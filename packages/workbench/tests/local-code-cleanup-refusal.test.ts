@@ -225,8 +225,8 @@ if (!linuxOnly.skip) {
 }
 const agent = await import("../server/local-code-agent.ts");
 
-// Seed a synthetic turn that was admitted before the funding refusal. The actual
-// execution owner still governs Stop and cleanup. Public Send never bypasses its policy.
+// Seed a synthetic retained turn to isolate the execution owner
+// that governs Stop and cleanup from runtime discovery.
 const fixtureOwner = await build({ stdin: {
   contents: (await readFile(new URL("../server/local-code-agent.ts", import.meta.url), "utf8"))
     + "\nexport { startVivaryCodeRun as startPreviouslyAdmittedFixture };",
@@ -325,7 +325,7 @@ test("Continue anyway lifts a refusal Vivary cannot check, records who chose it,
     "You chose to continue. Vivary could not check whether this run's coding processes stopped. "
     + "Vivary accepts new messages again.");
   await assert.rejects(send("Start after continuing"), { errorCode: "vivary_code_runtime_unavailable" });
-  const runId = await sendAndSettle("Previously admitted before funding guard");
+  const runId = await sendAndSettle("Retained synthetic turn");
   assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
 });
 
@@ -356,7 +356,7 @@ test("a live process group keeps refusing by name, and a send after it stops lif
     process.kill(-groupId, "SIGKILL");
     await exited;
     await assert.rejects(send("Start after it stopped"), { errorCode: "vivary_code_runtime_unavailable" });
-    const runId = await sendAndSettle("Previously admitted before funding guard");
+    const runId = await sendAndSettle("Retained synthetic turn");
     assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
     assert.equal((metadataOf("live-group").cleanupLifted as { how?: string }).how, "rechecked");
     assert.equal(lastStatus("live-group"), "The leftover coding processes are gone. Vivary accepts new messages again.");

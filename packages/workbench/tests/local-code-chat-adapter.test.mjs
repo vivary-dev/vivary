@@ -64,7 +64,7 @@ test("an uncertain Code owner failure keeps its pending submission for reconcili
 
 test("an explicit pre-append owner rejection restores the same Code draft", async () => {
   // Issue #121. Leftover coding processes refuse a send before it is appended, so the draft comes back too.
-  for (const [status, errorCode] of [[503, "vivary_code_runtime_unavailable"], [409, "vivary_code_cleanup_required"], [409, "vivary_code_subscription_funding_unavailable"], [409, "vivary_code_subscription_funding_exhausted"], [409, "vivary_code_subscription_funding_paid_funding_enabled"]]) {
+  for (const [status, errorCode] of [[503, "vivary_code_runtime_unavailable"], [409, "vivary_code_cleanup_required"]]) {
     const rejections = [], actions = [];
     const error = Object.assign(new Error(`Refused with ${errorCode}`), { status, errorCode });
     const adapter = adapterForTest(rejections, actions, "codex-cli", error);

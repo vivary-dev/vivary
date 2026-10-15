@@ -14,8 +14,7 @@ const PRE_APPEND_CODE_REJECTIONS = new Set([
   "vivary_code_model_changed", "vivary_code_model_unsupported", "vivary_code_project_changed",
   "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_run_active",
   "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
-  "vivary_code_cleanup_required", "vivary_code_subscription_funding_unavailable",
-  "vivary_code_subscription_funding_exhausted", "vivary_code_subscription_funding_paid_funding_enabled",
+  "vivary_code_cleanup_required",
 ]);
 
 function isPreAppendCodeRejection(error: unknown): boolean {

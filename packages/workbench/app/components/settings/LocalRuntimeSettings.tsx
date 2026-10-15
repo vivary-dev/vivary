@@ -128,9 +128,6 @@ export function LocalRuntimeSettings() {
             : <p className="text-sm leading-6 text-muted-foreground" role="status">
                 {current?.message ?? "Refresh to check this runtime."}
               </p>}
-          <p className="mt-3 text-sm leading-6 text-muted-foreground" role="status">
-            {current?.funding?.message ?? "Subscription-only funding is unverified. New and resumed turns are blocked."}
-          </p>
           {runtime.engine === "claude-cli" && status.data?.claudeModels && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
             <p>Installed version: {current?.version ?? "Unverified"}. Model IDs and API list prices verified 2026-10-13.</p>
             {status.data.claudeModels.map(model => <p key={model.id}>

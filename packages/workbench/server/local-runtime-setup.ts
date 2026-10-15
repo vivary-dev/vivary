@@ -1,5 +1,4 @@
 import type { CodexModelCatalog } from "./codex-models";
-import { type CodeSubscriptionFunding } from "./code-subscription-funding";
 import { claudeCodeModelChoices } from "../shared/claude-models";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
@@ -19,7 +18,7 @@ export type VivaryRuntimeStatus = {
 export type VivaryRuntimeStatusResult = {
   codexModels: CodexModelCatalog | null;
   claudeModels: ReturnType<typeof claudeCodeModelChoices>;
-  runtimes: Array<VivaryRuntimeStatus & { engine: VivaryCodeEngine; label: string; funding: CodeSubscriptionFunding }>;
+  runtimes: Array<VivaryRuntimeStatus & { engine: VivaryCodeEngine; label: string }>;
 };
 
 type ProbeResult =
@@ -132,7 +131,7 @@ export function vivaryRuntimeStatusFromProbe(
     return unavailable;
   }
   return signedIn
-    ? { status: "ready", message: `${label} is signed in. Subscription-only funding remains unverified.`, checkedAt,
+    ? { status: "ready", message: `${label} is signed in.`, checkedAt,
         ...(result.version ? { version: result.version } : {}) }
     : { status: "sign-in-required", message: `Sign in to ${label} in your terminal, then refresh.`, checkedAt };
 }

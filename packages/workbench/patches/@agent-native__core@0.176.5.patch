@@ -2087,7 +2087,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..b17699cccc0bba6f27eb3b8953d9ef7b20453662
 --- /dev/null
 +++ b/dist/cli/codex-app-server-executor.js
-@@ -0,0 +1,468 @@
+@@ -0,0 +1,479 @@
 +import { spawn } from "node:child_process";
 +import { randomUUID } from "node:crypto";
 +import path from "node:path";
@@ -2504,6 +2504,17 @@ index 0000000000000000000000000000000000000000..b17699cccc0bba6f27eb3b8953d9ef7b
 +        await call("initialize", { clientInfo: { name: "vivary", title: "Vivary", version: "1" }, capabilities: { experimentalApi: true } });
 +        if (completed || options.signal?.aborted) return;
 +        write({ method: "initialized" });
++        const account = await call("account/read", { refreshToken: false });
++        if (!isRecord(account?.account) || account.account.type !== "chatgpt") {
++            throw new Error("Codex is not signed in with ChatGPT. Refresh Runtime settings. No turn was started.");
++        }
++        const settings = await call("config/read", { includeLayers: false, cwd: options.cwd });
++        const config = isRecord(settings?.config) ? settings.config : null;
++        if (!config || (config.model_provider != null && config.model_provider !== "" && config.model_provider !== "openai") ||
++            (config.model_providers != null && (!isRecord(config.model_providers) || Object.hasOwn(config.model_providers, "openai")))) {
++            throw new Error("Codex is configured for another provider. Select the ChatGPT provider in Codex, then refresh Runtime settings. No turn was started.");
++        }
++        if (completed || options.signal?.aborted) return;
 +        const started = await call(options.threadId ? "thread/resume" : "thread/start", {
 +            ...(options.threadId ? { threadId: options.threadId } : {}), cwd: options.cwd, model: options.model,
 +            approvalPolicy: policy.approvalPolicy, approvalsReviewer: "user", sandbox: policy.sandbox,
@@ -17339,20 +17350,17 @@ index cb5aed786bbcaed8f9516934de78e06bbe165786..0293e4c19895d0aa6775a98987b3e2c9
                                  const next = event.currentTarget.open;
                                  if (next && !advanced && friendly.schedule) {
 diff --git a/dist/cli/claude-code-participant.d.ts b/dist/cli/claude-code-participant.d.ts
-index f6d2580..51daf2d 100644
 --- a/dist/cli/claude-code-participant.d.ts
 +++ b/dist/cli/claude-code-participant.d.ts
-@@ -46,6 +46,9 @@ export interface RunClaudeCodeParticipantOptions {
+@@ -46,6 +46,7 @@
      session?: ClaudeCodeParticipantSession;
      /** Either the fixed CLI name or an absolute executable path for packaged apps. */
      command?: string;
 +    argsPrefix?: string[];
-+    /** Validate this process's account and usage controls before any user input. */
-+    beforePrompt?: (snapshot: { account: unknown; usage: unknown }) => void;
      signal?: AbortSignal;
      env?: NodeJS.ProcessEnv;
      maxEvents?: number;
-@@ -70,12 +73,13 @@ export declare class ClaudeCodeAuthStatusError extends Error {
+@@ -70,6 +71,7 @@
      constructor(rawMessage: string);
  }
  export interface ClaudeCodeSubscriptionStatusOptions {
@@ -17360,18 +17368,17 @@ index f6d2580..51daf2d 100644
      command?: string;
      env?: NodeJS.ProcessEnv;
      execute?: typeof execFile;
- }
- export declare function readClaudeCodeSubscriptionStatus(options?: ClaudeCodeSubscriptionStatusOptions): Promise<ClaudeCodeSubscriptionStatus>;
- export declare function runClaudeCodeParticipant(options: RunClaudeCodeParticipantOptions): Promise<ClaudeCodeParticipantResult>;
--export declare function buildClaudeCodeParticipantArgs(options: Pick<RunClaudeCodeParticipantOptions, "role" | "model" | "effort" | "session">): string[];
-+export declare function buildClaudeCodeParticipantArgs(options: Pick<RunClaudeCodeParticipantOptions, "role" | "model" | "effort" | "session" | "beforePrompt">): string[];
- export declare const CLAUDE_CODE_PARTICIPANT_TESTED_VERSION = "2.1.208";
- export {};
 diff --git a/dist/cli/claude-code-participant.js b/dist/cli/claude-code-participant.js
-index 4d427f87dc030d76059b54a7377298f226caf2b3..29c87b7f0782aa03761683cae6c7742a39ff0bc8 100644
 --- a/dist/cli/claude-code-participant.js
 +++ b/dist/cli/claude-code-participant.js
-@@ -57,7 +57,7 @@ function isClaudeUnauthenticatedError(error) {
+@@ -1,5 +1,6 @@
+ import { execFile as execFileCallback, spawn } from "node:child_process";
+ import { isAbsolute } from "node:path";
++import { redactText } from "../audit/redact.js";
+ import { StringDecoder } from "node:string_decoder";
+ import { promisify } from "node:util";
+ const execFile = promisify(execFileCallback);
+@@ -57,7 +58,7 @@
  export async function readClaudeCodeSubscriptionStatus(options = {}) {
      const execute = options.execute ?? execFile;
      try {
@@ -17380,7 +17387,7 @@ index 4d427f87dc030d76059b54a7377298f226caf2b3..29c87b7f0782aa03761683cae6c7742a
              encoding: "utf8",
              maxBuffer: 128 * 1024,
              env: safeEnvironment(options.env ?? process.env),
-@@ -89,14 +89,14 @@ export async function runClaudeCodeParticipant(options) {
+@@ -89,14 +90,14 @@
      const command = resolveCommand(options.command, "claude");
      const subscription = await (options.preflight
          ? options.preflight({ command, env })
@@ -17397,141 +17404,7 @@ index 4d427f87dc030d76059b54a7377298f226caf2b3..29c87b7f0782aa03761683cae6c7742a
          cwd: options.cwd,
          env,
          shell: false,
-@@ -108,7 +108,7 @@ export function buildClaudeCodeParticipantArgs(options) {
-     const args = [
-         "--print",
-         "--input-format",
--        "text",
-+        options.beforePrompt ? "stream-json" : "text",
-         "--output-format",
-         "stream-json",
-         "--verbose",
-@@ -180,9 +180,14 @@ function collectClaudeCodeParticipantResult(child, options) {
-             stopWithError(new Error(`Claude Code timed out after ${timeoutMs}ms.`));
-         }, timeoutMs);
-         timeoutTimer.unref?.();
-+        const admissionTimer = options.beforePrompt ? setTimeout(() => {
-+            stopWithError(new Error("Claude subscription controls timed out. No message was sent."));
-+        }, Math.min(timeoutMs, 12000)) : undefined;
-+        admissionTimer?.unref?.();
-         const cleanup = () => {
-             options.signal?.removeEventListener("abort", abort);
-             clearTimeout(timeoutTimer);
-+            clearTimeout(admissionTimer);
-             if (terminationTimer)
-                 clearTimeout(terminationTimer);
-             if (forceSettleTimer)
-@@ -212,6 +217,42 @@ function collectClaudeCodeParticipantResult(child, options) {
-             child.kill("SIGTERM");
-         };
-         const abort = () => stopWithError(createAbortError());
-+        let account;
-+        let expectedControl = options.beforePrompt ? "vivary-funding-initialize" : null;
-+        const writeControl = (request_id, request) => child.stdin.write(JSON.stringify({
-+            type: "control_request", request_id, request,
-+        }) + "\n");
-+        const pendingEvents = [];
-+        const consumeControl = (event) => {
-+            if (event.type !== "control_response") {
-+                if (!expectedControl) return false;
-+                if (pendingEvents.length >= maxEvents) throw new Error("Claude exceeded the pre-prompt event limit.");
-+                pendingEvents.push(event);
-+                return true;
-+            }
-+            const response = asRecord(event.response);
-+            if (!expectedControl || !response || response.request_id !== expectedControl || response.subtype !== "success") {
-+                throw new Error("Claude subscription controls could not be read. No message was sent.");
-+            }
-+            const payload = asRecord(response.response);
-+            if (!payload) throw new Error("Claude returned invalid subscription controls. No message was sent.");
-+            if (expectedControl === "vivary-funding-initialize") {
-+                account = payload.account;
-+                expectedControl = "vivary-funding-usage";
-+                writeControl(expectedControl, { subtype: "get_usage", skip_behaviors: true });
-+            } else {
-+                options.beforePrompt({ account, usage: payload });
-+                expectedControl = null;
-+                clearTimeout(admissionTimer);
-+                for (const buffered of pendingEvents.splice(0)) {
-+                    events.push(buffered);
-+                    options.onEvent?.(buffered);
-+                }
-+                child.stdin.end(JSON.stringify({ type: "user", session_id: "", parent_tool_use_id: null,
-+                    message: { role: "user", content: options.prompt } }) + "\n");
-+            }
-+            return true;
-+        };
-         const streamError = (error) => {
-             if (!settled)
-                 stopWithError(error);
-@@ -238,7 +279,7 @@ function collectClaudeCodeParticipantResult(child, options) {
-             }
-             pending += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-             try {
--                pending = consumeJsonLines(pending, events, maxEvents, options.onEvent);
-+                pending = consumeJsonLines(pending, events, maxEvents, options.onEvent, options.beforePrompt ? consumeControl : undefined);
-             }
-             catch (error) {
-                 stopWithError(toError(error));
-@@ -264,7 +305,7 @@ function collectClaudeCodeParticipantResult(child, options) {
-                 pending += decoder.end();
-                 stderr += stderrDecoder.end();
-                 if (pending.trim()) {
--                    consumeJsonLine(pending, events, maxEvents, options.onEvent);
-+                    consumeJsonLine(pending, events, maxEvents, options.onEvent, options.beforePrompt ? consumeControl : undefined);
-                 }
-             }
-             catch (error) {
-@@ -274,6 +315,10 @@ function collectClaudeCodeParticipantResult(child, options) {
-                 finishError(fatalError);
-                 return;
-             }
-+            if (expectedControl) {
-+                finishError(new Error("Claude closed before subscription admission. No message was sent."));
-+                return;
-+            }
-             if (exitCode !== 0) {
-                 finishError(new Error(`Claude Code exited with ${exitSignal ?? exitCode ?? "unknown"}${stderr ? `: ${summarizeStderr(stderr)}` : ""}`));
-                 return;
-@@ -288,24 +333,25 @@ function collectClaudeCodeParticipantResult(child, options) {
-             });
-         });
-         try {
--            child.stdin.end(options.prompt);
-+            if (options.beforePrompt) writeControl(expectedControl, { subtype: "initialize" });
-+            else child.stdin.end(options.prompt);
-         }
-         catch (error) {
-             stopWithError(toError(error));
-         }
-     });
- }
--function consumeJsonLines(value, events, maxEvents, onEvent) {
-+function consumeJsonLines(value, events, maxEvents, onEvent, consumeControl) {
-     let start = 0;
-     let newline = value.indexOf("\n", start);
-     while (newline !== -1) {
--        consumeJsonLine(value.slice(start, newline), events, maxEvents, onEvent);
-+        consumeJsonLine(value.slice(start, newline), events, maxEvents, onEvent, consumeControl);
-         start = newline + 1;
-         newline = value.indexOf("\n", start);
-     }
-     return value.slice(start);
- }
--function consumeJsonLine(line, events, maxEvents, onEvent) {
-+function consumeJsonLine(line, events, maxEvents, onEvent, consumeControl) {
-     const trimmed = line.trim();
-     if (!trimmed)
-         return;
-@@ -316,6 +362,7 @@ function consumeJsonLine(line, events, maxEvents, onEvent) {
-     const event = asRecord(parsed);
-     if (!event)
-         throw new Error("Claude Code emitted a non-object JSON event.");
-+    if (consumeControl?.(event)) return;
-     events.push(event);
-     onEvent?.(event);
- }
-@@ -328,7 +375,11 @@ function assertClaudeCodeSubscription(status) {
+@@ -328,7 +329,11 @@
      }
  }
  function safeEnvironment(input) {
@@ -17544,158 +17417,73 @@ index 4d427f87dc030d76059b54a7377298f226caf2b3..29c87b7f0782aa03761683cae6c7742a
  }
  function validateInput(options) {
      if (!readString(options.prompt))
+@@ -373,7 +378,7 @@
+     return safe;
+ }
+ function summarizeStderr(value) {
+-    return sanitizeStderr(value)
++    return sanitizeStderr(redactText(value))
+         .replace(/\s+/g, " ")
+         .trim()
+         .slice(0, MAX_ERROR_MESSAGE_LENGTH);
 diff --git a/dist/cli/code-agent-executor.d.ts b/dist/cli/code-agent-executor.d.ts
-index 4a48e7b..9ecf63d 100644
 --- a/dist/cli/code-agent-executor.d.ts
 +++ b/dist/cli/code-agent-executor.d.ts
-@@ -20,6 +20,14 @@ export interface ExecuteCodeAgentRunOptions {
+@@ -19,6 +19,12 @@
+         permissionMode: "normal" | "read-only" | "yolo";
          onRequest: (request: import("./codex-app-server-executor.js").CodexAppServerRequest) => Promise<Record<string, unknown>>;
          onRequestResolved?: (requestId: string) => void;
-     };
-+    /** Native Claude controls run in the execution process before the user prompt. */
++    };
++    /** Resolved Claude launcher for packaged and host-managed installations. */
 +    claudeCli?: {
 +        command: string;
 +        argsPrefix?: string[];
 +        env?: NodeJS.ProcessEnv;
-+        beforePrompt: (snapshot: { account: unknown; usage: unknown }) => void;
-+        onEvent?: (event: import("./claude-code-participant.js").ClaudeCodeParticipantEvent) => void;
-+    };
+     };
      reasoningEffort?: ReasoningEffort;
      attachments?: AgentPromptAttachment[];
-     stdout?: NodeJS.WritableStream;
 diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
-index 711b7c7..cf266a7 100644
 --- a/dist/cli/code-agent-executor.js
 +++ b/dist/cli/code-agent-executor.js
-@@ -76,37 +76,43 @@ export async function executeCodeAgentRun(options) {
-             },
-         });
-     }
--    if (options.appendUserEvent !== false) {
-+    const requestedEngine = normalizeRequestedEngine(metadataString(existing, "engine") ?? getAppConfig().agent.engine);
-+    const guardedClaude = requestedEngine === CLAUDE_CLI_ENGINE_NAME && !!options.claudeCli?.beforePrompt;
-+    let running;
-+    const startRun = () => {
-+        if (options.appendUserEvent !== false) {
-+            appendCodeAgentTranscriptEvent({
-+                runId: existing.id,
-+                kind: "user",
-+                message: prompt,
-+                metadata: { source: "execution-prompt" },
-+            });
-+        }
-+        running = updateCodeAgentRunRecord(existing.id, {
-+            status: "running",
-+            phase: "executing",
-+            progress: {
-+                label: "Running",
-+                completed: 0,
-+                total: 1,
-+                percent: 10,
-+            },
-+            metadata: {
-+                executionStartedAt: new Date().toISOString(),
-+            },
-+        });
-         appendCodeAgentTranscriptEvent({
-             runId: existing.id,
--            kind: "user",
--            message: prompt,
--            metadata: { source: "execution-prompt" },
-+            kind: "status",
-+            message: "Agent-Native Code run started.",
-+            metadata: { status: "running", phase: "executing" },
-         });
--    }
--    const running = updateCodeAgentRunRecord(existing.id, {
--        status: "running",
--        phase: "executing",
--        progress: {
--            label: "Running",
--            completed: 0,
--            total: 1,
--            percent: 10,
--        },
--        metadata: {
--            executionStartedAt: new Date().toISOString(),
--        },
--    });
--    appendCodeAgentTranscriptEvent({
--        runId: existing.id,
--        kind: "status",
--        message: "Agent-Native Code run started.",
--        metadata: { status: "running", phase: "executing" },
--    });
-+    };
-+    if (!guardedClaude) startRun();
-     // Fall back to AGENT_ENGINE here too, mirroring resolveExecutorEngine below.
-     // Without it, `AGENT_ENGINE=codex-cli` skips this Codex branch and is handed
-     // to resolveEngine (LLM providers only), which throws `Unknown engine`.
--    const requestedEngine = normalizeRequestedEngine(metadataString(existing, "engine") ?? getAppConfig().agent.engine);
-+
-     if (requestedEngine === CODEX_CLI_ENGINE_NAME) {
-         return executeCodexCliRun({
-             run: existing,
-@@ -122,6 +128,8 @@ export async function executeCodeAgentRun(options) {
+@@ -1,4 +1,5 @@
+ import { spawn } from "node:child_process";
++import { redactText } from "../audit/redact.js";
+ import { runCodexAppServer } from "./codex-app-server-executor.js";
+ import fs from "node:fs";
+ import os from "node:os";
+@@ -122,6 +123,7 @@
      if (requestedEngine === CLAUDE_CLI_ENGINE_NAME) {
          return executeClaudeCliRun({
              run: existing,
 +            claudeCli: options.claudeCli,
-+            onAdmitted: guardedClaude ? startRun : undefined,
              prompt: executionPrompt,
              model: options.model ?? metadataString(existing, "model"),
              reasoningEffort: options.reasoningEffort ?? metadataReasoningEffort(existing),
-@@ -496,19 +504,30 @@ async function executeClaudeCliRun(options) {
-     const sessionMode = resumeSessionId ? "resume-requested"
-         : listCodeAgentTranscriptEvents(options.run.id).filter(event => event.kind === "user").length > 1
-             ? "reconstructed-context" : "new-session";
--    updateCodeAgentRunRecord(options.run.id, { metadata: { providerSessionMode: sessionMode } });
--    appendCodeAgentTranscriptEvent({
--        runId: options.run.id,
--        kind: "status",
--        message: "Starting Claude Code with local Claude authentication.",
--        metadata: {
--            status: "running",
--            phase: "executing",
--            engine: CLAUDE_CLI_ENGINE_NAME,
--        },
--    });
-+    let admitted = !options.claudeCli?.beforePrompt;
-+    const startSession = () => {
-+        updateCodeAgentRunRecord(options.run.id, { metadata: { providerSessionMode: sessionMode } });
-+        appendCodeAgentTranscriptEvent({
-+            runId: options.run.id,
-+            kind: "status",
-+            message: "Starting Claude Code with local Claude authentication.",
-+            metadata: {
-+                status: "running",
-+                phase: "executing",
-+                engine: CLAUDE_CLI_ENGINE_NAME,
-+            },
-+        });
-+    };
-+    if (admitted) startSession();
+@@ -509,6 +511,7 @@
+     });
      try {
          const result = await runClaudeCodeParticipant({
 +            ...options.claudeCli,
-+            beforePrompt: options.claudeCli?.beforePrompt ? snapshot => {
-+                options.claudeCli.beforePrompt(snapshot);
-+                admitted = true;
-+                options.onAdmitted?.();
-+                startSession();
-+            } : undefined,
              // Claude's driver uses acceptEdits, which is the closest available
              // mapping for auto-edit and full-auto. Keep ask-before-edit on the
              // read-only watchdog path because this non-interactive runner has no
-@@ -524,6 +543,7 @@ async function executeClaudeCliRun(options) {
-             session: { persist: true, ...(resumeSessionId ? { resumeSessionId } : {}) },
-             signal: options.signal,
-             onEvent: (event) => {
-+                options.claudeCli?.onEvent?.(event);
-                 // Init/result records must identify the session; ordinary content
-                 // and tool events may omit it, but any supplied ID must be valid.
-                 const requiresSessionId = event.type === "result" ||
-@@ -589,6 +609,7 @@ async function executeClaudeCliRun(options) {
+@@ -540,6 +543,15 @@
+                         });
+                     }
+                 }
++                if (event.type === "rate_limit_event" && event.rate_limit_info?.status === "rejected") {
++                    throw new Error("Claude Code rejected this turn because its usage limit was reached.");
++                }
++                if (event.type === "result" && (event.is_error === true ||
++                    typeof event.subtype === "string" && event.subtype.startsWith("error"))) {
++                    const errors = Array.isArray(event.errors)
++                        ? event.errors.filter(value => typeof value === "string" && value.trim()).join("\n") : "";
++                    throw new Error(errors || (typeof event.result === "string" && event.result.trim()) || "Claude Code returned an error.");
++                }
+                 const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames);
+                 if (!text)
+                     return;
+@@ -589,6 +601,7 @@
                  attachments: pendingFollowUp.attachments ??
                      userPromptAttachmentsForEvent(options.run.id, pendingFollowUp.eventId),
                  appendUserEvent: false,
@@ -17703,11 +17491,35 @@ index 711b7c7..cf266a7 100644
                  stdout: options.stdout,
                  streamToolOutputToStdout: options.streamToolOutputToStdout,
                  signal: options.signal,
-@@ -624,6 +645,7 @@ async function executeClaudeCliRun(options) {
-         });
+@@ -625,8 +638,8 @@
      }
      catch (error) {
-+        if (!admitted) throw error;
          const interrupted = options.signal?.aborted === true;
-         const message = error instanceof Error ? error.message : String(error);
-         const executionError = error instanceof ClaudeCodeAuthStatusError ? error.rawMessage : message;
+-        const message = error instanceof Error ? error.message : String(error);
+-        const executionError = error instanceof ClaudeCodeAuthStatusError ? error.rawMessage : message;
++        const message = redactText(error instanceof Error ? error.message : String(error)).slice(0, 700);
++        const executionError = error instanceof ClaudeCodeAuthStatusError ? redactText(error.rawMessage).slice(0, 700) : message;
+         const summary = interrupted
+             ? "Claude Code run paused."
+             : `Claude Code run failed: ${message}`;
+@@ -1270,10 +1283,11 @@
+         },
+         onNotification: (method, params) => appendCodexAppServerTranscriptEvent(options.run.id, method, params),
+     });
++    const error = typeof result.error === "string" ? redactText(result.error).slice(0, 700) : undefined;
+     const status = result.status === "completed" ? "completed" : result.status === "interrupted" ? "paused" : "errored";
+     const phase = status === "completed" ? "complete" : status === "paused" ? "paused" : "error";
+     appendCodeAgentTranscriptEvent({ runId: options.run.id, kind: "status",
+-        message: status === "completed" ? "Codex completed the turn." : status === "paused" ? "Codex stopped." : result.error ?? "Codex could not finish the turn.",
++        message: status === "completed" ? "Codex completed the turn." : status === "paused" ? "Codex stopped." : error ?? "Codex could not finish the turn.",
+         metadata: { status, phase, engine: CODEX_CLI_ENGINE_NAME, source: "codex-app-server" },
+     });
+     return updateCodeAgentRunRecord(options.run.id, {
+@@ -1283,6 +1297,6 @@
+             percent: status === "completed" ? 100 : 0 },
+         metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? "codex-default",
+             codexTurnId: result.turnId, codexPermissionMode: native.permissionMode,
+-            executionError: result.error, executionCompletedAt: new Date().toISOString() },
++            executionError: error, executionCompletedAt: new Date().toISOString() },
+     });
+ }

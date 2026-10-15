@@ -27,7 +27,6 @@ import {
 import { getCodexModels, type CodexModelCatalog } from "./codex-models";
 import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
   claudeCodeModelChoices, type ClaudeCodeModelId } from "../shared/claude-models";
-import { getClaudeSubscriptionFunding, assessCodexSubscription, refuseCodeSubscriptionFunding, type CodeSubscriptionFunding } from "./code-subscription-funding";
 import { codexSessionLogLifecycle } from "./codex-session-process";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 
@@ -38,7 +37,7 @@ import {
 } from "./code-execution-host";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
 import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
-import { getVivaryRuntimeStatus, resolveVivaryRuntimeCommand, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
+import { getVivaryRuntimeStatus, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
 
 export const VIVARY_CODE_ENGINES = ["claude-cli", "codex-cli"] satisfies [VivaryCodeEngine, ...VivaryCodeEngine[]];
 export const VIVARY_CODE_DEFAULT_ENGINE: VivaryCodeEngine = "claude-cli";
@@ -163,7 +162,7 @@ export type VivaryCodeState = VivaryCodeHostState & {
   runtime: VivaryRuntimeStatus;
   permissionMode: CodePermissionMode;
   engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null;
-    claudeModels: ReturnType<typeof claudeCodeModelChoices> | null; funding: CodeSubscriptionFunding }[];
+    claudeModels: ReturnType<typeof claudeCodeModelChoices> | null }[];
   runs: VivaryCodeRunSummary[];
   run: VivaryCodeRunState | null;
   error?: string;
@@ -884,12 +883,6 @@ export async function getVivaryCodeState(
       : modelCatalog?.status === "ready" ? modelCatalog.models.map(model => model.id) : [];
     return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex", models, modelCatalog,
       claudeModels: engine === "claude-cli" ? claudeCodeModelChoices(runtime.version) : null,
-      funding: engine === "claude-cli" && runtime.status === "ready" && discoveryRoot
-        ? (await getClaudeSubscriptionFunding(discoveryRoot, selected && engineFromRun(selected) === engine
-          ? modelFromRun(selected) : VIVARY_CODE_DEFAULT_MODEL, await resolveVivaryRuntimeCommand(engine))).funding
-        : engine === "claude-cli" ? { policy: "included-only" as const, status: "unavailable" as const,
-          message: runtime.status === "ready" ? "Select a workspace to check Claude subscription controls." : runtime.message }
-        : modelCatalog?.status === "ready" ? modelCatalog.funding : assessCodexSubscription(undefined),
       configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
 
@@ -1008,11 +1001,6 @@ export async function sendVivaryCodeMessage(input: {
   if (!existing && selectedEngine === "codex-cli" && selectedModel === "default") {
     fail("Choose a model reported by Codex before starting a conversation.", { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
   }
-  const subscription = selectedEngine === "claude-cli"
-    ? await getClaudeSubscriptionFunding(workspace.root, selectedModel,
-      await resolveVivaryRuntimeCommand(selectedEngine), { refresh: true })
-    : { funding: catalog?.status === "ready" ? catalog.funding : assessCodexSubscription(undefined), binding: undefined };
-  refuseCodeSubscriptionFunding(subscription.funding);
   const permissionMode = await getCodePermissionMode(input.ownerEmail, input.orgId);
   // The worker's fingerprints and the transcript's user event use the credentials held now.
   await refreshHeldCredentials();
@@ -1065,7 +1053,6 @@ export async function sendVivaryCodeMessage(input: {
   }
   updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
     metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
-      subscriptionFundingBinding: subscription.binding,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, permissionMode });

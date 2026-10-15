@@ -584,9 +584,6 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
     && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
-  const selectedFunding = selectedEngine?.funding?.models?.[choice.model] ?? selectedEngine?.funding;
-  const fundingMessage = selectedFunding?.status === "ready" ? undefined
-    : selectedFunding?.message ?? "Subscription controls are unavailable. Refresh Runtime settings.";
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
@@ -599,7 +596,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
-    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !!fundingMessage || !selectedModelAvailable;
+    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -627,7 +624,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : fundingMessage ? fundingMessage : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
@@ -673,7 +670,6 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             }}>Restore draft for editing</Button>)}
         <Button variant="ghost" size="sm" onClick={() => void draft.discard(draftThreadId)}>Discard draft</Button>
       </div>}
-      <div className="local-agent-notice" role="status">{fundingMessage}</div>
       {selectedClaudeModel && selectedClaudeModel.support !== "supported" && <div className="local-agent-notice" role="status">
         <span>{selectedClaudeModel.message} Check Runtime settings.</span>
       </div>}

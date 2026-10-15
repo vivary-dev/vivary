@@ -18,7 +18,7 @@ const config = { config: { model: "gpt-example-b", model_provider: "openai",
   mcp_servers: { files: { command: "private-command", env: { SECRET: "do-not-return" } }, disabled: { enabled: false } } } };
 // A Codex that answers every request, then keeps running after its input closes, so only a forced stop ends it.
 const lingeringCodex = String.raw`import readline from 'node:readline';
-const values = ${JSON.stringify({ 1: {}, 2: models, 3: config, 4: account, 5: { ordinaryUsageAllowed: true, rateLimits: { credits: { hasCredits: true, unlimited: false } } } })};
+const values = ${JSON.stringify({ 1: {}, 2: models, 3: config, 4: account })};
 readline.createInterface({input:process.stdin}).on('line', line => {
  const input=JSON.parse(line);
  if (input.id) process.stdout.write(JSON.stringify({id:input.id,result:values[input.id]})+'\n');
@@ -67,7 +67,7 @@ test("speaks bounded app-server protocol through an absolute launcher with space
   const file = path.join(dir, "fake cli.mjs");
   await writeFile(file, String.raw`import readline from 'node:readline';
 import {writeFileSync} from 'node:fs';
-const values = ${JSON.stringify({ 1: {}, 2: models, 3: config, 4: account, 5: { ordinaryUsageAllowed: true, rateLimits: { credits: { hasCredits: true, unlimited: false } } } })};
+const values = ${JSON.stringify({ 1: {}, 2: models, 3: config, 4: account })};
 readline.createInterface({input:process.stdin}).on('line', line => {
  const input=JSON.parse(line);
  if (input.id) {

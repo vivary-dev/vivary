@@ -4,137 +4,212 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { createCodeAgentRunRecord, getCodeAgentRunRecord, listCodeAgentTranscriptEvents } from "@agent-native/core/code-agents";
 import { credentialFingerprints } from "../server/credential-redaction.ts";
-import { claudeSubscriptionAccount, claudeSubscriptionRuntime } from "../server/code-subscription-funding.ts";
-import { claudeAccount, createClaudeSubscriptionFixture, includedClaudeUsage } from "./fixtures/claude-subscription.ts";
 import { codingRuntimeEnvironment } from "../server/local-runtime-setup.ts";
 
-test("the actual worker refuses retained Claude and Codex records before any runtime starts", {
-  timeout: 60_000, skip: process.platform === "win32",
-}, async () => {
-  const fixture = await mkdtemp(path.join(tmpdir(), "vivary-code-worker-funding-"));
+const ownerEmail = "worker@example.test";
+const claudeSession = "00000000-0000-4000-8000-000000000010";
+type Engine = "claude-cli" | "codex-cli";
+
+async function fixture(t: TestContext, engine: Engine) {
+  const root = await mkdtemp(path.join(tmpdir(), "vivary-code-worker-route-"));
+  const bin = path.join(root, "bin");
+  const receipt = path.join(root, "calls.jsonl");
+  const modeFile = path.join(root, "mode.txt");
+  await mkdir(bin);
+  await writeFile(modeFile, "complete");
+  // guard:allow-env-credential - Disposable Native store, restored after the fixture.
   const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
-  const bin = path.join(fixture, "bin");
-  const probe = path.join(fixture, "runtime-started");
-  try {
-    await mkdir(bin);
-    // guard:allow-env-credential - Use a disposable Native store for synthetic retained runs.
-    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture;
-    for (const command of ["claude", "codex"]) await writeFile(path.join(bin, command),
-      `#!/usr/bin/env node
-require("node:fs").writeFileSync(${JSON.stringify(probe)}, "started");
-`, { mode: 0o755 });
-    for (const engine of ["claude-cli", "codex-cli"] as const) {
-      const runId = `worker-funding-${engine}`;
-      const ownerEmail = "worker@example.test";
-      createCodeAgentRunRecord({ id: runId, goalId: "vivary-local-code", title: "Retained worker fixture",
-        status: "completed", cwd: fixture, metadata: { app: "vivary-workbench-local-code", engine, ownerEmail } });
-      const record = getCodeAgentRunRecord(runId);
-      const child = fork(path.join(import.meta.dirname, "..", "server", "code-execution-worker.ts"), [], {
-        execArgv: ["--import", "tsx"], cwd: path.join(import.meta.dirname, ".."),
-        // guard:allow-env-credential - Nonsecret executable search path for disposable fake runtimes. All other child environment fields remain filtered.
-        env: { ...codingRuntimeEnvironment(process.env), PATH: bin + path.delimiter + (process.env.PATH ?? "") },
-        detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"],
-      });
-      const exited = once(child, "exit");
-      try {
-        const [ready] = await once(child, "message");
-        assert.equal(ready.type, "vivary:code-worker:ready");
-        const response = once(child, "message");
-        child.send({ type: "vivary:code-worker:start", runId, prompt: "Must not execute",
-          model: engine === "claude-cli" ? "claude-fable-5-1" : "retained-model", ownerEmail,
-          redaction: credentialFingerprints() });
-        const [failed] = await response;
-        assert.equal(failed.type, "vivary:code-worker:failed");
-        assert.deepEqual(getCodeAgentRunRecord(runId), record);
-        assert.deepEqual(listCodeAgentTranscriptEvents(runId), []);
-        await assert.rejects(readFile(probe), { code: "ENOENT" });
-      } finally {
-        if (child.connected) child.disconnect();
-        await exited;
-      }
-    }
-  } finally {
-    // guard:allow-env-credential - Restore only the fixture Native record directory.
+  process.env.AGENT_NATIVE_CODE_AGENTS_HOME = root;
+  t.after(async () => {
     if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
     else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore;
-    await rm(fixture, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  });
+  const prelude = `#!${process.execPath}
+import { appendFileSync, readFileSync } from "node:fs";
+const args = process.argv.slice(2), mode = readFileSync(${JSON.stringify(modeFile)}, "utf8");
+const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
+const record = value => appendFileSync(${JSON.stringify(receipt)}, JSON.stringify({ pid: process.pid, ...value }) + "\\n");
+// guard:allow-env-credential - The fixture observes only the nonsecret Windows runtime setting.
+record({ engine: ${JSON.stringify(engine)}, args, systemRoot: process.env.SystemRoot });
+`;
+  const claude = `
+if (args[0] === "auth") {
+  emit({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "max" });
+  process.exit(0);
+}
+let prompt = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", value => { prompt += value; });
+process.stdin.on("end", () => {
+  record({ prompt });
+  const session_id = ${JSON.stringify(claudeSession)};
+  emit({ type: "system", subtype: "init", session_id });
+  if (mode === "quota") {
+    emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "seven_day" } });
+    return;
+  }
+  if (mode === "provider-error") {
+    emit({ type: "result", subtype: "error_during_execution", is_error: true, session_id,
+      errors: ["Claude fixture model unavailable. Bearer AbCdEf1234567890GhIjKl9876543210"] });
+    return;
+  }
+  if (mode === "credits") emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed", isUsingOverage: true } });
+  emit({ type: "result", subtype: "success", session_id, result: "Fixture answer." });
+});
+`;
+  const codex = `
+import { createInterface } from "node:readline";
+const threadId = "fixture-codex-thread", turnId = "fixture-codex-turn";
+createInterface({ input: process.stdin }).on("line", line => {
+  const message = JSON.parse(line);
+  record({ message });
+  if (message.method === "initialize") emit({ id: message.id, result: {} });
+  if (message.method === "account/read") emit({ id: message.id, result: { account: { type: mode === "api-key" ? "apiKey" : "chatgpt" } } });
+  if (message.method === "config/read") emit({ id: message.id, result: { config: { model_provider: "openai",
+    ...(mode === "custom-provider" ? { model_providers: { openai: { base_url: "https://example.invalid/alternate" } } } : {}) } } });
+  if (message.method === "thread/start" || message.method === "thread/resume") {
+    if (mode === "protocol-error") {
+      emit({ id: message.id, error: { message: "Codex fixture sign-in failed. Bearer AbCdEf1234567890GhIjKl9876543210 " + "detail ".repeat(200) } });
+      return;
+    }
+    const p = message.params;
+    emit({ id: message.id, result: { thread: { id: threadId }, cwd: p.cwd, model: p.model,
+      modelProvider: "openai", approvalPolicy: p.approvalPolicy, approvalsReviewer: "user",
+      sandbox: { type: "workspaceWrite", networkAccess: false, writableRoots: [] } } });
+  }
+  if (message.method === "turn/start") {
+    emit({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [] } } });
+    const error = mode === "quota" ? "Codex fixture usage limit reached."
+      : mode === "provider-error" ? "Codex fixture model unavailable. Bearer AbCdEf1234567890GhIjKl9876543210" : undefined;
+    if (!error) emit({ method: "item/completed", params: { threadId, turnId,
+      item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "Fixture answer." } } });
+    emit({ method: "turn/completed", params: { threadId, turn: { id: turnId,
+      status: error ? "failed" : "completed", items: [], ...(error ? { error: { message: error } } : {}) } } });
   }
 });
+`;
+  const command = engine === "claude-cli" ? "claude" : "codex";
+  await writeFile(path.join(bin, command), prelude + (engine === "claude-cli" ? claude : codex), { mode: 0o755 });
+  // Any unintended route has an inert executable, so a regression cannot reach a real provider.
+  await writeFile(path.join(bin, command === "claude" ? "codex" : "claude"), prelude + '\nrecord({ wrongRoute: true }); process.exit(99);\n', { mode: 0o755 });
+  const model = engine === "claude-cli" ? "claude-fable-5-1" : "gpt-6-astra";
+  let serial = 0;
+  const create = () => createCodeAgentRunRecord({ id: `route-${engine}-${++serial}`, goalId: "vivary-local-code",
+    title: "Route fixture", status: "queued", cwd: root, permissionMode: "auto-edit",
+    metadata: { app: "vivary-workbench-local-code", engine, ownerEmail, model,
+      subscriptionFundingBinding: { obsolete: true } } });
+  const calls = async () => (await readFile(receipt, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  async function execute(runId: string, selectedModel = model) {
+    const child = fork(path.join(import.meta.dirname, "..", "server", "code-execution-worker.ts"), [], {
+      execArgv: ["--import", "tsx"], cwd: path.join(import.meta.dirname, ".."),
+      // guard:allow-env-credential - Nonsecret fixture executable search path and Windows runtime directory.
+      env: { ...codingRuntimeEnvironment(process.env), PATH: bin + path.delimiter + (process.env.PATH ?? ""), SystemRoot: "C:\\Windows" },
+      detached: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", chunk => { stderr += chunk; });
+    const exited = once(child, "exit");
+    try {
+      const [ready] = await once(child, "message", { signal: AbortSignal.timeout(15_000) });
+      assert.equal(ready.type, "vivary:code-worker:ready", stderr);
+      const response = once(child, "message", { signal: AbortSignal.timeout(15_000) });
+      child.send({ type: "vivary:code-worker:start", runId, prompt: "Read the fixture.", model: selectedModel,
+        permissionMode: "normal", ownerEmail, redaction: credentialFingerprints() });
+      const [result] = await response;
+      return result;
+    } finally {
+      if (child.connected) child.disconnect();
+      await exited;
+    }
+  }
+  return { root, model, create, execute, calls, configure: (mode: string) => writeFile(modeFile, mode) };
+}
 
-
-test("the actual worker admits Claude through Native's same-process check and refuses changed funding before a prompt", {
-  timeout: 90_000, skip: process.platform === "win32",
-}, async () => {
-  const fixture = await mkdtemp(path.join(tmpdir(), "vivary-code-worker-included-"));
-  const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
-  try {
-    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture; // guard:allow-env-credential - Disposable Native store, restored below.
-    const cli = await createClaudeSubscriptionFixture(fixture);
-    const runId = "worker-verified-included";
-    const ownerEmail = "worker@example.test";
-    createCodeAgentRunRecord({ id: runId, goalId: "vivary-local-code", title: "Included worker fixture",
-      status: "completed", cwd: fixture, permissionMode: "auto-edit", metadata: {
-        app: "vivary-workbench-local-code", engine: "claude-cli", ownerEmail, model: "claude-fable-5-1",
-        subscriptionFundingBinding: { version: "2.1.289", account: claudeSubscriptionAccount({ account: claudeAccount }),
-          runtime: await claudeSubscriptionRuntime(fixture, cli.launch) },
-      } });
-    async function execute() {
-      const child = fork(path.join(import.meta.dirname, "..", "server", "code-execution-worker.ts"), [], {
-        execArgv: ["--import", "tsx"], cwd: path.join(import.meta.dirname, ".."),
-        env: { ...codingRuntimeEnvironment(process.env), PATH: cli.bin + path.delimiter + (process.env.PATH ?? "") }, // guard:allow-env-credential - Disposable executable search path.
-        detached: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
-      });
-      let stderr = "";
-      child.stderr?.on("data", chunk => { stderr += chunk; });
-      const exited = once(child, "exit");
-      try {
-        const [ready] = await once(child, "message");
-        assert.equal(ready.type, "vivary:code-worker:ready", stderr);
-        const response = once(child, "message");
-        child.send({ type: "vivary:code-worker:start", runId, prompt: "Use included allowance only",
-          model: "claude-fable-5-1", ownerEmail, redaction: credentialFingerprints() });
-        const [result] = await response;
-        return result;
-      } finally {
-        if (child.connected) child.disconnect();
-        await exited;
+for (const engine of ["claude-cli", "codex-cli"] as const) {
+  test(`actual ${engine} worker preserves new and resumed routes and visible provider failures`, {
+    timeout: 180_000, skip: process.platform === "win32",
+  }, async t => {
+    const f = await fixture(t, engine);
+    const retained = f.create();
+    for (let turn = 0; turn < 2; turn++) {
+      assert.equal((await f.execute(retained.id)).type, "vivary:code-worker:done");
+      const run = getCodeAgentRunRecord(retained.id);
+      assert.equal(run?.status, "completed");
+      assert.equal(run?.metadata?.engine, engine);
+      assert.equal(run?.metadata?.model, f.model);
+    }
+    assert.equal(getCodeAgentRunRecord(retained.id)?.metadata?.providerSessionMode, "native-resume");
+    for (const mode of ["quota", "provider-error"]) {
+      await f.configure(mode);
+      for (const runId of [f.create().id, retained.id]) {
+        assert.equal((await f.execute(runId)).type, "vivary:code-worker:done");
+        const run = getCodeAgentRunRecord(runId);
+        assert.equal(run?.status, "errored");
+        assert.equal(run?.metadata?.engine, engine);
+        assert.equal(run?.metadata?.model, f.model);
+        const shown = JSON.stringify([run, listCodeAgentTranscriptEvents(runId)]);
+        assert.match(shown, mode === "quota" ? /usage limit/ : /fixture model unavailable/);
+        assert.doesNotMatch(shown, /AbCdEf1234567890GhIjKl9876543210|subscription controls|included-only/i);
+        if (mode === "provider-error") assert.match(shown, /redacted/);
       }
     }
-    for (let turn = 0; turn < 2; turn++) {
-      assert.equal((await execute()).type, "vivary:code-worker:done");
-      assert.equal(getCodeAgentRunRecord(runId)?.status, "completed");
+    if (engine === "claude-cli") {
+      await f.configure("credits");
+      assert.equal((await f.execute(retained.id)).type, "vivary:code-worker:done");
+      assert.equal(getCodeAgentRunRecord(retained.id)?.status, "completed", "provider credit-use observations do not impose an app funding policy");
+    } else {
+      for (const [mode, runId] of [["api-key", f.create().id], ["custom-provider", retained.id]]) {
+        await f.configure(mode);
+        const before = await f.calls();
+        assert.equal((await f.execute(runId)).type, "vivary:code-worker:done");
+        const run = getCodeAgentRunRecord(runId);
+        assert.equal(run?.status, "errored");
+        assert.equal(run?.metadata?.engine, engine);
+        assert.equal(run?.metadata?.model, f.model);
+        assert.match(String(run?.metadata?.executionError), mode === "api-key" ? /not signed in with ChatGPT/ : /configured for another provider/);
+        const additions = (await f.calls()).slice(before.length);
+        assert.equal(additions.some(call => ["thread/start", "thread/resume", "turn/start"].includes(call.message?.method)), false);
+      }
+      await f.configure("protocol-error");
+      const failed = await f.execute(retained.id);
+      assert.equal(failed.type, "vivary:code-worker:done");
+      const run = getCodeAgentRunRecord(retained.id);
+      assert.equal(run?.status, "errored");
+      const error = String(run?.metadata?.executionError);
+      assert.match(error, /Codex fixture sign-in failed/);
+      assert.match(error, /redacted/);
+      assert.doesNotMatch(error, /AbCdEf1234567890GhIjKl9876543210/);
+      assert.ok(error.length <= 700);
     }
-    const events = await cli.events();
-    assert.equal(events.filter(event => event.type === "user").length, 2);
-    assert.equal(events.filter(event => event.request?.subtype === "get_usage").length, 2);
-    assert.ok(events.some(event => event.args?.includes("--resume")));
-    assert.equal(events.some(event => event.args?.includes("--safe-mode")), false);
-    assert.doesNotMatch(JSON.stringify(listCodeAgentTranscriptEvents(runId)), /fixture@example|user_disabled|control_response/);
-    for (const mutation of ["exhausted", "changed-account", "credits-enabled", "malformed-control"]) {
-      const usage: ReturnType<typeof includedClaudeUsage> & { malformed_control?: boolean } = includedClaudeUsage();
-      if (mutation === "malformed-control") usage.malformed_control = true;
-      if (mutation === "exhausted") usage.rate_limits.seven_day.utilization = 100;
-      if (mutation === "credits-enabled") usage.rate_limits.extra_usage.user_disabled = false;
-      await writeFile(cli.usageFile, JSON.stringify(usage));
-      await writeFile(cli.accountFile, JSON.stringify(mutation === "changed-account" ? { ...claudeAccount, email: "other@example.test" } : claudeAccount));
-      const record = getCodeAgentRunRecord(runId);
-      const transcript = listCodeAgentTranscriptEvents(runId);
-      const result = await execute();
-      assert.equal(result.type, "vivary:code-worker:failed");
-      assert.equal(result.funding.status, mutation === "exhausted" ? "exhausted" : mutation === "credits-enabled" ? "paid-funding-enabled" : "unavailable");
-      assert.deepEqual(getCodeAgentRunRecord(runId), record);
-      const cliProcess = (await cli.events()).filter(event => event.args).at(-1)?.pid;
-      assert.ok(typeof cliProcess === "number");
-      assert.throws(() => process.kill(cliProcess, 0), { code: "ESRCH" });
-      assert.deepEqual(listCodeAgentTranscriptEvents(runId), transcript);
-      assert.equal((await cli.events()).filter(event => event.type === "user").length, 2);
+    const before = await f.calls();
+    const mismatch = await f.execute(retained.id, "changed-model");
+    assert.equal(mismatch.type, "vivary:code-worker:failed");
+    assert.match(mismatch.error, /saved coding model changed/);
+    const calls = await f.calls();
+    assert.deepEqual(calls, before, "a changed retained model never starts a runtime");
+    assert.equal(calls.some(call => call.wrongRoute), false, "no other runtime starts after an error");
+    for (const call of calls.filter(call => call.args)) {
+      assert.equal(call.engine, engine);
+      assert.equal(call.systemRoot, "C:\\Windows");
     }
-  } finally {
-    if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Restore fixture state.
-    else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore; // guard:allow-env-credential - Restore fixture state.
-    await rm(fixture, { recursive: true, force: true });
-  }
-});
+    if (engine === "claude-cli") {
+      const launches = calls.filter(call => call.args?.includes("--print"));
+      assert.equal(launches[0].args.includes("--resume"), false);
+      assert.equal(launches[1].args[launches[1].args.indexOf("--resume") + 1], claudeSession);
+      assert.equal(launches.every(call => call.args[call.args.indexOf("--input-format") + 1] === "text"), true);
+      assert.equal(calls.filter(call => call.prompt).length, 7);
+    } else {
+      const starts = calls.filter(call => ["thread/start", "thread/resume"].includes(call.message?.method));
+      assert.equal(starts[0].message.method, "thread/start");
+      assert.equal(starts[1].message.method, "thread/resume");
+      assert.equal(starts[1].message.params.threadId, "fixture-codex-thread");
+      assert.equal(calls.filter(call => call.message?.method === "turn/start").length, 6);
+      assert.equal(calls.some(call => call.message?.method === "account/rateLimits/read"), false);
+    }
+    for (const pid of new Set(calls.map(call => call.pid))) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  });
+}

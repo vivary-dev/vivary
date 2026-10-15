@@ -11,28 +11,24 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
-## Claude subscription admission before a prompt
+## Claude launcher and provider errors
 
-The optional `claudeCli.beforePrompt` callback uses Native's existing Claude
-process and stream parser to initialize and read usage controls before writing
-the user envelope. The callback may refuse without Native run or transcript
-writes. Control replies and buffered pre-admission events stay private until
-admission. The control wait is bounded to twelve seconds, with the existing
-participant stop lifecycle. Other callers retain their text-input path. Resolved
-launcher prefixes are preserved for auth checks and execution. Queued follow-ups
-retain the callback.
+The optional `claudeCli` executor options preserve the resolved executable,
+launcher prefix, and filtered environment through authentication, execution,
+and queued follow-ups. Windows SystemRoot survives case variants so Node can
+initialize crypto. The existing credential allowlist remains in place.
 
-Workbench owns the funding decision. Its experimental compatibility contract is
-pinned to SDK 0.3.288 with verified Claude Code 2.1.289 and 2.1.296. The observed CLI version stays in the worker binding. The provider UI's Usage credits OFF
-state was correlated with the native response. A temporary zero balance is not
-OFF. The execution callback freshly checks the actual account and applicable
-quota under the admitted runtime and workspace. Rate-limit events can stop and
-explain exhaustion, with no paid executor fallback. Fake CLI tests exercise the
-installed patched Native worker's new and resumed paths and pre-prompt refusal.
-A control-only check through the installed participant also read the real CLI
-controls, refused before a user envelope, and verified child exit and owned
-cleanup. These checks do not establish live model execution or Windows package
-acceptance.
+Claude uses its ordinary text-input protocol. Vivary does not request account
+usage controls or attach a funding admission callback. Rejected rate-limit
+events and error result envelopes become errored turns with provider details.
+The registered redactor runs before Claude error normalization and truncation,
+then the existing Native transcript owner retains the safe details. Worker setup errors
+cross IPC as bounded, redacted messages. No provider failure selects another
+runtime, model, or API route. Offline worker fixtures cover new and resumed
+execution. The Codex app-server reads its current account and provider
+configuration before starting a thread. API-key sign-in and custom providers
+refuse without a turn or fallback. This check does not read funding controls.
+Live provider and packaged Windows checks remain separate.
 
 ## Native API Claude catalog
 
@@ -99,7 +95,7 @@ system instructions, tools, model, or account changes.
 Focused checks use `native-anthropic-models.test.ts`, its intercepted-transport
 fixture, `native-usage-cost.test.ts`, and `chat-model-groups.test.mjs`. They exercise
 the actual installed model owners and SDK without contacting a provider. API
-catalog metadata does not change Code funding admission. API prices do not establish included-only funding.
+catalog metadata does not change the selected provider route. API prices do not establish account entitlement.
 Both installed SDK adapters are checked through intercepted transport. Live API
 acceptance remains unrun.
 

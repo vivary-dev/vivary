@@ -36,6 +36,9 @@ rl.on("line",line=>{
 // guard:allow-env-credential - Disposable test paths and fixture behavior, not credentials.
  writeFileSync(process.env.FIXTURE_RECEIPT,JSON.stringify({pid:process.pid,args:process.argv.slice(2),messages}));
  if (message.method==="initialize") reply(message.id,{});
+ if (message.method==="account/read") reply(message.id,{account:{type:mode==="api-key"?"apiKey":"chatgpt"}});
+ if (message.method==="config/read") reply(message.id,{config:{model_provider:"openai",
+  ...(mode==="custom-provider"?{model_providers:{openai:{base_url:"https://example.invalid/alternate"}}}:{})}});
  if (message.method==="thread/start" || message.method==="thread/resume") {
   const p=message.params;
   reply(message.id,{thread:{id:threadId},cwd:p.cwd,model:mode==="bad-model"?"other-model":p.model,
@@ -340,4 +343,15 @@ for (const mode of ["v2-summary", "v2-live", "v2-failed"]) test(`${mode} retains
   const reads = (await f.receipt()).messages.filter(message => message.method === "thread/turns/list");
   assert.equal(reads.length, mode === "v2-live" ? 0 : 1);
   if (reads.length) assert.deepEqual(reads[0].params, { threadId: "v2-child", limit: 1, sortDirection: "desc", itemsView: "summary" });
+});
+
+
+for (const mode of ["api-key", "custom-provider"]) test(`the executing Codex process refuses changed ${mode} routing before a thread or turn`, async t => {
+  const f = await fixture(t, mode);
+  const result = await runCodexAppServer(f.options);
+  assert.equal(result.status, "failed");
+  assert.match(result.error, mode === "api-key" ? /not signed in with ChatGPT/ : /configured for another provider/);
+  const messages = (await f.receipt()).messages;
+  assert.equal(messages.some(message => ["thread/start", "thread/resume", "turn/start"].includes(message.method)), false);
+  assert.equal(messages.some(message => message.method === "account/rateLimits/read"), false);
 });

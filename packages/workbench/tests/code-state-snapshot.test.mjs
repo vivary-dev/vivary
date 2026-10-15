@@ -1,6 +1,4 @@
 import { claudeCodeModelChoices } from "../shared/claude-models.ts";
-import { assessClaudeSubscription, assessCodexSubscription } from "../server/code-subscription-funding.ts";
-import { claudeAccount, includedClaudeUsage } from "./fixtures/claude-subscription.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
@@ -30,7 +28,7 @@ for (const scenario of ["terminal", "engine", "model"]) test(scenario === "model
     ownedRuns: () => [record],
     requireOwnedRun: () => record,
     getCodexModels: async () => { discovered(); await held;
-      return { status: "ready", funding: assessCodexSubscription(undefined), models: [{ id: "fixture-model" }] }; },
+      return { status: "ready", models: [{ id: "fixture-model" }] }; },
     getVivaryCodeHostState: async () => ({ activeRun: null, busy: false, cleanup: { scan: "unavailable" } }),
     readVivaryCodeHostState: () => ({ activeRun: null, busy: false, cleanup: { scan: "unavailable" } }),
     listCodeAgentTranscriptEvents: () => [{ kind: "status", metadata: { status: "errored", phase: "cleanup-unverified" } }],
@@ -62,12 +60,10 @@ function stateFixture(overrides = {}) {
     VIVARY_CODE_ENGINES: ["claude-cli", "codex-cli"],
     VIVARY_CODE_DEFAULT_ENGINE: "codex-cli",
     VIVARY_CODE_MODELS: [],
-    claudeCodeModelChoices, assessCodexSubscription,
-    resolveVivaryRuntimeCommand: async () => null,
-    getClaudeSubscriptionFunding: async () => ({ funding: assessClaudeSubscription({ account: claudeAccount, usage: includedClaudeUsage() }, "claude-fable-5-1", "2.1.289") }),
+    claudeCodeModelChoices,
     VIVARY_CODE_DEFAULT_MODEL: "fixture-model",
     getVivaryRuntimeStatus: async engine => ({ status: "ready", message: engine }),
-    getCodexModels: async () => ({ status: "ready", funding: assessCodexSubscription(undefined), models: [{ id: "fixture-model" }] }),
+    getCodexModels: async () => ({ status: "ready", models: [{ id: "fixture-model" }] }),
     engineFromRun: run => run.engine,
     modelFromRun: run => run.model,
     engineLabelFromRun: run => run.engine,
@@ -95,7 +91,7 @@ test("runtime readiness is re-probed after awaited model discovery", async () =>
   const getState = stateFixture({
     getVivaryRuntimeStatus: async engine => engine === "codex-cli" ? codexRuntime : signedIn,
     getCodexModels: async () => { discovered(); await held;
-      return { status: "ready", funding: assessCodexSubscription(undefined), models: [{ id: "fixture-model" }] }; },
+      return { status: "ready", models: [{ id: "fixture-model" }] }; },
   });
   const response = getState("owner@example.test");
   await discoveryStarted;
@@ -126,7 +122,7 @@ test("host activity matches a run that finishes during awaited state work", asyn
     ownedRuns: () => [record],
     requireOwnedRun: () => record,
     getCodexModels: async () => { discoveryFinished = true;
-      return { status: "ready", funding: assessCodexSubscription(undefined), models: [{ id: "fixture-model" }] }; },
+      return { status: "ready", models: [{ id: "fixture-model" }] }; },
     getVivaryRuntimeStatus: async engine => {
       if (discoveryFinished) { await Promise.resolve(); finishRun(); }
       return { status: "ready", message: engine };

@@ -1,5 +1,4 @@
-import { getClaudeSubscriptionFunding, assessCodexSubscription } from "../server/code-subscription-funding";
-import { CLAUDE_CODE_DEFAULT_MODEL, claudeCodeModelChoices } from "../shared/claude-models";
+import { claudeCodeModelChoices } from "../shared/claude-models";
 import { homedir } from "node:os";
 import { getCodexModels } from "../server/codex-models";
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
@@ -7,7 +6,7 @@ import { CLI_REGISTRY } from "@agent-native/core/terminal/server";
 import { z } from "zod";
 
 import { VIVARY_LOCAL_OWNER_EMAIL } from "../shared/owner-session.ts";
-import { getVivaryRuntimeStatus, resolveVivaryRuntimeCommand, type VivaryRuntimeStatusResult } from "../server/local-runtime-setup.ts";
+import { getVivaryRuntimeStatus, type VivaryRuntimeStatusResult } from "../server/local-runtime-setup.ts";
 
 export default defineAction({
   description: "Check whether the local Claude Code and Codex runtimes are installed and signed in.",
@@ -38,13 +37,9 @@ export default defineAction({
       getVivaryRuntimeStatus("codex-cli", { refresh }),
     ]);
     const codexModels = codex.status === "ready" ? await getCodexModels(homedir(), { refresh }) : null;
-    const claudeFunding = claude.status === "ready" ? (await getClaudeSubscriptionFunding(homedir(), CLAUDE_CODE_DEFAULT_MODEL,
-      await resolveVivaryRuntimeCommand("claude-cli"), { refresh })).funding : {
-      policy: "included-only" as const, status: "unavailable" as const, message: claude.message,
-    };
     return { codexModels, claudeModels: claudeCodeModelChoices(claude.version), runtimes: [
-      { engine: "claude-cli", label: CLI_REGISTRY.claude.label, ...claude, funding: claudeFunding },
-      { engine: "codex-cli", label: CLI_REGISTRY.codex.label, ...codex, funding: codexModels?.status === "ready" ? codexModels.funding : assessCodexSubscription(undefined) },
+      { engine: "claude-cli", label: CLI_REGISTRY.claude.label, ...claude },
+      { engine: "codex-cli", label: CLI_REGISTRY.codex.label, ...codex },
     ] };
   },
 });

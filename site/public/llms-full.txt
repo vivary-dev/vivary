@@ -7355,7 +7355,7 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/harness-adapters.md), [Native owner map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/native-owners.md), and [runtime source map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
-### Coding model selection and funding
+### Coding model selection and provider routes
 
 The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
@@ -7411,44 +7411,25 @@ cloud-provider, and unknown auth routes stay unavailable in Code. Native API
 providers remain a separate selection. These checks do not change saved runtime,
 model, or conversation selections.
 
-First-party sign-in establishes authentication. The Workbench
-[funding owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-subscription-funding.ts) also
-reads Claude's live account controls without yielding a user message. The reader
-uses the installed SDK's experimental `get_usage` bridge, pinned to SDK 0.3.288
-and verified Claude Code versions 2.1.289 and 2.1.296. The compatibility contract was checked against the
-provider's Usage credits switch before and after an explicitly authorized OFF
-change. Admission requires the observed explicit-off fields, first-party personal
-subscription authentication, and available global and applicable model allowance.
-A zero credit balance, auto-reload off, missing scope, or unknown response cannot
-establish readiness. Metadata reads have one process owner at a time, and canceled
-queued reads cannot launch. An unconfirmed cleanup refuses subsequent probes. Pro Fable requires usage credits and stays unavailable here.
-See Anthropic's [usage credits guide](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)
-and [Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
+Code uses the selected signed-in runtime and model for new and resumed turns.
+Native API chat remains an explicit separate surface with its selected provider,
+credentials, and model. Vivary does not enforce an app-wide funding policy, read
+usage-credit switches, or block a supported route because its billing controls
+are unknown. The provider owns its account limits and billing behavior.
 
-Each send refreshes controls before creating a run or writing its transcript.
-The private admission binding covers the account, resolved runtime, and workspace.
-Native's execution process then reads its own account and usage controls before
-receiving the prompt. A refusal leaves its retained record and transcript intact.
-Control replies stay private. The worker rechecks new and resumed execution,
-and provider limit rejection stops with an allowance explanation. The account's
-explicit Usage credits OFF control prevents paid overflow. Event monitoring is
-only a stop and explanation mechanism. Compatibility changes fail closed until
-the version and shape are checked again. There is no manual attestation bypass.
+The send owner still checks sign-in, model support, project ownership, and cleanup
+before writing a turn. The execution worker resolves only the selected runtime. Codex reads its account
+and provider configuration in that process before starting a thread, so a stale
+status cache cannot admit API-key or custom-provider routing. These reads check
+route identity, not funding. Provider errors remain on that conversation, including authentication failures,
+unavailable models, and usage-limit rejections. Vivary does not switch runtimes,
+models, or API surfaces after a failure. Retained funding metadata is ignored.
+Saved choices, native session continuity, approval requests, and Stop keep their
+existing owners. The maintained Native patch preserves resolved Claude launcher
+prefixes and Windows SystemRoot while retaining credential filtering.
 
-Codex discovery reads the backend's ordinary-usage permission and quota windows
-through its existing app-server process. These are observations, not a funding
-cap. The current personal-account CLI has no verified control that prevents
-existing ChatGPT credits from funding overflow, so Codex gives a specific refusal
-even when included allowance remains. The [Codex credits guide](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-personal-plans)
-describes automatic credit use. API chat is an explicit separate surface. Saved
-runtime, model, and surface choices remain unchanged, and neither subscription
-route falls back to it. Runtime status, retained history, and Stop remain usable.
-Synthetic positive and refusal tests establish source behavior. A control-only
-read through the installed Native participant also verified its actual CLI
-initialize/usage exchange, refusal before a user envelope, and owned cleanup.
-The actual Claude OFF account still had exhausted global weekly allowance, so no live model
-turn was accepted. Builds, live provider execution, and packaged Windows
-acceptance remain separate gates.
+Offline runtime fixtures cover route selection and error handling. Live provider
+execution and packaged Windows acceptance remain separate checks.
 
 ### Original engine
 
@@ -7739,6 +7720,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-15 provider route correction. The app-wide included-only policy and its
+metadata probes, funding bindings, and pre-prompt control exchange are removed.
+The selected Code runtime or Native API provider remains authoritative. Send and
+worker fixtures cover new and resumed turns, provider failures, and unchanged
+route choices. Claude error result envelopes and rejected rate-limit events now
+produce an errored conversation instead of a completed turn. Error redaction
+precedes normalization and truncation. The Codex execution process checks its
+actual sign-in and provider configuration before a thread or turn. The earlier
+subscription sign-in and Windows SystemRoot fixes remain intact. This replaces
+the funding admission described in the dated reviews below. Live provider and
+Windows package acceptance are still separate.
 
 The Native Claude participant retains only the Windows SystemRoot setting across case variants so Node-based runtimes can initialize crypto. Its existing credential and environment allowlist boundary stays in place. Claude 2.1.300 joins the experimentally verified control-protocol versions after native and SDK metadata-only Windows checks. Funding admission, shared allowance limits, record ownership, and the unknown-version refusal remain unchanged.
 

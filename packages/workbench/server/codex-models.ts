@@ -4,7 +4,6 @@ import {
   type CleanupCheck, type CleanupFailure, type CleanupTarget,
 } from "./code-execution-host";
 import { spawn } from "node:child_process";
-import { assessCodexSubscription, type CodeSubscriptionFunding } from "./code-subscription-funding";
 import { z } from "zod";
 import { resolveVivaryRuntimeCommand, type CommandLaunch } from "./local-runtime-setup";
 
@@ -20,7 +19,7 @@ const configSchema = z.object({ config: z.object({
 }) });
 const accountSchema = z.object({ account: z.object({ type: z.literal("chatgpt") }).passthrough() });
 export type CodexModelCatalog =
-  | { status: "ready"; models: { id: string; label: string }[]; defaultModel: string; connections: string[]; message: string; funding: CodeSubscriptionFunding }
+  | { status: "ready"; models: { id: string; label: string }[]; defaultModel: string; connections: string[]; message: string }
   | { status: "unavailable"; message: string };
 const unavailable = (): CodexModelCatalog => ({ status: "unavailable",
   message: "Codex could not report its subscription models. Check Codex in your terminal, then refresh Runtime settings." });
@@ -37,7 +36,7 @@ const unconfirmedStops = new Set<CleanupTarget>();
 const cache = new Map<string, { expiresAt: number; value: CodexModelCatalog }>();
 const pending = new Map<string, Promise<CodexModelCatalog>>();
 
-export function parseCodexCatalog(modelsValue: unknown, configValue: unknown, accountValue: unknown, rateLimitsValue?: unknown): CodexModelCatalog {
+export function parseCodexCatalog(modelsValue: unknown, configValue: unknown, accountValue: unknown): CodexModelCatalog {
   const models = modelsSchema.safeParse(modelsValue);
   const config = configSchema.safeParse(configValue);
   if (!models.success || !config.success || !accountSchema.safeParse(accountValue).success) return unavailable();
@@ -54,7 +53,7 @@ export function parseCodexCatalog(modelsValue: unknown, configValue: unknown, ac
   const unique = [...new Map(visible.map(model => [model.model, model])).values()];
   unique.sort((a, b) => Number(b.model === preferred.model) - Number(a.model === preferred.model));
   return {
-    status: "ready", funding: assessCodexSubscription(rateLimitsValue), models: unique.map(model => ({ id: model.model, label: model.displayName })),
+    status: "ready", models: unique.map(model => ({ id: model.model, label: model.displayName })),
     defaultModel: preferred.model,
     connections: Object.entries(settings.mcp_servers ?? {}).filter(([, server]) => server.enabled !== false).map(([name]) => name),
     message: settings.model && settings.model !== preferred.model
@@ -204,10 +203,9 @@ export async function probeCodexModels(
           send({ id: 2, method: "model/list", params: { limit: 200, includeHidden: false } });
           send({ id: 3, method: "config/read", params: { includeLayers: false, cwd } });
           send({ id: 4, method: "account/read", params: { refreshToken: false } });
-          send({ id: 5, method: "account/rateLimits/read", params: {} });
-        } else if (parsed.data.id >= 2 && parsed.data.id <= 5) {
+        } else if (parsed.data.id >= 2 && parsed.data.id <= 4) {
           replies.set(parsed.data.id, parsed.data.result);
-          if (replies.size === 4) finish(parseCodexCatalog(replies.get(2), replies.get(3), replies.get(4), replies.get(5)));
+          if (replies.size === 3) finish(parseCodexCatalog(replies.get(2), replies.get(3), replies.get(4)));
         }
       }
     });

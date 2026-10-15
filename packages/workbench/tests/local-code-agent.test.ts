@@ -481,7 +481,6 @@ process.exit(2);
       assert.equal(getCodeAgentRunRecord("missing-model-history")?.metadata?.model, undefined);
       assert.ok(state.engines.find(engine => engine.engine === "claude-cli")?.models.includes("sonnet"));
       assert.equal(state.defaultModel, "claude-sonnet-5-5");
-      assert.equal(state.engines.every(engine => engine.funding.status !== "ready"), true);
     } finally {
       // guard:allow-env-credential - Restore only the temporary Native store setting.
       if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
