@@ -424,6 +424,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-15 Retained Codex default-model review. The worker now compares an
+omitted Codex IPC model with the host's retained default sentinel. The actual
+executor still receives the omitted model so the native session chooses its own
+model. Claude comparisons and explicit model mismatch refusals remain strict.
+The public Send regression reproduces the previous worker refusal for both
+missing and null saved Codex model metadata. It uses the real host request and
+worker with an inert Codex app-server fixture, checks native resume without a
+model override, and preserves the single user event. Existing worker tests also
+reject changed, default, and omitted model inputs for explicit saved models.
+The regression is included in the maintained credential-redaction command.
+Execution, account, credential, and cleanup ownership boundaries are unchanged.
+
 2026-10-15 Code regression coverage review. Successful-send fixtures again
 exercise the public host path for slot exclusion, permission snapshots, draft
 reconciliation, Stop ownership, and fresh project context on each turn. Their

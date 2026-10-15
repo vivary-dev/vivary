@@ -103,7 +103,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     metadata: { app: "vivary-workbench-local-code", engine, ownerEmail, model,
       subscriptionFundingBinding: { obsolete: true } } });
   const calls = async () => (await readFile(receipt, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-  async function execute(runId: string, selectedModel = model) {
+  async function execute(runId: string, selection: { model?: string } = { model }) {
     const child = fork(path.join(import.meta.dirname, "..", "server", "code-execution-worker.ts"), [], {
       execArgv: ["--import", "tsx"], cwd: path.join(import.meta.dirname, ".."),
       // guard:allow-env-credential - Nonsecret fixture executable search path and Windows runtime directory.
@@ -117,7 +117,7 @@ createInterface({ input: process.stdin }).on("line", line => {
       const [ready] = await once(child, "message", { signal: AbortSignal.timeout(15_000) });
       assert.equal(ready.type, "vivary:code-worker:ready", stderr);
       const response = once(child, "message", { signal: AbortSignal.timeout(15_000) });
-      child.send({ type: "vivary:code-worker:start", runId, prompt: "Read the fixture.", model: selectedModel,
+      child.send({ type: "vivary:code-worker:start", runId, prompt: "Read the fixture.", model: selection.model,
         permissionMode: "normal", ownerEmail, redaction: credentialFingerprints() });
       const [result] = await response;
       return result;
@@ -186,9 +186,11 @@ for (const engine of ["claude-cli", "codex-cli"] as const) {
       assert.ok(error.length <= 700);
     }
     const before = await f.calls();
-    const mismatch = await f.execute(retained.id, "changed-model");
-    assert.equal(mismatch.type, "vivary:code-worker:failed");
-    assert.match(mismatch.error, /saved coding model changed/);
+    for (const model of ["changed-model", "default", undefined]) {
+      const mismatch = await f.execute(retained.id, { model });
+      assert.equal(mismatch.type, "vivary:code-worker:failed");
+      assert.match(mismatch.error, /saved coding model changed/);
+    }
     const calls = await f.calls();
     assert.deepEqual(calls, before, "a changed retained model never starts a runtime");
     assert.equal(calls.some(call => call.wrongRoute), false, "no other runtime starts after an error");

@@ -54,7 +54,8 @@ async function receive(message: unknown) {
     if (!record.cwd) throw new Error("The saved workspace is unavailable.");
     const savedModel = typeof record.metadata?.model === "string" ? record.metadata.model
       : engine === "claude-cli" ? "sonnet" : "default";
-    if (message.model !== savedModel) throw new Error("The saved coding model changed. Reopen the conversation.");
+    const selectedModel = engine === "codex-cli" && message.model === undefined ? "default" : message.model;
+    if (selectedModel !== savedModel) throw new Error("The saved coding model changed. Reopen the conversation.");
     await runWithRequestContext({ userEmail: message.ownerEmail, orgId: message.orgId }, () =>
       executeCodeAgentRun({
         runId: message.runId,
