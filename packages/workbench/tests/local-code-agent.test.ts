@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { compileFunction } from "node:vm";
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
 import {
@@ -9,6 +11,7 @@ import {
   getCodeAgentRunRecord,
   listCodeAgentTranscriptEvents,
   listCodeAgentRunRecords,
+  type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
 import codeStateAction from "../actions/vivary-code-state.ts";
 import codeApproveAction from "../actions/vivary-code-approve.ts";
@@ -35,8 +38,25 @@ import {
 } from "../server/local-code-agent.ts";
 
 import { claimProjectReconnection } from "../server/project-reconnection-admission.mjs";
-import { codingRuntimeEnvironment } from "../server/local-runtime-setup.ts";
-import { renderUnavailableContext } from "../server/project-memory.ts";
+import { codingRuntimeEnvironment, getVivaryRuntimeStatus } from "../server/local-runtime-setup.ts";
+import { createProjectMemory, renderFactFile, renderUnavailableContext } from "../server/project-memory.ts";
+import { setTimeout as delay } from "node:timers/promises";
+import { changeChatDraft, createCodeDraftIdentity, reconcileCodeDraft } from "../server/chat-draft.ts";
+import { runWithRequestContext } from "@agent-native/core/server";
+import { getCodePermissionMode, setCodePermissionMode } from "../server/code-permissions.ts";
+
+// Load Native's transcript builder the way codex-transcript.test.mjs does: its
+// module imports client-only code, so only the pure functions are compiled.
+async function coreTranscriptBuilder(): Promise<(events: CodeAgentTranscriptEvent[]) => { messages: { message: unknown }[] }> {
+  const core = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "node_modules", "@agent-native", "core");
+  const { normalizeCodeAgentTranscript, isCredentialGapCodeAgentEvent } = await import(
+    pathToFileURL(path.join(core, "dist/code-agents/transcript-normalizer.js")).href);
+  const file = path.join(core, "dist/agent/thread-data-builder.js");
+  const source = (await readFile(file, "utf8")).replace(/^import [\s\S]*?;\n/gm, "").replace(/^export /gm, "");
+  return compileFunction(`${source}\nreturn buildRepositoryFromCodeAgentTranscript;`,
+    ["normalizeCodeAgentTranscript", "isCredentialGapCodeAgentEvent"], { filename: file })(
+    normalizeCodeAgentTranscript, isCredentialGapCodeAgentEvent);
+}
 
 const stateRoot = await mkdtemp(path.join(os.tmpdir(), "vivary-code-test-state-"));
 const previousPath = codingRuntimeEnvironment(process.env).PATH;
@@ -241,8 +261,12 @@ describe("local Vivary code agent boundaries", () => {
     temporaryRoots.push(store, workspaceRoot, bin);
     const executable = path.join(bin, "claude");
     await writeFile(executable, `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
-process.stdout.write('{"loggedIn":true}');
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
     const previous = {
       store: process.env.AGENT_NATIVE_CODE_AGENTS_HOME, // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
@@ -259,6 +283,7 @@ process.stdout.write('{"loggedIn":true}');
       process.env.AGENT_NATIVE_CODE_AGENTS_HOME = store; // guard:allow-env-credential - Isolated Native test record directory.
       process.env.PATH = bin + path.delimiter + (previous.path ?? ""); // guard:allow-env-credential - Isolated test runtime configuration.
       process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated test runtime configuration.
+      assert.equal((await getVivaryRuntimeStatus("claude-cli", { refresh: true })).status, "ready");
       createCodeAgentRunRecord({ id: runId, goalId: "vivary-local-code",
         title: "Retained Alpha conversation", status: "completed", cwd: workspaceRoot,
         metadata: { app: "vivary-workbench-local-code", ownerEmail, orgId,
@@ -400,6 +425,229 @@ process.stdout.write('{"loggedIn":true}');
     }
   });
 
+  it("Send starts immediately, keeps one host slot, snapshots settings, and Stop remains available", async () => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-send-"));
+    temporaryRoots.push(fixture);
+    const server = path.join(fixture, ".output", "server");
+    const bin = path.join(fixture, "bin");
+    await mkdir(server, { recursive: true });
+    await mkdir(bin);
+    await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
+if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
+`, { mode: 0o755 });
+    await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+import {writeFileSync} from "node:fs";
+process.on("message", message => {
+ if(message.type === "vivary:code-worker:start") writeFileSync("started.json", JSON.stringify(message));
+});
+process.send({type:"vivary:code-worker:ready"});
+`);
+    const previousCwd = process.cwd();
+    const previousMode = process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const previousPath = process.env.PATH; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    let runId: string | undefined;
+    const workspace = { root: fixture, label: "Immediate project", projectId: "immediate",
+      bindingId: "immediate-binding", rootId: "immediate-root", bindingRevision: 1 };
+    try {
+      process.chdir(fixture);
+      process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.PATH = bin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      assert.equal((await getVivaryRuntimeStatus("claude-cli", { refresh: true })).status, "ready");
+      await setCodePermissionMode("immediate@example.com", "read-only", "immediate-org");
+      const state = await sendVivaryCodeMessage({ ownerEmail: "immediate@example.com", orgId: "immediate-org",
+        message: "Inspect this fixture", engine: "claude-cli", model: "sonnet", workspace,
+        draftSubmitId: "29cf865b-641d-4415-a42d-df12113e6e0c",
+        draftThreadId: "vivary-code:project:immediate:draft-1",
+        revalidateWorkspace: async () => workspace });
+      runId = state.run!.id;
+      assert.equal(state.run?.draftThreadId, "vivary-code:project:immediate:draft-1");
+      assert.equal(state.runs.find(item => item.id === runId)?.draftThreadId,
+        "vivary-code:project:immediate:draft-1");
+      assert.equal((await getVivaryCodeState("immediate@example.com", runId, workspace, "immediate-org"))
+        .run?.draftThreadId, "vivary-code:project:immediate:draft-1");
+      assert.equal(state.pendingApproval, null);
+      assert.equal(state.activeRun?.id, runId);
+      assert.equal(state.busy, true);
+      assert.equal(getCodeAgentRunRecord(runId)?.metadata?.pendingLaunch, undefined);
+      assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
+      assert.equal(hasOwnedVivaryCodeSubmit("immediate@example.com", "immediate-org", workspace,
+        "vivary-code:project:immediate:draft-1", "29cf865b-641d-4415-a42d-df12113e6e0c"), true);
+      assert.equal(hasOwnedVivaryCodeSubmit("different@example.com", "immediate-org", workspace,
+        "vivary-code:project:immediate:draft-1", "29cf865b-641d-4415-a42d-df12113e6e0c"), false);
+      assert.equal(hasOwnedVivaryCodeSubmit("immediate@example.com", "immediate-org", workspace,
+        "vivary-code:project:immediate:other", "29cf865b-641d-4415-a42d-df12113e6e0c"), false);
+      const draftIdentity = createCodeDraftIdentity("immediate@example.com", "immediate-org", "immediate");
+      await runWithRequestContext({ userEmail: "immediate@example.com", orgId: "immediate-org" }, async () => {
+        const pendingDraft = await changeChatDraft(draftIdentity, "vivary-code:project:immediate:draft-1", null,
+          { status: "pending", text: "Inspect this fixture",
+            submitId: "29cf865b-641d-4415-a42d-df12113e6e0c" });
+        assert.equal(pendingDraft.changed, true);
+        const settledDraft = await reconcileCodeDraft(draftIdentity, "vivary-code:project:immediate:draft-1",
+          "immediate@example.com", "immediate-org", workspace);
+        assert.equal(settledDraft.saved, true);
+        assert.equal(settledDraft.record?.status, "cleared");
+      });
+      await setCodePermissionMode("immediate@example.com", "yolo", "immediate-org");
+      let invocation;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        try { invocation = JSON.parse(await readFile(path.join(fixture, "started.json"), "utf8")); break; }
+        catch { await delay(20); }
+      }
+      assert.equal(invocation?.permissionMode, "read-only");
+      assert.equal(await getCodePermissionMode("immediate@example.com", "immediate-org"), "yolo");
+      assert.equal(await getCodePermissionMode("different@example.com", "immediate-org"), "normal");
+      await assert.rejects(sendVivaryCodeMessage({ ownerEmail: "immediate@example.com", message: "Second", workspace }),
+        { errorCode: "vivary_code_run_active" });
+      await assert.rejects(stopVivaryCodeRun({ ownerEmail: "different@example.com", runId, projectId: workspace.projectId }),
+        { statusCode: 404 });
+      await stopVivaryCodeRun({ ownerEmail: "immediate@example.com", orgId: "immediate-org", runId, projectId: workspace.projectId });
+      await Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")).activeRuns.get(runId)?.execution;
+      assert.equal((await getVivaryCodeHostState("immediate@example.com", "immediate-org")).busy, false);
+      assert.equal(getCodeAgentRunRecord(runId)?.status, "paused");
+      runId = undefined;
+    } finally {
+      if (runId) {
+        const execution = Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")).activeRuns.get(runId)?.execution;
+        await stopVivaryCodeRun({ ownerEmail: "immediate@example.com", orgId: "immediate-org", runId, projectId: workspace.projectId }).catch(() => undefined);
+        await execution;
+      }
+      process.chdir(previousCwd);
+      if (previousMode === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previousMode; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    }
+  });
+
+  it("sends each project turn's context block to the engine and keeps the transcript raw", async () => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-context-"));
+    temporaryRoots.push(fixture);
+    const server = path.join(fixture, ".output", "server");
+    const bin = path.join(fixture, "bin");
+    const root = path.join(fixture, "project");
+    await mkdir(server, { recursive: true });
+    await mkdir(bin);
+    await mkdir(path.join(root, ".vivary", "knowledge"), { recursive: true });
+    await writeFile(path.join(root, ".vivary", "workspace.toml"), "version = 1\n");
+    await writeFile(path.join(root, "AGENTS.md"), "# Agents\n");
+    await writeFile(path.join(root, "STATE.md"), "# State\n");
+    const factFile = path.join(root, ".vivary", "knowledge", "relay-budget.md");
+    const fact = (amount: number) => renderFactFile({ title: "Relay budget", source: "Jeff, planning call",
+      text: `The relay budget is ${amount} dollars per month.`, confirmed: "2026-09-25" });
+    await writeFile(factFile, fact(40));
+    await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
+if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
+`, { mode: 0o755 });
+    await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+import {writeFileSync} from "node:fs";
+process.on("message", message => {
+ if(message.type === "vivary:code-worker:start") writeFileSync("started.json", JSON.stringify(message));
+});
+process.send({type:"vivary:code-worker:ready"});
+`);
+    const memory = createProjectMemory({
+      readWorkspaceContext: async () => ({ status: "thin", roles: { law: ["AGENTS.md"], map: [], record: [],
+        memory: [], boundary: [".gitignore"] }, state: "STATE.md", memory: [".vivary/knowledge"],
+        memoryAssigned: false, protected: [],
+        privacy: { policy: "none", private: [], privateFiles: [], ignoreFiles: [".gitignore"], privateCandidates: [],
+          checkedFiles: [".vivary/knowledge/relay-budget.md"] } }),
+    });
+    const workspace = { root, label: "Relay", projectId: "relay", bindingId: "relay-binding", rootId: "relay-root",
+      bindingRevision: 1, policyRevision: 1, actorId: "actor", locationRef: "loc",
+      verificationKind: "local-stat-revalidated-v1" as const };
+    const ownerEmail = "context@example.com";
+    const orgId = "context-org";
+    const previous = { cwd: process.cwd(), mode: process.env.VIVARY_ACCESS_MODE, // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      path: process.env.PATH, store: process.env.AGENT_NATIVE_CODE_AGENTS_HOME }; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const host = () => Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")).activeRuns;
+    // Send, read what the fake worker received, then stop so the next turn can start.
+    const recorded: string[] = [];
+    const turn = async (message: string, runId?: string) => {
+      await rm(path.join(fixture, "started.json"), { force: true });
+      const state = await sendVivaryCodeMessage({ ownerEmail, orgId, message, engine: "claude-cli", model: "sonnet",
+        runId, workspace, projectContext: await memory.renderForRun(workspace, "code"),
+        recordProjectContext: load => recorded.push(load.revision) });
+      const id = state.run!.id;
+      let started: { prompt: string } | undefined;
+      for (let attempt = 0; attempt < 100 && !started; attempt++) {
+        try { started = JSON.parse(await readFile(path.join(fixture, "started.json"), "utf8")); }
+        catch { await delay(20); }
+      }
+      const execution = host().get(id)?.execution;
+      await stopVivaryCodeRun({ ownerEmail, orgId, runId: id, projectId: workspace.projectId });
+      await execution;
+      return { id, prompt: started?.prompt ?? "" };
+    };
+    try {
+      process.chdir(fixture);
+      process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.PATH = bin + path.delimiter + (previous.path ?? ""); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      assert.equal((await getVivaryRuntimeStatus("claude-cli", { refresh: true })).status, "ready");
+
+      // A refused send records no load, so the panel's last load stays true.
+      await assert.rejects(sendVivaryCodeMessage({ ownerEmail, orgId, message: "Refused", engine: "claude-cli",
+        model: "sonnet", workspace, revalidateWorkspace: async () => ({ ...workspace, bindingRevision: 2 }),
+        projectContext: await memory.renderForRun(workspace, "code"), recordProjectContext: load => recorded.push(load.revision) }),
+      { errorCode: "vivary_code_project_changed" });
+      await assert.rejects(sendVivaryCodeMessage({ ownerEmail, orgId, message: "Refused", engine: "claude-cli",
+        model: "sonnet", workspace, revalidateWorkspace: async () => ({ ...workspace, policyRevision: 2 }),
+        projectContext: await memory.renderForRun(workspace, "code"), recordProjectContext: load => recorded.push(load.revision) }),
+      { errorCode: "vivary_code_project_changed" });
+      assert.deepEqual(recorded, []);
+
+      const first = await turn("What is the relay budget?");
+      assert.ok(first.prompt.startsWith("<project-context>\nProject: Relay\n"), first.prompt.slice(0, 80));
+      assert.match(first.prompt, /The relay budget is 40 dollars per month\.[\s\S]*<\/project-context>\n\nWhat is the relay budget\?$/);
+      const users = () => listCodeAgentTranscriptEvents(first.id).filter(event => event.kind === "user");
+      assert.deepEqual(users().map(event => event.message), ["What is the relay budget?"]);
+      const [firstRevision] = recorded;
+      assert.match(firstRevision, /^ctx-[0-9a-f]{12}$/);
+      assert.equal(getCodeAgentRunRecord(first.id)?.metadata?.projectContextRevision, firstRevision);
+
+      await writeFile(factFile, fact(55));
+      const second = await turn("Ask again.", first.id);
+      const [block, quoted] = second.prompt.split("</project-context>\n\n");
+      assert.match(block, /55 dollars/);
+      assert.doesNotMatch(block, /40 dollars/);
+      assert.match(quoted, /^# Previous conversation\n[\s\S]*User: What is the relay budget\?[\s\S]*# Current request\nAsk again\.$/);
+      assert.doesNotMatch(quoted, /project-context|dollars/);
+      assert.deepEqual(users().map(event => event.message), ["What is the relay budget?", "Ask again."]);
+      const loads = listCodeAgentTranscriptEvents(first.id)
+        .filter(event => event.metadata?.source === "vivary-project-context");
+      assert.equal(loads.length, 2);
+      assert.equal(loads[0].message, `Loaded project context ${firstRevision}: 1 fact from .vivary/knowledge, `
+        + "instructions from AGENTS.md, state from STATE.md.");
+      assert.match(loads[1].message, /The project context changed since the last turn\.$/);
+      assert.deepEqual(loads.map(event => event.kind), ["note", "note"]);
+      assert.equal(getCodeAgentRunRecord(first.id)?.metadata?.projectContextRevision, recorded[1]);
+      assert.notEqual(recorded[1], firstRevision);
+      assert.equal(recorded.length, 2);
+      // Native's transcript builder, which the Code view uses, shows the note.
+      const repository = (await coreTranscriptBuilder())(listCodeAgentTranscriptEvents(first.id));
+      const shown = JSON.stringify(repository.messages.map((entry: { message: unknown }) => entry.message));
+      assert.ok(shown.includes(`Loaded project context ${firstRevision}`), shown.slice(0, 400));
+    } finally {
+      process.chdir(previous.cwd);
+      if (previous.mode === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previous.mode; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previous.path === undefined) delete process.env.PATH; else process.env.PATH = previous.path; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previous.store === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previous.store; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    }
+  });
+
   it("refuses unavailable runtimes before new or resumed run and transcript writes", async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-funding-"));
     temporaryRoots.push(fixture);
@@ -429,6 +677,7 @@ process.exit(2);
       Object.assign(process.env, { PATH: bin + path.delimiter + (previous.path ?? ""),
         VIVARY_ACCESS_MODE: "local", AGENT_NATIVE_CODE_AGENTS_HOME: fixture });
       for (const engine of ["claude-cli", "codex-cli"] as const) {
+        assert.equal((await getVivaryRuntimeStatus(engine, { refresh: true })).status, "unavailable");
         const runId = `funding-retained-${engine}`;
         const model = engine === "claude-cli" ? "claude-sonnet-4-20250514" : "retained-codex-model";
         createCodeAgentRunRecord({ id: runId, goalId: "vivary-local-code", title: "Retained conversation",

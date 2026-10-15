@@ -428,6 +428,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-15 Code regression coverage review. Successful-send fixtures again
+exercise the public host path for slot exclusion, permission snapshots, draft
+reconciliation, Stop ownership, and fresh project context on each turn. Their
+inert CLI fixtures report the subscription route and version required by current
+runtime admission. Cleanup-refusal tests also use public Send after cleanup,
+instead of exporting the private execution starter from a fixture bundle. The
+maintained shared-UI command now includes editor content-preservation and command
+menu focus regressions. Review compared removed assertions with the baseline,
+checked the fixture call sites, and traced maintained commands from CI. These
+changes restore coverage without changing runtime behavior or bringing back the
+obsolete funding gate. The execution and credential boundaries remain unchanged.
+
 2026-10-15 Code model-choice review. The composer and send adapter now share
 new-conversation model admission from the current catalog. Exact historical IDs
 remain available for retained conversations, and saved supported Claude aliases

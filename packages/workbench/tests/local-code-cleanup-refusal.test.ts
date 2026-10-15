@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { pathToFileURL } from "node:url";
-import { build } from "esbuild";
-import { appendCodeAgentTranscriptEvent } from "@agent-native/core/code-agents";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -56,8 +53,12 @@ await mkdir(projectRoot);
 await mkdir(bin);
 await mkdir(scanner, { recursive: true });
 await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
-process.stdout.write('{"loggedIn":true}');
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
 // The runtime lookup adds `.exe` while the platform reads as Windows.
 await copyFile(path.join(bin, "claude"), path.join(bin, "claude.exe"));
@@ -225,38 +226,12 @@ if (!linuxOnly.skip) {
 }
 const agent = await import("../server/local-code-agent.ts");
 
-// Seed a synthetic retained turn to isolate the execution owner
-// that governs Stop and cleanup from runtime discovery.
-const fixtureOwner = await build({ stdin: {
-  contents: (await readFile(new URL("../server/local-code-agent.ts", import.meta.url), "utf8"))
-    + "\nexport { startVivaryCodeRun as startPreviouslyAdmittedFixture };",
-  resolveDir: path.join(import.meta.dirname, "..", "server"), loader: "ts", sourcefile: "fixture-owner.ts",
-}, bundle: true, write: false, platform: "node", format: "esm", logLevel: "silent", plugins: [{
-  name: "retained-fixture-owner",
-  setup(builder) { builder.onResolve({ filter: /^[^./]/ }, async args => {
-    if (args.path.startsWith("node:") || args.pluginData === "resolved") return undefined;
-    const resolved = await builder.resolve(args.path, { kind: args.kind, resolveDir: args.resolveDir, pluginData: "resolved" });
-    return { path: pathToFileURL(resolved.path).href, external: true };
-  }); },
-}] });
-const { startPreviouslyAdmittedFixture } = await import("data:text/javascript;base64,"
-  + Buffer.from(fixtureOwner.outputFiles[0].text).toString("base64"));
-async function previouslyAdmitted(message: string) {
-  await agent.getVivaryCodeHostState(OWNER);
-  const run = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: message, status: "queued",
-    cwd: projectRoot, metadata: runMetadata });
-  appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message });
-  startPreviouslyAdmittedFixture({ runId: run.id, message, engine: "claude-cli", model: "sonnet",
-    ownerEmail: OWNER, workspace, permissionMode: "normal" });
-  return { run };
-}
-
 function send(message: string) {
   return agent.sendVivaryCodeMessage({ ownerEmail: OWNER, message, engine: "claude-cli", model: "sonnet", workspace });
 }
 
 async function sendAndSettle(message: string): Promise<string> {
-  const state = await previouslyAdmitted(message);
+  const state = await send(message);
   const runId = state.run!.id;
   // A fixture run can finish before the send returns, so the run's own transcript shows that it started.
   assert.ok(listCodeAgentTranscriptEvents(runId).some(event => event.kind === "user" && event.message === message));
@@ -324,8 +299,7 @@ test("Continue anyway lifts a refusal Vivary cannot check, records who chose it,
   assert.equal(lastStatus("legacy-marker"),
     "You chose to continue. Vivary could not check whether this run's coding processes stopped. "
     + "Vivary accepts new messages again.");
-  await assert.rejects(send("Start after continuing"), { errorCode: "vivary_code_runtime_unavailable" });
-  const runId = await sendAndSettle("Retained synthetic turn");
+  const runId = await sendAndSettle("Start after continuing");
   assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
 });
 
@@ -355,8 +329,7 @@ test("a live process group keeps refusing by name, and a send after it stops lif
     });
     process.kill(-groupId, "SIGKILL");
     await exited;
-    await assert.rejects(send("Start after it stopped"), { errorCode: "vivary_code_runtime_unavailable" });
-    const runId = await sendAndSettle("Retained synthetic turn");
+    const runId = await sendAndSettle("Start after it stopped");
     assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
     assert.equal((metadataOf("live-group").cleanupLifted as { how?: string }).how, "rechecked");
     assert.equal(lastStatus("live-group"), "The leftover coding processes are gone. Vivary accepts new messages again.");
@@ -469,7 +442,7 @@ test("a failed stop is recorded before its scan, and a refusal whose record cann
   await writeFile(scanHold, "");
   try {
     const runId = await asWindows(async () => {
-      const id = (await previouslyAdmitted("exit after its run")).run!.id;
+      const id = (await send("exit after its run")).run!.id;
       // The held scan ends after 10 seconds, so a refusal written only after it would arrive too late.
       const provisional = await waitFor(() => metadataOf(id).cleanupRefusal as Record<string, unknown> | undefined,
         AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]));
@@ -509,7 +482,7 @@ test("a failed stop whose check finds nothing left takes its early refusal off t
   await writeFile(scanHold, "");
   try {
     const runId = await asWindows(async () => {
-      const id = (await previouslyAdmitted("exit after its run")).run!.id;
+      const id = (await send("exit after its run")).run!.id;
       await waitFor(() => metadataOf(id).cleanupRefusal, AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]));
       await rm(scanHold);
       await hostSlots().activeRuns.get(id)?.execution;
@@ -533,7 +506,7 @@ test("a Stop during a failed stop's own check leaves the run failed, not stopped
   await writeFile(scanHold, "");
   try {
     const runId = await asWindows(async () => {
-      const id = (await previouslyAdmitted("exit after its run")).run!.id;
+      const id = (await send("exit after its run")).run!.id;
       await waitFor(() => metadataOf(id).cleanupRefusal, AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]));
       const owners = await agent.getVivaryCodeHostState(OWNER);
       assert.deepEqual({ active: owners.activeRun?.id, checking: owners.cleanup?.checking, run: owners.cleanup?.run?.id },
@@ -566,7 +539,7 @@ test("a failed stop's own check offers no choice until it ends and says that Viv
   await writeFile(scanHold, "");
   try {
     const runId = await asWindows(async () => {
-      const id = (await previouslyAdmitted("exit after its run")).run!.id;
+      const id = (await send("exit after its run")).run!.id;
       await waitFor(() => metadataOf(id).cleanupRefusal, AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]));
       // Another user of the host sees the check without the run. The owner's view is in the Stop case above.
       const checking = (await agent.getVivaryCodeHostState("someone-else@example.test")).cleanup;
