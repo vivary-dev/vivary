@@ -109,6 +109,10 @@ describe("local coding runtime status", () => {
 const fs = require("node:fs");
 // guard:allow-env-credential - The synthetic CLI checks that its nonsecret nesting marker was removed.
 if (process.env.CLAUDECODE) process.exit(2);
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
 const file = ${JSON.stringify(countFile)};
 const count = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0;
@@ -127,6 +131,8 @@ setTimeout(() => process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai"
         getVivaryRuntimeStatus("claude-cli", { refresh: true }),
       ]);
       assert.equal(one.status, "ready");
+      assert.equal(one.version, "2.1.300", "native CLI version is discovered without a package manifest");
+      assert.equal(claudeCodeModelChoices(one.version).every(model => model.support === "supported"), true);
       assert.strictEqual(one, two);
       assert.equal(await readFile(countFile, "utf8"), "1");
       await getVivaryRuntimeStatus("claude-cli");
@@ -144,6 +150,41 @@ setTimeout(() => process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai"
       if (previous.VIVARY_ACCESS_MODE === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previous.VIVARY_ACCESS_MODE;
       // guard:allow-env-credential - Restore only the test's previous CLI nesting marker.
       if (previous.CLAUDECODE === undefined) delete process.env.CLAUDECODE; else process.env.CLAUDECODE = previous.CLAUDECODE;
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps native Claude version support unverified after failed or malformed version responses", { skip: process.platform === "win32" }, async () => {
+    const fixture = await mkdtemp(path.join(tmpdir(), "vivary-native-version-"));
+    // guard:allow-env-credential - Restore the fixture's executable search path and local deployment mode.
+    const previous = { PATH: process.env.PATH, VIVARY_ACCESS_MODE: process.env.VIVARY_ACCESS_MODE };
+    try {
+      // guard:allow-env-credential - Use the disposable executable for the local runtime probe.
+      process.env.PATH = fixture + path.delimiter + previous.PATH;
+      // guard:allow-env-credential - Local mode enables only this synthetic status probe.
+      process.env.VIVARY_ACCESS_MODE = "local";
+      for (const response of [
+        { text: "2.1.300 (Claude Code)\n", exit: 1 },
+        { text: "2.1.300\n", exit: 0 },
+        { text: "unrelated 2.1.300 (Claude Code)\n", exit: 0 },
+        { text: "2.1.300 (Claude Code)\nadditional text", exit: 0 },
+      ]) {
+        await writeFile(path.join(fixture, "claude"), `#!/usr/bin/env node
+const args = JSON.stringify(process.argv.slice(2));
+if (args === '["--version"]') { process.stdout.write(${JSON.stringify(response.text)}); process.exit(${response.exit}); }
+if (args !== '["auth","status","--json"]') process.exit(2);
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
+`, { mode: 0o755 });
+        const status = await getVivaryRuntimeStatus("claude-cli", { refresh: true });
+        assert.equal(status.status, "ready");
+        assert.equal(status.version, undefined);
+        assert.equal(claudeCodeModelChoices(status.version).every(model => model.support === "unverified"), true);
+      }
+    } finally {
+      // guard:allow-env-credential - Restore only the fixture's executable path and local deployment mode.
+      if (previous.PATH === undefined) delete process.env.PATH; else process.env.PATH = previous.PATH;
+      // guard:allow-env-credential - Restore the deployment mode after the local fixture.
+      if (previous.VIVARY_ACCESS_MODE === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previous.VIVARY_ACCESS_MODE;
       await rm(fixture, { recursive: true, force: true });
     }
   });

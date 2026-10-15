@@ -64,6 +64,10 @@ Claude Code IDs, minimum CLI versions, and API list price references, verified
 [pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
 [Claude Code configuration](https://code.claude.com/docs/en/model-config).
 Installation manifests establish CLI version support without an account call.
+When native Claude has no usable manifest, Workbench runs `--version` through
+the same resolved executable, launch prefix, and filtered environment. It accepts
+only a successful complete Claude version response. This local probe retains the
+existing ten-second process timeout and output bound and creates no model turn.
 An unknown installation version remains unverified. Codex's account-effective
 `model/list` remains its model authority. API list prices do not establish a
 subscription bill or included model entitlement.

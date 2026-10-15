@@ -169,7 +169,8 @@ export function getVivaryRuntimeStatus(
 async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
   const launch = await resolveVivaryRuntimeCommand(engine);
   if (!launch) return { kind: "not-installed" };
-  const version = await runtimeInstallationVersion(launch, engine);
+  const version = await runtimeInstallationVersion(launch, engine)
+    ?? (engine === "claude-cli" ? await probeClaudeVersion(launch) : undefined);
   return new Promise(resolve => {
     const child = execFile(launch.executable, [...launch.prefix, ...commands[engine].args], {
       cwd: homedir(),
@@ -188,6 +189,26 @@ async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
         return;
       }
       resolve({ kind: "exited", exitCode: 0, stdout, stderr, version });
+    });
+    child.stdin?.end();
+  });
+}
+
+// Native Claude installations have no npm manifest. Query the same resolved launch without
+// opening a model session, and accept only the CLI's complete version response.
+async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const child = execFile(launch.executable, [...launch.prefix, "--version"], {
+      cwd: homedir(),
+      env: launch.env,
+      encoding: "utf8",
+      timeout: PROBE_TIMEOUT_MS,
+      maxBuffer: PROBE_MAX_BYTES,
+      killSignal: "SIGKILL",
+      shell: false,
+      windowsHide: true,
+    }, (error, stdout) => {
+      resolve(error ? undefined : /^(\d+\.\d+\.\d+) \(Claude Code\)$/.exec(stdout.trim())?.[1]);
     });
     child.stdin?.end();
   });
@@ -259,7 +280,7 @@ export async function runtimeInstallationVersion(launch: Pick<CommandLaunch, "ex
       }
     }
   } catch {
-    // Native installers without a package manifest keep version support unverified.
+    // Missing or malformed metadata leaves version discovery to the caller.
   }
   return undefined;
 }

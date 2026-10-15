@@ -56,13 +56,13 @@ import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
 
-export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false }) {
+export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false, version = "2.1.296", prefill = false }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const choices = [];
   const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
-    runtime: { status: "ready", message: "Signed in", version: "2.1.296" }, modelCatalog: null,
-    models: claudeCodeModelChoices("2.1.296").map(model => model.id),
-    claudeModels: claudeCodeModelChoices("2.1.296") };
+    runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
+    models: claudeCodeModelChoices(version).map(model => model.id),
+    claudeModels: claudeCodeModelChoices(version) };
   const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null };
   const selection = { key: "composer-review", runId: history ? "retained-run" : null, choice: { engine: "claude-cli", model } };
   const props = { state, selection, ownerKey: "fixture-owner", projectId: null, workspaceAvailable: true,
@@ -71,6 +71,11 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
     onChoice: choice => choices.push(choice), onStarted() {}, onStreaming() {}, onSettled() {},
     onStop: async () => false, onSettings() {} };
   const view = await mount(<QueryClientProvider client={client}><LocalCodeConversation {...props} /></QueryClientProvider>);
+  if (prefill) {
+    const example = [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change");
+    if (!example || example.disabled) throw new Error("native runtime did not enable the composer");
+    await act(async () => { example.dispatchEvent(new window.Event("click", { bubbles: true })); });
+  }
   const runtime = view.host.querySelector('[aria-label="Conversation runtime"]');
   const select = view.host.querySelector('[aria-label="Conversation model"]');
   const toolbar = view.host.querySelector('[data-agent-composer-slot="toolbar"]');
@@ -81,6 +86,7 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
     noticesOutsideToolbar: !toolbar?.contains(view.host.querySelector('[data-testid="preserved-notice"]')),
     model: select?.value, labels: [runtime?.getAttribute("aria-label"), select?.getAttribute("aria-label")],
     disabled: [runtime?.disabled, select?.disabled, send?.disabled], choices,
+    exampleDisabled: [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
     text: view.host.textContent };
   await view.unmount(); client.clear();
   return snapshot;
@@ -643,6 +649,19 @@ test("Native chat controls", async t => {
         assert.equal(snapshot.embedded, true);
         assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
       }
+    } finally { server(); }
+  });
+
+  await t.test("a discovered native Claude version enables Send for current models", async () => {
+    const server = installChatServer();
+    try {
+      const unknown = await proof.renderWorkbenchComposer({ model: "claude-haiku-5-5", version: null });
+      assert.equal(unknown.disabled[2], true);
+      assert.equal(unknown.exampleDisabled, true, "unknown version refuses work independently of the empty draft");
+      const supported = await proof.renderWorkbenchComposer({ model: "claude-haiku-5-5", version: "2.1.300", prefill: true });
+      assert.equal(supported.disabled[2], false);
+      assert.equal(supported.model, "claude-haiku-5-5");
+      assert.deepEqual(supported.choices, [], "version discovery preserves the selected model");
     } finally { server(); }
   });
 
