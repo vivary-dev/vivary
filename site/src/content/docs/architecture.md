@@ -428,6 +428,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Claude failure-path and local first-run review. Claude Code stderr
+is retained only while the complete diagnostic stays within its existing
+128 KiB bound. A write that would exceed the bound discards the retained
+diagnostic, and a nonzero exit then records a generic withheld-output error, so
+a partial credential cannot bypass downstream redaction. This is the policy the
+Codex executor already applies. Complete diagnostics within the bound keep their
+existing redaction and error behavior. In local mode, where Builder offers are
+off, both Back controls on the first-run key form return to the intro instead
+of rendering the same form again. Self-hosted mode still returns to the Builder
+choice. Participant tests cover a held credential that crosses the bound in one
+write and split before, at, and after it, plus a split credential inside the
+bound. Onboarding component tests drive both Back controls from the intro and
+keep an offers-on control. No provider, permission, persistence, or
+process-cleanup ownership changes.
+
 2026-10-16 Codex failure-path review. App-server stderr is retained only while
 the complete diagnostic stays within its existing 4096-character bound. Once it
 exceeds the bound, the executor discards the diagnostic and records a generic

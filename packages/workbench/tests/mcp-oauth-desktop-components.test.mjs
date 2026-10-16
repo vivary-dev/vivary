@@ -86,7 +86,8 @@ async function build() {
   const result = await esbuild.build({ stdin: { contents: proof, resolveDir: WB, loader: "tsx" }, absWorkingDir: WB,
     bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", logLevel: "silent",
     banner: { js: `import {createRequire} from 'node:module';const require=createRequire(${JSON.stringify(path.join(WB, "package.json"))});` },
-    define: { "process.env.NODE_ENV": '"development"' },
+    // Vite replaces import.meta.env.DEV at build time. A packaged app reads false, which the Builder choice screen needs.
+    define: { "process.env.NODE_ENV": '"development"', "import.meta.env.DEV": "false" },
     plugins: [{ name: "oauth-component-controls", setup(build) {
       build.onResolve({ filter: /^@proof\// }, args => ({ path: path.join(CLIENT, entries[args.path.slice(7)]) }));
       build.onResolve({ filter: /^@tabler\/icons-react$/ }, () => ({ path: "icons", namespace: "proof" }));
@@ -98,8 +99,8 @@ async function build() {
         if (stubs.has(relative)) return { contents: stubs.get(relative), loader: "tsx", resolveDir: path.dirname(args.path) };
         if (relative.startsWith("components/ui/")) return { contents: passthrough, loader: "tsx", resolveDir: WB };
         if (relative === "onboarding/FirstRunOnboarding.js") {
-          // Start at the integrations step. Its actual buttons and handlers remain intact.
-          return { contents: (await readFile(args.path, "utf8")).replace('useState("intro")', 'useState("tools")'), loader: "js", resolveDir: path.dirname(args.path) };
+          // Start at the integrations step unless a test names another. Its actual buttons and handlers remain intact.
+          return { contents: (await readFile(args.path, "utf8")).replace('useState("intro")', 'useState(globalThis.__onboardingStart ?? "tools")'), loader: "js", resolveDir: path.dirname(args.path) };
         }
       });
     } }],
@@ -222,3 +223,27 @@ for (const [cron, text] of [["15 */2 * * *", "Runs every 2 hours at minute 15."]
     assert.equal(built.automationScheduleToCron(built.automationScheduleDraftFromCron(cron).draft).schedule, cron.replace("*/1", "*"));
   });
 }
+for (const backIndex of [0, 1]) {
+  test(`local first-run key form Back ${backIndex === 0 ? "link" : "button"} returns to the intro`, async () => {
+    state(); globalThis.__onboardingStart = "intro"; window.__AGENT_NATIVE_CONFIG__ = { builderOffers: false };
+    const mounted = await built.mount("onboarding", {});
+    try {
+      await mounted.click(button(mounted.host, "Continue"));
+      assert.match(mounted.host.textContent, /Your keys/, "local Continue skips the Builder choice");
+      const backs = [...mounted.host.querySelectorAll("button")].filter(item => item.textContent.trim() === "Back");
+      assert.equal(backs.length, 2);
+      await mounted.click(backs[backIndex]);
+      assert.match(mounted.host.textContent, /Free forever\./);
+      assert.doesNotMatch(mounted.host.textContent, /Your keys/);
+    } finally { delete globalThis.__onboardingStart; delete window.__AGENT_NATIVE_CONFIG__; await mounted.close(); }
+  });
+}
+test("first-run key form Back still returns to the Builder choice when offers are on", async () => {
+  state(); globalThis.__onboardingStart = "manual"; window.__AGENT_NATIVE_CONFIG__ = {};
+  const mounted = await built.mount("onboarding", {});
+  try {
+    assert.match(mounted.host.textContent, /Your keys/);
+    await mounted.click(button(mounted.host, "Back"));
+    assert.match(mounted.host.textContent, /Choose your setup\./);
+  } finally { delete globalThis.__onboardingStart; delete window.__AGENT_NATIVE_CONFIG__; await mounted.close(); }
+});

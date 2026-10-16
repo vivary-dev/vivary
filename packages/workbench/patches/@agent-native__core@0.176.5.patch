@@ -17583,3 +17583,66 @@ diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
              codexTurnId: result.turnId, codexPermissionMode: native.permissionMode,
              executionError: error, executionCompletedAt: new Date().toISOString() },
      });
+diff --git a/dist/cli/claude-code-participant.js b/dist/cli/claude-code-participant.js
+--- a/dist/cli/claude-code-participant.js
++++ b/dist/cli/claude-code-participant.js
+@@ -246,16 +246,17 @@
+             }
+         });
+         child.stderr.on("data", (chunk) => {
++            if (stderrTruncated)
++                return;
+             const encoded = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+-            const remaining = Math.max(0, maxStderrBytes - stderrBytes);
+-            if (remaining === 0) {
++            if (stderrBytes + encoded.length > maxStderrBytes) {
++                // A truncated credential cannot be recognized by the downstream redactor.
++                stderr = "";
+                 stderrTruncated = true;
+                 return;
+             }
+-            stderr += stderrDecoder.write(encoded.subarray(0, remaining));
+-            stderrBytes += Math.min(encoded.length, remaining);
+-            if (encoded.length > remaining)
+-                stderrTruncated = true;
++            stderr += stderrDecoder.write(encoded);
++            stderrBytes += encoded.length;
+         });
+         child.once("error", finishError);
+         child.once("close", (exitCode, exitSignal) => {
+@@ -263,7 +264,8 @@
+                 return;
+             try {
+                 pending += decoder.end();
+-                stderr += stderrDecoder.end();
++                if (!stderrTruncated)
++                    stderr += stderrDecoder.end();
+                 if (pending.trim()) {
+                     consumeJsonLine(pending, events, maxEvents, options.onEvent);
+                 }
+@@ -276,7 +278,10 @@
+                 return;
+             }
+             if (exitCode !== 0) {
+-                finishError(new Error(`Claude Code exited with ${exitSignal ?? exitCode ?? "unknown"}${stderr ? `: ${summarizeStderr(stderr)}` : ""}`));
++                const exitStatus = exitSignal ?? exitCode ?? "unknown";
++                finishError(new Error(stderrTruncated
++                    ? `Claude Code exited with ${exitStatus}. Oversized diagnostic output was withheld.`
++                    : `Claude Code exited with ${exitStatus}${stderr ? `: ${summarizeStderr(stderr)}` : ""}`));
+                 return;
+             }
+             settled = true;
+diff --git a/dist/client/onboarding/FirstRunOnboarding.js b/dist/client/onboarding/FirstRunOnboarding.js
+--- a/dist/client/onboarding/FirstRunOnboarding.js
++++ b/dist/client/onboarding/FirstRunOnboarding.js
+@@ -330,7 +330,9 @@
+     }
+     // Without Builder offers, the choice screen is the key form.
+     if (screen === "manual" || screen === "choice") {
+-        return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-xl flex-col gap-4", children: [_jsxs("div", { children: [_jsx("button", { type: "button", className: "mb-4 text-xs text-muted-foreground hover:text-foreground", onClick: () => setScreen("choice"), children: "Back" }), _jsx("h1", { className: "text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Your keys" })] }), _jsxs("div", { className: "rounded-xl bg-muted/35 p-4", children: [_jsx(CapabilityList, { capabilities: profile.capabilities }), _jsxs("div", { className: "mt-5 flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between", children: [_jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => setScreen("choice"), children: "Back" }), _jsxs("button", { type: "button", className: primaryButtonClass, onClick: handleOpenSettings, children: ["Open key settings", _jsx(IconArrowRight, { size: 15 })] }), _jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => {
++        // Back from the key form would render this form again, so local mode returns to the intro.
++        const backScreen = builderOffersEnabled() ? "choice" : "intro";
++        return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-xl flex-col gap-4", children: [_jsxs("div", { children: [_jsx("button", { type: "button", className: "mb-4 text-xs text-muted-foreground hover:text-foreground", onClick: () => setScreen(backScreen), children: "Back" }), _jsx("h1", { className: "text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Your keys" })] }), _jsxs("div", { className: "rounded-xl bg-muted/35 p-4", children: [_jsx(CapabilityList, { capabilities: profile.capabilities }), _jsxs("div", { className: "mt-5 flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between", children: [_jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => setScreen(backScreen), children: "Back" }), _jsxs("button", { type: "button", className: primaryButtonClass, onClick: handleOpenSettings, children: ["Open key settings", _jsx(IconArrowRight, { size: 15 })] }), _jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => {
+                                             trackFirstRunStepCompleted("manual");
+                                             setScreen(skipIntegrations ? "role" : "tools");
+                                         }, children: skipIntegrations ? "Continue" : "Continue to tools" })] })] })] }) }));

@@ -1428,7 +1428,8 @@ With the switch off:
   and authentication rows, and hides Browser Automation and Background Agent,
   which hold only that card. The LLM summary reads "Add your own provider
   keys." Voice settings drop the Builder Gemini option and the Builder wording.
-- First-run onboarding goes from the intro to the key form.
+- First-run onboarding goes from the intro to the key form, and both Back
+  controls on that form return to the intro.
 - The code-access panel drops its "Use Builder" link. The code-required
   dialog drops its Builder.io agent and connect options and keeps Desktop.
 - The remaining Builder wording goes too: the `FeatureNotConfiguredError`
