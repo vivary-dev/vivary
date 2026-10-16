@@ -161,7 +161,10 @@ events also report completed inside a running turn, so they never end the
 prefix. Code retains the server-captured
 prefix byte length, never a caller byte cursor, so later appends cannot widen a
 page. Native follows the saved branch when linking and excludes pending approvals, stopped
-turns and live or still-saving execution chunks. Later reads walk parent links
+turns and live or still-saving execution chunks at the boundary. A reply the
+owner stopped or a failed run anywhere earlier in the prefix is left out of the
+quoted text, while the request before it stays. Native's own engine history
+replays such replies, so this rule lives in `linked-history.ts`. Later reads walk parent links
 from the retained boundary message, so editing or regenerating the boundary or an
 earlier message, which moves the head to a sibling branch, leaves the linked
 prefix unchanged. No completed prefix means an

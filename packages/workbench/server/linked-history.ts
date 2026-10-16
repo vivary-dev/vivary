@@ -82,10 +82,16 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   return path.reverse();
 }
 
+/** A reply the owner stopped or a run that failed. Its partial output is never quoted history. */
+function isStoppedOrFailedNativeReply({ message }: NativeEntry): boolean {
+  const custom = message.metadata?.custom;
+  return message.role === "assistant" && (Boolean(custom?.userStopped) || Boolean(custom?.runError)
+    || (message.status !== undefined && (message.status.type !== "complete" || message.status.reason === "error")));
+}
+
 export function isCompletedNativeMessage(entry: NativeEntry): boolean {
-  const { message } = entry, custom = message.metadata?.custom;
-  return message.role === "assistant" && message.status?.type === "complete"
-    && message.status.reason !== "error" && !custom?.userStopped && !custom?.runError
+  const { message } = entry;
+  return message.role === "assistant" && message.status?.type === "complete" && !isStoppedOrFailedNativeReply(entry)
     && !message.content.some(part => part.type === "tool-call" && part.approval);
 }
 
@@ -107,8 +113,9 @@ export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryIte
   });
 }
 
+/** Every stopped or failed reply in the prefix is excluded, not only one at the boundary. The requests stay. */
 export function nativeHistoryItems(entries: NativeEntry[]): HistoryItem[] {
-  return entries.filter(entry => entry.message.role !== "system").map(({ message }) => ({
+  return entries.filter(entry => entry.message.role !== "system" && !isStoppedOrFailedNativeReply(entry)).map(({ message }) => ({
     id: message.id, role: message.role === "user" ? "User" : "Assistant",
     text: message.content.flatMap(part => part.type === "text" && typeof part.text === "string" ? [part.text]
       : part.type === "tool-call" && part.result !== undefined

@@ -325,6 +325,30 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(after.excerpt, before.excerpt); assert.doesNotMatch(after.excerpt, /REGENERATED|EDITED/);
     assert.equal((await service.context(actor, project.projectId, linked.target))!.block, block);
   });
+  await t.test("earlier stopped and failed Native replies inside the completed prefix are not quoted", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "stopped-source", orgId, scope: identity.scope });
+    const ask = (id: string, parentId: string | null, text: string) => ({ parentId, message: { id, role: "user", content: [{ type: "text", text }] } });
+    const reply = (id: string, parentId: string, text: string, status: Record<string, string>, custom?: Record<string, unknown>) => ({ parentId,
+      message: { id, role: "assistant", status, content: [{ type: "text", text }], ...(custom ? { metadata: { custom } } : {}) } });
+    // Shapes Native persists for a reply the owner stopped and for a failed run (thread-data-builder and the chat adapter).
+    const messages = [ask("stop-ask", null, "Request the owner stopped"),
+      reply("stopped", "stop-ask", "STOPPED PARTIAL", { type: "incomplete", reason: "cancelled" }, { userStopped: true }),
+      ask("error-ask", "stopped", "Request that failed"),
+      reply("errored", "error-ask", "FAILED PARTIAL", { type: "incomplete", reason: "error" }, { runError: { message: "Provider failed" } }),
+      ask("reason-ask", "errored", "Request with an error reason"),
+      reply("reason-error", "reason-ask", "ERROR REASON PARTIAL", { type: "complete", reason: "error" }),
+      ask("final-ask", "reason-error", "Final request"),
+      reply("final-answer", "final-ask", "Final completed answer", { type: "complete", reason: "stop" })];
+    await updateThreadData(thread.id, JSON.stringify({ headId: "final-answer", messages }), "Stopped source", "", messages.length);
+    const linked = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: thread.id },
+      target: { engine: "claude-cli", model: "sonnet" } });
+    const page = (await service.load(actor, project.projectId, linked.target))!;
+    assert.equal(page.boundaryId, "final-answer");
+    assert.match(page.excerpt, /Request the owner stopped[\s\S]*Request that failed[\s\S]*Final completed answer/);
+    assert.doesNotMatch(page.excerpt, /STOPPED PARTIAL|FAILED PARTIAL|ERROR REASON PARTIAL/);
+    assert.equal(page.availableEntries, 5);
+  });
   await t.test("a deleted source leaves the target usable without linked context, while a tampered link record refuses", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
     const { runWithRequestContext, deleteThread } = await import("@agent-native/core/server");
