@@ -192,7 +192,9 @@ explicit empty-history notice. Source drafts and approval custody stay unchanged
 An explicit send receives at most 12,000 characters from 100 recorded entries as
 quoted historical data. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
-bookkeeping and private reasoning are excluded. The canonical empty Native
+bookkeeping and private reasoning are excluded. A Native attachment, or any other
+content part such as an image or a source reference, becomes a named placeholder
+that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
 link onward to Code. The target keeps its normal tools and project guard.
 The UI distinguishes available entries, prepared context and accepted Code sends

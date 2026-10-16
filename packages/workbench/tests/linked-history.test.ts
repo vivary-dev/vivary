@@ -53,6 +53,26 @@ test("Native retains only the selected completed branch and treats tool results 
   assert.throws(() => nativeHistoryPath(JSON.stringify({ headId: "missing", messages })));
 });
 
+// Attachment shapes from buildStoredAttachments in Core's thread-data-builder.
+test("Native attachments and unsupported content parts are named as omitted, never silently dropped", () => {
+  const path = nativeHistoryPath(JSON.stringify({ headId: "answer", messages: [
+    { parentId: null, message: { id: "ask", role: "user", content: [{ type: "text", text: "See the files" }], attachments: [
+      { id: "att-0", type: "image", name: "diagram.png", contentType: "image/png", status: { type: "complete" }, content: [{ type: "image", image: "https://fixture.invalid/diagram.png" }] },
+      { id: "att-1", type: "file", name: "report.pdf", contentType: "application/pdf", status: { type: "complete" }, content: [{ type: "file", url: "https://fixture.invalid/report.pdf", mimeType: "application/pdf", filename: "report.pdf" }] }] } },
+    { parentId: "ask", message: { id: "answer", role: "assistant", status: { type: "complete", reason: "stop" }, content: [
+      { type: "reasoning", text: "PRIVATE REASONING" }, { type: "text", text: "Answer text" },
+      { type: "image", image: "https://fixture.invalid/chart.png" }, { type: "source", sourceType: "url", url: "https://fixture.invalid/cited" }] } },
+  ] }));
+  const [ask, answer] = nativeHistoryItems(path);
+  assert.match(ask.text, /See the files/);
+  assert.match(ask.text, /\[Attachment not included: diagram\.png \(image\)\]/);
+  assert.match(ask.text, /\[Attachment not included: report\.pdf \(file\)\]/);
+  assert.match(answer.text, /Answer text/);
+  assert.match(answer.text, /\[image content not included\]/);
+  assert.match(answer.text, /\[source content not included\]/);
+  assert.doesNotMatch(answer.text, /PRIVATE REASONING|reasoning content/);
+});
+
 test("bounded pages remain source-bound with stable continuation and explicit oversized omissions", () => {
   const items = Array.from({ length: 251 }, (_, index) => ({ id: "entry-" + index, role: "User", text: "text" }));
   const binding = historyDigest(["exact-source", "completed-event"]);

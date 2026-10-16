@@ -7,7 +7,7 @@ export const LINK_RETAINED_PARSE_BYTES = 64 * 1024 * 1024;
 export const LINK_EXCERPT_CHARS = 12_000;
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {
-  id: string; role: string; content: Array<Record<string, unknown>>;
+  id: string; role: string; content: Array<Record<string, unknown>>; attachments?: Array<Record<string, unknown>>;
   status?: { type?: string; reason?: string };
   metadata?: { runId?: string; custom?: Record<string, unknown> };
 } };
@@ -116,13 +116,27 @@ export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryIte
   });
 }
 
+const label = (value: unknown, fallback: string) => typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : fallback;
+
+/**
+ * Text and recorded tool output are quoted. Tool calls themselves and private reasoning are excluded by contract.
+ * Any other part, and every attachment, is named as not included, so the excerpt never implies it is complete.
+ */
+function nativePartText(part: Record<string, unknown>): string[] {
+  if (part.type === "text") return typeof part.text === "string" ? [part.text] : [];
+  if (part.type === "tool-call") return part.result === undefined ? []
+    : ["Recorded tool output: " + (typeof part.result === "string" ? part.result : JSON.stringify(part.result))];
+  if (part.type === "reasoning") return [];
+  return [`[${label(part.type, "unknown")} content not included]`];
+}
+
 /** Every stopped or failed reply in the prefix is excluded, not only one at the boundary. The requests stay. */
 export function nativeHistoryItems(entries: NativeEntry[]): HistoryItem[] {
   return entries.filter(entry => entry.message.role !== "system" && !isStoppedOrFailedNativeReply(entry)).map(({ message }) => ({
     id: message.id, role: message.role === "user" ? "User" : "Assistant",
-    text: message.content.flatMap(part => part.type === "text" && typeof part.text === "string" ? [part.text]
-      : part.type === "tool-call" && part.result !== undefined
-        ? ["Recorded tool output: " + (typeof part.result === "string" ? part.result : JSON.stringify(part.result))] : []).join("\n"),
+    text: [...message.content.flatMap(nativePartText),
+      ...(message.attachments ?? []).map(attachment =>
+        `[Attachment not included: ${label(attachment.name, "unnamed")} (${label(attachment.type, "file")})]`)].join("\n"),
   }));
 }
 

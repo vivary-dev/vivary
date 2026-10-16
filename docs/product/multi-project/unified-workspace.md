@@ -165,7 +165,9 @@ characters. **Inspect linked history** and **More recorded history** page throug
 the same frozen source boundary, rechecking current authority on every read.
 Later source work is excluded. Actual recorded tool results and artifact labels
 and references are quoted as history, never replayed as tool calls. Runtime
-bookkeeping and private reasoning are excluded. An empty saved Native conversation
+bookkeeping and private reasoning are excluded. A Native attachment, image or
+other unsupported part appears as a placeholder that names it as not included.
+An empty saved Native conversation
 has no completed portion and can link onward to Code. A shortened entry or omitted
 page is labeled as truncated, and the original stays readable. New linking refuses sources beyond
 the 8 MiB read limit. A source that grows past it after linking keeps its
