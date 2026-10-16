@@ -771,6 +771,15 @@ trust boundaries now states this check. Evidence: four new tests in
 closed listener, a later server error or close, the action error type, and the
 rendered refusal.
 
+2026-10-16 Concurrency release scope. Jeff chose to defer controlled
+concurrency for Code conversations from this release to issue #228. The
+desktop release page now states the limitation once: one Code conversation
+runs at a time on a host, and a second request is refused before any write
+with an Open button for the running one. The unified workspace acceptance
+row, the specification README and the acceptance register point to #228.
+No code changed. The host-wide single Code run guard described above is
+unchanged, so the design description holds.
+
 2026-10-16 Prepare handoff and handoff freshness (A083, A084). New
 `server/handoff.ts`, three owner actions with `agentTool: false`, a
 `HandoffControl` in the Code and Native conversation surfaces, migration 6, the

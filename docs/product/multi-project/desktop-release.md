@@ -89,6 +89,15 @@ See the [current desktop acceptance register](desktop-acceptance-status.md) for 
 | Browser experience | [Issue #31](receipts/11e-live-project-preview.md) verifies reviewed project commands, isolated live preview, responsive controls, and real agent repair on Zo | Explicit authenticated phone routing, packaged preview journeys, and supported agent image viewing |
 | Original Vivary | Bundled ten-verb standalone CLI, bounded preview/evaluation app adapter, and issue #14's shared new-folder and existing-folder creator operations | GUI and agent use of the remaining original operations under their owning issues |
 
+**Release limitation: one coding run at a time.** This release runs one Code
+conversation at a time on a host, across all projects. Before any write, a
+second Code request is refused with "An agent is working in another
+conversation" and an **Open** button for the running one. Native chat,
+linked conversations and Prepare handoff remain available. Per-thread
+activity, approvals and Stop for concurrent runs, plus shared-file conflict
+control, arrive with controlled concurrency in a later release (issue
+#228).
+
 Checkpoint, 2026-09-16: the published private `26798df` Windows candidate passed
 the focused journeys in the [acceptance register](desktop-acceptance-status.md).
 The later local `3dd5aa8` candidate verified Codex subscription model selection,
