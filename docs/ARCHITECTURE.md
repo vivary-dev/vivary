@@ -424,6 +424,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Workbench build gate. The production build runs `agent-native
+doctor`, which refuses environment reads outside its deploy allowlist. The
+legacy-model worker test added on 2026-10-15 saved and restored `PATH`,
+`VIVARY_ACCESS_MODE` and a dynamic set of fixture names, so `pnpm --dir
+packages/workbench build` failed on `dev` while every CI job passed. Those
+reads now carry the existing per-line opt-out with a reason, as the other
+fixture tests do, and the workbench CI job runs `doctor` after typechecking so
+a build-only gate cannot fail silently again. No runtime, credential or
+environment behavior changes, so the design description holds.
+
 This dependency review raises fast-uri from 3.1.7 to 3.1.8 and ip-address from 10.7.0 to 10.7.4 within their existing dependency ranges. The Native runtime, provider funding admission, project boundaries, and pinned Astro cache replacement keep their existing owners and contracts. Only the two Workbench transitive resolutions change. The existing dependency-advisory guard now enforces both minimum versions so future lockfile changes reject the older vulnerable releases.
 
 2026-10-16 Retained Code model advice review. A retained Code conversation keeps
