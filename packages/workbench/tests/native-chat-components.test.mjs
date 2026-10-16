@@ -51,6 +51,7 @@ import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
 import { AssistantRuntimeProvider, ThreadPrimitive, useLocalRuntime } from "@assistant-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
@@ -70,7 +71,7 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
     stopping: false, run: history ? { id: "retained-run", engine: "claude-cli", model, events: [], status: "completed" } : null,
     onChoice: choice => choices.push(choice), onStarted() {}, onStreaming() {}, onSettled() {},
     onStop: async () => false, onSettings() {} };
-  const view = await mount(<QueryClientProvider client={client}><LocalCodeConversation {...props} /></QueryClientProvider>);
+  const view = await mount(<QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation {...props} /></MemoryRouter></QueryClientProvider>);
   if (prefill) {
     const example = [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change");
     if (!example || example.disabled) throw new Error("native runtime did not enable the composer");
