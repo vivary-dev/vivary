@@ -514,3 +514,25 @@ test('remote preview shows an open refusal as text and renders no frame', async 
     stop();
   }
 });
+
+test('open preview access ends when its listener goes down', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const { createPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const origin = 'https://fixture.test:9443';
+  let bound = true, released = 0;
+  const gateway = createPreviewGateway({ access: {
+    configuration: () => ({ enabled: true, origin: 'https://fixture.test', preview: { origin, port: 42301 } }),
+    async admitPreviewGrant() { return { release() { released++; } }; },
+  }, resolveTarget: async () => ({ generation: 'one', initialPath: '/', signal: new AbortController().signal, check: async () => {} }),
+  listening: () => bound });
+  try {
+    const opened = await gateway.command({ operation: 'open', documentId: randomUUID(), projectId: 'alpha', launchId: randomUUID() }, {}, 'device');
+    bound = false;
+    const redeem = await gateway.handle(new Request(origin + '/_vivary/preview/redeem', { method: 'POST', body: JSON.stringify({ ticket: opened.ticket }),
+      headers: { host: new URL(origin).host, origin, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'empty' } }));
+    assert.equal(redeem.status, 403);
+    // The one-second liveness watch retires the record and releases its grant.
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(released, 1);
+  } finally { gateway.close(); }
+});
