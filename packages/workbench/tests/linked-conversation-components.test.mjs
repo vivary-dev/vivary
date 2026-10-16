@@ -40,6 +40,9 @@ const bundle = await build({ stdin: { contents: `
     const client = globalThis.linkFixture.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
       kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
+        : kind === "chooser-from-codex" ? createElement(LinkedConversationChooser, { ...props, sourceEngine: "codex-cli",
+          engines: [{ engine: "claude-cli", label: "Claude Code", configured: true, models: ["claude-sonnet-5-5", "claude-opus-5-5"],
+            claudeModels: globalThis.linkFixture.claudeModels }] })
         : createElement(LinkedHistoryNotice, { projectId: "alpha", target: { kind: kind === "native-notice" ? "native" : "code", id: "target" } }), createElement(Location)));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", external: ["react", "react/*", "react-dom/*", "react-router"],
@@ -185,4 +188,14 @@ test("an empty linked Native target with an unsent draft is listed once, under o
   const keys = [...rows.threads.map(thread => "native:" + thread.id), ...rows.drafts.map(draft => "native:" + draft.threadId)].sort();
   assert.deepEqual(keys, ["native:empty-plain", "native:linked-target", "native:saved"]);
   assert.deepEqual(rows.drafts.map(draft => draft.threadId), ["empty-plain"], "only an unlisted conversation keeps its draft row");
+});
+
+test("linking to Claude Code picks the first model the installed CLI supports, and offers none when no model is supported", async () => {
+  // claudeCodeModelChoices("2.1.281"): Opus 5.5 needs 2.1.280, Sonnet 5.5 needs 2.1.284.
+  linkFixture.claudeModels = [{ id: "claude-sonnet-5-5", support: "upgrade-required" }, { id: "claude-opus-5-5", support: "supported" }];
+  await render("chooser-from-codex"); await choose("claude-cli");
+  assert.deepEqual(linkFixture.calls.at(-1).input.target, { engine: "claude-cli", model: "claude-opus-5-5" });
+  linkFixture.claudeModels = [{ id: "claude-sonnet-5-5", support: "upgrade-required" }, { id: "claude-opus-5-5", support: "unverified" }];
+  await render("chooser-from-codex");
+  assert.equal(host.querySelector('option[value="claude-cli"]'), null, "a harness with no supported model is not offered");
 });

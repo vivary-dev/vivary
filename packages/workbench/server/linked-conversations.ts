@@ -17,6 +17,7 @@ import { isOwnedRun, resolveWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODEL
   type VivaryCodeWorkspace } from "./local-code-agent";
 import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
+import { claudeCodeModelChoices } from "../shared/claude-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
 import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
   isCompletedNativeMessage, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
@@ -53,16 +54,24 @@ type Dependencies = {
   /** Discovery only. Selection must never start a worker or send a message. */
   targetModel: (choice: Exclude<TargetChoice, { engine: "native" }>, workspace: VivaryCodeWorkspace) => Promise<string>;
 };
+/** The default target model discovery. Runtime and Codex catalog readers are injectable for tests. */
+export async function linkedTargetModel(choice: Exclude<TargetChoice, { engine: "native" }>, workspace: VivaryCodeWorkspace,
+  runtimeStatus = getVivaryRuntimeStatus, codexModels = getCodexModels): Promise<string> {
+  const runtime = await runtimeStatus(choice.engine);
+  if (runtime.status !== "ready")
+    fail("Connect this runtime in Settings before linking a conversation.", { statusCode: 409 });
+  const models = choice.engine === "codex-cli" ? await codexModels(workspace.root) : null;
+  if (models && models.status !== "ready") fail("Codex models are unavailable. Retry after refreshing Settings.", { statusCode: 409 });
+  const model = resolveVivaryCodeModel(choice.engine, choice.model,
+    models?.status === "ready" ? models.models.map(model => model.id) : VIVARY_CODE_MODELS);
+  // The same refusal sendVivaryCodeMessage makes, so a target is never pinned to a model it can never send with.
+  const claude = choice.engine === "claude-cli" ? claudeCodeModelChoices(runtime.version).find(item => item.id === model) : undefined;
+  if (claude && claude.support !== "supported") fail(claude.message, { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  return model;
+}
 const defaults: Dependencies = { member: isOrgMember, history: resolveVivaryCodeProjectHistory,
   workspace: (ctx, projectId) => projectId ? resolveVivaryCodeProject(ctx, projectId) : resolveWorkspace(),
-  targetModel: async (choice, workspace) => {
-    if ((await getVivaryRuntimeStatus(choice.engine)).status !== "ready")
-      fail("Connect this runtime in Settings before linking a conversation.", { statusCode: 409 });
-    const models = choice.engine === "codex-cli" ? await getCodexModels(workspace.root) : null;
-    if (models && models.status !== "ready") fail("Codex models are unavailable. Retry after refreshing Settings.", { statusCode: 409 });
-    return resolveVivaryCodeModel(choice.engine, choice.model,
-      models?.status === "ready" ? models.models.map(model => model.id) : VIVARY_CODE_MODELS);
-  } };
+  targetModel: (choice, workspace) => linkedTargetModel(choice, workspace) };
 
 function unavailable(message = "The linked conversation is no longer available in this project."): never {
   fail(message, { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });

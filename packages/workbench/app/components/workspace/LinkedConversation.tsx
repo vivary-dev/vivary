@@ -17,7 +17,9 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
   useEffect(() => () => { visit.current++; }, [projectId, source.kind, source.id]);
   const choices = engines.filter(engine => engine.configured && engine.engine !== sourceEngine).map(engine => ({
     engine: engine.engine, label: engine.label,
-    model: engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel : engine.models[0],
+    // Claude models carry install support, as in the Code composer. Only a supported model can ever send.
+    model: engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
+      : engine.models.find(model => (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"),
   })).filter(choice => choice.model);
   async function open(engine: string) {
     if (inFlight.current || !ready) return;

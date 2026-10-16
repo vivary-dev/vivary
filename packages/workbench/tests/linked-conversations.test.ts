@@ -75,6 +75,15 @@ test("linked conversations use Native records and immutable authorized completed
     assert.deepEqual(await service.sourceAvailable(actor, project.projectId, { kind: "native", id: "not-saved" }), { available: false });
     assert.equal(await service.load(actor, project.projectId, { kind: "native", id: "not-saved" }), null);
   });
+  await t.test("linking refuses a Claude model the installed Claude Code does not support, as a send would", async () => {
+    const { linkedTargetModel } = await import("../server/linked-conversations.ts");
+    // Opus 5.5 needs Claude Code 2.1.280 and Sonnet 5.5 needs 2.1.284, per shared/claude-models.ts.
+    const installed = (async () => ({ status: "ready", version: "2.1.281" })) as never;
+    const workspace = { root, ...project };
+    assert.equal(await linkedTargetModel({ engine: "claude-cli", model: "claude-opus-5-5" }, workspace, installed), "claude-opus-5-5");
+    await assert.rejects(linkedTargetModel({ engine: "claude-cli", model: "claude-sonnet-5-5" }, workspace, installed),
+      { errorCode: "vivary_code_model_unsupported" });
+  });
   await t.test("an unlinked conversation shows no linked-history notice while its project folder is unavailable", async () => {
     // The history dependency refuses, as resolveVivaryCodeProjectHistory does for a project with no connected folder.
     revoked = true;
