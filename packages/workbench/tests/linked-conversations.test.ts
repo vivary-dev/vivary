@@ -11,7 +11,7 @@ test("linked conversations use Native records and immutable authorized completed
   t.after(async () => {
     const { closeDbExec } = await import("@agent-native/core/db");
     await closeDbExec();
-    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key]; // guard:allow-env-credential - Restores the test process environment saved above, no credential is read.
     Object.assign(process.env, previous);
     await rm(root, { recursive: true, force: true });
   });
@@ -118,7 +118,7 @@ process.on("message", message => { if(message.type === "vivary:code-worker:start
 process.send({type:"vivary:code-worker:ready"});
 `);
     await writeFile(path.join(bin, "codex"), '#!/usr/bin/env node\nprocess.stderr.write("Not logged in"); process.exit(1);\n', { mode: 0o755 });
-    const previousCwd = process.cwd(), previousPath = process.env.PATH, previousMode = process.env.VIVARY_ACCESS_MODE;
+    const previousCwd = process.cwd(), previousPath = process.env.PATH, previousMode = process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Saves fixture PATH and access mode to restore after the fake CLI run.
     const host = Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host"));
     const loadLinkedContext = () => service.context(actor, project.projectId, linked.target);
     const send = (extra = {}) => sendVivaryCodeMessage({ ownerEmail: owner, orgId, runId, workspace,
