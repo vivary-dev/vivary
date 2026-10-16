@@ -116,6 +116,9 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
   useEffect(() => { visit.current++; setPages([]); setExpanded(false); setPagingError(false); }, [key]);
   const query = useQuery({ queryKey: ["vivary-linked-history", key], enabled: ready, retry: false,
     staleTime: 0, queryFn: () => call<LinkedHistoryPage | null>("vivary-linked-history", { projectId, target }) });
+  // Each successful first-page read replaces later pages and drops any page still loading, so current
+  // redaction and authorization apply to every shown excerpt.
+  useEffect(() => { visit.current++; setPages([]); setPaging(false); setPagingError(false); }, [query.dataUpdatedAt]);
   useEffect(() => {
     const refresh = () => { void query.refetch(); };
     const nativeRequest = (event: Event) => {

@@ -220,6 +220,8 @@ The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. Its collapsed view gives the source title, counts and
 stage. Boundary identifiers and session details remain in expanded inspection.
 Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
+Each refreshed first page replaces the later pages already shown, so a redaction
+or access change applies to the whole displayed excerpt.
 New linking reads at most 8 MiB of source data, and an oversized source refuses
 new linking rather than claiming full context. A later read of a Native source
 parses at most 64 MiB and checks only the walked prefix against 8 MiB, so source

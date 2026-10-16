@@ -225,3 +225,20 @@ test("a failed Native link prerequisite shows an explicit retry instead of hidin
   assert.ok(host.querySelector('select[aria-label="Open linked conversation in another harness"]'));
   assert.equal(host.querySelector('[role="alert"]'), null);
 });
+
+test("a refetched first history page replaces every page read before it", async () => {
+  let secret = "OLD-UNREDACTED-TOKEN";
+  linkFixture.call = async (name, input) => input.cursor
+    ? { ...noticePage(), excerpt: "Second page " + secret, nextCursor: null }
+    : { ...noticePage(), excerpt: "First page", nextCursor: "cursor-1" };
+  await render("notice"); await settle(); await notify();
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Inspect linked history").click());
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "More recorded history").click());
+  await settle(); await notify();
+  assert.equal(host.querySelector("pre").textContent.includes("OLD-UNREDACTED-TOKEN"), true);
+  // A newly held credential is now redacted by the server, and the ordinary lifecycle refetches the first page.
+  secret = "[REDACTED]";
+  await act(async () => window.dispatchEvent(new window.Event("agent-chat:threads-updated")));
+  await settle(); await notify();
+  assert.equal(host.querySelector("pre")?.textContent.includes("OLD-UNREDACTED-TOKEN") ?? false, false, "no page read before the refetch stays shown");
+});
