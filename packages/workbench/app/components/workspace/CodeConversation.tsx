@@ -19,6 +19,7 @@ import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-r
 import type { VivaryCodeRunState, VivaryCodeSessionDetails, VivaryCodeState } from "../../../server/local-code-agent";
 import { codeDraftSelectionKey, codeDraftThreadId } from "../../../shared/code-draft";
 import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
+import { codeConversationModelChoices } from "../../lib/code-conversation-model-choices";
 import { useProjects } from "../projects/ProjectContext";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
@@ -573,20 +574,20 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, []);
   const availableModels = useMemo(() => props.state.engines
     .filter(engine => !props.selection.runId || engine.engine === choice.engine)
-    .map(engine => ({ ...engine, models: [...engine.models] })),
-  [props.state.engines, props.selection.runId, choice.engine]);
+    .map(engine => ({ ...engine, models: codeConversationModelChoices(engine, Boolean(props.selection.runId),
+      engine.engine === choice.engine ? choice.model : undefined) })),
+  [props.state.engines, props.selection.runId, choice.engine, choice.model]);
   const selectedEngine = props.state.engines.find(engine => engine.engine === choice.engine);
-  const modelChoices = !props.selection.runId && choice.engine === "codex-cli"
-    ? selectedEngine?.modelCatalog?.status === "ready" ? selectedEngine.modelCatalog.models.map(model => model.id) : []
-    : selectedEngine?.models ?? [];
-  const availableDraftModel = !props.selection.runId && selectedEngine?.configured
-    && !modelChoices.includes(choice.model) ? modelChoices[0] : undefined;
-  useEffect(() => {
-    if (!availableDraftModel) return;
-    const next = { engine: choice.engine, model: availableDraftModel };
-    setChoice(next);
-    latest.current.onChoice(next);
-  }, [availableDraftModel, choice.engine]);
+  const modelChoices = availableModels.find(engine => engine.engine === choice.engine)?.models ?? [];
+  // Keep a saved choice even when the catalog changes. Only a deliberate selection replaces it.
+  const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
+  const selectedModelAvailable = modelChoices.includes(choice.model)
+    && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
+  // A retained conversation keeps its model. A new one can switch only to a listed
+  // choice that a configured runtime can send.
+  const otherModelAvailable = !props.selection.runId && availableModels.some(engine => engine.configured && engine.models.some(model =>
+    !(engine.engine === choice.engine && model === choice.model)
+    && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
@@ -599,7 +600,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
-    || (!!props.selection.runId && !props.run) || !!props.state.cleanup;
+    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -627,7 +628,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
@@ -673,37 +674,11 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             }}>Restore draft for editing</Button>)}
         <Button variant="ghost" size="sm" onClick={() => void draft.discard(draftThreadId)}>Discard draft</Button>
       </div>}
-      {!props.selection.runId && <div className="local-agent-notice">
-        <label className="flex items-center gap-2 text-sm">
-          Runtime
-          <select aria-label="Conversation runtime" value={choice.engine}
-            className="rounded-md border bg-background px-2 py-1 text-foreground"
-            disabled={!props.workspaceAvailable || props.active || props.streaming}
-            onChange={event => chooseRuntime(event.target.value)}>
-            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}>
-              {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
-            </option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 items-center gap-2 text-sm">
-          Model
-          <select aria-label="Conversation model" value={choice.model}
-            className="min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-foreground"
-            disabled={!props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
-            onChange={event => {
-              const model = event.target.value;
-              if (!selectedEngine || !modelChoices.includes(model)) return;
-              const next = { engine: selectedEngine.engine, model };
-              setChoice(next);
-              props.onChoice(next);
-            }}>
-            {!modelChoices.length && <option value={choice.model}>Models unavailable</option>}
-            {modelChoices.map(model => <option key={model} value={model}>
-              {selectedEngine?.modelCatalog?.status === "ready"
-                ? selectedEngine.modelCatalog.models.find(item => item.id === model)?.label ?? model : model}
-            </option>)}
-          </select>
-        </label>
+      {selectedClaudeModel && selectedClaudeModel.support !== "supported" && <div className="local-agent-notice" role="status">
+        <span>{selectedClaudeModel.message} Check Runtime settings.</span>
+      </div>}
+      {!selectedClaudeModel && choice.engine === "claude-cli" && <div className="local-agent-notice" role="status">
+        <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model for a new conversation.</span>
       </div>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
@@ -711,6 +686,40 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       <Button variant="outline" size="sm" onClick={props.onSettings}>Open runtime settings</Button>
       </div> : null}
     </div>}
+    composerToolbarSlot={<div className="local-agent-composer-controls">
+        <label className="local-agent-composer-runtime">
+          Runtime
+          <select aria-label="Conversation runtime" value={choice.engine}
+            className="local-agent-composer-select"
+            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming}
+            onChange={event => chooseRuntime(event.target.value)}>
+            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}>
+              {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
+            </option>)}
+          </select>
+        </label>
+        <label className="local-agent-composer-model">
+          Model
+          <select aria-label="Conversation model" value={choice.model}
+            className="local-agent-composer-select"
+            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
+            onChange={event => {
+              const model = event.target.value;
+              if (!selectedEngine || !modelChoices.includes(model)) return;
+              const next = { engine: selectedEngine.engine, model };
+              setChoice(next);
+              props.onChoice(next);
+            }}>
+            {!modelChoices.includes(choice.model) && <option value={choice.model}>{choice.model} (saved, unavailable)</option>}
+            {modelChoices.map(model => <option key={model} value={model}
+              disabled={selectedEngine?.claudeModels?.find(item => item.id === model)?.support === "upgrade-required"}>
+              {selectedEngine?.modelCatalog?.status === "ready"
+                ? selectedEngine.modelCatalog.models.find(item => item.id === model)?.label ?? model
+                : selectedEngine?.claudeModels?.find(item => item.id === model)?.label ?? model}
+            </option>)}
+          </select>
+        </label>
+      </div>}
     composerExtraActionButton={props.active && !props.streaming ?
       <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => void props.onStop()} aria-label="Stop response">
         <IconSquare size={14} /> Stop

@@ -44,7 +44,8 @@ const stubs = new Map([
       return createElement("div", { "data-replay": "true", "data-disabled": String(props.composerDisabled),
         "data-placeholder": props.composerDisabledPlaceholder });
     }
-    export const AgentChatSurface = props => createElement("div", { "data-editable-thread": props.threadUrlSync.routeThreadId });`],
+    export const AgentChatSurface = props => createElement("div", { "data-editable-thread": props.threadUrlSync.routeThreadId,
+      "data-restore-active": String(props.restoreActiveThread) });`],
   ["@agent-native/toolkit/ui", ui], ["@/components/ui/button", ui],
   ["@/components/layout/use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: globalThis.searchFixture.identity });`],
   ["../projects/ProjectContext", `export const useProjects = () => globalThis.searchFixture.projects;`],
@@ -279,6 +280,20 @@ for (const failure of ["404", "401", "network"]) test(`failed Native match (${fa
   assert.equal(params.get("history"), "project");
   assert.equal(params.get("panel"), "files");
   assert.equal(Boolean(host.querySelector("[data-replay]")), false);
+});
+// Ordinary startup reopens the saved conversation at any age. It reaches Core as the URL
+// selection, which Core keeps even after twelve hours, and Core's own restore stays off.
+test("ordinary Native startup hands the saved conversation to Core as its explicit selection", async () => {
+  searchFixture.savedSelection = { storageKey: "alpha", threadId: "saved-stale" };
+  globalThis.fetch = async input => String(input).includes("/agent-chat/threads/saved-stale")
+    ? Response.json({ id: "saved-stale", archivedAt: null, updatedAt: Date.now() - 13 * 60 * 60 * 1000 })
+    : Response.json({ message: "Not found" }, { status: 404 });
+  await render("native", "/?runtime=native&history=project");
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  const surface = host.querySelector('[data-editable-thread="saved-stale"]');
+  assert.ok(surface, "the saved conversation opens");
+  assert.equal(surface.dataset.restoreActive, "false");
+  assert.equal(new URLSearchParams(host.querySelector("#route").textContent).get("thread"), "saved-stale");
 });
 for (const archived of [false, true]) test(`failed Native match preserves saved selection and restores only active threads (archived=${archived})`, async () => {
   searchFixture.savedSelection = { storageKey: "alpha", threadId: "saved" };

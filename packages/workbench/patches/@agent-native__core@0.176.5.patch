@@ -1,12 +1,16 @@
 diff --git a/dist/agent/engine/ai-sdk-engine.js b/dist/agent/engine/ai-sdk-engine.js
-index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c9c2200c2 100644
+index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..010343e6bafc9d8d2c24466fe4b2ca343401991e 100644
 --- a/dist/agent/engine/ai-sdk-engine.js
 +++ b/dist/agent/engine/ai-sdk-engine.js
-@@ -14,7 +14,7 @@
+@@ -12,9 +12,9 @@
+  * so the core package remains installable without the AI SDK.
+  */
  import { clearProviderCredentialAuthFailure, readDeployCredentialEnv, recordProviderCredentialAuthFailure, } from "../../server/credential-provider.js";
- import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
- import { AI_SDK_MODEL_CONFIG } from "../model-config.js";
+-import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
+-import { AI_SDK_MODEL_CONFIG } from "../model-config.js";
 -import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, } from "./credential-errors.js";
++import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, validateAnthropicApiThinking, } from "../../shared/reasoning-effort.js";
++import { AI_SDK_MODEL_CONFIG, ANTHROPIC_API_MODELS } from "../model-config.js";
 +import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, llmMissingCredentialsMessage, } from "./credential-errors.js";
  import { classifyProviderError, describeErrorWithCauses, } from "./error-detail.js";
  import { createFirstEventAbortController } from "./first-event-timeout.js";
@@ -20,7 +24,37 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                  errorCode: LLM_MISSING_CREDENTIALS_ERROR_CODE,
              };
              return;
-@@ -397,9 +397,15 @@ class AISDKEngine {
+@@ -258,6 +258,7 @@ class AISDKEngine {
+         const providerOpts = {};
+         if (this.provider === "anthropic" && opts.providerOptions?.anthropic) {
+             const anthropicOpts = opts.providerOptions.anthropic;
++            validateAnthropicApiThinking(opts.model, anthropicOpts.thinking, opts.reasoningEffort);
+             if (anthropicOpts.thinking) {
+                 // Only the "enabled" config carries a numeric budgetTokens; clamp it
+                 // so thinking can't consume the entire maxOutputTokens budget and
+@@ -266,7 +267,7 @@ class AISDKEngine {
+                 providerOpts.anthropic = {
+                     ...(providerOpts.anthropic ?? {}),
+                     thinking: {
+-                        type: "enabled",
++                        type: anthropicOpts.thinking.type,
+                         budgetTokens: typeof anthropicOpts.thinking.budgetTokens === "number"
+                             ? clampThinkingBudgetTokens(anthropicOpts.thinking.budgetTokens, resolvedMaxOutputTokens)
+                             : anthropicOpts.thinking.budgetTokens,
+@@ -288,9 +289,9 @@ class AISDKEngine {
+                     providerOpts.anthropic = {
+                         ...(providerOpts.anthropic ?? {}),
+                         thinking: explicitThinking ?? { type: "adaptive" },
+-                        ...(explicitThinking
+-                            ? {}
+-                            : { outputConfig: { effort: reasoningEffort } }),
++                        ...(ANTHROPIC_API_MODELS[opts.model]
++                            ? { effort: reasoningEffort }
++                            : explicitThinking ? {} : { outputConfig: { effort: reasoningEffort } }),
+                     };
+                 }
+                 else {
+@@ -397,9 +398,15 @@ class AISDKEngine {
              // Buffer the terminal stop so assistant-content can be emitted just
              // before it, regardless of where `finish` arrives in the stream.
              let bufferedStop;
@@ -36,7 +70,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                  // "start" is a synthetic lifecycle marker the AI SDK enqueues
                  // synchronously when the stream begins — before any provider bytes
                  // arrive — so it does not count as real progress. Every other part
-@@ -411,6 +417,9 @@ class AISDKEngine {
+@@ -411,6 +418,9 @@ class AISDKEngine {
                  }
                  for (const event of aiSdkPartToEngineEvents(part, toolNameMap)) {
                      observeStreamedToolInput(toolInputs, event);
@@ -46,7 +80,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                      if (event.type === "stop" &&
                          event.reason === "error" &&
                          event.statusCode === 401) {
-@@ -424,7 +433,18 @@ class AISDKEngine {
+@@ -424,7 +434,18 @@ class AISDKEngine {
                          credentialFailureRecorded = true;
                      }
                      if (event.type === "stop") {
@@ -66,7 +100,7 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
                      }
                      else {
                          yield event;
-@@ -611,6 +631,16 @@ function isLocalBaseUrl(baseUrl) {
+@@ -611,6 +632,16 @@ function isLocalBaseUrl(baseUrl) {
          return true;
      return false;
  }
@@ -84,19 +118,48 @@ index 3e95a40707e4c2fcc95c0a54085a25f3e21aaffa..dc00d64ba9aacf78207709e3ff03643c
      return s.charAt(0).toUpperCase() + s.slice(1);
  }
 diff --git a/dist/agent/engine/anthropic-engine.js b/dist/agent/engine/anthropic-engine.js
-index f66ece32d03e3a4e719ad745449a0d31c7dbf16f..4221dfff002a55f511add203f47e9f025b2b1d47 100644
+index f66ece32d03e3a4e719ad745449a0d31c7dbf16f..673e05084f07bb68bb3ea44abf639c45dbf65e78 100644
 --- a/dist/agent/engine/anthropic-engine.js
 +++ b/dist/agent/engine/anthropic-engine.js
-@@ -10,7 +10,7 @@
+@@ -8,9 +8,9 @@
+  * All providerOptions.anthropic fields are forwarded directly to the SDK.
+  */
  import { clearProviderCredentialAuthFailure, readDeployCredentialEnv, recordProviderCredentialAuthFailure, } from "../../server/credential-provider.js";
- import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
- import { ANTHROPIC_MODEL_CONFIG } from "../model-config.js";
+-import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, } from "../../shared/reasoning-effort.js";
+-import { ANTHROPIC_MODEL_CONFIG } from "../model-config.js";
 -import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, } from "./credential-errors.js";
++import { allowsSamplingParams, anthropicManualThinkingBudget, normalizeReasoningEffortForModel, supportsClaudeAdaptiveThinking, validateAnthropicApiThinking, } from "../../shared/reasoning-effort.js";
++import { ANTHROPIC_MODEL_CONFIG, ANTHROPIC_API_MODELS } from "../model-config.js";
 +import { LLM_MISSING_CREDENTIALS_ERROR_CODE, LLM_MISSING_CREDENTIALS_MESSAGE, llmMissingCredentialsMessage, } from "./credential-errors.js";
  import { describeErrorWithCauses } from "./error-detail.js";
  import { createFirstEventAbortController } from "./first-event-timeout.js";
  import { limitProviderTools } from "./limit-provider-tools.js";
-@@ -320,7 +320,7 @@ export function createAnthropicEngine(config = {}) {
+@@ -50,6 +50,7 @@ class AnthropicEngine {
+         // Resolved once so both max_tokens and the thinking-budget headroom
+         // clamp below agree on the same ceiling.
+         const resolvedMaxOutputTokens = resolveMaxOutputTokensForEngine(this.name, opts.maxOutputTokens, opts.model);
++        validateAnthropicApiThinking(opts.model, anthropicOpts?.thinking, opts.reasoningEffort);
+         // Build extra body params for Anthropic-native features
+         const extra = {};
+         if (anthropicOpts?.thinking) {
+@@ -78,6 +79,7 @@ class AnthropicEngine {
+                 }
+             }
+         }
++        if (ANTHROPIC_API_MODELS[opts.model] && reasoningEffort) extra.output_config = { effort: reasoningEffort };
+         // Thinking and the sampling parameters cannot travel together: Anthropic
+         // rejects any temperature but 1 once thinking is on, and the Opus 4.7+ /
+         // Sonnet 5 families removed temperature/top_k outright. Effort defaults to
+@@ -221,6 +223,8 @@ class AnthropicEngine {
+                     outputTokens: finalMessage.usage.output_tokens ?? 0,
+                     cacheReadTokens,
+                     cacheWriteTokens,
++                    cacheWrite1hTokens: cacheWriteTokens === 0 ? 0 : finalMessage.usage.cache_creation?.ephemeral_1h_input_tokens,
++                    engineName: this.name,
+                 };
+             }
+             yield { type: "assistant-content", parts: assistantContent };
+@@ -320,7 +324,7 @@ export function createAnthropicEngine(config = {}) {
                  yield {
                      type: "stop",
                      reason: "error",
@@ -283,10 +346,10 @@ index 4e80d7dd9e363aaa7356b55e676a0435c0a3a142..a137c7a53445fd78f1efefae0a359950
      switch (reason) {
          case "tool-calls":
 diff --git a/dist/agent/engine/types.d.ts b/dist/agent/engine/types.d.ts
-index 422572c276296bee64fb3f57785a9922ff576d39..3257162e14d3627c8b100f9d402038d14fb21d47 100644
+index 422572c276296bee64fb3f57785a9922ff576d39..308b280320dcceef5c81b079ae4798f361b7ead3 100644
 --- a/dist/agent/engine/types.d.ts
 +++ b/dist/agent/engine/types.d.ts
-@@ -196,6 +196,11 @@ export type EngineEvent = {
+@@ -196,6 +196,14 @@ export type EngineEvent = {
      cacheWriteTokens?: number;
      totalTokens?: number;
      reasoningTokens?: number;
@@ -295,13 +358,17 @@ index 422572c276296bee64fb3f57785a9922ff576d39..3257162e14d3627c8b100f9d402038d1
 +     * 0 for a free model. Absent when the provider reported no cost.
 +     */
 +    costUsd?: number;
++    /** Observed 1-hour cache writes, a subset of cacheWriteTokens. */
++    cacheWrite1hTokens?: number;
++    engineName?: string;
  } | {
      /** Final assistant content for the turn. Engines MUST emit this
       *  exactly once, immediately before the terminal `stop` event. */
 diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
+index 2c1f3c527573540b1a4c0bd5ce09a5d74816dd6b..a43784feb7ede6d301d6e9916bb4bfa7288e8be9 100644
 --- a/dist/agent/production-agent.d.ts
 +++ b/dist/agent/production-agent.d.ts
-@@ -534,6 +534,12 @@
+@@ -534,6 +534,14 @@ export interface AgentLoopUsage {
      cacheReadTokens: number;
      cacheWriteTokens: number;
      model: string;
@@ -311,10 +378,12 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
 +     * reported no cost.
 +     */
 +    costUsd?: number;
++    cacheWrite1hTokens?: number;
++    engineName?: string;
      /** Number of provider model-stream attempts, including retries. */
      llmCalls?: number;
      /**
-@@ -736,6 +742,9 @@
+@@ -736,6 +744,9 @@ export type AgentToolCallExecutionResult = {
      output: string;
  };
  export interface ExecuteAgentToolCallOptions {
@@ -324,10 +393,11 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
      actions: Record<string, ActionEntry>;
      name: string;
      input?: unknown;
-@@ -835,6 +844,35 @@
+@@ -834,6 +845,35 @@ export declare function shouldGuardRepeatedSourceSweep(opts: {
+     priorCalls: number;
      message: string;
  } | null;
- /**
++/**
 + * Usage for one agent turn. Pass `startCall` as the agent loop's
 + * `onModelCall` and `add` as its `onUsage`. `usageRecord` returns the fields
 + * `recordUsage` stores.
@@ -352,15 +422,14 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
 +        cacheWriteTokens: number;
 +        model: string;
 +        costCentsX100?: number;
-+        costSource?: "reported";
++        costSource?: "reported" | "estimated" | "unavailable";
 +    };
 +}
 +export declare function createTurnUsage(model: string): TurnUsage;
-+/**
+ /**
   * The core agent loop — calls the engine iteratively until no more tool calls.
   * Decoupled from HTTP transport so it can run in the background.
-  * Returns accumulated token usage for cost tracking.
-@@ -852,6 +890,13 @@
+@@ -852,6 +892,13 @@ export declare function runAgentLoop(opts: {
      signal: AbortSignal;
      /** Observe usage as each model response reports it, including aborted loops. */
      onUsage?: (usage: AgentLoopUsage) => void;
@@ -375,9 +444,16 @@ diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
      onOutcome?: (outcome: AgentLoopOutcome) => void;
      ownerEmail?: string | null;
 diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+index 04c2c4fce3d658d5ed4ee0d7aa603d2073f5fa66..606e458028edcb6439ff134a134ac9541eab89ea 100644
 --- a/dist/agent/production-agent.js
 +++ b/dist/agent/production-agent.js
-@@ -31,7 +31,7 @@
+@@ -1,3 +1,5 @@
++import { ANTHROPIC_API_MODELS } from "./model-config.js";
++import { estimateUsageCost } from "../usage/store.js";
+ import { randomUUID } from "node:crypto";
+ import Ajv from "ajv";
+ import { defineEventHandler, getHeader, setResponseHeader, setResponseStatus, getMethod, } from "h3";
+@@ -31,7 +33,7 @@ import { buildSystemManifestSections, readContextXraySystemSections, } from "./c
  import { AGENT_CHAT_BACKGROUND_RUN_FIELD, AGENT_CHAT_PROCESS_RUN_PATH, backgroundRuntimeDiagnosticDetail, dispatchPathTargetsNetlifyBackgroundFunction, isAgentChatDurableBackgroundEnabled, isAgentChatForegroundSelfChainEnabled, isInBackgroundFunctionRuntime, resolveAgentChatProcessRunDispatchPath, shouldUseBackgroundFunctionTimeoutForWorker, } from "./durable-background.js";
  import { applyContextXrayTransformForIteration } from "./engine/context-directives-transform.js";
  import { attemptContinuationDispatch } from "./engine/continuation-dispatch-retry.js";
@@ -386,7 +462,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
  import { BUILDER_GATEWAY_INTERNAL_ERROR_CODE, isContextOverflowCode, isContextOverflowMessage, isProviderConnectionErrorMessage, } from "./engine/error-detail.js";
  import { resolveEngine, explicitEngineName, registerBuiltinEngines, getStoredModelForEngine, normalizeModelForEngine, isResolvedEngineUsableForRequest, } from "./engine/index.js";
  import { resolveEmptyResponseRetryMaxOutputTokens, resolveMainChatMaxOutputTokens, resolveMaxOutputTokensForEngine, } from "./engine/output-tokens.js";
-@@ -46,9 +46,11 @@
+@@ -46,9 +48,11 @@ import { ProcessorChain, TripWire, toolCallsFromContent, } from "./processors.js
  import { startRun, subscribeToRun, getActiveRunForThread, getActiveRunForThreadAsync, getRun, abortRun, abortRunDurably, abortTurnDurably, tryClaimRunSlot, isHostedRuntime, resolveRunSoftTimeoutMs, resolveRunToolTimeoutCeilingMs, endsAfterCompletedToolWithoutAssistantFinal, endsDuringActionPreparation, } from "./run-manager.js";
  import { writeLedgerEntry, readLedgerEntry, clearLedgerForThread, insertRun, insertRunEvent, isTurnAborted, markRunAborted, updateRunHeartbeat, updateRunStatusIfRunning, setRunError, setRunTerminalReason, claimBackgroundRun, readBackgroundRunClaim, recordRunDiagnostic, countRunsForTurn, RUN_DIAG_STAGE, UNCLAIMED_BACKGROUND_RUN_GRACE_MS, turnRunLedgerExhausted, } from "./run-store.js";
  import { buildCurrentTimeUserContext } from "./runtime-context.js";
@@ -398,7 +474,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
  import { describeToolResultImages, extractAgentImagesFromActionResult, } from "./tool-result-images.js";
  import { createToolSearchEntry, searchToolRegistry, TOOL_SEARCH_ACTION_NAME, } from "./tool-search.js";
  // Register built-in engines on first import
-@@ -968,6 +970,11 @@
+@@ -968,6 +972,11 @@ export function isRetryableError(err) {
      // Hard non-retryable codes — check these first.
      if (code === "builder_gateway_timeout")
          return false;
@@ -410,7 +486,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      if (code === "rate_limit_exceeded" ||
          msg.includes("daily gateway request cap"))
          return false;
-@@ -1395,8 +1402,11 @@
+@@ -1395,8 +1404,11 @@ export function structuredHistoryToEngineMessages(history) {
              messages.push({ role: message.role, content });
          }
      }
@@ -423,7 +499,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          : null;
  }
  /** Build enriched message with file/skill/mention references */
-@@ -1423,7 +1433,7 @@
+@@ -1423,7 +1435,7 @@ export async function resolveSkillReferenceContent(ref) {
          if (!ownerEmail || !ref.path)
              return null;
          try {
@@ -432,7 +508,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              const resourceOptions = {
                  userEmail: ownerEmail,
                  orgId: getRequestOrgId() ?? null,
-@@ -1433,10 +1443,12 @@
+@@ -1433,10 +1445,12 @@ export async function resolveSkillReferenceContent(ref) {
              });
              if (!effective.effectiveResource)
                  return null;
@@ -448,7 +524,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  return null;
              }
              return full.content;
-@@ -1708,6 +1720,11 @@
+@@ -1708,6 +1722,11 @@ export function isResumableEngineError(err) {
      if (!(err instanceof Error))
          return false;
      const code = err instanceof EngineError ? (err.errorCode ?? "").toLowerCase() : "";
@@ -460,7 +536,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      if (code === "builder_gateway_timeout" ||
          code === "builder_gateway_network_error" ||
          // A gateway stream that stopped mid-turn. It reached here as
-@@ -2358,6 +2375,9 @@
+@@ -2358,6 +2377,9 @@ export async function executeAgentToolCall(options) {
              ownerEmail: options.ownerEmail,
              orgId: options.orgId,
              actionCaller: options.caller,
@@ -470,10 +546,46 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              networkProtocol: options.networkProtocol,
              networkId: options.networkId,
              networkPeer: options.networkPeer,
-@@ -3335,6 +3355,65 @@
+@@ -3025,6 +3047,12 @@ const rawToolInputAjv = new Ajv({
+     // `oneOf` the caller never meant to match.
+     verbose: true,
+ });
++// Valid JSON inputs must keep their semantic types. Coercion is a fallback
++// only for inputs that fail validation in their original form.
++const rawToolInputNonCoercingAjv = new Ajv({
++    ...rawToolInputAjv.opts,
++    coerceTypes: false,
++});
+ const rawToolInputValidatorCache = new WeakMap();
+ const optionalPlaceholderAjv = new Ajv({
+     strict: false,
+@@ -3258,7 +3286,10 @@ function getRawToolInputValidator(schema) {
+     const cached = rawToolInputValidatorCache.get(schema);
+     if (cached)
+         return cached;
+-    const validator = rawToolInputAjv.compile(schema);
++    const validator = {
++        validate: rawToolInputNonCoercingAjv.compile(schema),
++        coerce: rawToolInputAjv.compile(schema),
++    };
+     rawToolInputValidatorCache.set(schema, validator);
+     return validator;
+ }
+@@ -3327,13 +3358,85 @@ function validateRawToolInput(entry, input) {
+     catch (err) {
+         return `tool schema is invalid: ${sanitizeToolErrorValue(err)}`;
+     }
+-    if (validator(input === undefined ? {} : input))
++    const value = input === undefined ? {} : input;
++    if (validator.validate(value) || validator.coerce(value))
+         return null;
+-    return rawToolInputAjv.errorsText(narrowUnionBranchErrors(validator.errors), {
++    return rawToolInputAjv.errorsText(narrowUnionBranchErrors(validator.coerce.errors), {
+         separator: "; ",
+         dataVar: "input",
      });
  }
- /**
++/**
 + * Usage for one agent turn, summed over its model calls and internal
 + * continuations. `startCall` counts each model call the agent loop starts. A
 + * retry replaces the failed attempt it retries, so it adds no call. `add` sums
@@ -485,6 +597,9 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 + * from its table or records the cost as unknown.
 + */
 +export function createTurnUsage(model) {
++    const requestPriced = Boolean(ANTHROPIC_API_MODELS[model]);
++    let pricedCalls = 0;
++    let estimatedCost = 0;
 +    const turn = {
 +        inputTokens: 0,
 +        outputTokens: 0,
@@ -504,6 +619,11 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +            turn.cacheReadTokens += usage.cacheReadTokens;
 +            turn.cacheWriteTokens += usage.cacheWriteTokens;
 +            turn.model = usage.model;
++            if (requestPriced) {
++                const cost = usage.costUsd !== undefined ? (usage.costUsd > 0 ? Math.max(1, Math.round(usage.costUsd * 10_000)) : 0)
++                    : estimateUsageCost(usage, { perRequest: true });
++                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; }
++            }
 +            if (usage.costUsd === undefined)
 +                return;
 +            turn.reportedCalls += 1;
@@ -518,8 +638,12 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +                model: turn.model,
 +            };
 +            if (turn.startedCalls === 0 ||
-+                turn.reportedCalls !== turn.startedCalls)
++                turn.reportedCalls !== turn.startedCalls) {
++                if (requestPriced) return { ...record,
++                    costSource: turn.startedCalls > 0 && pricedCalls === turn.startedCalls ? "estimated" : "unavailable",
++                    ...(turn.startedCalls > 0 && pricedCalls === turn.startedCalls ? { costCentsX100: estimatedCost } : {}) };
 +                return record;
++            }
 +            // Centicents, rounded as calculateCost rounds, so a small reported
 +            // cost never reads as free.
 +            const centicents = turn.reportedCostUsd * 10_000;
@@ -532,11 +656,18 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
 +    };
 +    return turn;
 +}
-+/**
+ /**
   * The core agent loop — calls the engine iteratively until no more tool calls.
   * Decoupled from HTTP transport so it can run in the background.
-  * Returns accumulated token usage for cost tracking.
-@@ -3625,6 +3704,7 @@
+@@ -3402,6 +3505,7 @@ export async function runAgentLoop(opts) {
+         cacheReadTokens: 0,
+         cacheWriteTokens: 0,
+         model,
++        engineName: engine.name,
+     };
+     const maxIterations = normalizeMaxIterations(opts.maxIterations, getDefaultMaxIterations());
+     const maxRunInputTokens = normalizeMaxRunInputTokens(opts.maxRunInputTokens, getDefaultMaxRunInputTokens());
+@@ -3625,6 +3729,7 @@ export async function runAgentLoop(opts) {
                      providerOptions: opts.providerOptions,
                  };
                  usage.llmCalls = (usage.llmCalls ?? 0) + 1;
@@ -544,15 +675,17 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  const eventStream = engine.stream(streamOpts);
                  let thinkingBuffer = "";
                  const toolInputNames = new Map();
-@@ -3941,6 +4021,7 @@
+@@ -3941,6 +4046,9 @@ export async function runAgentLoop(opts) {
                                  cacheReadTokens: event.cacheReadTokens ?? 0,
                                  cacheWriteTokens: event.cacheWriteTokens ?? 0,
                                  model,
++                                cacheWrite1hTokens: event.cacheWrite1hTokens,
++                                engineName: engine.name,
 +                                costUsd: event.costUsd,
                              };
                              usage.inputTokens += eventUsage.inputTokens;
                              usage.outputTokens += eventUsage.outputTokens;
-@@ -4363,7 +4444,8 @@
+@@ -4363,7 +4471,8 @@ export async function runAgentLoop(opts) {
                  });
              };
              const finalizeToolErrorResult = (rawResult) => {
@@ -562,7 +695,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  // Counting is the wrong instrument for a precondition the turn cannot
                  // satisfy: six identical round-trips through a missing API key cost the
                  // user minutes and end where the first one did. Classified first so the
-@@ -5085,6 +5167,10 @@
+@@ -5085,6 +5194,10 @@ export async function runAgentLoop(opts) {
                      let resultStr = typeof resultForAgent === "string"
                          ? resultForAgent
                          : JSON.stringify(resultForAgent, null, 2);
@@ -573,7 +706,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (resultStr.length > toolMaxResultChars) {
                          const truncated = resultStr.slice(0, toolMaxResultChars);
                          resultStr = `${truncated}\n\n...[truncated — full result was ${resultStr.length.toLocaleString()} chars; only first ${toolMaxResultChars.toLocaleString()} shown]`;
-@@ -5136,7 +5222,7 @@
+@@ -5136,7 +5249,7 @@ export async function runAgentLoop(opts) {
                  // so nothing stays pending to bleed into a later tool's result.
                  const agentWarnings = drainAgentWarnings();
                  if (agentWarnings.length > 0) {
@@ -582,7 +715,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  }
                  // Auto-refresh the UI after a successful mutating tool call. Any call
                  // that isn't read-only — by its own per-call Plan-mode effect, else the
-@@ -5469,6 +5555,11 @@
+@@ -5469,6 +5582,11 @@ export function isRecoverableContinuationError(event) {
      const message = event.error.toLowerCase();
      if (code === "builder_gateway_error")
          return false;
@@ -594,7 +727,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
      // An explicit flag outranks the message sniff below, which exists for events
      // that carry no flag at all. Every guard stop sets `recoverable: false`, and
      // sniffing its prose is how a stop that merely NAMES a connection or a
-@@ -5890,7 +5981,7 @@
+@@ -5890,7 +6008,7 @@ export async function markBackgroundContinuationChunkTerminal(opts) {
              await persistError(opts.runId, terminalEvent.errorCode, terminalEvent.details || terminalEvent.error);
          }
          else if (terminalEvent?.type === "missing_api_key") {
@@ -603,7 +736,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          }
      }
      return updated;
-@@ -6629,6 +6720,10 @@
+@@ -6629,6 +6747,10 @@ export function createProductionAgentHandler(options) {
              }
          }
          const { message, history = [], structuredHistory, references = [], threadId, attachments, displayMessage, parentId, queuedMessageId, internalContinuation, turnId: requestTurnId, model: requestModel, engine: requestEngine, effort: requestEffort, browserTabId, scope, harness: requestHarness, trackInRunsTray, } = body;
@@ -614,7 +747,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const requestParentId = parentId === null
              ? null
              : typeof parentId === "string" && parentId.trim()
-@@ -7186,13 +7281,13 @@
+@@ -7186,13 +7308,13 @@ export function createProductionAgentHandler(options) {
              }
              if (history.length === 0) {
                  try {
@@ -630,7 +763,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                      if (allResources.length > 0) {
                          const fileLines = [];
                          const skillLines = [];
-@@ -7216,10 +7311,11 @@
+@@ -7216,10 +7338,11 @@ export function createProductionAgentHandler(options) {
                              if (kind === "skill" ||
                                  kind === "agent" ||
                                  kind === "remote-agent") {
@@ -644,7 +777,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                                  if (!full)
                                      continue;
                                  if (kind === "skill") {
-@@ -7389,12 +7485,12 @@
+@@ -7389,12 +7512,12 @@ export function createProductionAgentHandler(options) {
              attachments: requestAttachments,
          });
          const historyMessages = structuredHistoryToEngineMessages(structuredHistory) ??
@@ -659,7 +792,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
          const messages = [
              ...historyMessages,
              { role: "user", content: userContent },
-@@ -8299,13 +8395,7 @@
+@@ -8299,13 +8422,7 @@ export function createProductionAgentHandler(options) {
                  : typeof message === "string" && message.trim().length > 0
                      ? message
                      : undefined;
@@ -674,7 +807,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
              const agentLoopOpts = {
                  engine,
                  model: effectiveModel,
-@@ -8318,13 +8408,8 @@
+@@ -8318,13 +8435,8 @@ export function createProductionAgentHandler(options) {
                  actions: requestActions,
                  send,
                  signal,
@@ -690,7 +823,7 @@ diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
                  ownerEmail,
                  orgId: getRequestOrgId() ?? null,
                  attachments: requestAttachments,
-@@ -8493,11 +8578,7 @@
+@@ -8493,11 +8605,7 @@ export function createProductionAgentHandler(options) {
                          const { recordUsage } = await import("../usage/store.js");
                          await recordUsage({
                              ownerEmail: resolvedOwnerEmail,
@@ -1954,7 +2087,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..b17699cccc0bba6f27eb3b8953d9ef7b20453662
 --- /dev/null
 +++ b/dist/cli/codex-app-server-executor.js
-@@ -0,0 +1,468 @@
+@@ -0,0 +1,479 @@
 +import { spawn } from "node:child_process";
 +import { randomUUID } from "node:crypto";
 +import path from "node:path";
@@ -2371,6 +2504,17 @@ index 0000000000000000000000000000000000000000..b17699cccc0bba6f27eb3b8953d9ef7b
 +        await call("initialize", { clientInfo: { name: "vivary", title: "Vivary", version: "1" }, capabilities: { experimentalApi: true } });
 +        if (completed || options.signal?.aborted) return;
 +        write({ method: "initialized" });
++        const account = await call("account/read", { refreshToken: false });
++        if (!isRecord(account?.account) || account.account.type !== "chatgpt") {
++            throw new Error("Codex is not signed in with ChatGPT. Refresh Runtime settings. No turn was started.");
++        }
++        const settings = await call("config/read", { includeLayers: false, cwd: options.cwd });
++        const config = isRecord(settings?.config) ? settings.config : null;
++        if (!config || (config.model_provider != null && config.model_provider !== "" && config.model_provider !== "openai") ||
++            (config.model_providers != null && (!isRecord(config.model_providers) || Object.hasOwn(config.model_providers, "openai")))) {
++            throw new Error("Codex is configured for another provider. Select the ChatGPT provider in Codex, then refresh Runtime settings. No turn was started.");
++        }
++        if (completed || options.signal?.aborted) return;
 +        const started = await call(options.threadId ? "thread/resume" : "thread/start", {
 +            ...(options.threadId ? { threadId: options.threadId } : {}), cwd: options.cwd, model: options.model,
 +            approvalPolicy: policy.approvalPolicy, approvalsReviewer: "user", sandbox: policy.sandbox,
@@ -2915,7 +3059,7 @@ index e30f3fd04b4949bfe81bc340f1142dfe4398db6f..fa56229a0256de81c8c9116d83b89dda
 +    return (_jsx("div", { className: "space-y-2", "data-testid": "file-storage-setup-card", children: _jsx(BuilderConnectCard, { title: "Connect Builder for file storage", description: "Builder keeps uploaded images and files on durable object storage so the agent can reuse them throughout this thread.", trackingSource: "file_upload_chat_card", render: ({ viewModel, className }) => (_jsxs("div", { className: "space-y-2", children: [_jsx(DefaultBuilderConnectCardView, { viewModel: viewModel, className: className }), customStorageButton] })) }) }));
  }
 diff --git a/dist/client/MultiTabAssistantChat.js b/dist/client/MultiTabAssistantChat.js
-index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac99042112f1f886 100644
+index 24eb57b9a053b7205f14e29b94c03a91151a1200..90f04c18957067280c224fdedc6bceca917fea6b 100644
 --- a/dist/client/MultiTabAssistantChat.js
 +++ b/dist/client/MultiTabAssistantChat.js
 @@ -7,7 +7,7 @@ import { DEFAULT_REASONING_EFFORT, isReasoningEffort, resolveReasoningEffortSele
@@ -2973,7 +3117,15 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          queueMicrotask(() => {
              window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT, {
                  detail: { key },
-@@ -576,6 +599,15 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -469,6 +492,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         : null);
+     const [deepLinkedThreadId] = useState(() => threadUrlSyncEnabled ? null : readUrlThreadId(DEFAULT_THREAD_URL_PARAM));
+     const [activeDeepLinkedThreadId, setActiveDeepLinkedThreadId] = useState(deepLinkedThreadId);
++    const explicitlySelectedThreadId = threadUrlSyncEnabled ? urlThreadId : activeDeepLinkedThreadId;
+     const urlThreadIdRef = useRef(urlThreadId);
+     urlThreadIdRef.current = urlThreadId;
+     useEffect(() => {
+@@ -576,6 +600,15 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          switchThreadState(threadId);
          writeThreadUrl(threadId, options);
      }, [switchThreadState, writeThreadUrl]);
@@ -2989,7 +3141,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      // Namespace all localStorage keys by storageKey when provided (for per-app isolation in frame)
      const keyPrefix = storageKey ? `:${storageKey}` : "";
      const modelSelectionKey = chatModelSelectionStorageKey(storageKey);
-@@ -621,6 +653,18 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -621,6 +654,18 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
      const threadModelRef = useRef(new Map());
      const [persistedModelSelection, setPersistedModelSelection] = useState(() => readStoredModelSelection(modelSelectionKey));
      const [modelSelectionVersion, setModelSelectionVersion] = useState(0);
@@ -3008,7 +3160,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      useEffect(() => {
          setPersistedModelSelection(readStoredModelSelection(modelSelectionKey));
      }, [modelSelectionKey]);
-@@ -701,7 +745,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -701,7 +746,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
      const resolveThreadModelSelection = useCallback((threadId) => resolveModelSelection(threadModelRef.current.get(threadId) ?? persistedModelSelection, availableModels), [availableModels, persistedModelSelection, modelSelectionVersion]);
      const persistModelSelection = useCallback((selection) => {
          setPersistedModelSelection(selection);
@@ -3017,7 +3169,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      }, [modelSelectionKey]);
      const handleModelChange = useCallback((model, engine) => {
          const threadId = activeThreadIdRef.current;
-@@ -822,18 +866,56 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -822,18 +867,56 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                  builderConnected,
                  currentEngineName,
                  currentModel,
@@ -3075,7 +3227,17 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      // Parent-child thread mapping — persisted to localStorage.
      // Maps childThreadId → parentThreadId for sub-agent tabs.
      const PARENT_MAP_KEY = `agent-chat-parent-map${keyPrefix}`;
-@@ -1050,7 +1132,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1017,6 +1100,9 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         // are removed from the sidebar on load but remain accessible via history.
+         const now = Date.now();
+         const isStale = (id) => {
++            // Age may prune restored tabs, but must not replace the conversation the URL selected.
++            if (id === activeThreadId && id === explicitlySelectedThreadId)
++                return false;
+             const thread = threadMap.get(id);
+             return thread
+                 ? now - thread.updatedAt > STALE_THREAD_THRESHOLD_MS
+@@ -1050,7 +1136,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          if (!parentMap[activeThreadId] && isStale(activeThreadId)) {
              void createThread().then((id) => {
                  if (id)
@@ -3084,7 +3246,29 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              });
          }
      }, [
-@@ -1103,7 +1185,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1060,6 +1146,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+         switchThread,
+         createThread,
+         writeThreadUrl,
++        explicitlySelectedThreadId,
+     ]);
+     // Ensure active thread is always in open tabs.
+     // Use functional update to check inside the setter — avoids race with the
+@@ -1074,11 +1161,12 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+             return;
+         const activeThread = threads.find((thread) => thread.id === activeThreadId);
+         if (activeThread &&
++            activeThreadId !== explicitlySelectedThreadId &&
+             Date.now() - activeThread.updatedAt > STALE_THREAD_THRESHOLD_MS) {
+             return;
+         }
+         setOpenTabIds((prev) => prev.includes(activeThreadId) ? prev : [...prev, activeThreadId]);
+-    }, [activeThreadId, openTabIds, parentMap, threads]);
++    }, [activeThreadId, openTabIds, parentMap, threads, explicitlySelectedThreadId]);
+     // Ensure at least one tab is always open — auto-create if sidebar is empty.
+     // Skipped when an active thread already exists (e.g. the hook generated an
+     // optimistic id for a brand-new session); the activeThreadId effect above
+@@ -1103,7 +1191,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
              }
              newThreadIds.current.add(id);
              setOpenTabIds([id]);
@@ -3093,7 +3277,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          });
      }, [
          activeThreadId,
-@@ -1113,7 +1195,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1113,7 +1201,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          writeThreadUrl,
      ]);
      useEffect(() => {
@@ -3102,7 +3286,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              return;
          if (openTabIds.length === 0 && !activeThreadId) {
              autoCreatingRef.current = true;
-@@ -1122,11 +1204,11 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1122,11 +1210,11 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                  if (id) {
                      newThreadIds.current.add(id);
                      setOpenTabIds([id]);
@@ -3116,7 +3300,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      usePollLoop(async (signal) => {
          const runsUrl = `${apiUrl.replace(/\/$/, "")}/runs/list?goalId=agent-team`;
          try {
-@@ -1533,7 +1615,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1533,7 +1621,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          const id = await createThread();
          if (id) {
              newThreadIds.current.add(id);
@@ -3125,7 +3309,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
          }
          return id;
      }, [createThread, writeThreadUrl]);
-@@ -1588,7 +1670,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1588,7 +1676,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                      if (newId) {
                          newThreadIds.current.add(newId);
                          setOpenTabIds([newId]);
@@ -3134,7 +3318,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                      }
                  }
                  catch (error) {
-@@ -1654,7 +1736,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1654,7 +1742,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
              newThreadIds.current.add(id);
              setOpenTabIds([id]);
              switchThreadState(id);
@@ -3143,7 +3327,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
              dismissedSubAgentTabsRef.current.clear();
              // Clean up all old refs
              chatRefs.current.clear();
-@@ -1711,7 +1793,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1711,7 +1799,7 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                      if (!createdId)
                          return;
                      setOpenTabIds((prev) => prev.includes(createdId) ? prev : [...prev, createdId]);
@@ -3152,7 +3336,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                  });
                  return;
              }
-@@ -1852,12 +1934,13 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -1852,12 +1940,13 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
          });
      }, [generateTitle, saveThreadData]);
      const handleSaveThread = useCallback((threadId, data) => {
@@ -3167,7 +3351,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
      }, [saveThreadData, writeThreadUrl]);
      // ─── Slash command handler ──────────────────────────────────────────
      const [helpVisible, setHelpVisible] = useState(false);
-@@ -2045,6 +2128,8 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -2045,6 +2134,8 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                                              chatRefs.current.delete(tabId);
                                          }
                                      }, threadId: tabId, tabId: tabId, browserTabId: browserTabId, contextScope: scope, contextNamespace: contextNamespace, isolateHistoryByScope: isolateHistoryByScope, isActiveComposer: tabId === activeThreadId, apiUrl: apiUrl, isNewThread: newThreadIds.current.has(tabId) || isNewThread(tabId), onThreadRestoreNotFound: tabId === activeThreadId &&
@@ -3176,7 +3360,7 @@ index 24eb57b9a053b7205f14e29b94c03a91151a1200..922799cb95f14f4627b36fbcac990421
                                          (props.agentChatSurface !== "desktop" ||
                                              props.desktopIdentityAuthenticated === true)
                                          ? clearActiveTab
-@@ -2061,10 +2146,10 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
+@@ -2061,10 +2152,10 @@ export function MultiTabAssistantChat({ showTabBar = true, renderHeader, renderO
                                      // sub-agent tab would start a fresh run on that thread and kill
                                      // the in-flight team chunk. Disable the composer and show a
                                      // hint so users know to send via the orchestrator chat instead.
@@ -4374,7 +4558,7 @@ index ec98f2c4c68f092ac667ab04df8275e8d81e6928..4dd87312f1383319929bf401381ab19b
      const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
      if (host === "localhost" || host.endsWith(".localhost"))
 diff --git a/dist/client/onboarding/FirstRunOnboarding.js b/dist/client/onboarding/FirstRunOnboarding.js
-index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..06d37f8a9b4269fe3b30ea0f3fdb20858519ea7c 100644
+index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..1f6d717aa822a3e2a583089d06fd7b4d19fca159 100644
 --- a/dist/client/onboarding/FirstRunOnboarding.js
 +++ b/dist/client/onboarding/FirstRunOnboarding.js
 @@ -1,4 +1,5 @@
@@ -4383,7 +4567,18 @@ index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..06d37f8a9b4269fe3b30ea0f3fdb2085
  import { Skeleton } from "@agent-native/toolkit/ui/skeleton";
  import { IconArrowRight, IconBrandGithub, IconCheck, IconExternalLink, IconInfoCircle, IconKey, IconLoader2, IconSearch, IconX, } from "@tabler/icons-react";
  import React, { useCallback, useEffect, useMemo, useRef, useState, } from "react";
-@@ -302,10 +303,10 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+@@ -268,6 +269,10 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+             }
+             return;
+         }
++        if (integration.authMode === "oauth" && mcpServersQuery.data?.oauth?.available === false) {
++            setConnectError(mcpServersQuery.data.oauth.reason);
++            return;
++        }
+         if (integration.authMode === "oauth" &&
+             integration.connectionMode === "oauth" &&
+             integration.availability === "ready") {
+@@ -302,10 +307,10 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
      if (screen === "intro") {
          return (_jsx(OnboardingShell, { profile: profile, screen: "intro", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-lg flex-col items-center text-center", children: [_jsxs("h1", { className: "text-3xl font-semibold tracking-[-0.05em] sm:text-4xl", children: ["Free forever.", _jsx("br", {}), _jsx("span", { className: "text-primary", children: "Open source for life." })] }), _jsxs("div", { className: "mt-7 grid w-full gap-2 text-left sm:grid-cols-3", children: [_jsxs("div", { className: "rounded-lg bg-muted/35 px-3 py-3", children: [_jsx("p", { className: "text-xs font-medium", children: "Fully customizable" }), _jsx("p", { className: "mt-1 text-[11px] leading-4 text-muted-foreground", children: "Change the UI, code, and behavior." })] }), _jsxs("div", { className: "rounded-lg bg-muted/35 px-3 py-3", children: [_jsx("p", { className: "text-xs font-medium", children: "Bring your own keys" }), _jsx("p", { className: "mt-1 text-[11px] leading-4 text-muted-foreground", children: "Use your own providers and accounts." })] }), _jsxs("div", { className: "rounded-lg bg-muted/35 px-3 py-3", children: [_jsx("p", { className: "text-xs font-medium", children: "Build your own" }), _jsx("p", { className: "mt-1 text-[11px] leading-4 text-muted-foreground", children: "Mix and match toolkit pieces in your own apps." })] })] }), _jsxs("button", { type: "button", className: cn(primaryButtonClass, "mt-6"), onClick: () => {
                              trackFirstRunStepCompleted("intro");
@@ -4396,7 +4591,7 @@ index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..06d37f8a9b4269fe3b30ea0f3fdb2085
          return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-3xl flex-col gap-4", children: [_jsx("h1", { className: "text-center text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Choose your setup." }), _jsxs("div", { className: "grid gap-3 sm:grid-cols-2", children: [_jsxs("section", { className: "rounded-xl bg-primary/[0.06] p-4 shadow-sm", children: [_jsxs("div", { className: "flex items-start justify-between gap-3", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-sm font-semibold", children: canActivateBuilderFreeCredits
                                                              ? t("agentChat.onboarding.builderActivateCredits")
                                                              : t("agentChat.onboarding.builderConnectCredits") }), _jsx("p", { className: "mt-1 max-w-xs text-xs leading-5 text-muted-foreground", children: canActivateBuilderFreeCredits ? (t("agentChat.onboarding.builderActivateDescription")) : (_jsxs(_Fragment, { children: ["One click connects", " ", _jsx("a", { href: "https://www.builder.io/", target: "_blank", rel: "noreferrer", className: "text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", children: "Builder.io free credits" }), " ", "with the services this app needs."] })) })] }), _jsx(IconArrowRight, { className: "mt-0.5 text-primary", size: 17 })] }), _jsxs("div", { className: "mt-5 pt-3", children: [_jsx("p", { className: "text-[11px] font-medium text-muted-foreground", children: canActivateBuilderFreeCredits
-@@ -323,7 +324,8 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+@@ -323,7 +328,8 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
                                      setScreen("manual");
                                  }, children: [_jsxs("div", { className: "flex items-start justify-between gap-3", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-sm font-semibold", children: "Use my own keys" }), _jsx("p", { className: "mt-1 text-xs text-muted-foreground", children: "See what this app needs" })] }), _jsx(IconKey, { className: "text-muted-foreground", size: 17 })] }), _jsx(CapabilityList, { capabilities: profile.capabilities, compact: true, className: "mt-5 pt-3" })] })] }), import.meta.env.DEV ? (_jsxs("p", { "data-testid": "first-run-local-provider-note", className: "mx-auto max-w-2xl text-center text-[11px] leading-5 text-muted-foreground", children: ["Or set", " ", _jsx("code", { className: "rounded bg-muted px-1", children: "ANTHROPIC_API_KEY" }), " ", "or ", _jsx("code", { className: "rounded bg-muted px-1", children: "OPENAI_API_KEY" }), " ", "in ", _jsx("code", { className: "rounded bg-muted px-1", children: ".env" }), " to make that provider available to everyone using this app.", " ", _jsxs("a", { href: docsUrl("environment-variables"), target: "_blank", rel: "noreferrer", className: "inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", children: ["Read the setup guide", _jsx(IconExternalLink, { size: 12 })] })] })) : null] }) }));
      }
@@ -4406,7 +4601,20 @@ index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..06d37f8a9b4269fe3b30ea0f3fdb2085
          return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-xl flex-col gap-4", children: [_jsxs("div", { children: [_jsx("button", { type: "button", className: "mb-4 text-xs text-muted-foreground hover:text-foreground", onClick: () => setScreen("choice"), children: "Back" }), _jsx("h1", { className: "text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Your keys" })] }), _jsxs("div", { className: "rounded-xl bg-muted/35 p-4", children: [_jsx(CapabilityList, { capabilities: profile.capabilities }), _jsxs("div", { className: "mt-5 flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between", children: [_jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => setScreen("choice"), children: "Back" }), _jsxs("button", { type: "button", className: primaryButtonClass, onClick: handleOpenSettings, children: ["Open key settings", _jsx(IconArrowRight, { size: 15 })] }), _jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => {
                                              trackFirstRunStepCompleted("manual");
                                              setScreen(skipIntegrations ? "role" : "tools");
-@@ -385,7 +387,7 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+@@ -345,10 +351,10 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+                                             actionLabel: connected ? "Connected" : "Connect",
+                                             disabled: connected ||
+                                                 connectingIntegrationId === integration.id ||
+-                                                !mcpServersQuery.isSuccess,
++                                                !mcpServersQuery.isSuccess || (integration.authMode === "oauth" && mcpServersQuery.data?.oauth?.available === false),
+                                             onAction: () => void connectIntegration(integration),
+                                         };
+-                                    }), emptyLabel: "No integrations match." })] })] }), integrationDialogId && (_jsx(McpIntegrationDialog, { open: true, onOpenChange: (open) => {
++                                    }), emptyLabel: "No integrations match." })] })] }), mcpServersQuery.data?.oauth?.available === false && (_jsx("p", { role: "status", className: "text-sm text-muted-foreground", children: mcpServersQuery.data.oauth.reason })), integrationDialogId && (_jsx(McpIntegrationDialog, { open: true, onOpenChange: (open) => {
+                         if (!open)
+                             setIntegrationDialogId(null);
+                     }, connectIntegrationId: integrationDialogId, defaultScope: "user", canCreateOrgMcp: canCreateOrgMcp, hasOrg: hasOrg, onCreateMcpServer: createMcpServer.mutateAsync }))] }));
+@@ -385,7 +391,7 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
                              ],
                              [
                                  "Flexible providers",
@@ -4415,7 +4623,7 @@ index 6d4135e6606d13d523c72a153fcc7ca960d45ef6..06d37f8a9b4269fe3b30ea0f3fdb2085
                              ],
                          ]
                          : [
-@@ -393,7 +395,7 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
+@@ -393,7 +399,7 @@ export function FirstRunOnboarding({ skipIntegrations = shouldSkipFirstRunIntegr
                              ["Agent integrations", "Connect tools from Settings anytime."],
                              [
                                  "Flexible providers",
@@ -6084,7 +6292,7 @@ index d86ba8c8975aa27234f661b9906259e40d0998b7..59da4cffbbed15f4557d894f6f6af72b
 +}): Promise<void>;
  export declare function recordIntegrationResponseDelivery(payload: IntegrationResponseDeliveryTaskPayload, receipt: PlatformDeliveryReceipt): Promise<void>;
 diff --git a/dist/integrations/webhook-handler.js b/dist/integrations/webhook-handler.js
-index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b808400b42 100644
+index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..ee214638aec3af3fcf33bacecc6a55e959909ce8 100644
 --- a/dist/integrations/webhook-handler.js
 +++ b/dist/integrations/webhook-handler.js
 @@ -4,7 +4,7 @@ import { isInBackgroundFunctionRuntime } from "../agent/durable-background.js";
@@ -6229,10 +6437,12 @@ index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b8
 +        actualCostMicros = usage.costCentsX100 * 100;
 +    }
 +    else if (usage) {
-+        const { calculateCost, hasTablePrice } = await import("../usage/store.js");
++        const { estimateUsageCost } = await import("../usage/store.js");
          // token_usage uses centicents; one centicent is 100 currency micros.
-         actualCostMicros =
-             calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens) * 100;
+-        actualCostMicros =
+-            calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens) * 100;
++        const estimate = usage.costSource === "unavailable" ? undefined : estimateUsageCost(usage);
++        actualCostMicros = (estimate ?? 0) * 100;
 +        // A run that used tokens of a model Core has no price for has an
 +        // unknown cost. It keeps its reservation estimate, and a budget cap
 +        // still fills. A run that used no tokens costs 0.
@@ -6240,7 +6450,7 @@ index 7027e9b195cf2b24fa4aa526cce40e8b4d75d751..efd06506f7e39f9afdc4b3227d9d26b8
 +            usage.outputTokens +
 +            usage.cacheReadTokens +
 +            usage.cacheWriteTokens;
-+        unknownCost = tokens > 0 && !hasTablePrice(usage.model);
++        unknownCost = tokens > 0 && estimate === undefined;
      }
      await Promise.all(reservations.map((reservation) => settleIntegrationUsageBudget({
          budgetId: reservation.budgetId,
@@ -10996,10 +11206,25 @@ diff --git a/dist/resources/store.js b/dist/resources/store.js
      return moved;
  }
 diff --git a/dist/scripts/agent-engines/list-agent-engines.js b/dist/scripts/agent-engines/list-agent-engines.js
-index fbf87b306902458e7426c727455251f706c7f028..0513231b7f297e511c2214feb354097b12d0f633 100644
+index fbf87b306902458e7426c727455251f706c7f028..d96b5a2e92e553eee8bda17d99c56a6ae4dd1e6f 100644
 --- a/dist/scripts/agent-engines/list-agent-engines.js
 +++ b/dist/scripts/agent-engines/list-agent-engines.js
-@@ -119,6 +119,9 @@ export async function run(args = {}) {
+@@ -73,9 +73,13 @@ export async function run(args = {}) {
+     const preserveCustomModels = currentEntry
+         ? await resolveEnginePreservesCustomModels(currentEntry)
+         : false;
++    // Keep the reported unconfigured engine and model in the same catalog.
++    const fallbackModel = !currentEntry && !envUnavailable
++        ? getAgentEngineEntry(currentEngineName)?.defaultModel
++        : undefined;
+     const currentModel = currentEntry && !envUnavailable
+         ? normalizeModelForEngine(currentEntry, currentModelCandidate ?? currentEntry.defaultModel, { preserveCustomModels })
+-        : (currentModelCandidate ?? DEFAULT_MODEL);
++        : (currentModelCandidate ?? fallbackModel ?? DEFAULT_MODEL);
+     // Readiness has to be resolved here: `requiredEnvVars` alone cannot see
+     // vault-stored keys or the deploy-injected Builder gateway lane, so a client
+     // that re-derives it from env keys marks working engines unconfigured.
+@@ -119,6 +123,9 @@ export async function run(args = {}) {
              : {
                  engine: currentEngineName,
                  model: currentModel,
@@ -12597,7 +12822,7 @@ index 5a20c95723aa0d8ce70ad13508514c22416ec104..96b3e08ed22874ff43f58166b8bed3cd
  
  You are an AI agent in an agent-native application, running in **development mode**.
 diff --git a/dist/server/agent-chat/plugin-options.d.ts b/dist/server/agent-chat/plugin-options.d.ts
-index e60c5334c0159767045b81164ee54138e3e248f3..c675f3c9ab9cf0d068fbe84faf6402fa74a4516d 100644
+index e60c5334c0159767045b81164ee54138e3e248f3..47e09863ca89e005766f8ed6368f5fdf9b613c4b 100644
 --- a/dist/server/agent-chat/plugin-options.d.ts
 +++ b/dist/server/agent-chat/plugin-options.d.ts
 @@ -76,10 +76,8 @@ export interface AgentChatPluginOptions {
@@ -12613,6 +12838,15 @@ index e60c5334c0159767045b81164ee54138e3e248f3..c675f3c9ab9cf0d068fbe84faf6402fa
       */
      backgroundMcpTools?: "requested" | "all";
      /**
+@@ -88,6 +86,8 @@ export interface AgentChatPluginOptions {
+      * persistent approval for actions that must be confirmed on every call.
+      */
+     resolveMcpActionEntry?: McpActionEntryOptions["resolveActionEntry"];
++    /** Availability of interactive outgoing MCP OAuth. Saved grants and refresh remain usable. */
++    mcpOAuthAvailability?: (event: import("h3").H3Event) => import("../../mcp-client/oauth-routes.js").McpOAuthAvailability;
+     /**
+      * Everything about this app's MCP mount — whether it is mounted, which tools
+      * external callers see, and the branding sent during the `initialize`
 diff --git a/dist/server/agent-chat/prompt-resources.js b/dist/server/agent-chat/prompt-resources.js
 index 40396251b3887addb4303ece517af947f2eb4ed3..eb4ff2082d40a2d52b784b9ed3ec7f13277ae89f 100644
 --- a/dist/server/agent-chat/prompt-resources.js
@@ -13204,6 +13438,7 @@ index ea9fd705f1741f2988ac6fca3498c9a831811a7d..99142fc8d5899f6a2bd057414a28d561
              },
          };
 diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
+index 61cbf15014173e612be5219b8dc76f8c93a2848e..f5284d04c7c57f82d07309fdf55ecb980b07ce93 100644
 --- a/dist/server/agent-chat-plugin.js
 +++ b/dist/server/agent-chat-plugin.js
 @@ -1,3 +1,4 @@
@@ -13211,7 +13446,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
  import crypto from "node:crypto";
  import nodePath from "node:path";
  import { createError, defineEventHandler, setResponseStatus, setResponseHeader, getMethod, getQuery, getHeader, getRequestIP, } from "h3";
-@@ -35,7 +36,7 @@
+@@ -35,7 +36,7 @@ import { McpClientManager, mcpToolsToActionEntries, syncMcpActionEntries, mountM
  import { declaredMcpToolNames } from "../mcp/build-server.js";
  import { setProgressPreListHook } from "../progress/store.js";
  import { getSkillNameFromPath } from "../resources/metadata.js";
@@ -13220,7 +13455,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
  import { normalizeDatabaseToolsMode } from "../scripts/db/tool-mode.js";
  import { getSetting, putSetting } from "../settings/store.js";
  import { ANALYTICS_CLIENT_PLATFORM_BODY_FIELD, normalizeAnalyticsClientPlatform, } from "../shared/analytics-platform.js";
-@@ -128,6 +129,7 @@
+@@ -128,6 +129,7 @@ import { loadRunCodeToolEntries } from "./agent-chat/run-code-tools.js";
  import { createAgentEngineScriptEntries, createAgentLoopSettingsScriptEntries, createCallAgentScriptEntry, createChatScriptEntries, createDbScriptEntries, createDocsScriptEntries, createResourceScriptEntries, } from "./agent-chat/script-entries.js";
  import { isRuntimeVisibleScope, parseSkillFrontmatter, } from "./agent-chat/skill-frontmatter.js";
  import { shouldDisableInProcessSweeps } from "./sweep-runtime.js";
@@ -13228,7 +13463,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
  export { loadResourcesForPrompt };
  export { _agentChatPromptSectionsForTests };
  export { buildPublicAgentA2ASkills };
-@@ -404,7 +406,6 @@
+@@ -404,7 +406,6 @@ export function createAgentChatPlugin(options) {
              // `externalAgents` into `mcp`. A2A reads the same object, so the
              // connector policy cannot diverge between the two external surfaces.
              const mcpOptions = resolveAgentChatMcpOptions(options);
@@ -13236,7 +13471,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const mcpActionEntryOptions = options?.resolveMcpActionEntry
                  ? { resolveActionEntry: options.resolveMcpActionEntry }
                  : {};
-@@ -454,23 +455,6 @@
+@@ -454,23 +455,6 @@ export function createAgentChatPlugin(options) {
                  return mcpInitializationPromise;
              };
              setGlobalMcpManager(mcpManager, ensureMcpInitialized);
@@ -13260,7 +13495,15 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              // Mount status + management routes so the settings UI can list / add /
              // remove remote MCP servers and hot-reload the running manager.
              mountMcpStatusRoute(nitroApp, mcpManager);
-@@ -581,6 +565,31 @@
+@@ -478,6 +462,7 @@ export function createAgentChatPlugin(options) {
+                 // Serialize an unusually early settings mutation behind the initial
+                 // config snapshot so stale startup data cannot overwrite the write.
+                 waitUntilReady: ensureMcpInitialized,
++                oauthAvailability: options?.mcpOAuthAvailability,
+             });
+             // Hub-serve: expose org-scope servers to other agent-native apps in the
+             // workspace when `AGENT_NATIVE_MCP_HUB_TOKEN` is set (dispatch, by
+@@ -581,6 +566,31 @@ export function createAgentChatPlugin(options) {
                  ? await createCallAgentScriptEntry(options?.appId)
                  : {};
              let runNowSchedulerDeps = null;
@@ -13292,7 +13535,15 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const browserTools = createBuilderBrowserTool({
                  getOrigin: () => getRequestRunContext()?.requestOrigin ?? "http://localhost:3000",
                  getOwner: () => getRequestRunContext()?.owner ?? getRequestUserEmail(),
-@@ -956,31 +965,27 @@
+@@ -644,6 +654,7 @@ export function createAgentChatPlugin(options) {
+                                     discoveredActionsAll[name] = {
+                                         tool: def.tool,
+                                         run: def.run,
++                                        ...(def.schema !== undefined ? { schema: def.schema } : {}),
+                                         ...(def.http !== undefined ? { http: def.http } : {}),
+                                         ...(typeof def.agentTool === "boolean"
+                                             ? { agentTool: def.agentTool }
+@@ -956,31 +967,27 @@ export function createAgentChatPlugin(options) {
                  coreAttachmentTools = createCoreAttachmentActionEntries();
              }
              catch { }
@@ -13344,7 +13595,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              };
              // -----------------------------------------------------------------------
              // Production code-execution mode resolution.
-@@ -1906,6 +1911,14 @@
+@@ -1906,6 +1913,14 @@ export function createAgentChatPlugin(options) {
              const getFrameworkPromptActions = () => Object.fromEntries(Object.entries(prodActions).filter(([name]) => !templateScripts[name] && !mcpActionEntries[name]));
              const resolveRequestBasePrompt = () => (options?.systemPrompt ??
                  filterFrameworkPromptToSurface(lazyContext ? PROD_FRAMEWORK_PROMPT_COMPACT : PROD_FRAMEWORK_PROMPT, getFrameworkPromptActions(), getRequestRunContext()?.allowedActionNames)) + resolveRequestActionsPrompt("tool");
@@ -13359,7 +13610,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              const resolveRequestLeanPrompt = () => (options?.systemPrompt ?? "") + resolveRequestLeanActionsPrompt();
              const resolveRequestDevPrompt = () => {
                  if (devNative)
-@@ -2838,6 +2851,10 @@
+@@ -2838,6 +2853,10 @@ When the user asks to add a feature, edit a component, fix a bug in the app itse
  
  Non-code requests are still fine on this surface: read data, navigate the UI, summarize, search, create/update extensions (sandboxed Alpine.js mini-apps stored in SQL), and call template actions. The restriction is specifically about direct edits to the host app's own source files.
  </app-rendered-chat-no-direct-code-edits>`;
@@ -13370,7 +13621,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
              // System-prompt note appended when production code execution is enabled.
              const prodCodeExecPromptNote = !canToggle && effectiveProdCodeExec !== "off"
                  ? effectiveProdCodeExec === "trusted"
-@@ -2854,7 +2871,9 @@
+@@ -2854,7 +2873,9 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                      const requestLeanPrompt = resolveRequestLeanPrompt();
                      const runtimeContext = runtimeContextForEvent(event);
                      const codeEditingSurfaceRestriction = shouldBlockInProductCodeEditing(event)
@@ -13381,7 +13632,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          : "";
                      const hostedHarnessRuntime = getRequestRunContext()?.hostedHarnessRuntime;
                      const hostedHarnessPromptNote = hostedHarnessRuntime
-@@ -3816,15 +3835,21 @@
+@@ -3816,15 +3837,21 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                              return pathOrder;
                          return a.path.localeCompare(b.path);
                      });
@@ -13406,7 +13657,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              if (full) {
                                  const fm = parseSkillFrontmatter(full.content);
                                  if (!isRuntimeVisibleScope(fm.scope))
-@@ -4649,6 +4674,24 @@
+@@ -4649,6 +4676,24 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                                  setResponseStatus(event, 404);
                                  return { error: "Thread not found" };
                              }
@@ -13431,7 +13682,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              let newThreadData = body.threadData || thread.threadData;
                              let newMessageCount = body.messageCount ?? thread.messageCount;
                              let nextTitle = typeof body.title === "string" ? body.title : thread.title;
-@@ -4666,34 +4709,20 @@
+@@ -4666,34 +4711,20 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                                          nextTitle = meta.title;
                                  }
                              };
@@ -13478,7 +13729,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                              // Scope updates piggyback on the PUT — the client uses this
                              // path for detach and for claiming a legacy unscoped thread.
                              // A scoped thread cannot be retagged across resources here.
-@@ -4701,7 +4730,7 @@
+@@ -4701,7 +4732,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                                  const incomingScope = parseScopeFromBody(body.scope);
                                  await setThreadScope(threadId, incomingScope);
                              }
@@ -13487,7 +13738,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          });
                      }
                      // POST /threads/:id/queued — debounced writes from the client
-@@ -5113,32 +5142,13 @@
+@@ -5113,32 +5144,13 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                      ? preparedMarker.automationRunId
                      : undefined;
                  if (typeof automationRunId === "string" && automationRunId) {
@@ -13521,7 +13772,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                          }
                          catch {
                              setResponseStatus(event, 500);
-@@ -5146,7 +5156,7 @@
+@@ -5146,7 +5158,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                          }
                      }
                      const waitUntil = event.req?.waitUntil;
@@ -13530,7 +13781,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      if (typeof waitUntil === "function") {
                          void waitUntil(runPromise);
                      }
-@@ -5321,34 +5331,19 @@
+@@ -5321,34 +5333,19 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
              // Poll every 60 seconds for due recurring jobs and execute them.
              // Long-lived runtimes use setInterval; serverless runtimes rely on a
              // platform-owned sweep because an invocation cannot own a durable loop.
@@ -13569,7 +13820,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      apiKey: options?.apiKey,
                      model: resolveConfiguredAgentModel(options),
                      appId: options?.appId,
-@@ -5439,15 +5434,24 @@
+@@ -5439,15 +5436,24 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                      }
                  }
                  else {
@@ -13596,7 +13847,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
                      }, 10_000);
                  }
              }
-@@ -5759,27 +5763,48 @@
+@@ -5759,27 +5765,48 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
              // Event and webhook automations remain live when the recurring scheduler
              // is disabled; only the cron driver is gated above.
              const { initTriggerDispatcher } = await import("../triggers/dispatcher.js");
@@ -13655,7 +13906,7 @@ diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
          })().catch((err) => {
              // If the init fails, the routes never get registered and requests
              // to /_agent-native/agent-chat silently 404. Register a fallback
-@@ -5803,6 +5828,7 @@
+@@ -5803,6 +5830,7 @@ Non-code requests are still fine on this surface: read data, navigate the UI, su
                  "/mcp",
                  "/.well-known/agent-card.json",
                  "/_agent-native/a2a",
@@ -14993,23 +15244,45 @@ index 9a3a72d8f08edc0e902814934d749c432b4228bb..8ff65b608d1e83807046ca4f7affeab2
          },
          byLabel,
 diff --git a/dist/usage/store.d.ts b/dist/usage/store.d.ts
-index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5d7e9e71da0db59d810a1ac302583c55aa51c342 100644
+index c9cd99152199d4c5a2cb8d8eb9c1723790e820a0..5fac2770ccad8c2faabea10cd6fa7b14f6540c26 100644
 --- a/dist/usage/store.d.ts
 +++ b/dist/usage/store.d.ts
-@@ -67,6 +67,8 @@ export declare function ensureUsageTable(): Promise<void>;
+@@ -19,6 +19,10 @@ export interface UsageRecord {
+     outputTokens: number;
+     cacheReadTokens?: number;
+     cacheWriteTokens?: number;
++    /** Observed 1-hour writes, included in cacheWriteTokens. */
++    cacheWrite1hTokens?: number;
++    /** Actual execution engine, required for new direct API estimates. */
++    engineName?: string;
+     model: string;
+     /** Category for this call — e.g. "chat", "automation", "job", "custom-agent". */
+     label?: string;
+@@ -66,7 +70,10 @@ export declare function ensureUsageTable(): Promise<void>;
+  * Non-cache-aware callers pass 0 for the cache fields and get the full rate on
   * everything, which is correct for a provider with no prompt caching.
   */
- export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number): number;
+-export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number): number;
++export declare function calculateCost(inputTokens: number, outputTokens: number, model: string, cacheReadTokens?: number, cacheWriteTokens?: number, pricingContext?: { cacheWrite1hTokens?: number; engineName?: string }): number;
++export declare function estimateUsageCost(usage: Pick<UsageRecord, "inputTokens" | "outputTokens" | "model" | "cacheReadTokens" | "cacheWriteTokens" | "cacheWrite1hTokens" | "engineName">, options?: { perRequest?: boolean }): number | undefined;
 +/** Whether the price table prices a model, so `calculateCost` is its cost. */
 +export declare function hasTablePrice(model: string): boolean;
  /**
   * Record token usage from an LLM call.
   *
 diff --git a/dist/usage/store.js b/dist/usage/store.js
-index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbbaf1a0c20 100644
+index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..75681271e6ac888c407e7a95aeb91eaa8a00895a 100644
 --- a/dist/usage/store.js
 +++ b/dist/usage/store.js
-@@ -63,6 +63,11 @@ const PRICING = [
+@@ -7,6 +7,7 @@
+  *
+  * Cost is stored as "centicents" (1/100th of a cent) for integer precision.
+  */
++import { ANTHROPIC_API_MODELS } from "../agent/model-config.js";
+ import { getDbExec, intType, isPostgres } from "../db/client.js";
+ import { ensureColumnExists, ensureIndexExists, ensureTableExists, } from "../db/ddl-guard.js";
+ import { widenIntColumnsToBigInt } from "../db/widen-columns.js";
+@@ -63,6 +64,11 @@ const PRICING = [
          match: /haiku/i,
          pricing: { input: 100, output: 500, cacheRead: 10, cacheWrite: 125 },
      },
@@ -15021,7 +15294,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // ── OpenAI / Codex ──────────────────────────────────────────────────────────
      // Short-context rates from OpenAI's published table (read 2026-08-25):
      // https://developers.openai.com/api/docs/pricing#text-tokens
-@@ -138,18 +143,40 @@ const PRICING = [
+@@ -138,18 +144,46 @@ const PRICING = [
          match: /mistral-small|mistral-medium/i,
          pricing: { input: 20, output: 60, cacheRead: 0, cacheWrite: 0 },
      },
@@ -15036,6 +15309,11 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 -    for (const entry of PRICING) {
 -        if (entry.match.test(model))
 -            return entry.pricing;
++    const current = ANTHROPIC_API_MODELS[model];
++    if (current) return current;
++    // These direct API rates do not establish gateway prices for a routed ID.
++    const unqualified = model.slice(model.lastIndexOf("/") + 1);
++    if (ANTHROPIC_API_MODELS[unqualified]) return undefined;
 +    return PRICING.find((entry) => entry.match.test(model))?.pricing;
 +}
 +/** Whether the price table prices a model, so `calculateCost` is its cost. */
@@ -15055,7 +15333,8 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
 +        const { rows } = await client.execute(`SELECT DISTINCT model FROM token_usage WHERE cost_source = 'estimated'`);
 +        for (const row of rows) {
 +            const model = String(row.model ?? "");
-+            if (hasTablePrice(model))
++            // Keep these historical estimates intact. Current requests need route/TTL evidence.
++            if (ANTHROPIC_API_MODELS[model.slice(model.lastIndexOf("/") + 1)] || hasTablePrice(model))
 +                continue;
 +            await client.execute({
 +                sql: `UPDATE token_usage SET cost_source = 'unavailable', cost_cents_x100 = 0
@@ -15071,7 +15350,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
  }
  let _initPromise;
  export async function ensureUsageTable() {
-@@ -232,6 +259,7 @@ export async function ensureUsageTable() {
+@@ -232,6 +266,7 @@ export async function ensureUsageTable() {
                  // the whole release. The SHARE lock is the cost of a build that lands.
                  await ensureIndexExists("idx_token_usage_lower_owner_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_lower_owner_created ON token_usage (LOWER(owner_email), created_at)`);
                  await ensureIndexExists("idx_token_usage_org_app_created", `CREATE INDEX IF NOT EXISTS idx_token_usage_org_app_created ON token_usage (org_id, LOWER(app), created_at)`);
@@ -15079,7 +15358,7 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
                  return;
              }
              // SQLite (local dev): no lock problem — keep the original behaviour.
-@@ -265,6 +293,7 @@ export async function ensureUsageTable() {
+@@ -265,6 +300,7 @@ export async function ensureUsageTable() {
                      // through the Postgres branch above, which probes before creating.
                  }
              }
@@ -15087,9 +15366,36 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
          })().catch((err) => {
              // Retry init on the next call after a failed startup.
              _initPromise = undefined;
-@@ -292,6 +321,10 @@ export async function ensureUsageTable() {
+@@ -290,8 +326,36 @@ export async function ensureUsageTable() {
+  * Non-cache-aware callers pass 0 for the cache fields and get the full rate on
+  * everything, which is correct for a provider with no prompt caching.
   */
- export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0) {
+-export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0) {
++/** An API list-price estimate, never a bill or funding guarantee.
++ * Haiku needs the individual request length. Cache writes need their observed TTL split.
++ * Missing evidence remains unknown instead of treating a turn as one long prompt.
++ */
++export function estimateUsageCost(usage, { perRequest = false } = {}) {
++    const { inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0, cacheWrite1hTokens } = usage;
++    const current = ANTHROPIC_API_MODELS[model];
++    if (!current) return hasTablePrice(model)
++        ? calculateCost(inputTokens, outputTokens, model, cacheReadTokens, cacheWriteTokens) : undefined;
++    if (!["anthropic", "ai-sdk:anthropic"].includes(usage.engineName)) return undefined;
++    if (current.longContext && !perRequest) return undefined;
++    if (![inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens].every(value => Number.isFinite(value) && value >= 0)) return undefined;
++    if (cacheReadTokens + cacheWriteTokens > inputTokens) return undefined;
++    const write1h = cacheWriteTokens === 0 ? 0 : cacheWrite1hTokens;
++    if (!Number.isFinite(write1h) || write1h < 0 || write1h > cacheWriteTokens) return undefined;
++    const p = current.longContext && inputTokens > current.longContext.threshold ? current.longContext : current;
++    const dollars = ((inputTokens - cacheReadTokens - cacheWriteTokens) * p.input +
++        outputTokens * p.output + cacheReadTokens * p.cacheRead +
++        (cacheWriteTokens - write1h) * p.cacheWrite5m + write1h * p.cacheWrite1h) / 1_000_000;
++    return dollars > 0 ? Math.max(1, Math.round(dollars * 10_000)) : 0;
++}
++
++export function calculateCost(inputTokens, outputTokens, model, cacheReadTokens = 0, cacheWriteTokens = 0, pricingContext = {}) {
++    if (ANTHROPIC_API_MODELS[model]) return estimateUsageCost({ inputTokens, outputTokens, model,
++        cacheReadTokens, cacheWriteTokens, ...pricingContext }, { perRequest: true }) ?? 0;
      const p = pricingFor(model);
 +    // An unpriced model costs an unknown amount. Callers that need a number get
 +    // 0, and recordUsage records the cost as unavailable.
@@ -15098,22 +15404,55 @@ index 926f66ebaf33d87c3f3e26fa330f1ecf8b7183f6..dffbb95997f9b10b56e8edfcbe1e4dbb
      // An engine that still emits the exclusive convention would drive this
      // negative and credit the bill. Clamping keeps the partition non-negative;
      // the fix for a caller that trips it is that engine, not a wider clamp here.
-@@ -334,7 +367,14 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+@@ -334,16 +398,21 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
      }
      // Prefer an explicit precomputed cost (e.g. a provider-reported dollar cost);
      // otherwise derive it from tokens via the pricing table.
 -    const resolvedCostSource = costSource ?? (costCentsX100 == null ? "estimated" : "reported");
 +    // With no reported cost, a model the table cannot price records an unknown
 +    // cost instead of a guess.
-+    const resolvedCostSource = costSource ??
-+        (costCentsX100 != null
-+            ? "reported"
-+            : pricingFor(modelName)
-+                ? "estimated"
-+                : "unavailable");
++    const estimate = estimateUsageCost(record);
++    const resolvedCostSource = costSource === "unavailable" ? "unavailable"
++        : costCentsX100 != null ? costSource ?? "reported"
++        : estimate !== undefined ? "estimated" : "unavailable";
      const costX100 = resolvedCostSource === "unavailable"
          ? 0
-         : (costCentsX100 ??
+-        : (costCentsX100 ??
+-            calculateCost(inTok, outTok, modelName, cacheReadTokens, cacheWriteTokens));
++        : (costCentsX100 ?? estimate ?? 0);
+     const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+-    await client.execute({
++    const insert = {
+         sql: `INSERT INTO token_usage
+       (id, owner_email, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents_x100, cost_source, model, label, app, ref_id, org_id, run_id, thread_id, task_id, integration_scope_id, source_platform, source_id, created_at)
+-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++      ON CONFLICT (id) DO NOTHING`,
+         args: [
+             id,
+             ownerEmail,
+@@ -366,7 +435,20 @@ export async function recordUsage(recordOrOwner, inputTokens, outputTokens, mode
+             sourceId ?? null,
+             Date.now(),
+         ],
+-    });
++    };
++    // Timestamp/random IDs can collide across workers. Only an occupied primary key
++    // retries. Other database errors propagate, and no existing usage row is replaced.
++    let inserted = false;
++    for (let attempt = 0; attempt < 16; attempt++) {
++        const result = await client.execute(insert);
++        if (result.rowsAffected === 1) {
++            inserted = true;
++            break;
++        }
++        insert.args[0] += 1;
++    }
++    if (!inserted)
++        throw new Error("Could not allocate a unique token usage ID after 16 attempts.");
+     // Alert delivery is deliberately detached from the usage write. A provider
+     // or email outage must not make a successful model call fail, and the alert
+     // evaluator serializes its own work so the hot path stays one insert.
 diff --git a/dist/cli/claude-session-log.js b/dist/cli/claude-session-log.js
 new file mode 100644
 --- /dev/null
@@ -15815,21 +16154,31 @@ diff --git a/dist/jobs/frontmatter.d.ts b/dist/jobs/frontmatter.d.ts
 diff --git a/dist/server/action-discovery.js b/dist/server/action-discovery.js
 --- a/dist/server/action-discovery.js
 +++ b/dist/server/action-discovery.js
-@@ -640,6 +640,14 @@
-             () => import("../jobs/actions/run-automation-now.js"),
-         ],
+@@ -162,6 +162,9 @@
+ }
+ function preserveActionFlags(entry) {
+     const out = {};
++    // The advertised JSON schema does not replace the action's validator.
++    if (entry.schema !== undefined)
++        out.schema = entry.schema;
+     if (typeof entry.agentTool === "boolean")
+         out.agentTool = entry.agentTool;
+     if (typeof entry.mcpTool === "boolean")
+@@ -638,6 +641,14 @@
          [
+             "run-automation-now",
+             () => import("../jobs/actions/run-automation-now.js"),
++        ],
++        [
 +            "inspect-automation-run",
 +            () => import("../jobs/actions/inspect-automation-run.js"),
 +        ],
 +        [
 +            "decide-automation-approval",
 +            () => import("../jobs/actions/decide-automation-approval.js"),
-+        ],
-+        [
-             "list-automation-runs",
-             () => import("../jobs/actions/list-automation-runs.js"),
          ],
+         [
+             "list-automation-runs",
 diff --git a/dist/automations/service.js b/dist/automations/service.js
 --- a/dist/automations/service.js
 +++ b/dist/automations/service.js
@@ -16156,7 +16505,7 @@ index 135139d..259fcff 100644
              if (!endpoint)
                  return "unsupported";
 diff --git a/dist/mcp-client/oauth-routes.js b/dist/mcp-client/oauth-routes.js
-index 809d774..df69e6b 100644
+index 809d774f8c4f89a92f2fae611dcaa2155a51bfc6..094991fb4f7094a5b8c52f72762f11fedaf8dc40 100644
 --- a/dist/mcp-client/oauth-routes.js
 +++ b/dist/mcp-client/oauth-routes.js
 @@ -28,6 +28,7 @@ const MCP_WORKSPACE_STATE_PROVIDER = "mcp";
@@ -16180,7 +16529,33 @@ index 809d774..df69e6b 100644
      },
  ];
  export function resolveMcpOAuthReturnPath(connected, flow) {
-@@ -324,6 +327,7 @@ export async function resolveManagedMcpOAuthClient(serverUrl) {
+@@ -92,7 +95,7 @@ export function mountMcpOAuthRoutes(nitroApp, options) {
+             return { error: "Method not allowed" };
+         }
+         if (parts.length === 1 && parts[0] === "start") {
+-            return handleMcpOAuthStart(event);
++            return handleMcpOAuthStart(event, options);
+         }
+         if (parts.length === 1 && parts[0] === "callback") {
+             return handleMcpOAuthCallback(event, options);
+@@ -101,10 +104,15 @@ export function mountMcpOAuthRoutes(nitroApp, options) {
+         return { error: "Not found" };
+     }));
+ }
+-async function handleMcpOAuthStart(event) {
++async function handleMcpOAuthStart(event, options) {
+     const session = await getSession(event).catch(() => null);
+     if (!session?.email)
+         return unauthorized(event);
++    const availability = options.availability?.(event);
++    if (availability?.available === false) {
++        return Response.json({ error: availability.reason, errorCode: "mcp_oauth_interactive_unavailable", retryable: false },
++            { status: 409, headers: { "Cache-Control": "no-store" } });
++    }
+     const query = getQuery(event);
+     const reconnectServerId = text(query.serverId);
+     const reconnectScope = query.scope === "org" ? "org" : "user";
+@@ -324,6 +332,7 @@ export async function resolveManagedMcpOAuthClient(serverUrl) {
              client_id: clientId,
              client_secret: clientSecret,
              token_endpoint_auth_method: "client_secret_post",
@@ -16188,3 +16563,1336 @@ index 809d774..df69e6b 100644
          };
      }
      return undefined;
+diff --git a/dist/agent/model-config.d.ts b/dist/agent/model-config.d.ts
+index d0900cb03de78545ee338d333c0bf56290a51102..8e1f9e3cfebff0600039358e06c7b4627d3583af 100644
+--- a/dist/agent/model-config.d.ts
++++ b/dist/agent/model-config.d.ts
+@@ -21,6 +21,18 @@ export declare function getContextWindowForModel(modelId: string): number;
+  * a positive integer.
+  */
+ export declare function getMaxOutputTokensForModel(modelId: string | undefined): number;
++export interface AnthropicApiPricing {
++    input: number;
++    output: number;
++    cacheRead: number;
++    cacheWrite5m: number;
++    cacheWrite1h: number;
++}
++export declare const ANTHROPIC_API_MODELS: Readonly<Record<string, AnthropicApiPricing & {
++    contextWindow: number;
++    maxOutputTokens: number;
++    longContext?: AnthropicApiPricing & { threshold: number };
++}>>;
+ export declare const CLAUDE_SONNET_MODEL_ID: string;
+ export declare const CLAUDE_SONNET_MODEL_LABEL: string;
+ export declare const AGENT_MODEL_CONFIG: {
+@@ -29,13 +41,13 @@ export declare const AGENT_MODEL_CONFIG: {
+         readonly supportedModels: readonly ["auto", string, "gpt-5-6-terra", "gpt-5-6-sol", "claude-haiku-4-5", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "gemini-3-5-flash", "gemini-3-1-pro"];
+     };
+     readonly anthropic: {
+-        readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-        readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++        readonly defaultModel: "claude-sonnet-5-5";
++        readonly supportedModels: readonly string[];
+     };
+     readonly aiSdk: {
+         readonly anthropic: {
+-            readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-            readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++            readonly defaultModel: "claude-sonnet-5-5";
++            readonly supportedModels: readonly string[];
+         };
+         readonly openai: {
+             readonly defaultModel: "gpt-5.6-luna";
+@@ -72,13 +84,13 @@ export declare const BUILDER_MODEL_CONFIG: {
+     readonly supportedModels: readonly ["auto", string, "gpt-5-6-terra", "gpt-5-6-sol", "claude-haiku-4-5", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "gemini-3-5-flash", "gemini-3-1-pro"];
+ };
+ export declare const ANTHROPIC_MODEL_CONFIG: {
+-    readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-    readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++    readonly defaultModel: "claude-sonnet-5-5";
++    readonly supportedModels: readonly string[];
+ };
+ export declare const AI_SDK_MODEL_CONFIG: {
+     readonly anthropic: {
+-        readonly defaultModel: "claude-sonnet-4-6" | "claude-sonnet-5";
+-        readonly supportedModels: readonly ["claude-haiku-4-5-20251001", "claude-sonnet-4-6" | "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"];
++        readonly defaultModel: "claude-sonnet-5-5";
++        readonly supportedModels: readonly string[];
+     };
+     readonly openai: {
+         readonly defaultModel: "gpt-5.6-luna";
+@@ -112,4 +124,4 @@ export declare const AI_SDK_MODEL_CONFIG: {
+ export type AISDKProvider = keyof typeof AI_SDK_MODEL_CONFIG;
+ export declare const DEFAULT_MODEL: string;
+ export declare const DEFAULT_OPENAI_MODEL: "gpt-5.6-luna";
+-export declare const DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6" | "claude-sonnet-5";
++export declare const DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-5-5";
+diff --git a/dist/agent/model-config.js b/dist/agent/model-config.js
+index e43c149476d0cc68d78e5723e3db6fc4e67bb693..310a27798e6c7d2480709e168acea02051a7186c 100644
+--- a/dist/agent/model-config.js
++++ b/dist/agent/model-config.js
+@@ -23,6 +23,28 @@
+ // Note: Fable 5, Sonnet 5, Sonnet 4.6, and Opus 4.6/4.7/4.8 support 1M via the API
+ // at standard prices.
+ // ---------------------------------------------------------------------------
++// Direct Claude API reference metadata, verified 2026-10-13.
++// https://platform.claude.com/docs/en/models/{model}/overview
++// https://platform.claude.com/docs/en/about-claude/pricing
++// USD per million tokens, standard global inference. Gateway catalogs are separate.
++export const ANTHROPIC_API_MODELS = {
++    "claude-sonnet-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 2, output: 10, cacheRead: 0.10, cacheWrite5m: 2.50, cacheWrite1h: 4 },
++    "claude-haiku-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.20,
++        longContext: { threshold: 100_000, input: 0.50, output: 2.50,
++            cacheRead: 0.05, cacheWrite5m: 0.625, cacheWrite1h: 1 } },
++    "claude-opus-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 4, output: 20, cacheRead: 0.20, cacheWrite5m: 5, cacheWrite1h: 8 },
++    "claude-fable-5-1": { contextWindow: 1_000_000, maxOutputTokens: 128_000,
++        input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.50, cacheWrite1h: 20 },
++};
++const ANTHROPIC_API_SUPPORTED_MODELS = [
++    ...Object.keys(ANTHROPIC_API_MODELS),
++    // Preserve existing selections without migrating conversations or settings.
++    "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5",
++];
++
+ const MODEL_CONTEXT_WINDOWS = {
+     // ── Anthropic / Claude (via Builder gateway or Anthropic direct) ──────────
+     "claude-fable-5": 1_000_000,
+@@ -73,6 +95,8 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
+ export function getContextWindowForModel(modelId) {
+     if (!modelId)
+         return DEFAULT_CONTEXT_WINDOW;
++    const current = ANTHROPIC_API_MODELS[modelId];
++    if (current) return current.contextWindow;
+     const exact = MODEL_CONTEXT_WINDOWS[modelId];
+     if (exact !== undefined)
+         return exact;
+@@ -162,6 +186,8 @@ const DEFAULT_MAX_OUTPUT_TOKENS_CEILING = 64_000;
+ export function getMaxOutputTokensForModel(modelId) {
+     if (!modelId)
+         return DEFAULT_MAX_OUTPUT_TOKENS_CEILING;
++    const current = ANTHROPIC_API_MODELS[modelId];
++    if (current) return current.maxOutputTokens;
+     const exact = MODEL_MAX_OUTPUT_TOKENS[modelId];
+     if (exact !== undefined)
+         return exact;
+@@ -198,7 +224,7 @@ export const CLAUDE_SONNET_MODEL_LABEL = ENABLE_CLAUDE_SONNET_5
+ const OPENROUTER_CLAUDE_SONNET_MODEL_ID = ENABLE_CLAUDE_SONNET_5
+     ? "anthropic/claude-sonnet-5"
+     : "anthropic/claude-sonnet-4.6";
+-const ANTHROPIC_DEFAULT_MODEL_ID = CLAUDE_SONNET_MODEL_ID;
++const ANTHROPIC_DEFAULT_MODEL_ID = "claude-sonnet-5-5";
+ function builderGatewayModelId(model) {
+     return model.replace(/\./g, "-");
+ }
+@@ -230,22 +256,12 @@ export const AGENT_MODEL_CONFIG = {
+     },
+     anthropic: {
+         defaultModel: ANTHROPIC_DEFAULT_MODEL_ID,
+-        supportedModels: [
+-            "claude-haiku-4-5-20251001",
+-            CLAUDE_SONNET_MODEL_ID,
+-            "claude-opus-4-8",
+-            "claude-fable-5",
+-        ],
++        supportedModels: ANTHROPIC_API_SUPPORTED_MODELS,
+     },
+     aiSdk: {
+         anthropic: {
+             defaultModel: ANTHROPIC_DEFAULT_MODEL_ID,
+-            supportedModels: [
+-                "claude-haiku-4-5-20251001",
+-                CLAUDE_SONNET_MODEL_ID,
+-                "claude-opus-4-8",
+-                "claude-fable-5",
+-            ],
++            supportedModels: ANTHROPIC_API_SUPPORTED_MODELS,
+         },
+         openai: {
+             defaultModel: FRAMEWORK_DEFAULT_OPENAI_MODEL,
+diff --git a/dist/observability/traces.js b/dist/observability/traces.js
+index 470675eaf3bc80cde3338264166ddcfd2f7be363..f154dffa14c1841c99c506f4e93a21182be87d32 100644
+--- a/dist/observability/traces.js
++++ b/dist/observability/traces.js
+@@ -890,11 +890,11 @@ export async function instrumentAgentLoop(opts) {
+             let costCentsX100 = 0;
+             // Held for the per-generation costs below, which price each round-trip
+             // from its own tokens rather than splitting the run total.
+-            let calculateCost;
++            let estimateUsageCost;
+             try {
+-                ({ calculateCost } = await import("../usage/store.js"));
++                ({ estimateUsageCost } = await import("../usage/store.js"));
+                 if (usage) {
+-                    costCentsX100 = calculateCost(usage.inputTokens, usage.outputTokens, usage.model, usage.cacheReadTokens, usage.cacheWriteTokens);
++                    costCentsX100 = usage.costCentsX100 ?? estimateUsageCost(usage) ?? 0;
+                 }
+                 // Cost estimation is enrichment: a pricing-table miss leaves the span
+                 // without a cost rather than failing the trace.
+@@ -1016,9 +1016,10 @@ export async function instrumentAgentLoop(opts) {
+                 for (const generation of generations) {
+                     const callUsage = generation.callUsage;
+                     let callCostCentsX100;
+-                    if (calculateCost && callUsage && generation.tokensKnown) {
++                    if (estimateUsageCost && callUsage && generation.tokensKnown) {
+                         try {
+-                            callCostCentsX100 = calculateCost(callUsage.inputTokens, callUsage.outputTokens, callUsage.model, callUsage.cacheReadTokens, callUsage.cacheWriteTokens);
++                            callCostCentsX100 = callUsage.costUsd !== undefined ? Math.round(callUsage.costUsd * 10_000)
++                                : estimateUsageCost(callUsage, { perRequest: modelRoundTrips.length > 0 });
+                             // Cost estimation is enrichment: a pricing-table miss leaves the
+                             // generation without a cost rather than failing the trace.
+                         }
+diff --git a/dist/shared/reasoning-effort.d.ts b/dist/shared/reasoning-effort.d.ts
+index d54c726a2a53370272f92ee909f90d42638bfffd..bd0db6201142659453700c5ff83e2738593fcb5e 100644
+--- a/dist/shared/reasoning-effort.d.ts
++++ b/dist/shared/reasoning-effort.d.ts
+@@ -37,6 +37,7 @@ export declare function supportsClaudeAdaptiveThinking(model: string | undefined
+  * Map the shared effort ladder to Anthropic's manual thinking budgets for
+  * models that do not support adaptive thinking (currently Claude Haiku 4.5).
+  */
++export declare function validateAnthropicApiThinking(model: string, thinking: { type: string; budgetTokens?: number } | undefined, effort?: string): void;
+ export declare function anthropicManualThinkingBudget(effort: ReasoningEffort): 1024 | 4096 | 8000 | 16000 | 32000;
+ /**
+  * Whether a request may carry the sampling parameters (`temperature`,
+diff --git a/dist/shared/reasoning-effort.js b/dist/shared/reasoning-effort.js
+index b3b6ab68bb71711a99141278989af4c8fe7332b6..d36799565ea9cb054d1cf1741acbaf97aefe447a 100644
+--- a/dist/shared/reasoning-effort.js
++++ b/dist/shared/reasoning-effort.js
+@@ -1,3 +1,5 @@
++import { ANTHROPIC_API_MODELS } from "../agent/model-config.js";
++
+ export const REASONING_EFFORTS = [
+     "auto",
+     "none",
+@@ -126,6 +128,7 @@ export function isGPTReasoningModel(model) {
+     return /^gpt-5/.test(id) || /^o\d/.test(id);
+ }
+ function isClaudeReasoningModel(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     if (id.includes("fable-5") || id.includes("mythos-5"))
+         return true;
+@@ -142,6 +145,7 @@ function isClaudeReasoningModel(model) {
+  * requires the legacy manual `budget_tokens` configuration.
+  */
+ export function supportsClaudeAdaptiveThinking(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     if (!model)
+         return false;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+@@ -156,6 +160,20 @@ export function supportsClaudeAdaptiveThinking(model) {
+  * Map the shared effort ladder to Anthropic's manual thinking budgets for
+  * models that do not support adaptive thinking (currently Claude Haiku 4.5).
+  */
++// Preserve legacy settings. Refuse incompatible options only for these exact new IDs.
++export function validateAnthropicApiThinking(model, thinking, effort) {
++    if (!ANTHROPIC_API_MODELS[model] || !thinking) return;
++    const type = thinking.type;
++    const off = type === "disabled" && model === "claude-haiku-5-5";
++    const between = type === "between_tools" && model === "claude-sonnet-5-5";
++    if (type !== "adaptive" && !off && !between) {
++        throw new Error(`${model} requires adaptive thinking. Keep the saved model or choose compatible thinking settings.`);
++    }
++    if (thinking.budgetTokens !== undefined || ((off || between) && ["xhigh", "max"].includes(effort))) {
++        throw new Error(`${model} does not accept this thinking budget or effort combination. Saved settings have not been changed.`);
++    }
++}
++
+ export function anthropicManualThinkingBudget(effort) {
+     switch (effort) {
+         case "low":
+@@ -173,6 +191,7 @@ export function anthropicManualThinkingBudget(effort) {
+     }
+ }
+ function supportsClaudeXHigh(model) {
++    if (ANTHROPIC_API_MODELS[model]) return true;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     // Models that support the xhigh effort tier (built-in extended thinking via
+     // output_config.effort). Keep this version-aware so any future Claude model
+@@ -201,6 +220,7 @@ function isGeminiReasoningModel(model) {
+  * thinking is on.
+  */
+ function claudeAcceptsSamplingParams(model) {
++    if (ANTHROPIC_API_MODELS[model]) return false;
+     const id = model.toLowerCase().replace(/^anthropic\//, "");
+     if (id.includes("fable-5") || id.includes("mythos-5"))
+         return false;
+diff --git a/dist/client/CommandMenu.js b/dist/client/CommandMenu.js
+index ee47efcdf74bfdf219629df5e13bffde0cbd319a..383e6d77f21be1355375c82d33c7bdf815676631 100644
+--- a/dist/client/CommandMenu.js
++++ b/dist/client/CommandMenu.js
+@@ -25,6 +25,7 @@ import { ChangelogDialog, useChangelogSeen } from "./changelog/Changelog.js";
+ import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog.js";
+ import { useT } from "./i18n.js";
+ import { cn } from "./utils.js";
++import { captureCommandMenuFocus, restoreCommandMenuFocus } from "./command-menu-focus.js";
+ const CommandMenuContext = createContext(null);
+ function useCommandMenuContext() {
+     const ctx = useContext(CommandMenuContext);
+@@ -128,6 +129,7 @@ export function CommandMenu({ open, onOpenChange, children, renderResults, place
+     const [search, setSearch] = useState("");
+     const inputRef = useRef(null);
+     const containerRef = useRef(null);
++    const returnFocusRef = useRef(null);
+     const t = useT();
+     // Built-in "What's new" changelog surface (only active when `changelog` is
+     // passed). The dialog is rendered alongside the menu so it survives the menu
+@@ -273,7 +275,12 @@ export function CommandMenu({ open, onOpenChange, children, renderResults, place
+         (child.type === CommandGroup || child.type === CommandDocsGroup));
+     const dynamicResults = open ? renderResults?.(search) : null;
+     const hasDynamicResults = Boolean(dynamicResults);
+-    return (_jsxs(_Fragment, { children: [_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { ref: containerRef, "aria-describedby": undefined, hideClose: true, motion: "instant", overlayClassName: "fixed inset-0 z-50 bg-black/50 backdrop-blur-none transition-none", overlayStyle: {
++    return (_jsxs(_Fragment, { children: [_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { ref: containerRef, onOpenAutoFocus: () => {
++                    returnFocusRef.current = captureCommandMenuFocus(containerRef.current);
++                }, onCloseAutoFocus: (event) => {
++                    restoreCommandMenuFocus(returnFocusRef.current, event);
++                    if (returnFocusRef.current?.content === event.target) returnFocusRef.current = null;
++                }, "aria-describedby": undefined, hideClose: true, motion: "instant", overlayClassName: "fixed inset-0 z-50 bg-black/50 backdrop-blur-none transition-none", overlayStyle: {
+                         zIndex: 50,
+                         backgroundColor: "rgb(0 0 0 / 0.5)",
+                         backdropFilter: "none",
+diff --git a/dist/client/command-menu-focus.js b/dist/client/command-menu-focus.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..34e39ef5f53601ce067c3f1228076133daf5a1a8
+--- /dev/null
++++ b/dist/client/command-menu-focus.js
+@@ -0,0 +1,26 @@
++// Controlled command menus have no Radix DialogTrigger to restore automatically.
++export function captureCommandMenuFocus(content) {
++    if (!content) return null;
++    const document = content.ownerDocument;
++    const view = document.defaultView;
++    const invoker = document.activeElement;
++    return {
++        content,
++        invoker: invoker instanceof view.HTMLElement && invoker !== document.body && !content.contains(invoker)
++            ? invoker : null,
++        location: view.location.href,
++    };
++}
++export function restoreCommandMenuFocus(snapshot, event) {
++    event.preventDefault();
++    if (!snapshot?.invoker || event.target !== snapshot.content) return;
++    const { content, invoker, location } = snapshot;
++    const document = content.ownerDocument;
++    const active = document.activeElement;
++    // Navigation or another focused control owns focus now. Removed openers cannot receive it.
++    if (invoker.isConnected && invoker.ownerDocument === document
++        && document.defaultView.location.href === location
++        && (active === document.body || active === document.documentElement || content.contains(active))) {
++        invoker.focus({ preventScroll: true });
++    }
++}
+diff --git a/dist/client/agent-page/AgentWorkspaceContent.js b/dist/client/agent-page/AgentWorkspaceContent.js
+index 18309c2b890f9630878246f447cfff825badcf7c..d45d2f3a3db25932cb4ef3799ce4749a7b5c1cb0 100644
+--- a/dist/client/agent-page/AgentWorkspaceContent.js
++++ b/dist/client/agent-page/AgentWorkspaceContent.js
+@@ -62,6 +62,7 @@ function initialHubState() {
+     return { tab: "overview", resource };
+ }
+ function ResourceContent({ resource }) {
++    // Settings uses document flow. Give the existing panel/editor flex layout a definite height.
+     const copy = RESOURCE_TABS.find((tab) => tab.id === resource);
+     return (_jsxs("div", { className: "space-y-5", children: [_jsx("div", { className: "flex items-center gap-1 overflow-x-auto", children: RESOURCE_TABS.map((tab) => {
+                     const Icon = tab.icon;
+@@ -76,7 +77,7 @@ function ResourceContent({ resource }) {
+                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"), children: [_jsx(Icon, { className: "size-3.5" }), tab.label] }, tab.id));
+                 }) }), _jsxs("header", { className: "space-y-1", children: [_jsx("h2", { className: "text-lg font-semibold tracking-tight text-foreground", children: copy?.label ?? "Resources" }), _jsx("p", { className: "text-sm leading-5 text-muted-foreground", children: resource === "files"
+                             ? "Add context the agent can use across conversations."
+-                            : "Manage the resources that shape how the agent works." })] }), _jsx(Suspense, { fallback: _jsx("div", { className: "h-48 animate-pulse rounded-xl border border-border bg-muted/20" }), children: _jsx(ResourcesPanel, { showMcpServers: false, resourceFilter: resource, resourceTreeVariant: "collection", scope: "personal" }, resource) })] }));
++                            : "Manage the resources that shape how the agent works." })] }), _jsx("div", { style: { height: "clamp(18rem, 50dvh, 40rem)" }, children: _jsx(Suspense, { fallback: _jsx("div", { className: "h-48 animate-pulse rounded-xl border border-border bg-muted/20" }), children: _jsx(ResourcesPanel, { showMcpServers: false, resourceFilter: resource, resourceTreeVariant: "collection", scope: "personal" }, resource) }) })] }));
+ }
+ export function AgentWorkspaceContent({ overview, className, activeTab, }) {
+     const [{ resource }, setState] = useState(initialHubState);
+diff --git a/dist/mcp-client/oauth-routes.d.ts b/dist/mcp-client/oauth-routes.d.ts
+index 00a77c7a106524bf3be34ff6209fe81024d0c2a3..cb8609b5357744b8985230952d1346da530d22d7 100644
+--- a/dist/mcp-client/oauth-routes.d.ts
++++ b/dist/mcp-client/oauth-routes.d.ts
+@@ -21,7 +21,9 @@ export interface McpOAuthFlow {
+     replaceServerId?: string;
+     expiresAt: number;
+ }
++export type McpOAuthAvailability = { available: true } | { available: false; reason: string };
+ export interface McpOAuthRoutesOptions {
++    availability?: (event: H3Event) => McpOAuthAvailability;
+     reconfigure: (target: {
+         scope: RemoteMcpScope;
+         scopeId: string;
+diff --git a/dist/mcp-client/remote-store.js b/dist/mcp-client/remote-store.js
+index e0038223cc03feee99d7bc4ad5275bf49a2f761a..32329f47bc7169123a0863bb1c2ea363b7378519 100644
+--- a/dist/mcp-client/remote-store.js
++++ b/dist/mcp-client/remote-store.js
+@@ -556,7 +556,10 @@ export function toHttpServerConfig(stored) {
+  * stored data (e.g. for read-only listings that shouldn't disclose
+  * secrets).
+  */
+-export async function toHttpServerConfigAsync(scope, scopeId, stored) {
++export class McpOAuthAuthorizationRequiredError extends Error {
++    constructor() { super("The saved OAuth authorization is unavailable."); }
++}
++export async function toHttpServerConfigAsync(scope, scopeId, stored, options = {}) {
+     let headers = await materializeHeaders(scope, scopeId, stored);
+     if (stored.oauthSecretKey) {
+         const accessToken = await getMcpOAuthAccessToken({
+@@ -565,6 +568,7 @@ export async function toHttpServerConfigAsync(scope, scopeId, stored) {
+             scopeId,
+             serverUrl: stored.url,
+         });
++        if (!accessToken && options.requireOAuthToken) throw new McpOAuthAuthorizationRequiredError();
+         if (accessToken) {
+             headers ??= {};
+             headers.Authorization = `Bearer ${accessToken}`;
+diff --git a/dist/mcp-client/remote-store.d.ts b/dist/mcp-client/remote-store.d.ts
+index 22c7377815d7418eed139afb42d073c270ae6883..5d2e015ad98f9908cf20a1c7b9a430bdfbf74422 100644
+--- a/dist/mcp-client/remote-store.d.ts
++++ b/dist/mcp-client/remote-store.d.ts
+@@ -170,7 +170,8 @@ export declare function toHttpServerConfig(stored: StoredRemoteMcpServer): McpHt
+  * stored data (e.g. for read-only listings that shouldn't disclose
+  * secrets).
+  */
+-export declare function toHttpServerConfigAsync(scope: RemoteMcpScope, scopeId: string, stored: StoredRemoteMcpServer): Promise<McpHttpServerConfig>;
++export declare class McpOAuthAuthorizationRequiredError extends Error { constructor(); }
++export declare function toHttpServerConfigAsync(scope: RemoteMcpScope, scopeId: string, stored: StoredRemoteMcpServer, options?: { requireOAuthToken?: boolean }): Promise<McpHttpServerConfig>;
+ /**
+  * Build the merged-config key for a stored server.
+  *
+diff --git a/dist/mcp-client/routes.js b/dist/mcp-client/routes.js
+index bb9691d6c9d9594d01652dd20775325aded0016e..31b859479891c2e9077fdc3f307428a194e7bc87 100644
+--- a/dist/mcp-client/routes.js
++++ b/dist/mcp-client/routes.js
+@@ -36,7 +36,7 @@ import { formatMcpConnectError } from "./errors.js";
+ import { fetchHubServers } from "./hub-client.js";
+ import { buildMcpToolName, parseMcpToolName, } from "./manager.js";
+ import { mountMcpOAuthRoutes } from "./oauth-routes.js";
+-import { addRemoteServer, listRemoteServers, mergedConfigKey, removeRemoteServer, toHttpServerConfigAsync, validateRemoteUrl, } from "./remote-store.js";
++import { McpOAuthAuthorizationRequiredError, addRemoteServer, listRemoteServers, mergedConfigKey, removeRemoteServer, toHttpServerConfigAsync, validateRemoteUrl, } from "./remote-store.js";
+ import { isMcpToolAllowedForRequest } from "./visibility.js";
+ import { loadWorkspaceMcpServers } from "./workspace-servers.js";
+ export { formatMcpConnectError } from "./errors.js";
+@@ -130,7 +130,7 @@ export function builtinMergedConfigKey(scope, capability, ownerId) {
+  * `isMcpToolAllowedForRequest` then scopes tool visibility back down to the
+  * calling user.
+  */
+-export async function buildMergedConfig() {
++export async function buildMergedConfig(options = {}) {
+     const base = loadMcpConfig() ?? autoDetectMcpConfig();
+     const servers = { ...(base?.servers ?? {}) };
+     const all = await getAllSettings().catch((err) => {
+@@ -162,7 +162,9 @@ export async function buildMergedConfig() {
+             // running MCP client gets the cleartext bearer at request time.
+             // Stored row contains only the secret-key reference, never the value.
+             servers[mergedConfigKey(scope, stored, ownerId)] =
+-                await toHttpServerConfigAsync(scope, ownerId, stored);
++                await toHttpServerConfigAsync(scope, ownerId, stored, {
++                    requireOAuthToken: options.requireOAuthServer === mergedConfigKey(scope, stored, ownerId),
++                });
+         }
+     }
+     if (areBuiltinMcpCapabilitiesSupported()) {
+@@ -323,8 +325,8 @@ async function resolveContextForRequest(event) {
+     // rather than silently pool every unauthenticated request under one identity.
+     return { email, orgId, role };
+ }
+-async function reconfigureManager(manager) {
+-    const merged = await buildMergedConfig();
++async function reconfigureManager(manager, options) {
++    const merged = await buildMergedConfig(options);
+     await manager.reconfigure(merged);
+ }
+ export function mountMcpServersRoutes(nitroApp, manager, options = {}) {
+@@ -333,6 +335,7 @@ export function mountMcpServersRoutes(nitroApp, manager, options = {}) {
+         return;
+     mountedApps.add(nitroApp);
+     mountMcpOAuthRoutes(nitroApp, {
++        availability: options.oauthAvailability,
+         reconfigure: async ({ scope, scopeId, server }) => {
+             await options.waitUntilReady?.();
+             await reconfigureManager(manager);
+@@ -341,7 +344,6 @@ export function mountMcpServersRoutes(nitroApp, manager, options = {}) {
+     });
+     try {
+         getH3App(nitroApp).use("/_agent-native/mcp/servers", defineEventHandler(async (event) => {
+-            await options.waitUntilReady?.();
+             const method = getMethod(event);
+             const pathname = (event.url?.pathname || "")
+                 .replace(/^\/+/, "")
+@@ -357,25 +359,26 @@ export function mountMcpServersRoutes(nitroApp, manager, options = {}) {
+             if (method === "POST" && parts.length === 1 && parts[0] === "test") {
+                 return handleTestUrl(event);
+             }
++            if (parts.length === 2 && parts[1] === "test" && method === "POST") {
++                return handleTestExisting(event, manager, parts[0], options.oauthAvailability?.(event));
++            }
++            await options.waitUntilReady?.();
+             // Collection root
+             if (parts.length === 0) {
+                 if (method === "GET")
+-                    return handleList(event, manager);
++                    return handleList(event, manager, options.oauthAvailability?.(event));
+                 if (method === "POST")
+                     return handleAdd(event, manager);
+                 setResponseStatus(event, 405);
+                 return { error: "Method not allowed" };
+             }
+-            // /:id  /  /:id/test
++            // /:id  /  /:id/reconnect
+             if (parts.length === 1 || parts.length === 2) {
+                 const id = parts[0];
+-                if (parts.length === 2 && parts[1] === "test" && method === "POST") {
+-                    return handleTestExisting(event, manager, id);
+-                }
+                 if (parts.length === 2 &&
+                     parts[1] === "reconnect" &&
+                     method === "POST") {
+-                    return handleReconnectExisting(event, manager, id);
++                    return handleReconnectExisting(event, manager, id, options.oauthAvailability?.(event));
+                 }
+                 if (parts.length === 1 && method === "DELETE") {
+                     return handleDelete(event, manager, id);
+@@ -698,11 +701,12 @@ function validateBuiltinCapabilityForEnable(id) {
+     }
+     return null;
+ }
+-async function handleList(event, manager) {
++async function handleList(event, manager, availability = { available: true }) {
+     const { email, orgId, role } = await resolveContextForRequest(event);
+     const userServers = email ? await listRemoteServers("user", email) : [];
+     const orgServers = orgId ? await listRemoteServers("org", orgId) : [];
+     return {
++        oauth: availability,
+         user: userServers.map((s) => projectForClient(s, "user", email ?? "", statusFor(manager, mergedConfigKey("user", s, email ?? "")))),
+         org: orgServers.map((s) => projectForClient(s, "org", orgId ?? "", statusFor(manager, mergedConfigKey("org", s, orgId ?? "")))),
+         orgId,
+@@ -827,7 +831,7 @@ async function handleTestUrl(event) {
+     }
+     return { ok: true, toolCount: result.toolCount, tools: result.tools };
+ }
+-async function handleTestExisting(event, _manager, id) {
++async function handleTestExisting(event, _manager, id, availability) {
+     const scope = getQuery(event).scope;
+     const parsedScope = scope === "org" ? "org" : scope === "user" ? "user" : null;
+     if (!parsedScope) {
+@@ -850,7 +854,13 @@ async function handleTestExisting(event, _manager, id) {
+     // (Authorization, API keys) live encrypted in app_secrets and are resolved by
+     // toHttpServerConfigAsync. Testing with cleartext-only headers would fail for
+     // any server that uses encrypted credentials.
+-    const config = await toHttpServerConfigAsync(parsedScope, scopeId, server);
++    let config;
++    try {
++        config = await toHttpServerConfigAsync(parsedScope, scopeId, server, { requireOAuthToken: availability?.available === false });
++    } catch (error) {
++        if (error instanceof McpOAuthAuthorizationRequiredError) return reauthorizationUnavailable(event);
++        throw error;
++    }
+     const result = await tryConnect(server.url, config.headers);
+     if (result.ok !== true) {
+         setResponseStatus(event, 400);
+@@ -858,7 +868,13 @@ async function handleTestExisting(event, _manager, id) {
+     }
+     return { ok: true, toolCount: result.toolCount, tools: result.tools };
+ }
+-async function handleReconnectExisting(event, manager, id) {
++function reauthorizationUnavailable(event) {
++    setResponseStatus(event, 409);
++    setResponseHeader(event, "Cache-Control", "no-store");
++    return { ok: false, error: "The saved OAuth authorization is unavailable. Signing in again is not supported in the desktop app.",
++        errorCode: "mcp_oauth_reauthorization_unavailable", reauthorizationRequired: true, retryable: false };
++}
++async function handleReconnectExisting(event, manager, id, availability) {
+     const scope = getQuery(event).scope;
+     const parsedScope = scope === "org" ? "org" : scope === "user" ? "user" : null;
+     if (!parsedScope) {
+@@ -883,7 +899,13 @@ async function handleReconnectExisting(event, manager, id) {
+         setResponseStatus(event, 404);
+         return { error: "Server not found" };
+     }
+-    await reconfigureManager(manager);
++    try {
++        await reconfigureManager(manager, { requireOAuthServer: availability?.available === false && server.oauthSecretKey
++            ? mergedConfigKey(parsedScope, server, scopeId) : undefined });
++    } catch (error) {
++        if (error instanceof McpOAuthAuthorizationRequiredError) return reauthorizationUnavailable(event);
++        throw error;
++    }
+     const mergedId = mergedConfigKey(parsedScope, server, scopeId);
+     const status = reconnectStatusForClient(manager, mergedId);
+     const projected = projectForClient(server, parsedScope, scopeId, status);
+diff --git a/dist/mcp-client/routes.d.ts b/dist/mcp-client/routes.d.ts
+index 8a274f157d602e87efd7b30d57ec472be35a5c64..cbaa032c89644d0a1e14b5311bd61c39f59bdabd 100644
+--- a/dist/mcp-client/routes.d.ts
++++ b/dist/mcp-client/routes.d.ts
+@@ -98,8 +98,9 @@ export declare function builtinMergedConfigKey(scope: RemoteMcpScope, capability
+  * `isMcpToolAllowedForRequest` then scopes tool visibility back down to the
+  * calling user.
+  */
+-export declare function buildMergedConfig(): Promise<McpConfig | null>;
++export declare function buildMergedConfig(options?: { requireOAuthServer?: string }): Promise<McpConfig | null>;
+ export declare function startMcpConfigRefresh(manager: McpClientManager): (() => void) | null;
+ export declare function mountMcpServersRoutes(nitroApp: any, manager: McpClientManager, options?: {
+     waitUntilReady?: () => Promise<void>;
++    oauthAvailability?: import("./oauth-routes.js").McpOAuthRoutesOptions["availability"];
+ }): void;
+diff --git a/dist/client/resources/use-mcp-servers.js b/dist/client/resources/use-mcp-servers.js
+index 04501ae8fe05d0755c6bb2d37ad04c3260b0730a..c2c8e8c4a029d4203a91366d00c985b6e8449496 100644
+--- a/dist/client/resources/use-mcp-servers.js
++++ b/dist/client/resources/use-mcp-servers.js
+@@ -93,6 +93,12 @@ export function useMcpServers() {
+         staleTime: 10_000,
+     });
+ }
++export function useMcpOAuthAvailability() {
++    const query = useMcpServers();
++    if (!query.isSuccess) return { available: false, reason: query.isPending
++        ? "Checking OAuth availability." : "Could not check OAuth availability. Retry loading connections." };
++    return query.data.oauth ?? { available: true };
++}
+ export function useCreateMcpServer() {
+     const qc = useQueryClient();
+     const api = useMcpServersApi();
+diff --git a/dist/client/resources/use-mcp-servers.d.ts b/dist/client/resources/use-mcp-servers.d.ts
+index dd3516938ae2ce5836774be12e1826c90159e523..e67497514130eef09bdb4dcf17c7d58e112d51b7 100644
+--- a/dist/client/resources/use-mcp-servers.d.ts
++++ b/dist/client/resources/use-mcp-servers.d.ts
+@@ -32,7 +32,9 @@ export interface McpServer {
+         state: "unknown";
+     };
+ }
++export declare function useMcpOAuthAvailability(): import("../../mcp-client/oauth-routes.js").McpOAuthAvailability;
+ export interface McpServersList {
++    oauth?: import("../../mcp-client/oauth-routes.js").McpOAuthAvailability;
+     user: McpServer[];
+     org: McpServer[];
+     orgId: string | null;
+diff --git a/dist/client/resources/McpIntegrationDialog.js b/dist/client/resources/McpIntegrationDialog.js
+index efd28e5580154c0aadbce7f29ad343c012e47c34..26a86d4372a974200cfa6d1ac59d88391508d07a 100644
+--- a/dist/client/resources/McpIntegrationDialog.js
++++ b/dist/client/resources/McpIntegrationDialog.js
+@@ -10,7 +10,7 @@ import { IntegrationGrid } from "../integrations/IntegrationGrid.js";
+ import { cn } from "../utils.js";
+ import { buildMcpOAuthStartUrl, createMcpIntegrationFormDefaults, filterMcpIntegrations, getMcpIntegrationApiFallback, getDefaultMcpIntegrations, isCustomMcpIntegrationEnabled, navigateToMcpOAuthStart, resolveMcpIntegrationScope, shouldOfferMcpIntegrationOrganizationScope, shouldOfferMcpOrganizationScope, supportsMcpIntegrationOrganizationScope, } from "./mcp-integration-catalog.js";
+ import { McpIntegrationLogo } from "./McpIntegrationLogo.js";
+-import { formatMcpServerError, formatMcpServersLoadError, getMcpUrlValidationError, useMcpServersApi, useMcpServers, } from "./use-mcp-servers.js";
++import { formatMcpServerError, formatMcpServersLoadError, getMcpUrlValidationError, useMcpServersApi, useMcpServers, useMcpOAuthAvailability, } from "./use-mcp-servers.js";
+ function parseHeaderLines(text) {
+     const out = {};
+     for (const line of text.split(/\r?\n/)) {
+@@ -50,6 +50,8 @@ function resolveIntegrationScope(integration, defaultScope, hasOrg, canCreateOrg
+             integration.managedOAuth !== true));
+ }
+ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId = null, connectIntegrationId = null, quickConnectIntegrationId = null, defaultScope, canCreateOrgMcp, hasOrg, onCreateMcpServer, onOAuthStart, oauthReady = true, oauthReturnPath, onCreated, integrations, }) {
++    const oauthAvailability = useMcpOAuthAvailability();
++    const canStartOAuth = oauthReady && oauthAvailability.available;
+     const t = useT();
+     const [mode, setMode] = useState("catalog");
+     const [query, setQuery] = useState("");
+@@ -151,7 +153,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+         setMode("form");
+     };
+     const beginOAuth = (args, options) => {
+-        if (!oauthReady)
++        if (!canStartOAuth)
+             return;
+         const validationError = getMcpUrlValidationError(args.url);
+         if (validationError) {
+@@ -307,7 +309,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+         const integration = defaultIntegrations.find((candidate) => candidate.id === quickConnectIntegrationId);
+         if (!integration)
+             return;
+-        if (integration.authMode === "oauth" && !oauthReady)
++        if (integration.authMode === "oauth" && !canStartOAuth)
+             return;
+         quickConnectAttemptedRef.current = quickConnectIntegrationId;
+         quickConnectRef.current?.(integration);
+@@ -317,7 +319,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+         mcpServersQuery.isError,
+         mcpServersQuery.isSuccess,
+         open,
+-        oauthReady,
++        canStartOAuth,
+         quickConnectIntegrationId,
+     ]);
+     useEffect(() => {
+@@ -330,7 +332,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+         const integration = defaultIntegrations.find((candidate) => candidate.id === connectIntegrationId);
+         if (!integration)
+             return;
+-        if (integration.authMode === "oauth" && !oauthReady)
++        if (integration.authMode === "oauth" && !canStartOAuth)
+             return;
+         const attemptKey = `connect:${connectIntegrationId}`;
+         if (quickConnectAttemptedRef.current === attemptKey)
+@@ -354,7 +356,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+         mcpServersQuery.isError,
+         mcpServersQuery.isSuccess,
+         open,
+-        oauthReady,
++        canStartOAuth,
+     ]);
+     const connectPersonal = (integration) => {
+         if (requiresMcpIntegrationSetup(integration)) {
+@@ -455,7 +457,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+     };
+     if (!showCatalog && !customIntegrationEnabled)
+         return null;
+-    return (_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { "aria-describedby": undefined, className: "inset-0 flex h-[100dvh] max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0", children: [mcpServersQuery.isError ? (_jsxs("div", { role: "alert", className: "mx-7 mt-4 shrink-0 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive sm:mx-10", children: [_jsx("p", { children: formatMcpServersLoadError(mcpServersQuery.error) }), _jsx("button", { type: "button", onClick: () => void mcpServersQuery.refetch(), disabled: mcpServersQuery.isFetching, className: "mt-2 font-medium underline underline-offset-2 hover:text-foreground disabled:cursor-wait disabled:opacity-60", children: mcpServersQuery.isFetching
++    return (_jsx(Dialog, { open: open, onOpenChange: onOpenChange, children: _jsxs(DialogContent, { "aria-describedby": undefined, className: "inset-0 flex h-[100dvh] max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0", children: [!oauthAvailability.available && (_jsx("p", { role: "status", className: "mx-7 mt-4 text-xs text-muted-foreground sm:mx-10", children: oauthAvailability.reason })), mcpServersQuery.isError ? (_jsxs("div", { role: "alert", className: "mx-7 mt-4 shrink-0 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive sm:mx-10", children: [_jsx("p", { children: formatMcpServersLoadError(mcpServersQuery.error) }), _jsx("button", { type: "button", onClick: () => void mcpServersQuery.refetch(), disabled: mcpServersQuery.isFetching, className: "mt-2 font-medium underline underline-offset-2 hover:text-foreground disabled:cursor-wait disabled:opacity-60", children: mcpServersQuery.isFetching
+                                 ? t("mcpIntegrations.retrying")
+                                 : t("mcpIntegrations.retry") })] })) : null, mode === "choice" && selected ? (_jsxs(_Fragment, { children: [_jsx(DialogHeader, { className: "sr-only", children: _jsxs(DialogTitle, { children: [t("mcpIntegrations.connect"), " ", selected.name] }) }), _jsx(IntegrationConnectionChoice, { name: selected.name, logo: _jsx(McpIntegrationLogo, { name: selected.name, logoUrl: selected.logoUrl, integrationId: selected.id, className: "size-7 rounded-md", imageClassName: "size-full p-1" }), showWorkspaceOption: supportsMcpIntegrationOrganizationScope(selected), workspaceOptionDisabled: !canCreateOrgMcp, workspaceOptionDisabledReason: !canCreateOrgMcp
+                                 ? t("mcpIntegrations.workspaceAdminRequired")
+@@ -487,7 +489,7 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+                                                         : setupOnly
+                                                             ? t("mcpIntegrations.viewSetup")
+                                                             : t("mcpIntegrations.connect"),
+-                                                disabled: connected || busy || !mcpServersQuery.isSuccess,
++                                                disabled: connected || busy || !mcpServersQuery.isSuccess || (integration.authMode === "oauth" && !setupOnly && !canStartOAuth),
+                                                 onAction: () => {
+                                                     if (connected) {
+                                                         openForm(integration);
+@@ -549,5 +551,5 @@ export function McpIntegrationDialog({ open, onOpenChange, initialIntegrationId
+                                                         }, placeholder: selected?.headerPlaceholder ??
+                                                             t("mcpIntegrations.headersPlaceholder") })] })), selected?.docsUrl && (_jsxs("a", { href: selected.docsUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1 text-[11px] text-muted-foreground underline hover:text-foreground", children: [t("mcpIntegrations.openSetupDocs"), _jsx(IconExternalLink, { className: "h-3 w-3" })] }))] })), testResult && (_jsxs("div", { className: cn("flex items-start gap-1 rounded-md px-3 py-2 text-[11px] leading-snug", testResult.ok
+                                             ? "bg-green-500/5 text-green-600 dark:text-green-400"
+-                                            : "bg-red-500/5 text-red-600 dark:text-red-400"), children: [testResult.ok && (_jsx(IconCheck, { className: "mt-0.5 h-3 w-3 shrink-0" })), _jsx("span", { className: "min-w-0 break-words", children: testResult.message })] })), error && (_jsx("div", { className: "break-words rounded-md bg-red-500/5 px-3 py-2 text-[11px] leading-snug text-red-600 dark:text-red-400", children: error }))] }) }), _jsxs("div", { className: "flex shrink-0 items-center justify-between gap-2 border-t border-border px-7 py-4", children: [!selectedRequiresSetup && (_jsx("button", { type: "button", onClick: runTest, disabled: !url.trim() || busy, className: "rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-40", children: t("mcpIntegrations.test") })), !selected && customAuthMode === "oauth" ? (_jsxs("button", { type: "button", onClick: connectCustomWithOAuth, disabled: !oauthReady || !name.trim() || !url.trim() || busy, "aria-busy": busy, className: "rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-40", children: [busy && (_jsx(IconLoader2, { className: "me-1.5 inline h-3.5 w-3.5 animate-spin" })), t("mcpIntegrations.connectWithOAuth")] })) : null, selectedRequiresSetup ? (_jsx("div", { className: "ms-auto flex items-center gap-2", children: selected?.authMode === "oauth" && (_jsxs("button", { type: "button", onClick: () => connectWithOAuth(selected), disabled: !oauthReady || busy, "aria-busy": busy, className: "inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && (_jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" })), t("mcpIntegrations.continueToConnect")] })) })) : selected?.authMode === "oauth" ? (_jsxs("button", { type: "button", onClick: () => connectWithOAuth(selected), disabled: !oauthReady || !name.trim() || !url.trim() || busy, "aria-busy": busy, className: "inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && _jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" }), t("mcpIntegrations.connectWithOAuth")] })) : !selected && customAuthMode === "oauth" ? null : (_jsxs("button", { type: "button", onClick: submitForm, disabled: !name.trim() || !url.trim() || busy, className: "inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && _jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" }), t("mcpIntegrations.connect")] }))] })] }))] }) }));
++                                            : "bg-red-500/5 text-red-600 dark:text-red-400"), children: [testResult.ok && (_jsx(IconCheck, { className: "mt-0.5 h-3 w-3 shrink-0" })), _jsx("span", { className: "min-w-0 break-words", children: testResult.message })] })), error && (_jsx("div", { className: "break-words rounded-md bg-red-500/5 px-3 py-2 text-[11px] leading-snug text-red-600 dark:text-red-400", children: error }))] }) }), _jsxs("div", { className: "flex shrink-0 items-center justify-between gap-2 border-t border-border px-7 py-4", children: [!selectedRequiresSetup && (_jsx("button", { type: "button", onClick: runTest, disabled: !url.trim() || busy, className: "rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-40", children: t("mcpIntegrations.test") })), !selected && customAuthMode === "oauth" ? (_jsxs("button", { type: "button", onClick: connectCustomWithOAuth, disabled: !canStartOAuth || !name.trim() || !url.trim() || busy, "aria-busy": busy, className: "rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-40", children: [busy && (_jsx(IconLoader2, { className: "me-1.5 inline h-3.5 w-3.5 animate-spin" })), t("mcpIntegrations.connectWithOAuth")] })) : null, selectedRequiresSetup ? (_jsx("div", { className: "ms-auto flex items-center gap-2", children: selected?.authMode === "oauth" && (_jsxs("button", { type: "button", onClick: () => connectWithOAuth(selected), disabled: !canStartOAuth || busy, "aria-busy": busy, className: "inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && (_jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" })), t("mcpIntegrations.continueToConnect")] })) })) : selected?.authMode === "oauth" ? (_jsxs("button", { type: "button", onClick: () => connectWithOAuth(selected), disabled: !canStartOAuth || !name.trim() || !url.trim() || busy, "aria-busy": busy, className: "inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && _jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" }), t("mcpIntegrations.connectWithOAuth")] })) : !selected && customAuthMode === "oauth" ? null : (_jsxs("button", { type: "button", onClick: submitForm, disabled: !name.trim() || !url.trim() || busy, className: "inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40", children: [busy && _jsx(IconLoader2, { className: "h-3.5 w-3.5 animate-spin" }), t("mcpIntegrations.connect")] }))] })] }))] }) }));
+ }
+diff --git a/dist/client/integrations/IntegrationsPanel.js b/dist/client/integrations/IntegrationsPanel.js
+index 16b85ffceda5508f7a3099dc6267e2c78e0d3bff..7d99aaad0aea4970862da272898dcc88f6bf3b8c 100644
+--- a/dist/client/integrations/IntegrationsPanel.js
++++ b/dist/client/integrations/IntegrationsPanel.js
+@@ -222,7 +222,7 @@ function startMcpOAuthReconnect(server) {
+     });
+     window.location.assign(agentNativePath(`/_agent-native/mcp/servers/oauth/start?${params}`));
+ }
+-function McpServerStatus({ server, onReconnect, reconnecting = false, reconnectError, }) {
++function McpServerStatus({ server, onReconnect, reconnecting = false, reconnectError, reconnectLabel, }) {
+     const t = useT();
+     if (server.status.state === "connected") {
+         return (_jsxs("span", { className: "inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400", children: [_jsx("span", { className: "size-1.5 rounded-full bg-emerald-500" }), "Connected \u00B7 ", server.status.toolCount, " tool", server.status.toolCount === 1 ? "" : "s"] }));
+@@ -234,13 +234,14 @@ function McpServerStatus({ server, onReconnect, reconnecting = false, reconnectE
+                                 error: reconnectError,
+                             }) }))] }), onReconnect && (_jsxs("button", { type: "button", onClick: onReconnect, disabled: reconnecting, className: "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-60", children: [reconnecting ? (_jsx(IconLoader2, { className: "size-3.5 animate-spin" })) : (_jsx(IconRefresh, { className: "size-3.5" })), reconnecting
+                             ? t("mcpIntegrations.reconnecting")
+-                            : t("mcpIntegrations.reconnect")] }))] }));
++                            : reconnectLabel ?? t("mcpIntegrations.reconnect")] }))] }));
+     }
+     return (_jsxs("span", { className: "inline-flex items-center gap-1.5 text-xs text-muted-foreground", children: [_jsx("span", { className: "size-1.5 rounded-full bg-muted-foreground/50" }), "Status unknown"] }));
+ }
+ export function McpIntegrationsSection({ query, title, description, showTitle = true, showDescription = true, showHeader = true, className, integrations: integrationOptions, onOAuthStart, oauthReady, oauthReturnPath, showEmptyState = true, }) {
+     const t = useT();
+     const serversQuery = useMcpServers();
++    const oauthAvailability = serversQuery.data?.oauth;
+     const createServer = useCreateMcpServer();
+     const deleteServer = useDeleteMcpServer();
+     const reconnectServer = useReconnectMcpServer();
+@@ -339,7 +340,7 @@ export function McpIntegrationsSection({ query, title, description, showTitle =
+             setReconnectingKey(null);
+         }
+     }, [reconnectServer]);
+-    return (_jsxs("section", { "data-testid": "mcp-integrations", className: cn("space-y-5", className), children: [showHeader ? (_jsxs("div", { className: cn("flex flex-col gap-4 lg:flex-row lg:items-end", showTitle || showDescription
++    return (_jsxs("section", { "data-testid": "mcp-integrations", className: cn("space-y-5", className), children: [oauthAvailability?.available === false && (_jsx("p", { role: "status", className: "text-sm text-muted-foreground", children: oauthAvailability.reason })), showHeader ? (_jsxs("div", { className: cn("flex flex-col gap-4 lg:flex-row lg:items-end", showTitle || showDescription
+                     ? "lg:justify-between"
+                     : "lg:justify-end"), children: [showTitle || showDescription ? (_jsxs("div", { children: [showTitle ? (_jsx("h1", { className: "text-2xl font-semibold tracking-[-0.04em] text-foreground", children: title ?? t("mcpIntegrations.menuLabel") })) : null, showDescription ? (_jsx("p", { className: "mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground", children: description ?? t("mcpIntegrations.menuDescription") })) : null] })) : null, _jsxs("div", { className: "flex w-full flex-col gap-2 sm:flex-row lg:w-auto", children: [_jsxs("label", { className: "relative block min-w-0 flex-1 lg:w-72", children: [_jsx(IconSearch, { className: "pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" }), _jsx("input", { type: "search", value: activeQuery, onChange: (event) => setLocalQuery(event.target.value), placeholder: t("mcpIntegrations.searchPlaceholder"), "aria-label": t("mcpIntegrations.searchPlaceholder"), className: "h-9 w-full rounded-lg border border-border bg-background ps-9 pe-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-foreground/30 focus:ring-2 focus:ring-accent/40" })] }), _jsxs("button", { type: "button", onClick: () => openCatalog(), className: "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90", children: [_jsx(IconPlus, { className: "size-3.5" }), t("integrations.addIntegration")] })] })] })) : null, deleteError && (_jsx("p", { className: "border-y border-destructive/20 bg-destructive/5 py-3 text-xs text-destructive", children: deleteError })), serversQuery.isError ? (_jsx("p", { className: "border-y border-destructive/20 bg-destructive/5 py-3 text-xs text-destructive", children: "Could not load connected agent integrations. The catalog is still available." })) : servers.length > 0 && !normalizedQuery ? (_jsxs("section", { className: "space-y-2", children: [_jsx("h3", { className: "text-sm font-semibold text-foreground", children: "Installed" }), _jsx("div", { className: "grid gap-3 sm:grid-cols-2", children: servers.map((server) => {
+                             const key = `${server.scope}:${server.id}`;
+@@ -349,10 +350,10 @@ export function McpIntegrationsSection({ query, title, description, showTitle =
+                             return (_jsxs("div", { className: "flex min-w-0 items-start gap-3 rounded-2xl bg-card px-4 py-4", children: [_jsx(McpIntegrationLogo, { name: server.name, logoUrl: "", integrationId: server.name.toLowerCase(), className: "mt-0.5 size-9" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [_jsx("span", { className: "truncate text-sm font-medium text-foreground", children: server.name }), _jsx("span", { className: "text-[11px] text-muted-foreground", children: server.scope === "user"
+                                                             ? t("mcpIntegrations.personal")
+                                                             : t("mcpIntegrations.sharedWithWorkspace") })] }), _jsx(McpServerStatus, { server: server, onReconnect: server.status.state === "error"
+-                                                    ? () => server.authMode === "oauth"
++                                                    ? () => server.authMode === "oauth" && oauthAvailability?.available !== false
+                                                         ? startMcpOAuthReconnect(server)
+                                                         : void reconnect(server)
+-                                                    : undefined, reconnecting: reconnectingKey === key, reconnectError: reconnectError?.key === key
++                                                    : undefined, reconnectLabel: server.authMode === "oauth" && oauthAvailability?.available === false ? "Retry saved connection" : undefined, reconnecting: reconnectingKey === key, reconnectError: reconnectError?.key === key
+                                                     ? reconnectError.message
+                                                     : undefined })] }), canRemove && (_jsx("button", { type: "button", onClick: () => void removeServer(server), disabled: deleteServer.isPending, className: "shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50", children: deleteTarget === key ? "Confirm" : "Remove" }))] }, key));
+                         }) })] })) : null, filteredCatalog.length > 0 && (_jsxs("div", { children: [_jsxs("div", { className: "mb-1 flex items-center justify-between gap-3", children: [_jsx("h3", { className: "text-sm font-semibold text-foreground", children: "Available integrations" }), _jsxs("span", { className: "text-xs text-muted-foreground", children: [filteredCatalog.length, " integrations"] })] }), _jsx(IntegrationGrid, { items: filteredCatalog.map((integration) => {
+diff --git a/dist/client/resources/McpServerDetail.js b/dist/client/resources/McpServerDetail.js
+index 719bd098d4f24ebebd4c0b1808f63a7bb96b6d49..384e446494ac5f0b3d912375bb0b6145f8555d79 100644
+--- a/dist/client/resources/McpServerDetail.js
++++ b/dist/client/resources/McpServerDetail.js
+@@ -10,9 +10,10 @@ import { IconPlugConnected, IconAlertTriangle, IconLoader2, IconCheck, IconTestP
+  */
+ import { useState } from "react";
+ import { cn } from "../utils.js";
+-import { useMcpServersApi, } from "./use-mcp-servers.js";
++import { useMcpServersApi, useMcpOAuthAvailability, } from "./use-mcp-servers.js";
+ export function McpServerDetail({ server }) {
+     const mcpApi = useMcpServersApi();
++    const oauthAvailability = useMcpOAuthAvailability();
+     const [testing, setTesting] = useState(false);
+     const [testResult, setTestResult] = useState(null);
+     const headers = server.headers ? Object.keys(server.headers) : [];
+@@ -35,7 +36,7 @@ export function McpServerDetail({ server }) {
+     };
+     return (_jsx("div", { className: "flex h-full flex-col overflow-y-auto", children: _jsxs("div", { className: "px-4 py-4", children: [_jsxs("div", { className: "mb-3 flex items-center gap-2", children: [_jsx(IconPlugConnected, { className: "h-4 w-4 text-muted-foreground" }), _jsx("h2", { className: "text-[14px] font-medium text-foreground", children: server.name }), _jsx(StatusBadge, { server: server })] }), server.description && (_jsx("p", { className: "mb-4 text-[12px] leading-relaxed text-muted-foreground", children: server.description })), _jsxs("dl", { className: "space-y-3", children: [_jsx(Field, { label: "Scope", children: _jsxs("div", { className: "space-y-0.5", children: [_jsx("span", { className: "text-[12px] text-foreground", children: server.scope === "user" ? "Personal" : "Organization" }), _jsx("p", { className: "text-[11px] leading-relaxed text-muted-foreground", children: server.scope === "user"
+                                             ? "Only available to you. Best for private or staging connections."
+-                                            : "Shared with the active organization. Best for vetted team connections." })] }) }), _jsx(Field, { label: "URL", children: _jsx("code", { className: "rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground break-all", children: server.url }) }), headers.length > 0 && (_jsx(Field, { label: "Headers", children: _jsx("ul", { className: "space-y-1", children: headers.map((k) => (_jsxs("li", { className: "flex items-center gap-2 text-[11px] text-muted-foreground", children: [_jsx("code", { className: "rounded bg-muted px-1.5 py-0.5 text-foreground", children: k }), _jsx("span", { className: "italic", children: "(hidden)" })] }, k))) }) })), _jsx(Field, { label: "Tools", children: _jsx(ToolsSummary, { server: server }) })] }), _jsxs("div", { className: "mt-5 flex items-center gap-2", children: [_jsxs("button", { type: "button", onClick: runTest, disabled: testing, className: cn("inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-accent", testing && "opacity-60"), children: [testing ? (_jsx(IconLoader2, { className: "h-3 w-3 animate-spin" })) : (_jsx(IconTestPipe, { className: "h-3 w-3" })), "Test connection"] }), testResult && _jsx(TestResultLine, { result: testResult })] }), _jsx("p", { className: "mt-6 rounded-md border border-border bg-muted/40 p-2.5 text-[11px] leading-relaxed text-muted-foreground", children: "To change the URL, headers, or description, delete this entry and add a new server. Edits in place aren't supported yet." })] }) }));
++                                            : "Shared with the active organization. Best for vetted team connections." })] }) }), _jsx(Field, { label: "URL", children: _jsx("code", { className: "rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground break-all", children: server.url }) }), headers.length > 0 && (_jsx(Field, { label: "Headers", children: _jsx("ul", { className: "space-y-1", children: headers.map((k) => (_jsxs("li", { className: "flex items-center gap-2 text-[11px] text-muted-foreground", children: [_jsx("code", { className: "rounded bg-muted px-1.5 py-0.5 text-foreground", children: k }), _jsx("span", { className: "italic", children: "(hidden)" })] }, k))) }) })), _jsx(Field, { label: "Tools", children: _jsx(ToolsSummary, { server: server }) })] }), _jsxs("div", { className: "mt-5 flex items-center gap-2", children: [_jsxs("button", { type: "button", onClick: runTest, disabled: testing, className: cn("inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-accent", testing && "opacity-60"), children: [testing ? (_jsx(IconLoader2, { className: "h-3 w-3 animate-spin" })) : (_jsx(IconTestPipe, { className: "h-3 w-3" })), "Test connection"] }), testResult && _jsx(TestResultLine, { result: testResult })] }), server.authMode === "oauth" && !oauthAvailability.available && (_jsx("p", { role: "status", className: "mt-4 text-xs text-muted-foreground", children: oauthAvailability.reason })), _jsx("p", { className: "mt-6 rounded-md border border-border bg-muted/40 p-2.5 text-[11px] leading-relaxed text-muted-foreground", children: "To change the URL, headers, or description, delete this entry and add a new server. Edits in place aren't supported yet." })] }) }));
+ }
+ function Field({ label, children, }) {
+     return (_jsxs("div", { children: [_jsx("dt", { className: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", children: label }), _jsx("dd", { children: children })] }));
+diff --git a/dist/client/agent-page/AutomationScheduleDialog.js b/dist/client/agent-page/AutomationScheduleDialog.js
+index cb5aed786bbcaed8f9516934de78e06bbe165786..0293e4c19895d0aa6775a98987b3e2c9cddc1fa8 100644
+--- a/dist/client/agent-page/AutomationScheduleDialog.js
++++ b/dist/client/agent-page/AutomationScheduleDialog.js
+@@ -140,7 +140,9 @@ export function AutomationScheduleDialog({ open, name, schedule, timezone, savin
+                                         ? "every day at midnight"
+                                         : draft.preset === "daily-noon"
+                                             ? "every day at noon"
+-                                            : "at " + formatAutomationTime(draft.time),
++                                            : draft.preset === "custom" && draft.unit === "hour"
++                                                ? `every ${draft.interval === 1 ? "hour" : `${draft.interval} hours`} at minute ${customMinute}`
++                                                : "at " + formatAutomationTime(draft.time),
+                             }) })) : null, _jsxs("div", { children: [_jsx("label", { className: "text-xs font-medium text-foreground", htmlFor: "automation-timezone", children: t("jobs.timezone", { defaultValue: "Timezone" }) }), _jsx("div", { className: "mt-1", children: _jsx(TimezoneSelect, { id: "automation-timezone", value: zone, disabled: saving, onChange: setZone, suggested: [browserTimezone()] }) })] }), _jsxs("details", { className: "group rounded-lg border border-border/70 bg-muted/20", open: advanced, onToggle: (event) => {
+                                 const next = event.currentTarget.open;
+                                 if (next && !advanced && friendly.schedule) {
+diff --git a/dist/cli/claude-code-participant.d.ts b/dist/cli/claude-code-participant.d.ts
+--- a/dist/cli/claude-code-participant.d.ts
++++ b/dist/cli/claude-code-participant.d.ts
+@@ -46,6 +46,7 @@
+     session?: ClaudeCodeParticipantSession;
+     /** Either the fixed CLI name or an absolute executable path for packaged apps. */
+     command?: string;
++    argsPrefix?: string[];
+     signal?: AbortSignal;
+     env?: NodeJS.ProcessEnv;
+     maxEvents?: number;
+@@ -70,6 +71,7 @@
+     constructor(rawMessage: string);
+ }
+ export interface ClaudeCodeSubscriptionStatusOptions {
++    argsPrefix?: string[];
+     command?: string;
+     env?: NodeJS.ProcessEnv;
+     execute?: typeof execFile;
+diff --git a/dist/cli/claude-code-participant.js b/dist/cli/claude-code-participant.js
+--- a/dist/cli/claude-code-participant.js
++++ b/dist/cli/claude-code-participant.js
+@@ -1,5 +1,6 @@
+ import { execFile as execFileCallback, spawn } from "node:child_process";
+ import { isAbsolute } from "node:path";
++import { redactText } from "../audit/redact.js";
+ import { StringDecoder } from "node:string_decoder";
+ import { promisify } from "node:util";
+ const execFile = promisify(execFileCallback);
+@@ -57,7 +58,7 @@
+ export async function readClaudeCodeSubscriptionStatus(options = {}) {
+     const execute = options.execute ?? execFile;
+     try {
+-        const { stdout } = await execute(resolveCommand(options.command, "claude"), ["auth", "status", "--json"], {
++        const { stdout } = await execute(resolveCommand(options.command, "claude"), [...(options.argsPrefix ?? []), "auth", "status", "--json"], {
+             encoding: "utf8",
+             maxBuffer: 128 * 1024,
+             env: safeEnvironment(options.env ?? process.env),
+@@ -89,14 +90,14 @@
+     const command = resolveCommand(options.command, "claude");
+     const subscription = await (options.preflight
+         ? options.preflight({ command, env })
+-        : readClaudeCodeSubscriptionStatus({ command, env }));
++        : readClaudeCodeSubscriptionStatus({ command, env, argsPrefix: options.argsPrefix }));
+     assertClaudeCodeSubscription(subscription);
+     if (options.signal?.aborted)
+         throw createAbortError();
+     const args = buildClaudeCodeParticipantArgs(options);
+     const spawnProcess = options.spawnProcess ??
+         ((command, commandArgs, spawnOptions) => spawn(command, commandArgs, spawnOptions));
+-    const child = spawnProcess(command, args, {
++    const child = spawnProcess(command, [...(options.argsPrefix ?? []), ...args], {
+         cwd: options.cwd,
+         env,
+         shell: false,
+@@ -328,7 +329,11 @@
+     }
+ }
+ function safeEnvironment(input) {
+-    return Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => typeof input[key] === "string" ? [[key, input[key]]] : []));
++    const env = Object.fromEntries(SAFE_ENVIRONMENT_KEYS.flatMap((key) => typeof input[key] === "string" ? [[key, input[key]]] : []));
++    // Windows Node needs SystemRoot for its crypto provider. Environment names are case-insensitive.
++    const systemRoot = Object.entries(input).find(([name, value]) => name.toUpperCase() === "SYSTEMROOT" && typeof value === "string");
++    if (systemRoot) env.SystemRoot = systemRoot[1];
++    return env;
+ }
+ function validateInput(options) {
+     if (!readString(options.prompt))
+@@ -373,7 +378,7 @@
+     return safe;
+ }
+ function summarizeStderr(value) {
+-    return sanitizeStderr(value)
++    return sanitizeStderr(redactText(value))
+         .replace(/\s+/g, " ")
+         .trim()
+         .slice(0, MAX_ERROR_MESSAGE_LENGTH);
+diff --git a/dist/cli/code-agent-executor.d.ts b/dist/cli/code-agent-executor.d.ts
+--- a/dist/cli/code-agent-executor.d.ts
++++ b/dist/cli/code-agent-executor.d.ts
+@@ -19,6 +19,12 @@
+         permissionMode: "normal" | "read-only" | "yolo";
+         onRequest: (request: import("./codex-app-server-executor.js").CodexAppServerRequest) => Promise<Record<string, unknown>>;
+         onRequestResolved?: (requestId: string) => void;
++    };
++    /** Resolved Claude launcher for packaged and host-managed installations. */
++    claudeCli?: {
++        command: string;
++        argsPrefix?: string[];
++        env?: NodeJS.ProcessEnv;
+     };
+     reasoningEffort?: ReasoningEffort;
+     attachments?: AgentPromptAttachment[];
+diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
+--- a/dist/cli/code-agent-executor.js
++++ b/dist/cli/code-agent-executor.js
+@@ -1,4 +1,5 @@
+ import { spawn } from "node:child_process";
++import { redactText } from "../audit/redact.js";
+ import { runCodexAppServer } from "./codex-app-server-executor.js";
+ import fs from "node:fs";
+ import os from "node:os";
+@@ -122,6 +123,7 @@
+     if (requestedEngine === CLAUDE_CLI_ENGINE_NAME) {
+         return executeClaudeCliRun({
+             run: existing,
++            claudeCli: options.claudeCli,
+             prompt: executionPrompt,
+             model: options.model ?? metadataString(existing, "model"),
+             reasoningEffort: options.reasoningEffort ?? metadataReasoningEffort(existing),
+@@ -509,6 +511,7 @@
+     });
+     try {
+         const result = await runClaudeCodeParticipant({
++            ...options.claudeCli,
+             // Claude's driver uses acceptEdits, which is the closest available
+             // mapping for auto-edit and full-auto. Keep ask-before-edit on the
+             // read-only watchdog path because this non-interactive runner has no
+@@ -540,6 +543,15 @@
+                         });
+                     }
+                 }
++                if (event.type === "rate_limit_event" && event.rate_limit_info?.status === "rejected") {
++                    throw new Error("Claude Code rejected this turn because its usage limit was reached.");
++                }
++                if (event.type === "result" && (event.is_error === true ||
++                    typeof event.subtype === "string" && event.subtype.startsWith("error"))) {
++                    const errors = Array.isArray(event.errors)
++                        ? event.errors.filter(value => typeof value === "string" && value.trim()).join("\n") : "";
++                    throw new Error(errors || (typeof event.result === "string" && event.result.trim()) || "Claude Code returned an error.");
++                }
+                 const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames);
+                 if (!text)
+                     return;
+@@ -589,6 +601,7 @@
+                 attachments: pendingFollowUp.attachments ??
+                     userPromptAttachmentsForEvent(options.run.id, pendingFollowUp.eventId),
+                 appendUserEvent: false,
++                claudeCli: options.claudeCli,
+                 stdout: options.stdout,
+                 streamToolOutputToStdout: options.streamToolOutputToStdout,
+                 signal: options.signal,
+@@ -625,8 +638,8 @@
+     }
+     catch (error) {
+         const interrupted = options.signal?.aborted === true;
+-        const message = error instanceof Error ? error.message : String(error);
+-        const executionError = error instanceof ClaudeCodeAuthStatusError ? error.rawMessage : message;
++        const message = redactText(error instanceof Error ? error.message : String(error)).slice(0, 700);
++        const executionError = error instanceof ClaudeCodeAuthStatusError ? redactText(error.rawMessage).slice(0, 700) : message;
+         const summary = interrupted
+             ? "Claude Code run paused."
+             : `Claude Code run failed: ${message}`;
+@@ -1270,10 +1283,11 @@
+         },
+         onNotification: (method, params) => appendCodexAppServerTranscriptEvent(options.run.id, method, params),
+     });
++    const error = typeof result.error === "string" ? redactText(result.error).slice(0, 700) : undefined;
+     const status = result.status === "completed" ? "completed" : result.status === "interrupted" ? "paused" : "errored";
+     const phase = status === "completed" ? "complete" : status === "paused" ? "paused" : "error";
+     appendCodeAgentTranscriptEvent({ runId: options.run.id, kind: "status",
+-        message: status === "completed" ? "Codex completed the turn." : status === "paused" ? "Codex stopped." : result.error ?? "Codex could not finish the turn.",
++        message: status === "completed" ? "Codex completed the turn." : status === "paused" ? "Codex stopped." : error ?? "Codex could not finish the turn.",
+         metadata: { status, phase, engine: CODEX_CLI_ENGINE_NAME, source: "codex-app-server" },
+     });
+     return updateCodeAgentRunRecord(options.run.id, {
+@@ -1283,6 +1297,6 @@
+             percent: status === "completed" ? 100 : 0 },
+         metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? "codex-default",
+             codexTurnId: result.turnId, codexPermissionMode: native.permissionMode,
+-            executionError: result.error, executionCompletedAt: new Date().toISOString() },
++            executionError: error, executionCompletedAt: new Date().toISOString() },
+     });
+ }
+diff --git a/dist/cli/codex-app-server-executor.js b/dist/cli/codex-app-server-executor.js
+--- a/dist/cli/codex-app-server-executor.js
++++ b/dist/cli/codex-app-server-executor.js
+@@ -5,6 +5,7 @@
+ const REQUEST_TIMEOUT_MS = 15_000;
+ const INTERRUPT_TIMEOUT_MS = 3_000;
+ const MAX_LINE_BYTES = 8 * 1024 * 1024;
++const MAX_STDERR_CHARS = 4096;
+ const MAX_TRACKED_THREADS = 128;
+ const MAX_CACHED_ITEMS = 256;
+ const MAX_CACHED_ITEM_CHARS = 2 * 1024 * 1024;
+@@ -65,6 +66,7 @@
+     let completed = false;
+     let buffer = "";
+     let stderr = "";
++    let stderrWithheld = false;
+     let sequence = 0;
+     let threadId;
+     let effectiveModel;
+@@ -397,7 +399,16 @@
+         } catch (error) { fail(error); }
+     });
+     child.stderr.setEncoding("utf8");
+-    child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-4096); });
++    child.stderr.on("data", chunk => {
++        if (stderrWithheld) return;
++        if (stderr.length + chunk.length > MAX_STDERR_CHARS) {
++            // A truncated credential cannot be recognized by the downstream redactor.
++            stderr = "";
++            stderrWithheld = true;
++            return;
++        }
++        stderr += chunk;
++    });
+     child.stdin.on("error", error => { if (!stopping) fail(error); });
+     child.once("error", fail);
+     child.once("close", () => {
+@@ -405,7 +416,9 @@
+         resolveClose();
+         if (!completed) {
+             try { if (buffer.trim()) receive(buffer); } catch (error) { fail(error); }
+-            if (!completed) fail(new Error(stderr.trim() || "Codex disconnected before the turn finished."));
++            if (!completed) fail(new Error(stderrWithheld
++                ? "Codex disconnected. Oversized diagnostic output was withheld."
++                : stderr.trim() || "Codex disconnected before the turn finished."));
+         }
+     });
+     options.signal?.addEventListener("abort", abort, { once: true });
+diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
+--- a/dist/cli/code-agent-executor.js
++++ b/dist/cli/code-agent-executor.js
+@@ -1295,7 +1295,7 @@
+         progress: { label: status === "completed" ? "Complete" : status === "paused" ? "Stopped" : "Error",
+             completed: status === "completed" ? 1 : 0, total: 1, failed: status === "errored" ? 1 : 0,
+             percent: status === "completed" ? 100 : 0 },
+-        metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? "codex-default",
++        metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? options.run.metadata?.model,
+             codexTurnId: result.turnId, codexPermissionMode: native.permissionMode,
+             executionError: error, executionCompletedAt: new Date().toISOString() },
+     });
+diff --git a/dist/cli/claude-code-participant.js b/dist/cli/claude-code-participant.js
+--- a/dist/cli/claude-code-participant.js
++++ b/dist/cli/claude-code-participant.js
+@@ -246,16 +246,17 @@
+             }
+         });
+         child.stderr.on("data", (chunk) => {
++            if (stderrTruncated)
++                return;
+             const encoded = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+-            const remaining = Math.max(0, maxStderrBytes - stderrBytes);
+-            if (remaining === 0) {
++            if (stderrBytes + encoded.length > maxStderrBytes) {
++                // A truncated credential cannot be recognized by the downstream redactor.
++                stderr = "";
+                 stderrTruncated = true;
+                 return;
+             }
+-            stderr += stderrDecoder.write(encoded.subarray(0, remaining));
+-            stderrBytes += Math.min(encoded.length, remaining);
+-            if (encoded.length > remaining)
+-                stderrTruncated = true;
++            stderr += stderrDecoder.write(encoded);
++            stderrBytes += encoded.length;
+         });
+         child.once("error", finishError);
+         child.once("close", (exitCode, exitSignal) => {
+@@ -263,7 +264,8 @@
+                 return;
+             try {
+                 pending += decoder.end();
+-                stderr += stderrDecoder.end();
++                if (!stderrTruncated)
++                    stderr += stderrDecoder.end();
+                 if (pending.trim()) {
+                     consumeJsonLine(pending, events, maxEvents, options.onEvent);
+                 }
+@@ -276,7 +278,10 @@
+                 return;
+             }
+             if (exitCode !== 0) {
+-                finishError(new Error(`Claude Code exited with ${exitSignal ?? exitCode ?? "unknown"}${stderr ? `: ${summarizeStderr(stderr)}` : ""}`));
++                const exitStatus = exitSignal ?? exitCode ?? "unknown";
++                finishError(new Error(stderrTruncated
++                    ? `Claude Code exited with ${exitStatus}. Oversized diagnostic output was withheld.`
++                    : `Claude Code exited with ${exitStatus}${stderr ? `: ${summarizeStderr(stderr)}` : ""}`));
+                 return;
+             }
+             settled = true;
+diff --git a/dist/client/onboarding/FirstRunOnboarding.js b/dist/client/onboarding/FirstRunOnboarding.js
+--- a/dist/client/onboarding/FirstRunOnboarding.js
++++ b/dist/client/onboarding/FirstRunOnboarding.js
+@@ -330,7 +330,9 @@
+     }
+     // Without Builder offers, the choice screen is the key form.
+     if (screen === "manual" || screen === "choice") {
+-        return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-xl flex-col gap-4", children: [_jsxs("div", { children: [_jsx("button", { type: "button", className: "mb-4 text-xs text-muted-foreground hover:text-foreground", onClick: () => setScreen("choice"), children: "Back" }), _jsx("h1", { className: "text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Your keys" })] }), _jsxs("div", { className: "rounded-xl bg-muted/35 p-4", children: [_jsx(CapabilityList, { capabilities: profile.capabilities }), _jsxs("div", { className: "mt-5 flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between", children: [_jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => setScreen("choice"), children: "Back" }), _jsxs("button", { type: "button", className: primaryButtonClass, onClick: handleOpenSettings, children: ["Open key settings", _jsx(IconArrowRight, { size: 15 })] }), _jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => {
++        // Back from the key form would render this form again, so local mode returns to the intro.
++        const backScreen = builderOffersEnabled() ? "choice" : "intro";
++        return (_jsx(OnboardingShell, { profile: profile, screen: "choice", onDismiss: dismissOnboarding, ...completionErrorProps, children: _jsxs("div", { className: "mx-auto flex w-full max-w-xl flex-col gap-4", children: [_jsxs("div", { children: [_jsx("button", { type: "button", className: "mb-4 text-xs text-muted-foreground hover:text-foreground", onClick: () => setScreen(backScreen), children: "Back" }), _jsx("h1", { className: "text-xl font-semibold tracking-[-0.04em] sm:text-2xl", children: "Your keys" })] }), _jsxs("div", { className: "rounded-xl bg-muted/35 p-4", children: [_jsx(CapabilityList, { capabilities: profile.capabilities }), _jsxs("div", { className: "mt-5 flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between", children: [_jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => setScreen(backScreen), children: "Back" }), _jsxs("button", { type: "button", className: primaryButtonClass, onClick: handleOpenSettings, children: ["Open key settings", _jsx(IconArrowRight, { size: 15 })] }), _jsx("button", { type: "button", className: secondaryButtonClass, onClick: () => {
+                                             trackFirstRunStepCompleted("manual");
+                                             setScreen(skipIntegrations ? "role" : "tools");
+                                         }, children: skipIntegrations ? "Continue" : "Continue to tools" })] })] })] }) }));
+diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+--- a/dist/agent/production-agent.js
++++ b/dist/agent/production-agent.js
+@@ -1030,6 +1030,45 @@
+         msg.includes("inactivity timeout") ||
+         msg.includes("too much time has passed without sending any data"));
+ }
++/**
++ * Whether a failed model call was refused before the model ran, so the
++ * provider charged nothing for it: a rate limit, an overload, or a context
++ * overflow. The caller also requires that the call produced no model output.
++ */
++function isRefusedBeforeGeneration(err) {
++    if (!(err instanceof Error))
++        return false;
++    if (isContextTooLongError(err))
++        return true;
++    const statusCode = err instanceof EngineError ? err.statusCode : undefined;
++    if (statusCode === 429 || statusCode === 529)
++        return true;
++    const msg = err.message.toLowerCase();
++    return (/\b(?:429|529)\b/.test(msg) ||
++        msg.includes("rate limit") ||
++        msg.includes("rate_limit") ||
++        msg.includes("too many requests") ||
++        msg.includes("overloaded") ||
++        msg.includes("resource_exhausted"));
++}
++/**
++ * Whether a stream event shows that the model produced output, so its call may
++ * have been charged. A keepalive, empty content, and a usage report with no
++ * tokens and no cost do not. An engine can send the last two before a refusal.
++ */
++function isModelOutputEvent(event) {
++    switch (event.type) {
++        case "stop":
++        case "gateway-heartbeat":
++            return false;
++        case "assistant-content":
++            return event.parts.length > 0;
++        case "usage":
++            return (event.inputTokens ?? 0) > 0 || (event.outputTokens ?? 0) > 0 || (event.costUsd ?? 0) > 0;
++        default:
++            return true;
++    }
++}
+ // ---------------------------------------------------------------------------
+ // Context-window overflow recovery
+ // ---------------------------------------------------------------------------
+@@ -3368,9 +3407,11 @@
+ }
+ /**
+  * Usage for one agent turn, summed over its model calls and internal
+- * continuations. `startCall` counts each model call the agent loop starts. A
+- * retry replaces the failed attempt it retries, so it adds no call. `add` sums
+- * the usage each call reports and counts the calls whose usage holds a cost.
++ * continuations. `startCall` counts each model call the agent loop starts,
++ * retries included, because a failed attempt may already have been charged.
++ * `refuseCall` settles an attempt the provider refused before the model ran,
++ * which costs nothing. `add` sums the usage each call reports and counts the
++ * calls whose usage holds a cost.
+  * The provider's reported cost is the turn's cost only when every counted call
+  * reported one. A call cut off by Stop, a dropped connection, or an in-stream
+  * error reports no cost, and so does a stream that ends with no usage chunk.
+@@ -3381,6 +3422,9 @@
+     const requestPriced = Boolean(ANTHROPIC_API_MODELS[model]);
+     let pricedCalls = 0;
+     let estimatedCost = 0;
++    // Whether the current attempt already counts as reported or priced.
++    let attemptReported = false;
++    let attemptPriced = false;
+     const turn = {
+         inputTokens: 0,
+         outputTokens: 0,
+@@ -3390,9 +3434,21 @@
+         startedCalls: 0,
+         reportedCalls: 0,
+         reportedCostUsd: 0,
+-        startCall(call) {
+-            if (!call?.retry)
+-                turn.startedCalls += 1;
++        startCall() {
++            turn.startedCalls += 1;
++            attemptReported = false;
++            attemptPriced = false;
++        },
++        refuseCall() {
++            // A known $0 call. A usage report it already sent counts once.
++            if (!attemptReported) {
++                turn.reportedCalls += 1;
++                attemptReported = true;
++            }
++            if (requestPriced && !attemptPriced) {
++                pricedCalls += 1;
++                attemptPriced = true;
++            }
+         },
+         add(usage) {
+             turn.inputTokens += usage.inputTokens;
+@@ -3403,12 +3459,13 @@
+             if (requestPriced) {
+                 const cost = usage.costUsd !== undefined ? (usage.costUsd > 0 ? Math.max(1, Math.round(usage.costUsd * 10_000)) : 0)
+                     : estimateUsageCost(usage, { perRequest: true });
+-                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; }
++                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; attemptPriced = true; }
+             }
+             if (usage.costUsd === undefined)
+                 return;
+             turn.reportedCalls += 1;
+             turn.reportedCostUsd += usage.costUsd;
++            attemptReported = true;
+         },
+         usageRecord() {
+             const record = {
+@@ -3710,6 +3767,7 @@
+         }
+         for (let retry = 0;; retry++) {
+             const attemptStartedAt = Date.now();
++            let attemptProducedOutput = false;
+             assistantContent = undefined;
+             streamedAssistantText = "";
+             streamedAssistantToolCalls.length = 0;
+@@ -3729,7 +3787,7 @@
+                     providerOptions: opts.providerOptions,
+                 };
+                 usage.llmCalls = (usage.llmCalls ?? 0) + 1;
+-                opts.onModelCall?.({ retry: retry > 0 });
++                opts.onModelCall?.();
+                 const eventStream = engine.stream(streamOpts);
+                 let thinkingBuffer = "";
+                 const toolInputNames = new Map();
+@@ -3932,6 +3990,8 @@
+                             break;
+                         }
+                         const event = nextEvent.value;
++                        if (isModelOutputEvent(event))
++                            attemptProducedOutput = true;
+                         if (hasNoProgressStalled()) {
+                             checkpointNoProgress();
+                             break;
+@@ -4103,6 +4163,9 @@
+             catch (err) {
+                 if (signal.aborted)
+                     throw err;
++                // Every other failed call keeps an unknown cost, so the turn's total is incomplete.
++                if (!attemptProducedOutput && isRefusedBeforeGeneration(err))
++                    opts.onModelCallRefused?.();
+                 if (isContextTooLongError(err)) {
+                     // ── One-shot recovery: trim old tool results and retry once ────────
+                     // Only attempt recovery on the first overflow (retry === 0) to avoid
+@@ -8437,6 +8500,7 @@
+                 signal,
+                 onUsage: turnUsage.add,
+                 onModelCall: turnUsage.startCall,
++                onModelCallRefused: turnUsage.refuseCall,
+                 ownerEmail,
+                 orgId: getRequestOrgId() ?? null,
+                 attachments: requestAttachments,
+diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
+--- a/dist/agent/production-agent.d.ts
++++ b/dist/agent/production-agent.d.ts
+@@ -847,7 +847,8 @@
+ } | null;
+ /**
+  * Usage for one agent turn. Pass `startCall` as the agent loop's
+- * `onModelCall` and `add` as its `onUsage`. `usageRecord` returns the fields
++ * `onModelCall`, `refuseCall` as its `onModelCallRefused`, and `add` as
++ * its `onUsage`. `usageRecord` returns the fields
+  * `recordUsage` stores.
+  */
+ export interface TurnUsage {
+@@ -859,9 +860,8 @@
+     startedCalls: number;
+     reportedCalls: number;
+     reportedCostUsd: number;
+-    startCall(call?: {
+-        retry: boolean;
+-    }): void;
++    startCall(): void;
++    refuseCall(): void;
+     add(usage: AgentLoopUsage): void;
+     usageRecord(): {
+         inputTokens: number;
+@@ -892,13 +892,13 @@
+     signal: AbortSignal;
+     /** Observe usage as each model response reports it, including aborted loops. */
+     onUsage?: (usage: AgentLoopUsage) => void;
++    /** Observe each model call as it starts, retries included. */
++    onModelCall?: () => void;
+     /**
+-     * Observe each model call as it starts. `retry` is true when the call
+-     * retries a failed attempt, which it replaces.
++     * Observe a failed call the provider refused before the model produced
++     * output: a rate limit, an overload, or a context overflow.
+      */
+-    onModelCall?: (call: {
+-        retry: boolean;
+-    }) => void;
++    onModelCallRefused?: () => void;
+     /** Observe the attempt's typed terminal state separately from chat events. */
+     onOutcome?: (outcome: AgentLoopOutcome) => void;
+     ownerEmail?: string | null;
+diff --git a/dist/integrations/webhook-handler.js b/dist/integrations/webhook-handler.js
+--- a/dist/integrations/webhook-handler.js
++++ b/dist/integrations/webhook-handler.js
+@@ -985,6 +985,7 @@
+                             reasoningEffort: normalizeReasoningEffortForRequest(target.model, undefined),
+                             onUsage: turnUsage.add,
+                             onModelCall: turnUsage.startCall,
++                            onModelCallRefused: turnUsage.refuseCall,
+                         }, undefined, {
+                             useHostedDefault: true,
+                             backgroundFunction: isInBackgroundFunctionRuntime(),
+diff --git a/dist/usage/store.js b/dist/usage/store.js
+--- a/dist/usage/store.js
++++ b/dist/usage/store.js
+@@ -441,7 +441,7 @@
+     let inserted = false;
+     for (let attempt = 0; attempt < 16; attempt++) {
+         const result = await client.execute(insert);
+-        if (result.rowsAffected === 1) {
++        if (result.rowsAffected === 1 || await isOwnUsageRow(client, insert.args)) {
+             inserted = true;
+             break;
+         }
+@@ -463,6 +463,24 @@
+         console.error("[usage-alerts] could not enqueue evaluation:", error);
+     });
+ }
++// The token_usage columns after id, in the order recordUsage inserts them.
++const USAGE_ROW_COLUMNS = ["owner_email", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
++    "cost_cents_x100", "cost_source", "model", "label", "app", "ref_id", "org_id", "run_id", "thread_id", "task_id",
++    "integration_scope_id", "source_platform", "source_id", "created_at"];
++/**
++ * Whether the row at the insert's ID is this call's own committed write. A
++ * database client resends a statement whose reply it lost, and that resend
++ * finds the row already there. Every stored value must match, so another
++ * worker's record at the same ID still counts as a collision.
++ */
++async function isOwnUsageRow(client, args) {
++    const { rows } = await client.execute({
++        sql: `SELECT ${USAGE_ROW_COLUMNS.join(", ")} FROM token_usage WHERE id = ?`,
++        args: [args[0]],
++    });
++    const row = rows[0];
++    return Boolean(row) && USAGE_ROW_COLUMNS.every((column, index) => String(row[column] ?? null) === String(args[index + 1] ?? null));
++}
+ /** Total cost (in cents) charged against a user, across all time. */
+ export async function getUserUsageCents(ownerEmail) {
+     await ensureUsageTable();

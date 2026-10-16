@@ -53,11 +53,17 @@ await mkdir(projectRoot);
 await mkdir(bin);
 await mkdir(scanner, { recursive: true });
 await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
-process.stdout.write('{"loggedIn":true}');
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
 // The runtime lookup adds `.exe` while the platform reads as Windows.
 await copyFile(path.join(bin, "claude"), path.join(bin, "claude.exe"));
+await writeFile(path.join(bin, "codex"), "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o755 });
+await copyFile(path.join(bin, "codex"), path.join(bin, "codex.exe"));
 // A run whose prompt asks for it exits after it receives its run, like a worker that died on its own.
 await writeFile(path.join(fixture, ".output", "server", "vivary-code-worker.mjs"), `
 import { writeFileSync } from "node:fs";

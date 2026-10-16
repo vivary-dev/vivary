@@ -11,6 +11,126 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude launcher and provider errors
+
+The optional `claudeCli` executor options preserve the resolved executable,
+launcher prefix, and filtered environment through authentication, execution,
+and queued follow-ups. Windows SystemRoot survives case variants so Node can
+initialize crypto. The existing credential allowlist remains in place.
+
+Claude uses its ordinary text-input protocol. Vivary does not request account
+usage controls or attach a funding admission callback. Rejected rate-limit
+events and error result envelopes become errored turns with provider details.
+The registered redactor runs before Claude error normalization and truncation,
+then the existing Native transcript owner retains the safe details. Worker setup errors
+cross IPC as bounded, redacted messages. No provider failure selects another
+runtime, model, or API route. Offline worker fixtures cover new and resumed
+execution. The Codex app-server reads its current account and provider
+configuration before starting a thread. API-key sign-in and custom providers
+refuse without a turn or fallback. This check does not read funding controls.
+Live provider and packaged Windows checks remain separate.
+
+## Native API Claude catalog
+
+Issue #38. The maintained Core patch updates direct Anthropic and AI-SDK Anthropic
+model metadata to Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1. The direct default
+is `claude-sonnet-5-5`. Existing older IDs stay listed, saved Settings and composer
+choices remain selected, and no conversation model is migrated. To upgrade an
+existing choice, select the exact new model intentionally. Builder and OpenRouter
+keep their separate model IDs and defaults. The optional AI-SDK Anthropic adapter
+remains hidden by Workbench. The pinned dependency graph includes its SDK. Catalog metadata does not establish account availability.
+
+Rendered acceptance also found that `list-agent-engines` returned Anthropic with
+the global Builder model when no engine was configured. Its no-entry fallback now
+uses the reported engine's registered default, keeping `chosen: false`. A fresh
+Custom keys form therefore starts with `claude-sonnet-5-5`. Stored/app model
+candidates and custom model normalization remain unchanged. The offline action
+fixture checks the fresh result and saved legacy/custom choices with a disposable
+SQLite store and no outbound transport. Explicit provider selection continues to
+use that provider's catalog default.
+
+`agent/model-config.js` owns exact IDs, 1M context and 128K output limits, and direct
+API rate metadata. The definitions were verified on 2026-10-13 against official
+[Sonnet](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
+[Haiku](https://platform.claude.com/docs/en/models/haiku-5-5/overview),
+[Opus](https://platform.claude.com/docs/en/models/opus-5-5/overview),
+[Fable](https://platform.claude.com/docs/en/models/fable-5-1/overview), and
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing) documentation.
+Rates below are USD per million tokens for standard global inference.
+
+| Direct model | Input | Output | Cache read | 5m write | 1h write |
+|---|---:|---:|---:|---:|---:|
+| `claude-sonnet-5-5` | 2 | 10 | 0.10 | 2.50 | 4 |
+| `claude-haiku-5-5`, prompt through 100K | 0.10 | 0.50 | 0.01 | 0.125 | 0.20 |
+| `claude-haiku-5-5`, prompt above 100K | 0.50 | 2.50 | 0.05 | 0.625 | 1 |
+| `claude-opus-5-5` | 4 | 20 | 0.20 | 5 | 8 |
+| `claude-fable-5-1` | 10 | 50 | 0.25 | 12.50 | 20 |
+
+`usage/store.js` estimates these rates only with an actual `anthropic` or
+`ai-sdk:anthropic` engine identity. A routed ID or an unknown engine does not inherit
+the direct rate. Haiku's tier uses each request's entire prompt, including cached
+tokens. `createTurnUsage` sums request estimates before aggregation. Cache writes
+need their observed 1-hour subset, emitted by the direct engine from SDK usage.
+An aggregate with no Haiku request lengths, a write with no duration breakdown,
+or a call with no route evidence remains unknown. Provider-reported cost wins,
+including zero. Integration budgets retain their existing reservation fallback for
+unknown costs. Traces omit an unverified generation estimate and retain their
+existing zero placeholder for an unknown run estimate. Historical estimates for
+these model IDs remain unchanged. Batch, fast mode, regional routing, server-tool
+fees, negotiated prices, and subscriptions are not established by this table.
+
+The installed SDK 0.93.0 accepts string model IDs and adaptive thinking. Native's
+reasoning helpers recognize exact new Opus and Haiku IDs and omit withdrawn
+sampling parameters. The engine validates explicit thinking options before
+transport. Haiku accepts disabled thinking through high effort. Sonnet's
+`between_tools` setting accepts low through high on the direct engine. The pinned
+AI SDK lacks this mode, so its hidden adapter refuses it locally. Manual budgets are refused for
+these new models, and Opus/Fable cannot disable thinking. Saved settings are not
+rewritten. See the official [effort guide](https://platform.claude.com/docs/en/build-with-claude/effort)
+and [migration guides](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
+Native retains signed thinking blocks. Fake transport can check replay shape,
+but it cannot establish the provider's signature checks when earlier history,
+system instructions, tools, model, or account changes.
+
+Focused checks use `native-anthropic-models.test.ts`, its intercepted-transport
+fixture, `native-usage-cost.test.ts`, and `chat-model-groups.test.mjs`. They exercise
+the actual installed model owners and SDK without contacting a provider. API
+catalog metadata does not change the selected provider route. API prices do not establish account entitlement.
+Both installed SDK adapters are checked through intercepted transport. Live API
+acceptance remains unrun.
+
+## Native action JSON values
+
+Offline Windows acceptance found that a Native `vivary-project-evaluate` Decide
+call with numeric `turns_used: 0` and `actions_used: 0` reached the adapter with
+strings. Core's discovery discarded the action's Standard Schema. The agent
+loop then validated its advertised JSON schema with coercion enabled. A JSON
+record's first union branch accepts strings, so valid numbers, booleans and nulls
+could change before the action's strict validator ran. This affected other
+record-valued actions and manually declared JSON-schema tools too.
+
+The maintained patch retains the declared schema through static, filesystem,
+and development action discovery. The action's wrapped validator remains the
+validation owner. For manually declared JSON-schema tools, Native first checks
+the original input without coercion. Already valid JSON keeps its types. Only
+an input that fails that check enters the existing coercing compatibility path.
+Malformed inputs still fail, and authorization still runs after validation.
+
+The patch changes `dist/server/action-discovery.js`,
+`dist/server/agent-chat-plugin.js`, and `dist/agent/production-agent.js`.
+`tests/native-action-schema.test.ts` invokes Native's actual agent loop with an
+injected deterministic engine. It checks both static export forms, JSON scalars,
+nested records and arrays, raw-schema compatibility and rejection, numeric Decide
+budgets, and actor, evidence, owner-only and foreign-path refusals before a runner.
+The maintained Native test command includes this regression. The existing
+project-evaluate tests cover the broader governed adapter contract.
+
+The frozen Windows acceptance package remains unchanged. Acceptance of a new
+package is a separate gate. The original review/control tool contract belongs
+to [issue #20](https://github.com/vivary-dev/Vivary-New/issues/20).
+Remove these hunks when a pinned upstream Core release preserves action schemas
+through discovery and passes the JSON-value regressions without this patch.
+
 ## Claude provider session continuity
 
 Issue [#10](https://github.com/vivary-dev/vivary/issues/10) connects the pinned
@@ -148,6 +268,52 @@ not establish a browser redirect journey or packaged Windows acceptance.
 Remove these OAuth hunks when a pinned Native release supplies trusted managed
 issuers and refuses unbound revocation while preserving local unlink and revision
 custody, and the installed-owner regressions pass without the patch.
+
+## Desktop outgoing OAuth availability
+
+The desktop app cannot complete Native's browser sign-in journey under its
+current callback and navigation controls. Workbench supplies an outgoing OAuth
+availability policy from the listener-owned desktop request identity. Core
+checks that policy before interactive OAuth discovery or registration and
+returns `mcp_oauth_interactive_unavailable`. The connection list carries the
+same availability and reason. Custom, catalog and first-run OAuth Connect
+controls show that reason and do not start sign-in. Other launches retain their
+existing OAuth flow. Browser headers and user-agent text cannot establish this
+desktop identity.
+
+Saved OAuth Test stays available. An unexpired bearer or a successful bound
+server-to-server refresh can still connect. The desktop saved-connection action
+retries that grant through the existing POST reconnect route. Only when token
+resolution returns no usable token do Test and retry return
+`mcp_oauth_reauthorization_unavailable`, without an anonymous connection attempt
+or an extra refresh. The saved connection is retained. Non-OAuth Test, retry and
+tool calls keep their existing owners. Manager initialization and background
+credential work remain unchanged, so refusal of a new interactive request is
+not a promise that no earlier startup request occurred.
+
+This treatment does not loosen issuer binding, incoming MCP refusal, desktop
+capabilities, callback authentication, cookies, origin checks or navigation.
+It does not claim to implement desktop OAuth setup or browser reauthorization.
+The existing built loopback OAuth fixture supplies an explicit HTTP origin and
+manually delivers callback cookies. Its passing result does not prove the
+desktop browser journey.
+
+`mcp-oauth-desktop.test.mjs` exercises the installed handlers, the Workbench
+policy, synthetic encrypted grants and intercepted transport. It covers refusal
+before new setup requests, saved grants, one refresh, unavailable authorization
+and non-OAuth controls. `mcp-oauth-desktop-components.test.mjs` renders the actual
+Native components with presentation and query fixtures. It checks custom,
+catalog, first-run, saved retry and saved Test controls. Existing issuer and
+desktop capability tests remain required. These checks make no account or
+provider calls and do not replace packaged Windows acceptance.
+
+## Custom hourly schedule summary
+
+The Custom schedule preview now includes its hourly interval and minute. An
+interval of 2 at minute 15 reads "Runs every 2 hours at minute 15." and still
+generates `15 */2 * * *`. The installed-component regression checks singular and
+plural intervals and compares the preview with Native's existing cron generator.
+Cron storage, execution and timezone handling are unchanged.
 
 ## Email BCC delivery
 
@@ -504,6 +670,17 @@ an upstream Toolkit release names the button and passes the same test.
 
 ## Native usage cost
 
+`usage/store.js` also retries numeric primary-key collisions across concurrent
+writers. Its insert ignores only an occupied `id`, tries up to 16 consecutive
+candidates, and rejects exhaustion. When an insert affects no row, the store first
+reads the row at that ID. A row whose every stored value matches the record is
+this call's own committed write, which a database client resends after a lost
+reply, so the store records nothing more. Other database failures propagate. Existing
+usage rows, costs, and the schema stay intact. Alert evaluation runs only after
+the new row is inserted. `tests/native-usage-cost.test.ts` forces two independent
+writers to collide, replays a committed insert as a lost reply, and covers
+exhaustion without replacing stored records.
+
 Issue #103. Core priced every Native turn from its own table. A model the table
 did not know matched a catch-all entry and was priced at Sonnet's $3 input and
 $15 output per million tokens. In the packaged run for #50,
@@ -521,10 +698,12 @@ The patch changes these files:
   declares the field.
 - `agent/production-agent.js` passes `costUsd` from the agent loop to
   `onUsage`, and the loop calls the new `onModelCall` as each model call
-  starts, with `retry` set when the call retries a failed attempt. The new
-  `createTurnUsage` sums a turn's usage over its model calls and internal
-  continuations. A retry replaces the attempt it retries, so a rate-limited
-  attempt adds no call. The turn records the sum as a reported cost, in
+  starts, retries included. When an attempt fails before the model produced
+  output and the provider refused it (a rate limit, an overload, or a context
+  overflow), the loop also calls `onModelCallRefused`. A usage report with no
+  tokens and no cost does not count as output. The new `createTurnUsage` sums
+  a turn's usage over its model calls and internal continuations, and settles
+  a refused attempt as a known $0 call. The turn records the sum as a reported cost, in
   centicents rounded as `calculateCost` rounds, only when every call it counts
   reported a cost. Otherwise the turn passes no cost and the store decides.
 - `usage/store.js` gives Sonnet ids their own price entry and removes the
@@ -585,9 +764,9 @@ These limits remain:
   off by Stop, by a dropped connection, or by an in-stream provider error
   after text reports none, and so does a call whose stream ends with no usage
   chunk. The table prices that turn, or it shows as Unknown.
-- A retry replaces the attempt it retries. OpenRouter can bill output that an
-  attempt streamed before it failed, and a turn whose retry reports a cost
-  leaves that output out.
+- A retried attempt that was not refused has an unknown cost, because
+  OpenRouter can bill output that an attempt streamed before it failed. Its
+  turn shows Unknown even when the retry reports a cost.
 - An integration run of an unpriced model whose provider reports no cost,
   such as a model reached through a provider other than OpenRouter, fills a
   budget cap at the $5 reservation per run, however little it cost.
@@ -1255,7 +1434,8 @@ With the switch off:
   and authentication rows, and hides Browser Automation and Background Agent,
   which hold only that card. The LLM summary reads "Add your own provider
   keys." Voice settings drop the Builder Gemini option and the Builder wording.
-- First-run onboarding goes from the intro to the key form.
+- First-run onboarding goes from the intro to the key form, and both Back
+  controls on that form return to the intro.
 - The code-access panel drops its "Use Builder" link. The code-required
   dialog drops its Builder.io agent and connect options and keeps Desktop.
 - The remaining Builder wording goes too: the `FeatureNotConfiguredError`
@@ -3068,3 +3248,28 @@ Listing and component controls cover unavailable legacy rows and current Inspect
 positives. These successor controls are source-checked and await controller
 runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
 preceding bytes.
+
+## Command menu return focus
+
+The maintained Native command menu is a controlled Radix dialog without a
+registered trigger. `client/command-menu-focus.js` captures the current focused
+opener before dialog autofocus and restores it after close only if it is still
+connected, the route is unchanged, and another control has not taken focus.
+`CommandMenu.js` owns the dialog callback wiring. Existing keyboard opening and
+menu navigation remain unchanged. The focused tests exercise the installed focus
+owner with DOM elements. They do not establish real-dialog or Windows acceptance.
+
+## Resource editor preservation and height
+
+Toolkit's `SharedRichEditor` rejects updates whose transaction did not change the
+document before reading or emitting saved content. Its editability effect also
+uses TipTap's supported no-update option. This prevents mount and editability
+events from sending a normalized snapshot into a host's autosave callback.
+Real document edits keep the existing reconciliation and collaboration guards.
+Core's Settings resource section gives `ResourcesPanel` a definite responsive
+height in its otherwise normal document flow. Existing editor flex sizing,
+internal scrolling, and the outer Settings scroll remain responsible for layout.
+The resource schema and one-second autosave contract are unchanged. Code remains
+the source editor for syntax outside the Visual schema. Focused installed-component
+checks cover non-content updates, real edits, view switching, and height ownership.
+They do not establish Markdown display fidelity or native pixel acceptance.
