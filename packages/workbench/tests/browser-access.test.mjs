@@ -572,3 +572,46 @@ test('each isolated preview refusal reaches the remote page as its own text', as
   } finally { gateway.close(); installPreviewGateway(undefined); }
 });
 
+
+test('open refusals that arrive while target or grant admission is pending stay readable and release the grant', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const { isActionContractError } = await import('@agent-native/core/action');
+  const { createPreviewGateway, installPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const { runWithBrowserIdentity } = await import('../server/browser-request-context.mjs');
+  const { default: action } = await import('../actions/vivary-remote-preview.ts');
+  const readable = pattern => error => isActionContractError(error) && error.statusCode < 500 && pattern.test(error.message);
+  const ended = /^Preview access ended\. Open the preview again\.$/;
+  // Each case changes host state while one awaited step of Open is still pending.
+  const cases = [
+    ['listener drops during target lookup', 'target', state => { state.bound = false; }, unboundPreview],
+    ['listener drops during grant admission', 'grant', state => { state.bound = false; }, unboundPreview],
+    ['settings turn preview off during grant admission', 'grant', state => { state.settings.preview = null; }, ended],
+    ['launch ends during grant admission', 'grant', state => { state.target.abort(); }, ended],
+  ];
+  for (const [name, step, change, expected] of cases) {
+    const state = { bound: true, target: new AbortController(), controllers: [], released: 0,
+      settings: { enabled: true, origin: 'https://fixture.test', preview: { origin: 'https://fixture.test:9443', port: 42301 } } };
+    const pending = Promise.withResolvers();
+    const gateway = createPreviewGateway({ access: {
+      configuration: () => state.settings,
+      async admitPreviewGrant(_id, controller) {
+        state.controllers.push(controller);
+        if (step === 'grant') { change(state); await pending.promise; }
+        return { release() { state.released++; } };
+      },
+    }, resolveTarget: async () => {
+      if (step === 'target') { change(state); await pending.promise; }
+      return { generation: 'one', initialPath: '/', signal: state.target.signal, check: async () => {} };
+    }, listening: () => state.bound });
+    installPreviewGateway(gateway);
+    try {
+      const opening = runWithBrowserIdentity({ kind: 'remote', deviceId: 'device' },
+        () => action.run({ operation: 'open', documentId: randomUUID(), projectId: 'alpha', launchId: randomUUID() }, {}));
+      setTimeout(pending.resolve, 10);
+      await assert.rejects(opening, readable(expected), name);
+      assert.equal(state.controllers.length, 1, name);
+      assert.equal(state.released, 1, name);
+      assert.equal(state.controllers[0].signal.aborted, true, name);
+    } finally { gateway.close(); installPreviewGateway(undefined); }
+  }
+});

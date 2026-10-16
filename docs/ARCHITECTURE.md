@@ -437,7 +437,14 @@ existing wording, which names no credential or path. Gateway rules, ticket
 issue and proxying are unchanged, so the remote preview description holds.
 Evidence: a new test in `tests/browser-access.test.mjs` runs each refusal
 through the `vivary-remote-preview` action and checks the error type, status
-and text.
+and text. PR #231 review found that Open could still end with a plain error when
+the listener dropped, settings changed or the launch ended while the target
+lookup or grant admission was pending. Those late Open checks now use `fail()`
+with status 409, giving the listener message when the listener is the cause and
+"Preview access ended. Open the preview again." otherwise. Request liveness on
+the gateway keeps its plain errors, because those requests answer with the
+gateway's own refusal text. A further test drops the listener or the settings
+during each pending step and checks the readable error and the released grant.
 
 2026-10-16 Isolated preview listener state. If the preview origin's loopback
 listener failed to bind, the failure was kept only as a desktop settings message.
