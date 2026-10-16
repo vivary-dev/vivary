@@ -536,3 +536,39 @@ test('open preview access ends when its listener goes down', async () => {
     assert.equal(released, 1);
   } finally { gateway.close(); }
 });
+
+test('each isolated preview refusal reaches the remote page as its own text', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const { isActionContractError } = await import('@agent-native/core/action');
+  const { createPreviewGateway, installPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const { runWithBrowserIdentity } = await import('../server/browser-request-context.mjs');
+  const { default: action } = await import('../actions/vivary-remote-preview.ts');
+  // The action route echoes only contract errors below 500. Anything else reaches the phone as "Internal server error".
+  const readable = message => error => isActionContractError(error) && error.statusCode < 500 && error.message === message;
+  const settings = { enabled: true, origin: 'https://fixture.test', preview: { origin: 'https://fixture.test:9443', port: 42301 } };
+  let admit = true;
+  const gateway = createPreviewGateway({ access: {
+    configuration: () => settings,
+    async admitPreviewGrant() { return admit ? { release() {} } : null; },
+  }, resolveTarget: async () => ({ generation: 'one', initialPath: '/', signal: new AbortController().signal, check: async () => {} }) });
+  const input = (documentId = randomUUID(), launchId = randomUUID()) => ({ operation: 'open', documentId, projectId: 'alpha', launchId });
+  const remote = value => runWithBrowserIdentity({ kind: 'remote', deviceId: 'device' }, () => action.run(value, {}));
+  try {
+    installPreviewGateway(undefined);
+    await assert.rejects(remote(input()), readable('Remote previews are not configured on this host.'));
+    installPreviewGateway(gateway);
+    await assert.rejects(action.run(input(), {}), readable('Use the paired browser to open an isolated preview.'));
+    settings.preview = null;
+    await assert.rejects(remote(input()), readable('Enable the separate preview origin in desktop Browser access settings.'));
+    settings.preview = { origin: 'https://fixture.test:9443', port: 42301 };
+    admit = false;
+    await assert.rejects(remote(input()), readable('Browser access ended.'));
+    admit = true;
+    const documentId = randomUUID();
+    await remote(input(documentId));
+    await assert.rejects(remote(input(documentId)), readable('Save your work and refresh Vivary before opening a different preview.'));
+    for (let index = 1; index < 128; index++) await remote(input());
+    await assert.rejects(remote(input()), readable('Too many preview documents. Restart browser access from the desktop.'));
+  } finally { gateway.close(); installPreviewGateway(undefined); }
+});
+

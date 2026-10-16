@@ -7737,6 +7737,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Isolated preview refusal text. The remaining Open refusals in
+`server/preview-ingress.mjs` (no gateway installed, a caller that is not the
+paired browser, the preview origin turned off, too many preview documents, a
+different launch in the same app document, and a device grant that ended) were
+plain errors. The action route turned each into "Internal server error" on the
+paired browser. They now use `fail()` with status 403 or 409 and keep their
+existing wording, which names no credential or path. Gateway rules, ticket
+issue and proxying are unchanged, so the remote preview description holds.
+Evidence: a new test in `tests/browser-access.test.mjs` runs each refusal
+through the `vivary-remote-preview` action and checks the error type, status
+and text.
+
 2026-10-16 Isolated preview listener state. If the preview origin's loopback
 listener failed to bind, the failure was kept only as a desktop settings message.
 Open still checked only the saved configuration, issued a ticket and sent the
