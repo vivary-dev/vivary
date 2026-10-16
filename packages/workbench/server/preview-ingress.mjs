@@ -4,6 +4,7 @@ import { Agent, request as httpRequest } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
+import { fail } from '@agent-native/core/action';
 import { currentBrowserIdentity } from './browser-request-context.mjs';
 import { ownedProjectPreview } from './project-preview.ts';
 
@@ -19,7 +20,9 @@ export function remotePreviewCommand(input, context) {
   if (identity?.kind !== 'remote') throw new Error('Use the paired browser to open an isolated preview.');
   return installed.command(remotePreviewInput.parse(input), context, identity.deviceId);
 }
-export function createPreviewGateway({ access, resolveTarget = ownedProjectPreview, now = Date.now }) {
+// `listening` reports whether the preview origin's loopback listener is bound right now.
+// Saved settings alone cannot tell, because a port conflict leaves them unchanged.
+export function createPreviewGateway({ access, resolveTarget = ownedProjectPreview, now = Date.now, listening = () => true }) {
   const documents = new Map(), tickets = new Map(), leases = new Map();
   let closed = false;
   let queue = Promise.resolve();
@@ -39,7 +42,7 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
   }
   async function live(record) {
     if (closed || record.controller.signal.aborted || !config().enabled || config().preview?.origin !== record.origin
-      || now() >= record.expiresAt) throw new Error('Preview access ended.');
+      || now() >= record.expiresAt || !listening()) throw new Error('Preview access ended.');
     await record.target.check();
     if (record.controller.signal.aborted) throw new Error('Preview access ended.');
   }
@@ -48,6 +51,9 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
     const previous = documents.get(key);
     if (input.operation === 'close') { if (previous) retire(previous); return { closed: true }; }
     if (closed || !config().enabled || !config().preview) throw new Error('Enable the separate preview origin in desktop Browser access settings.');
+    // Refuse before any ticket. Otherwise the remote frame loads a bootstrap URL that nothing answers.
+    if (!listening()) fail('Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.',
+      { statusCode: 409, errorCode: 'vivary_preview_listener_unavailable' });
     if (documents.size >= 128 && !previous) throw new Error('Too many preview documents. Restart browser access from the desktop.');
     const target = await resolveTarget(context, input.projectId, input.launchId);
     const binding = `${input.projectId}:${input.launchId}:${target.generation}`;

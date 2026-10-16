@@ -317,6 +317,9 @@ app credentials and upstream cookies, blocks workers and upgrades, and forwards
 only to the established socket verified as belonging to the selected registered
 project launch. Existing process identities, launch ownership and shutdown remain
 the owners. Unknown ownership fails closed, including on unsupported platforms.
+Opening a remote preview checks that the dedicated listener is bound at that
+moment, not only that settings name a port. While it is not, Open issues no ticket
+and returns a readable refusal that the paired browser shows in place of the frame.
 
 One app document is locked to one project, launch and host generation because
 removing an iframe does not reset its credentialless storage partition. Opening a
@@ -423,6 +426,23 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-16 Isolated preview listener state. If the preview origin's loopback
+listener failed to bind, the failure was kept only as a desktop settings message.
+Open still checked only the saved configuration, issued a ticket and sent the
+paired browser to a bootstrap URL that nothing answered, which showed as an empty
+white frame. `createBrowserListener` in `server/browser-ingress.mjs` now reports
+whether its own server is listening and forgets a server that later errors or
+closes. `createPreviewGateway` in `server/preview-ingress.mjs` refuses Open
+through `fail()` before resolving the target or admitting a grant while that
+listener is down, and also ends open preview access then. A bare error would
+reach the browser only as "Internal server error", because the action route
+echoes contract errors alone. `RemoteProjectPreview` already shows an Open
+error as an alert and renders no frame. The remote preview paragraph in Data and
+trust boundaries now states this check. Evidence: four new tests in
+`tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
+closed listener, a later server error or close, the action error type, and the
+rendered refusal.
 
 2026-10-16 Workbench build gate. The production build runs `agent-native
 doctor`, which refuses environment reads outside its deploy allowlist. The

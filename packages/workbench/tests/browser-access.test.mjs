@@ -369,3 +369,148 @@ test('preview disable during pending admission releases the granted admission', 
     assert.equal(released, 1);
   } finally { gateway.close(); }
 });
+
+const unboundPreview = /Isolated preview is unavailable because its listener on this host could not start or has stopped\./;
+function countingPreviewGateway(createPreviewGateway, listening) {
+  const counts = { targets: 0, grants: 0 };
+  const gateway = createPreviewGateway({ access: {
+    configuration: () => ({ enabled: true, origin: 'https://fixture.test', preview: { origin: 'https://fixture.test:9443', port: 42301 } }),
+    async admitPreviewGrant() { counts.grants++; return { release() {} }; },
+  }, resolveTarget: async () => { counts.targets++; return { generation: 'one', initialPath: '/', signal: new AbortController().signal, check: async () => {} }; },
+  listening });
+  return { gateway, counts };
+}
+
+test('remote preview open refuses with a readable message before any ticket when its listener is not listening', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const { isActionContractError } = await import('@agent-native/core/action');
+  const { createPreviewGateway, installPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const { runWithBrowserIdentity } = await import('../server/browser-request-context.mjs');
+  const { default: action } = await import('../actions/vivary-remote-preview.ts');
+  let bound = false;
+  const { gateway, counts } = countingPreviewGateway(createPreviewGateway, () => bound);
+  installPreviewGateway(gateway);
+  const open = () => runWithBrowserIdentity({ kind: 'remote', deviceId: 'device' },
+    () => action.run({ operation: 'open', documentId: randomUUID(), projectId: 'alpha', launchId: randomUUID() }, {}));
+  try {
+    // The action route echoes only contract errors with a client status, so the phone sees this text.
+    await assert.rejects(open(), error => isActionContractError(error) && error.statusCode < 500 && unboundPreview.test(error.message));
+    assert.deepEqual(counts, { targets: 0, grants: 0 });
+    bound = true;
+    const opened = await open();
+    assert.match(opened.ticket, /^[\w-]{43}$/); assert.deepEqual(counts, { targets: 1, grants: 1 });
+    bound = false;
+    await assert.rejects(open(), unboundPreview);
+    assert.deepEqual(counts, { targets: 1, grants: 1 });
+  } finally { gateway.close(); installPreviewGateway(undefined); }
+});
+
+test('preview open follows the real listener: bind failure refuses, a bound listener opens, a closed listener refuses', async () => {
+  const { createServer } = await import('node:net');
+  const { once } = await import('node:events');
+  const { randomUUID } = await import('node:crypto');
+  const { createPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const blocker = createServer(); blocker.listen(0, '127.0.0.1'); await once(blocker, 'listening');
+  const { port } = blocker.address();
+  const listener = createBrowserListener({ access: { configuration: () => ({ enabled: true, port }) }, fetch: () => new Response('') });
+  const { gateway, counts } = countingPreviewGateway(createPreviewGateway, () => listener.listening());
+  const open = () => gateway.command({ operation: 'open', documentId: randomUUID(), projectId: 'alpha', launchId: randomUUID() }, {}, 'device');
+  try {
+    await listener.reconcile();
+    assert.equal(listener.listening(), false); assert.ok(listener.error());
+    await assert.rejects(open(), unboundPreview);
+    assert.deepEqual(counts, { targets: 0, grants: 0 });
+    blocker.close(); await once(blocker, 'close');
+    await listener.reconcile();
+    assert.equal(listener.listening(), true); assert.equal(listener.error(), null);
+    assert.match((await open()).ticket, /^[\w-]{43}$/);
+    await listener.close();
+    assert.equal(listener.listening(), false);
+    await assert.rejects(open(), unboundPreview);
+    assert.deepEqual(counts, { targets: 1, grants: 1 });
+  } finally { gateway.close(); await listener.close(); if (blocker.listening) blocker.close(); }
+});
+
+test('listener stops reporting itself listening after its server errors or closes', async () => {
+  const { EventEmitter } = await import('node:events');
+  const servers = [];
+  const createHttpServer = () => {
+    const server = new EventEmitter(); server.listening = false; server.closeAllConnections = () => undefined;
+    server.close = callback => { server.listening = false; callback?.(); };
+    server.listen = (_port, _host, callback) => { server.listening = true; callback(); };
+    servers.push(server); return server;
+  };
+  const listener = createBrowserListener({ access: { configuration: () => ({ enabled: true, port: 42301 }) }, fetch: () => new Response(''), createHttpServer });
+  try {
+    await listener.reconcile(); assert.equal(listener.listening(), true);
+    servers[0].emit('error', new Error('socket failure'));
+    assert.equal(listener.listening(), false); assert.ok(listener.error());
+    await listener.reconcile(); assert.equal(servers.length, 2); assert.equal(listener.listening(), true); assert.equal(listener.error(), null);
+    servers[1].listening = false; servers[1].emit('close');
+    assert.equal(listener.listening(), false); assert.ok(listener.error());
+  } finally { await listener.close(); }
+});
+
+test('remote preview shows an open refusal as text and renders no frame', async () => {
+  const { createRequire } = await import('node:module');
+  const { build, stop } = await import('esbuild');
+  const { realpathSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const workbench = fileURLToPath(new URL('..', import.meta.url));
+  const { parseHTML } = createRequire(realpathSync(path.join(workbench, 'node_modules/@agent-native/core/package.json')))('linkedom');
+  const { window } = parseHTML('<html><body></body></html>');
+  Object.defineProperty(Object.getPrototypeOf(window.document.createElement('iframe')), 'credentialless', { configurable: true, value: false });
+  const bundleDirectory = await mkdtemp(path.join(tmpdir(), 'vivary-remote-preview-component-'));
+  const saved = new Map();
+  // React's scheduler opens MessageChannels here. Closing them lets the test process exit.
+  const channels = [];
+  class TrackedMessageChannel extends MessageChannel {
+    constructor() { super(); channels.push(this); }
+  }
+  for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator,
+    HTMLElement: window.HTMLElement, MessageChannel: TrackedMessageChannel, IS_REACT_ACT_ENVIRONMENT: true })) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  // Stub only the transport and refresh helpers. The component's own open flow runs unchanged.
+  const stubs = { name: 'remote-preview-stubs', setup(stage) {
+    stage.onResolve({ filter: /^@\/lib\/(native-actions|workbench-preview)$/ }, args => ({ path: args.path, namespace: 'stub' }));
+    stage.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({ loader: 'js', contents: args.path.endsWith('native-actions')
+      ? 'export function useNativeActionCaller(){return {ready:true,call:(...args)=>globalThis.previewCall(...args)};}'
+      : 'export async function refreshPreviewDocument(){return true;}' }));
+  } };
+  try {
+    const result = await build({ stdin: { contents: `
+      import { act } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { RemoteProjectPreview } from './app/components/workbench/RemoteProjectPreview';
+      export async function run(assert, refusal) {
+        const launch={code:'ready',launchId:'22222222-2222-4222-8222-222222222222',staleBinding:false};
+        let reply=()=>Promise.reject(new Error(refusal));
+        globalThis.previewCall=(_name,input)=>input.operation==='close'?Promise.resolve({closed:true}):reply();
+        document.body.innerHTML='<div id="root"></div>';
+        const root=createRoot(document.getElementById('root'));
+        await act(async()=>root.render(<RemoteProjectPreview projectId="alpha" launch={launch} onOpen={()=>undefined}/>));
+        const click=async()=>{const button=document.querySelector('button[aria-label="Open isolated preview"],button[aria-label="Refresh preview"]');assert.ok(button);await act(async()=>button.click());};
+        await click();
+        assert.equal(document.querySelector('[role="alert"]')?.textContent,refusal);
+        assert.equal(document.querySelector('iframe'),null);
+        reply=()=>Promise.resolve({ticket:'t'.repeat(43),origin:'https://fixture.test:9443',generation:'one'});
+        await click();
+        assert.equal(document.querySelector('[role="alert"]'),null);
+        assert.equal(document.querySelector('iframe')?.getAttribute('src'),'https://fixture.test:9443/_vivary/preview/bootstrap');
+        await act(async()=>root.unmount());
+      }`, resolveDir: workbench, loader: 'tsx' }, bundle: true, write: false, plugins: [stubs],
+      platform: 'node', format: 'esm', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' } });
+    const bundlePath = path.join(bundleDirectory, 'proof.mjs');
+    await writeFile(bundlePath, result.outputFiles[0].text);
+    const proof = await import(bundlePath);
+    await proof.run(assert, 'Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.');
+  } finally {
+    for (const channel of channels) { channel.port1.close(); channel.port2.close(); }
+    await rm(bundleDirectory, { recursive: true, force: true });
+    delete globalThis.previewCall;
+    for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
+    stop();
+  }
+});
