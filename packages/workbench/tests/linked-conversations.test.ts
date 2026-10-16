@@ -492,9 +492,20 @@ process.send({type:"vivary:code-worker:ready"});
   });
   await t.test("a real metadata write failure starts nothing, preserves source custody and permits Retry", async () => {
     const before = JSON.stringify(getCodeAgentRunRecord(source.id));
+    const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");
+    const count = async () => ({ runs: listCodeAgentRunRecords("vivary-local-code").length,
+      threads: Number((await db.execute("SELECT COUNT(*) AS n FROM chat_threads")).rows[0].n),
+      drafts: Number((await db.execute("SELECT COUNT(*) AS n FROM application_state WHERE key LIKE 'vivary-chat-draft-v1:%'")).rows[0].n) });
+    const records = await count();
     await db.execute("CREATE TRIGGER fail_link_write BEFORE INSERT ON vivary_conversation_links BEGIN SELECT RAISE(ABORT, 'selected metadata fault'); END");
-    try { await assert.rejects(create({ engine: "codex-cli", model: "fixture-model" }), /selected metadata fault/); }
-    finally { await db.execute("DROP TRIGGER fail_link_write"); }
+    try {
+      // Each failed attempt, including repeated Retry, leaves no unreachable target run, thread or draft.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(create({ engine: "codex-cli", model: "fixture-model" }), /selected metadata fault/);
+        await assert.rejects(create({ engine: "native" }), /selected metadata fault/);
+      }
+    } finally { await db.execute("DROP TRIGGER fail_link_write"); }
+    assert.deepEqual(await count(), records);
     assert.equal(JSON.stringify(getCodeAgentRunRecord(source.id)), before);
     assert.deepEqual(await readChatDraft(draftIdentity, "vivary-code:project:project-a:source"), originalDraft);
     const retry = await create({ engine: "codex-cli", model: "fixture-model" });

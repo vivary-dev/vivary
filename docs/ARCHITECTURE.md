@@ -141,7 +141,12 @@ in the same authorized project. Claude Code and Codex can link to each other or 
 Native chat. Native can link to either configured Code harness. Selection saves
 the source draft through its current owner, then creates a paused Code record or
 an empty Native thread and its cleared draft. It submits no prompt, requests no
-worker, consumes no approval and transfers no provider session. A failed link
+worker, consumes no approval and transfers no provider session. The target's
+cleared draft is written only after the link metadata row exists. If that row or
+a later creation step fails, the service removes the new Code record or Native
+thread (and the row, when written), so Retry leaves no hidden target behind.
+Core has no Code run removal, so the service deletes the record file in
+`codeAgentRunsDir`. A failed link
 keeps the source selected and offers Retry. The host execution guard is unchanged.
 
 `linked-conversations.ts` uses Native records and the existing Workbench database
