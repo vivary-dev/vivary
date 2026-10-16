@@ -75,6 +75,15 @@ test("linked conversations use Native records and immutable authorized completed
     assert.deepEqual(await service.sourceAvailable(actor, project.projectId, { kind: "native", id: "not-saved" }), { available: false });
     assert.equal(await service.load(actor, project.projectId, { kind: "native", id: "not-saved" }), null);
   });
+  await t.test("an unlinked conversation shows no linked-history notice while its project folder is unavailable", async () => {
+    // The history dependency refuses, as resolveVivaryCodeProjectHistory does for a project with no connected folder.
+    revoked = true;
+    try {
+      assert.equal(await service.load(actor, project.projectId, { kind: "native", id: "never-linked" }), null);
+      // The owner is still verified first, so an unverified caller learns nothing.
+      await assert.rejects(service.load({ ...actor, appId: "foreign-app" }, project.projectId, { kind: "native", id: "never-linked" }));
+    } finally { revoked = false; }
+  });
   await t.test("Code-to-Code selection is inactive with no prompt, session transfer or pending-source mutation", async () => {
     codeTarget = await create({ engine: "codex-cli", model: "fixture-model" });
     const saved = getCodeAgentRunRecord(codeTarget.target.id)!;

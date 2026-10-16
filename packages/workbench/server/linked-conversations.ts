@@ -85,11 +85,15 @@ const isSourceFault = (error: unknown) => error instanceof LinkedSourceChanged
 
 /** Existing Native record owners plus a metadata row, never a copied transcript. */
 export function createLinkedConversationService(dependencies: Dependencies = defaults) {
-  async function scope(ctx: ActionRunContext | undefined, projectId: string | null): Promise<Scope> {
+  async function verifiedOwner(ctx: ActionRunContext | undefined) {
     const owner = ctx?.userEmail?.trim().toLowerCase(), orgId = ctx?.orgId;
     if (!owner || !orgId || !["vivary", "workbench"].includes(ctx?.appId ?? "")
       || !["http", "frontend"].includes(ctx?.caller ?? "") || !await dependencies.member(orgId, owner))
       fail("The conversation owner could not be verified.", { statusCode: 403 });
+    return { owner, orgId };
+  }
+  async function scope(ctx: ActionRunContext | undefined, projectId: string | null): Promise<Scope> {
+    const { owner, orgId } = await verifiedOwner(ctx);
     let personal: Promise<VivaryCodeWorkspace | undefined> | undefined;
     return { owner, orgId, projectId, history: await dependencies.history(ctx, projectId ?? undefined),
       // An unconfigured or unavailable personal workspace owns no Code history.
@@ -172,12 +176,15 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   }
 
   async function load(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference, cursor?: string): Promise<LinkedHistoryPage | null> {
-    const identity = await scope(ctx, projectId);
+    // An unlinked conversation needs only a verified owner. Project history, which an unavailable folder refuses,
+    // is resolved only for a conversation that has a link row.
+    await verifiedOwner(ctx);
     const rows = await linkRows(target.kind, target.id);
     if (!rows.length) {
       if (target.kind === "code" && getCodeAgentRunRecord(target.id)?.metadata?.linkedHistoryId) unavailable();
       return null;
     }
+    const identity = await scope(ctx, projectId);
     const currentTarget = await record(target, identity);
     const parsed = linkSchema.safeParse(JSON.parse(String(rows[0].record_json)));
     if (!parsed.success) unavailable();
