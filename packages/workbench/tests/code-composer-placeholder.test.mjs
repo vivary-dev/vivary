@@ -6,7 +6,7 @@ import test from "node:test";
 const source = await readFile(new URL("../app/components/workspace/CodeConversation.tsx", import.meta.url), "utf8");
 const expression = source.match(/composerDisabledPlaceholder=\{([^\n]+)\}/)?.[1];
 assert.ok(expression, "the Code composer exposes its disabled reason");
-const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", `return (${expression});`);
+const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", "otherModelAvailable", `return (${expression});`);
 const props = { viewingMatch: false, state: {}, selection: {}, workspaceAvailable: true };
 
 test("review regression: unavailable models explain the refusal without claiming an active run", () => {
@@ -15,9 +15,21 @@ test("review regression: unavailable models explain the refusal without claiming
     [{ support: "upgrade-required", minimumVersion: "2.1.296" }, /Update Claude Code.*2\.1\.296.*choose another model/i],
     [{ support: "unverified", minimumVersion: "2.1.296" }, /Verify.*version.*choose another model/i],
   ]) {
-    const message = evaluate(props, true, false, model);
+    const message = evaluate(props, true, false, model, true);
     assert.match(message, expected);
     assert.doesNotMatch(message, /agent is working|Stop it/i);
+  }
+});
+
+test("review regression: without another usable model the refusal does not offer one", () => {
+  for (const [model, expected] of [
+    [undefined, /selected model is unavailable.*Check Runtime settings/i],
+    [{ support: "upgrade-required", minimumVersion: "2.1.296" }, /Update Claude Code.*2\.1\.296/i],
+    [{ support: "unverified", minimumVersion: "2.1.296" }, /Verify.*version/i],
+  ]) {
+    const message = evaluate(props, true, false, model, false);
+    assert.match(message, expected);
+    assert.doesNotMatch(message, /another model/i);
   }
 });
 

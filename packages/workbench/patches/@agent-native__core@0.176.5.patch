@@ -17859,3 +17859,40 @@ diff --git a/dist/integrations/webhook-handler.js b/dist/integrations/webhook-ha
                          }, undefined, {
                              useHostedDefault: true,
                              backgroundFunction: isInBackgroundFunctionRuntime(),
+diff --git a/dist/usage/store.js b/dist/usage/store.js
+--- a/dist/usage/store.js
++++ b/dist/usage/store.js
+@@ -441,7 +441,7 @@
+     let inserted = false;
+     for (let attempt = 0; attempt < 16; attempt++) {
+         const result = await client.execute(insert);
+-        if (result.rowsAffected === 1) {
++        if (result.rowsAffected === 1 || await isOwnUsageRow(client, insert.args)) {
+             inserted = true;
+             break;
+         }
+@@ -463,6 +463,24 @@
+         console.error("[usage-alerts] could not enqueue evaluation:", error);
+     });
+ }
++// The token_usage columns after id, in the order recordUsage inserts them.
++const USAGE_ROW_COLUMNS = ["owner_email", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
++    "cost_cents_x100", "cost_source", "model", "label", "app", "ref_id", "org_id", "run_id", "thread_id", "task_id",
++    "integration_scope_id", "source_platform", "source_id", "created_at"];
++/**
++ * Whether the row at the insert's ID is this call's own committed write. A
++ * database client resends a statement whose reply it lost, and that resend
++ * finds the row already there. Every stored value must match, so another
++ * worker's record at the same ID still counts as a collision.
++ */
++async function isOwnUsageRow(client, args) {
++    const { rows } = await client.execute({
++        sql: `SELECT ${USAGE_ROW_COLUMNS.join(", ")} FROM token_usage WHERE id = ?`,
++        args: [args[0]],
++    });
++    const row = rows[0];
++    return Boolean(row) && USAGE_ROW_COLUMNS.every((column, index) => String(row[column] ?? null) === String(args[index + 1] ?? null));
++}
+ /** Total cost (in cents) charged against a user, across all time. */
+ export async function getUserUsageCents(ownerEmail) {
+     await ensureUsageTable();

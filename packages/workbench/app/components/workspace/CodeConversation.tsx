@@ -583,6 +583,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
     && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
+  // Advice to choose another model needs a listed choice that a configured runtime can send.
+  const otherModelAvailable = availableModels.some(engine => engine.configured && engine.models.some(model =>
+    !(engine.engine === choice.engine && model === choice.model)
+    && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
@@ -623,7 +627,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later, or choose another model.` : selectedClaudeModel?.support === "unverified" ? "Verify the installed Claude Code version in Settings, or choose another model." : "The selected model is unavailable. Choose another model." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);

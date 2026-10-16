@@ -428,6 +428,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Review follow-up for usage writes, Code model advice, and Native
+startup. A usage insert that finds its ID taken now reads that row and treats an
+exact match of every stored value as its own committed write. A database client
+resends a statement whose reply it lost, and the resend previously recorded the
+call a second time. A different record at the same ID still moves to the next
+candidate. The Code composer offers "choose another model" only when a
+configured runtime lists another choice it can send. Otherwise it points to the
+version check or Runtime settings. The explicit-selection paragraph above now
+states that Vivary's startup reopens the saved conversation at any age, which is
+the release journey's requirement and unchanged behavior. A component control
+mounts `NativeConversation` with a thirteen-hour-old saved conversation and
+checks that it reaches Core as the URL selection with Core's restore off. The
+route-selection tests now run the real model resolver, and a refusal of an
+unretained historical Claude ID was added. The usage store, the Usage tab, and
+the Code worker boundaries are otherwise unchanged, so the design description
+holds.
+
 2026-10-16 Native retry cost review. A failed model attempt that the agent loop
 retries now counts as a call in the turn's usage, so a turn whose first attempt
 streamed output and then dropped no longer records the retry's reported cost as
@@ -633,9 +650,13 @@ and packaged Windows acceptance remain separate gates.
 Explicit Native history selection. The maintained Core tab initialization and
 active-tab inclusion retain the conversation named by the URL even when its last
 activity is older than twelve hours. This applies to both project and Unassigned
-history on first mount and after changing scope. Ordinary startup without an
-explicit selection still replaces a stale restored tab with a fresh chat. The
-existing scoped thread lookup and message restoration remain the owners of
+history on first mount and after changing scope. Vivary's ordinary startup
+reopens the saved conversation at any age, as the release journey's "return
+tomorrow, reopen the same session" requires. `NativeConversation` writes the
+saved selection into the URL before Core mounts and keeps Core's own tab restore
+off, so Core treats it as the explicit selection. Core still replaces a stale
+restored tab with a fresh chat on a surface that restores its active tab without
+a URL selection, which Vivary does not mount. The existing scoped thread lookup and message restoration remain the owners of
 access and content, so the conversation storage and project boundaries above
 still hold. The real Core component regressions exercise both scopes, route and
 active-ID retention, saved messages, scope changes and the no-selection controls

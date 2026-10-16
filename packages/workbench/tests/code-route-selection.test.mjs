@@ -3,13 +3,23 @@ import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
 import test from "node:test";
 import { transform } from "esbuild";
-import { claudeCodeModelChoices } from "../shared/claude-models.ts";
+import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS, claudeCodeModelChoices }
+  from "../shared/claude-models.ts";
 
 const source = await readFile(new URL("../server/local-code-agent.ts", import.meta.url), "utf8");
 const start = source.indexOf("export async function sendVivaryCodeMessage(");
 const end = source.indexOf("\nexport type VivaryCodeSessionDetails", start);
 assert.ok(start >= 0 && end > start);
 const { code } = await transform(source.slice(start, end).replace("export ", ""), { loader: "ts" });
+// The real resolver, so retained-ID and alias admission run instead of an accept-all stub.
+const resolverStart = source.indexOf("export function resolveVivaryCodeModel(");
+const resolverEnd = source.indexOf("\nfunction titleFromMessage", resolverStart);
+assert.ok(resolverStart >= 0 && resolverEnd > resolverStart);
+const resolver = await transform(source.slice(resolverStart, resolverEnd).replace("export ", ""), { loader: "ts" });
+const fail = (message, options) => { throw Object.assign(new Error(message), options); };
+const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
+  ["VIVARY_CODE_DEFAULT_MODEL", "VIVARY_CODE_MODELS", "CLAUDE_CODE_LEGACY_ALIASES", "fail"])(
+  CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_MODELS.map(model => model.id), CLAUDE_CODE_LEGACY_ALIASES, fail);
 
 function fixture() {
   let runtime = { status: "ready", version: "2.1.300" };
@@ -21,10 +31,10 @@ function fixture() {
     requireOwnedRun: id => records.get(id), engineFromRun: run => run.metadata.engine,
     modelFromRun: run => run.metadata.model, VIVARY_CODE_DEFAULT_ENGINE: "claude-cli",
     sameWorkspace: (a, b) => a.root === b.root,
-    fail(message, options) { throw Object.assign(new Error(message), options); },
+    fail,
     getVivaryRuntimeStatus: async () => runtime,
     getCodexModels: async () => ({ status: "ready", models: [{ id: "gpt-fixture" }], defaultModel: "gpt-fixture" }),
-    resolveVivaryCodeModel: (engine, model) => model ?? (engine === "claude-cli" ? "claude-sonnet-5-5" : "gpt-fixture"),
+    resolveVivaryCodeModel,
     claudeCodeModelChoices,
     getCodePermissionMode: async () => "normal", refreshHeldCredentials: async () => {},
     VIVARY_CODE_GOAL_ID: "vivary-local-code", VIVARY_CODE_APP_MARKER: "vivary-workbench-local-code",
@@ -105,4 +115,9 @@ test("Claude aliases and retained historical IDs keep their existing admission b
     await value.send({ ownerEmail: "fixture@example.test", runId: first.run.id, message: "Resume", workspace: value.workspace });
     assert.equal(value.launches.at(-1).model, model);
   }
+  // A historical ID is admitted only for the conversation that retained it.
+  const value = fixture();
+  await assert.rejects(value.send({ ownerEmail: "fixture@example.test", engine: "claude-cli", message: "New",
+    model: "claude-sonnet-4-20250514", workspace: value.workspace }), { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  assert.equal(value.launches.length, 0);
 });

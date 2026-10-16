@@ -672,10 +672,14 @@ an upstream Toolkit release names the button and passes the same test.
 
 `usage/store.js` also retries numeric primary-key collisions across concurrent
 writers. Its insert ignores only an occupied `id`, tries up to 16 consecutive
-candidates, and rejects exhaustion. Other database failures propagate. Existing
+candidates, and rejects exhaustion. When an insert affects no row, the store first
+reads the row at that ID. A row whose every stored value matches the record is
+this call's own committed write, which a database client resends after a lost
+reply, so the store records nothing more. Other database failures propagate. Existing
 usage rows, costs, and the schema stay intact. Alert evaluation runs only after
 the new row is inserted. `tests/native-usage-cost.test.ts` forces two independent
-writers to collide and covers exhaustion without replacing stored records.
+writers to collide, replays a committed insert as a lost reply, and covers
+exhaustion without replacing stored records.
 
 Issue #103. Core priced every Native turn from its own table. A model the table
 did not know matched a catch-all entry and was priced at Sonnet's $3 input and

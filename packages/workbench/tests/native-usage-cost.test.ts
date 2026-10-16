@@ -304,6 +304,28 @@ test("usage writers preserve both records when their generated numeric IDs colli
     [["collision-0", 0, "reported"], ["collision-1", 1, "reported"]]);
 });
 
+test("a usage write whose committed insert the client retries records it once", async t => {
+  await store.ensureUsageTable();
+  const owner = `owner-${randomUUID()}@example.test`;
+  const client = getDbExec();
+  const execute = client.execute.bind(client);
+  // A lost reply: the first insert commits, then the client sends the same statement again.
+  let replayed = false;
+  t.mock.method(client, "execute", async (statement: { sql?: string }) => {
+    if (!replayed && typeof statement === "object" && statement.sql?.startsWith("INSERT INTO token_usage")) {
+      replayed = true;
+      await execute(statement);
+    }
+    return execute(statement);
+  });
+  await store.recordUsage({ ownerEmail: owner, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, label: "chat",
+    model: "probe/free-model", costCentsX100: 123, costSource: "reported", runId: "lost-reply" });
+  t.mock.restoreAll();
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT run_id, cost_cents_x100 FROM token_usage WHERE owner_email = ?", args: [owner] });
+  assert.deepEqual(rows.map(row => [row.run_id, Number(row.cost_cents_x100)]), [["lost-reply", 123]]);
+});
+
 test("usage writer reports exhausted IDs without replacing existing records", async t => {
   await store.ensureUsageTable();
   const owner = `owner-${randomUUID()}@example.test`;
