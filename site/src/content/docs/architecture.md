@@ -174,7 +174,9 @@ its older sources usable. A personal workspace Code record must match the
 currently configured personal workspace root, the same scope `isOwnedRun`
 applies, so a changed personal workspace setting withholds the old root's history. A replaced binding or an invalid target link record
 fails closed. A source that is deleted, revoked or no longer matches its frozen
-prefix is reported as unavailable instead. The target stays usable, its sends
+prefix is reported as unavailable instead. The service opens a retained Code
+transcript without following links, so a transcript replaced by a symbolic link
+or otherwise no longer a safe regular file also counts as unavailable. The target stays usable, its sends
 proceed without linked history, and nothing records a prepared or accepted
 portion for them. A Code boundary is the executor's turn completion event
 (status completed, phase complete). Codex subagent and agent-operation status

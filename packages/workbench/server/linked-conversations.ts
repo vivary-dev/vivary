@@ -137,7 +137,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
         }
         text = buffer.toString("utf8");
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        // O_NOFOLLOW refuses a symbolic link with ELOOP. A link, a non-directory parent or a refused open
+        // is a transcript that no longer verifies, so the source is unavailable. The link is never followed.
+        if (code === "ELOOP" || code === "ENOTDIR" || code === "EACCES" || code === "EPERM")
+          unavailable("The source transcript is not a safe regular file.");
+        if (code !== "ENOENT") throw error;
         if (boundaryId) unavailable("The source transcript is missing.");
       } finally { await file?.close(); }
       const events = codeHistoryRecords(text, ref.id);

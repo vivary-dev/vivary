@@ -476,6 +476,19 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(service.load(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
     await assert.rejects(service.context(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("a retained Code transcript replaced by a symbolic link is withheld, never followed", async () => {
+    const { symlink, rename } = await import("node:fs/promises");
+    const transcript = codeAgentRunTranscriptPath(source.id), copy = path.join(root, "symlinked-transcript.jsonl");
+    // The link points at identical bytes, so only following it could make the source verify.
+    await writeFile(copy, await readFile(transcript)); await rename(transcript, transcript + ".kept");
+    try {
+      await symlink(copy, transcript);
+      const page = (await service.load(actor, project.projectId, codeTarget.target))!;
+      assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.excerpt, "");
+      assert.deepEqual(await service.context(actor, project.projectId, codeTarget.target), { block: null, portion: null });
+    } finally { await rm(transcript, { force: true }); await rename(transcript + ".kept", transcript); await rm(copy); }
+    assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.sourceStatus, "available");
+  });
   await t.test("appended and partial source events cannot widen a retained boundary", async () => {
     await appendFile(codeAgentRunTranscriptPath(source.id), '{"runId":"source","id":"in-progress"');
     assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.boundaryId, "source-done");
