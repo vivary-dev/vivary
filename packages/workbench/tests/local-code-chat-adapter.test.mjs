@@ -94,7 +94,8 @@ test("accepted owner sends refresh linked history while refused sends emit no ac
       return { projectId: "project-one", run: { id: "accepted-target", engine: "codex-cli", status: "completed", events: [] }, error: null };
     },
     projectId: "project-one", draftThreadId: "retained-draft", runIdRef,
-    engines: () => [{ engine: "codex-cli", models: ["fixture-model"] }],
+    engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
+      modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
     onKnownRejected: async () => {}, onStarted: () => controller.abort(), onStreaming: () => {}, onSettled: () => {},
   });
   for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Explicit send" }] }],
