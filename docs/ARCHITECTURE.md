@@ -155,7 +155,10 @@ its older sources usable. A replaced binding or an invalid target link record
 fails closed. A source that is deleted, revoked or no longer matches its frozen
 prefix is reported as unavailable instead. The target stays usable, its sends
 proceed without linked history, and nothing records a prepared or accepted
-portion for them. Code retains the server-captured
+portion for them. A Code boundary is the executor's turn completion event
+(status completed, phase complete). Codex subagent and agent-operation status
+events also report completed inside a running turn, so they never end the
+prefix. Code retains the server-captured
 prefix byte length, never a caller byte cursor, so later appends cannot widen a
 page. Native follows the saved branch when linking and excludes pending approvals, stopped
 turns and live or still-saving execution chunks. Later reads walk parent links

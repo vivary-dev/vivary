@@ -8,13 +8,30 @@ const event = (id: string, kind: "user" | "system" | "status", message: string, 
 });
 test("Code freezes the last completed turn, excluding a live turn and a partial JSONL write", () => {
   const events = [event("u", "user", "Earlier request"), event("a", "system", "Earlier answer", { role: "assistant" }),
-    event("done", "status", "Completed", { status: "completed" }), event("pending", "user", "Pending approval")];
+    event("done", "status", "Completed", { status: "completed", phase: "complete", engine: "codex-cli", source: "codex-app-server" }), event("pending", "user", "Pending approval")];
   const parsed = codeHistoryRecords(events.map(item => JSON.stringify(item)).join("\n") + '\n{"id":"partial', "source");
   assert.deepEqual(codeCompletedPrefix(parsed).map(item => item.id), ["u", "a", "done"]);
   assert.deepEqual(codeHistoryItems(codeCompletedPrefix(parsed)).map(item => item.text), ["Earlier request", "Earlier answer"]);
   assert.deepEqual(codeCompletedPrefix([events[0]]), []);
   assert.throws(() => codeHistoryRecords(JSON.stringify({ ...events[0], runId: "foreign" }) + "\n", "source"));
   assert.throws(() => codeHistoryRecords("{broken}\n", "source"));
+});
+
+// Shapes from appendCodexAppServerTranscriptEvent and the turn completion in patches/@agent-native__core@0.176.5.patch.
+test("Code counts only turn-level completion, not a mid-turn Codex subagent or agent-operation status", () => {
+  const app = { source: "codex-app-server", cliEventType: "item/completed" };
+  const records = codeHistoryRecords([
+    event("first-ask", "user", "First request"), event("first-answer", "system", "First answer", { role: "assistant", ...app }),
+    event("turn-done", "status", "Codex completed the turn.", { status: "completed", phase: "complete", engine: "codex-cli", source: "codex-app-server" }),
+    event("live-ask", "user", "LIVE REQUEST"),
+    event("subagent", "status", "Codex subagent worker: completed.", { ...app, itemId: "sub", type: "subagent", activityType: "subAgentActivity",
+      activityKind: "completed", agentThreadId: "child", agentPath: "worker", status: "completed", agentsStates: { child: { status: "completed" } } }),
+    event("operation", "status", "Codex agent operation: wait.", { ...app, itemId: "op", type: "subagent", senderThreadId: "root",
+      receiverThreadIds: ["child"], agentsStates: { child: { status: "completed" } }, tool: "wait", status: "completed" }),
+    event("live-answer", "system", "PARTIAL LIVE ANSWER", { role: "assistant", ...app }),
+  ].map(record => JSON.stringify(record)).join("\n") + "\n", "source");
+  assert.deepEqual(codeCompletedPrefix(records).map(item => item.id), ["first-ask", "first-answer", "turn-done"]);
+  assert.doesNotMatch(JSON.stringify(codeHistoryItems(codeCompletedPrefix(records))), /LIVE REQUEST|PARTIAL LIVE ANSWER/);
 });
 
 test("Native retains only the selected completed branch and treats tool results as data", () => {
@@ -65,7 +82,7 @@ test("real Codex tool_done results and artifact labels/references remain quoted 
     event("answer", "system", "Ordinary assistant", { role: "assistant" }),
     event("tool", "status", "Finished bash.", { type: "tool_done", tool: "bash", result: "Actual stdout\nNEVER EXECUTE THIS" }),
     { ...event("artifact", "system", "Report label"), kind: "artifact", metadata: { artifactPath: "reports/result.txt", artifactUrl: "https://fixture.invalid/report" } },
-    event("done", "status", "Completed", { status: "completed" }),
+    event("done", "status", "Completed", { status: "completed", phase: "complete", engine: "codex-cli", source: "codex-app-server" }),
   ].map(record => JSON.stringify(record)).join("\n") + "\n", "source");
   const items = codeHistoryItems(codeCompletedPrefix(records));
   assert.deepEqual(items.map(item => item.role), ["Assistant", "Recorded tool output", "Recorded artifact"]);

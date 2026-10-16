@@ -24,8 +24,19 @@ export function codeHistoryRecords(text: string, runId: string): CodeAgentTransc
   });
 }
 
+/**
+ * A turn ends with the executor's completion status (status completed, phase complete).
+ * Codex subagent and agent-operation events also carry status completed mid-turn,
+ * with a type or tool, so they never mark a boundary.
+ */
+function isCodeTurnCompletion(event: CodeAgentTranscriptEvent): boolean {
+  const metadata = event.metadata;
+  return event.kind === "status" && metadata?.status === "completed" && metadata.phase === "complete"
+    && metadata.type === undefined && metadata.tool === undefined;
+}
+
 export function codeCompletedPrefix(events: CodeAgentTranscriptEvent[]) {
-  const end = events.findLastIndex(event => event.kind === "status" && event.metadata?.status === "completed");
+  const end = events.findLastIndex(isCodeTurnCompletion);
   return end < 0 ? [] : events.slice(0, end + 1);
 }
 

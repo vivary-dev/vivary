@@ -55,7 +55,7 @@ test("linked conversations use Native records and immutable authorized completed
   const source = code("source");
   appendCodeAgentTranscriptEvent({ runId: source.id, id: "source-user", kind: "user", message: "Completed request" });
   appendCodeAgentTranscriptEvent({ runId: source.id, id: "source-answer", kind: "system", message: "Completed answer", metadata: { role: "assistant" } });
-  appendCodeAgentTranscriptEvent({ runId: source.id, id: "source-done", kind: "status", message: "Completed", metadata: { status: "completed" } });
+  appendCodeAgentTranscriptEvent({ runId: source.id, id: "source-done", kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
   appendCodeAgentTranscriptEvent({ runId: source.id, id: "source-pending", kind: "user", message: "Live pending request excluded" });
   const draftIdentity = createCodeDraftIdentity(owner, orgId, project.projectId);
   await changeChatDraft(draftIdentity, "vivary-code:project:project-a:source", null,
@@ -96,7 +96,7 @@ test("linked conversations use Native records and immutable authorized completed
     appendCodeAgentTranscriptEvent({ runId: admissionSource.id, kind: "system", message: "Retained assistant", metadata: { role: "assistant" } });
     appendCodeAgentTranscriptEvent({ runId: admissionSource.id, kind: "status", message: "Finished bash.", metadata: { type: "tool_done", tool: "bash", result: "Actual retained output" } });
     appendCodeAgentTranscriptEvent({ runId: admissionSource.id, kind: "artifact", message: "Report", metadata: { artifactPath: "reports/retained.txt" } });
-    appendCodeAgentTranscriptEvent({ runId: admissionSource.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: admissionSource.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
     const linked = await service.create(actor, { projectId: project.projectId, source: { kind: "code", id: admissionSource.id },
       target: { engine: "claude-cli", model: "sonnet" } });
     const expectedPage = (await service.load(actor, project.projectId, linked.target))!;
@@ -244,7 +244,7 @@ process.send({type:"vivary:code-worker:ready"});
     const codex = code("codex-source", "codex-cli");
     updateCodeAgentRunRecord(codex.id, { metadata: { codexSessionId: "source-codex-session" } });
     appendCodeAgentTranscriptEvent({ runId: codex.id, kind: "system", message: "Codex completed history", metadata: { role: "assistant" } });
-    appendCodeAgentTranscriptEvent({ runId: codex.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: codex.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
     for (const target of [{ engine: "claude-cli", model: "sonnet" }, { engine: "native" }] as const) {
       const linked = await create(target, { kind: "code", id: codex.id });
       assert.match((await service.load(actor, project.projectId, linked.target))!.excerpt, /Codex completed history/);
@@ -349,7 +349,7 @@ process.send({type:"vivary:code-worker:ready"});
     // Code source to Native target. The Native send proceeds with the unchanged request.
     const codeSource = code("deleted-code-source");
     appendCodeAgentTranscriptEvent({ runId: codeSource.id, kind: "system", message: "Code answer", metadata: { role: "assistant" } });
-    appendCodeAgentTranscriptEvent({ runId: codeSource.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: codeSource.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
     const nativeLinked = await create({ engine: "native" }, { kind: "code", id: codeSource.id });
     const prepareNative = () => runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: identity.scope } }, () =>
       service.prepareNativeMessage({ threadId: nativeLinked.target.id, ownerEmail: owner, message: "Native request" }));
@@ -377,7 +377,7 @@ process.send({type:"vivary:code-worker:ready"});
     const text = await readFile(codeAgentRunTranscriptPath(source.id), "utf8");
     await writeFile(codeAgentRunTranscriptPath(source.id), text.slice(0, text.lastIndexOf("\n") + 1));
     appendCodeAgentTranscriptEvent({ runId: source.id, id: "later-answer", kind: "system", message: "AFTER BOUNDARY", metadata: { role: "assistant" } });
-    appendCodeAgentTranscriptEvent({ runId: source.id, id: "later-done", kind: "status", message: "Later complete", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: source.id, id: "later-done", kind: "status", message: "Later complete", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
     assert.doesNotMatch((await service.load(actor, project.projectId, codeTarget.target))!.excerpt, /AFTER BOUNDARY|Live pending/);
     await appendFile(codeAgentRunTranscriptPath(source.id), "malformed-after-boundary\n");
     assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.boundaryId, "source-done");
@@ -433,7 +433,7 @@ process.send({type:"vivary:code-worker:ready"});
     const paged = code("paged-source");
     for (let index = 0; index < 211; index++) appendCodeAgentTranscriptEvent({ runId: paged.id, id: "paged-" + index,
       kind: "user", message: "Historical entry " + index });
-    appendCodeAgentTranscriptEvent({ runId: paged.id, id: "paged-done", kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: paged.id, id: "paged-done", kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
     const linked = await create({ engine: "codex-cli", model: "fixture-model" }, { kind: "code", id: paged.id });
     const first = (await service.load(actor, project.projectId, linked.target))!;
     assert.equal(first.availableEntries, 211); assert.equal(first.truncated, true); assert.ok(first.nextCursor);
