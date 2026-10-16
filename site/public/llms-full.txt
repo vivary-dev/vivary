@@ -7734,6 +7734,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Retained Code model advice review. A retained Code conversation keeps
+its runtime and model, and the server refuses a model change on an existing run.
+The composer therefore never suggests choosing another model for a retained
+conversation, and it points to the version update, version check, or Runtime
+settings instead. A new conversation still offers another sendable choice. The
+model-choice test executes the component's real selection block for both cases.
+No server, worker, or persistence behavior changes, so the design description
+holds.
+
 2026-10-16 Review follow-up for usage writes, Code model advice, and Native
 startup. A usage insert that finds its ID taken now reads that row and treats an
 exact match of every stored value as its own committed write. A database client

@@ -10,7 +10,7 @@ const start = source.indexOf("  const availableModels = useMemo(");
 const end = source.indexOf("  const runtime = selectedEngine?.runtime;", start);
 assert.ok(start >= 0 && end > start);
 const evaluate = new Function("props", "choice", "useMemo", "codeConversationModelChoices",
-  source.slice(start, end) + "\nreturn { availableModels, selectedModelAvailable };\n");
+  source.slice(start, end) + "\nreturn { availableModels, selectedModelAvailable, otherModelAvailable };\n");
 const current = "claude-sonnet-5-5", historical = "claude-sonnet-4-20250514";
 const claude = { engine: "claude-cli", models: [current, historical],
   claudeModels: [{ id: current, support: "supported" }], modelCatalog: null };
@@ -29,6 +29,26 @@ test("new Claude choices exclude exact IDs supplied only by a historical convers
   assert.deepEqual(result.availableModels.find(engine => engine.engine === "claude-cli").models, [current]);
   assert.equal(result.selectedModelAvailable, false);
   assert.equal(selection("claude-cli", current).selectedModelAvailable, true);
+});
+
+test("the composer offers another model only for a new conversation with a sendable choice", () => {
+  const configuredClaude = { ...claude, configured: true, claudeModels: [
+    { id: current, support: "supported" }, { id: "claude-haiku-5-5", support: "upgrade-required" }],
+    models: [current, "claude-haiku-5-5"] };
+  const configuredCodex = { ...codex, configured: true };
+  // A new conversation can switch to a supported Claude model or to a configured Codex model.
+  assert.equal(selection("claude-cli", "claude-haiku-5-5", false, [configuredClaude]).otherModelAvailable, true);
+  assert.equal(selection("claude-cli", "claude-haiku-5-5", false,
+    [{ ...configuredClaude, claudeModels: configuredClaude.claudeModels.map(model => ({ ...model, support: "unverified" })) },
+      configuredCodex]).otherModelAvailable, true);
+  // Nothing else is sendable: every Claude model is unverified and no other runtime is configured.
+  assert.equal(selection("claude-cli", "claude-haiku-5-5", false,
+    [{ ...configuredClaude, claudeModels: configuredClaude.claudeModels.map(model => ({ ...model, support: "unverified" })) },
+      codex]).otherModelAvailable, false);
+  // A retained conversation keeps its model even when another one is supported.
+  const retained = selection("claude-cli", "claude-haiku-5-5", true, [configuredClaude, configuredCodex]);
+  assert.equal(retained.selectedModelAvailable, false);
+  assert.equal(retained.otherModelAvailable, false);
 });
 
 test("retained Claude exact IDs remain available on their own route", () => {

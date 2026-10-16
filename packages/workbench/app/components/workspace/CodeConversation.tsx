@@ -583,8 +583,9 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
     && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
-  // Advice to choose another model needs a listed choice that a configured runtime can send.
-  const otherModelAvailable = availableModels.some(engine => engine.configured && engine.models.some(model =>
+  // A retained conversation keeps its model. A new one can switch only to a listed
+  // choice that a configured runtime can send.
+  const otherModelAvailable = !props.selection.runId && availableModels.some(engine => engine.configured && engine.models.some(model =>
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
