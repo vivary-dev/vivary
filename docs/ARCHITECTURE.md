@@ -424,6 +424,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+This dependency review raises fast-uri from 3.1.7 to 3.1.8 and ip-address from 10.7.0 to 10.7.4 within their existing dependency ranges. The Native runtime, provider funding admission, project boundaries, and pinned Astro cache replacement keep their existing owners and contracts. Only the two Workbench transitive resolutions change. The existing dependency-advisory guard now enforces both minimum versions so future lockfile changes reject the older vulnerable releases.
+
 2026-10-16 Retained Code model advice review. A retained Code conversation keeps
 its runtime and model, and the server refuses a model change on an existing run.
 The composer therefore never suggests choosing another model for a retained
