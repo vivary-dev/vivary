@@ -65,6 +65,10 @@ export function HandoffControl({ projectId, conversation, disabled, submit }: {
   });
 
   const status = query.data;
+  // A new Native conversation has no saved thread until its first reply is saved.
+  // It has nothing to hand off yet. The next conversation update checks again.
+  const error = query.error as (Error & { errorCode?: string }) | null;
+  if (error?.errorCode === "vivary_linked_history_unavailable") return null;
   if (query.isError) return <div className="local-agent-notice" role="alert">Handoff freshness could not be checked.
     <Button size="sm" variant="outline" onClick={() => void query.refetch()}>Retry check</Button></div>;
   if (!status) return null;

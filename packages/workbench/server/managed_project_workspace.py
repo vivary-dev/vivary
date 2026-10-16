@@ -66,7 +66,10 @@ def observe_project(target):
     worktree = facts.get("worktree_root", {})
     if worktree.get("status") != "known":
         return {"kind": "unknown"}
-    relative = os.path.relpath(os.path.realpath(target), os.path.realpath(worktree["value"]))
+    try:
+        relative = os.path.relpath(os.path.realpath(target), os.path.realpath(worktree["value"]))
+    except ValueError:  # Another Windows drive.
+        return {"kind": "unknown"}
     if relative == os.pardir or relative.startswith(os.pardir + os.sep) or os.path.isabs(relative):
         return {"kind": "unknown"}
     prefix = "" if relative == os.curdir else relative.replace(os.sep, "/") + "/"

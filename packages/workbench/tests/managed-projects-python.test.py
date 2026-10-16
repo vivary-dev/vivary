@@ -151,11 +151,13 @@ class ManagedProjectBridgeTests(unittest.TestCase):
 
     def test_observe_operation(self):
         with tempfile.TemporaryDirectory(prefix="vivary-managed-observe-") as temporary:
-            target = Path(temporary) / "project"
+            # The Workbench passes an admitted canonical root, never a Windows short name.
+            target = Path(temporary).resolve() / "project"
             target.mkdir()
             self.assertEqual(managed_request({"operation": "observe", "target": str(target)}),
                              {"code": "observe", "observation": {"kind": "plain"}})
             env = {"PATH": os.environ.get("PATH", ""), "HOME": temporary, "GIT_CONFIG_NOSYSTEM": "1",
+                   **{name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ},
                    "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
                    "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
 
@@ -180,7 +182,7 @@ class ManagedProjectBridgeTests(unittest.TestCase):
             self.assertEqual(observation["ref"], "main")
             self.assertEqual(observation["entries"], [{"path": "a.txt", "state": "M"},
                                                       {"path": "sub/b.txt", "state": "??"}])
-            self.assertNotIn(temporary, json.dumps(answer))
+            self.assertNotIn(str(target), json.dumps(answer))
             # A project folder inside a larger checkout reports only its own entries, relative to itself.
             nested = managed_request({"operation": "observe", "target": str(target / "sub")})["observation"]
             self.assertEqual(nested["entries"], [{"path": "b.txt", "state": "??"}])

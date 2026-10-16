@@ -358,7 +358,9 @@ document through `projectFileService.save` with the prepared version and
 binding. A plain workspace or a missing, private or protected state file refuses
 Prepare. A conflict or failed write keeps the previous file and saved record,
 marks the request Failed and offers Retry. Nothing is cleaned, stashed or
-committed. A dirty tree is reported as a count.
+committed. A dirty tree is reported as a count. A new Native conversation
+shows no control until its thread is saved, because nothing in it can be
+handed off yet.
 
 Freshness is computed on request, with no timer and no model call. It compares
 the state file version, Git HEAD and branch, the dirty entry list and each dirty
@@ -368,7 +370,8 @@ excluded from the project facts because its own version is compared. A listing
 at its cap or an unknown Git state is Unverifiable, never Fresh. Git facts come
 from a read-only `observe` creator bridge operation over
 `vivary_core.workspace_observe`, gated like `context` and reported relative to
-the project folder. Migration 6 adds `vivary_handoff_records`, one row per
+the project folder. If the project folder and its checkout root resolve to
+different Windows drives, the version reads as unknown. Migration 6 adds `vivary_handoff_records`, one row per
 project binding and document, holding the pending request and the saved record.
 
 

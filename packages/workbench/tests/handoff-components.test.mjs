@@ -114,6 +114,22 @@ test("a refused reply lists the problems and keeps Save handoff", async () => {
   assert.ok(button("Save handoff"));
 });
 
+test("an unsaved Native conversation shows nothing until a conversation update finds it", async () => {
+  let saved = false;
+  handoffFixture.call = async (name, input) => {
+    handoffFixture.calls.push({ name, input });
+    if (!saved) throw Object.assign(new Error("The linked conversation is no longer available in this project."),
+      { errorCode: "vivary_linked_history_unavailable" });
+    return { status: "none", path: "STATE.md" };
+  };
+  await render({ conversation: { kind: "native", id: "unsaved-thread" } }); await settle();
+  assert.equal(host.textContent, "");
+  saved = true;
+  await act(async () => window.dispatchEvent(new window.Event("agent-chat:threads-updated"))); await settle();
+  assert.match(host.textContent, /No handoff saved/);
+  assert.deepEqual(handoffFixture.submitted, []);
+});
+
 test("Out of date names the reasons", async () => {
   handoffFixture.status = { status: "out-of-date", covered, reasons: ["head-moved", "document-edited"] };
   await render(); await settle();
