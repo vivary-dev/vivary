@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createCodeAgentRunRecord, executeCodeAgentRun, getCodeAgentRunRecord } from "@agent-native/core/code-agents";
+import { randomBytes } from "node:crypto";
+import { setTextRedactor } from "@agent-native/core/audit";
+import { createCredentialRedactor } from "../server/credential-redaction.ts";
+import { createCodeAgentRunRecord, executeCodeAgentRun, getCodeAgentRunRecord, listCodeAgentTranscriptEvents } from "@agent-native/core/code-agents";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,6 +39,13 @@ rl.on("line",line=>{
 // guard:allow-env-credential - Disposable test paths and fixture behavior, not credentials.
  writeFileSync(process.env.FIXTURE_RECEIPT,JSON.stringify({pid:process.pid,args:process.argv.slice(2),messages}));
  if (message.method==="initialize") reply(message.id,{});
+ if (message.method==="account/read" && mode.startsWith("stderr-")) {
+  // guard:allow-env-credential - Random synthetic diagnostic text for the test.
+  const text=process.env.FIXTURE_STDERR_TEXT;
+  if(mode==="stderr-split") process.stderr.write(text.slice(0,24),()=>setTimeout(()=>process.stderr.write(text.slice(24),()=>process.exit(2)),20));
+  else process.stderr.write(text,()=>process.exit(2));
+  return;
+ }
  if (message.method==="account/read") reply(message.id,{account:{type:mode==="api-key"?"apiKey":"chatgpt"}});
  if (message.method==="config/read") reply(message.id,{config:{model_provider:"openai",
   ...(mode==="custom-provider"?{model_providers:{openai:{base_url:"https://example.invalid/alternate"}}}:{})}});
@@ -355,3 +365,37 @@ for (const mode of ["api-key", "custom-provider"]) test(`the executing Codex pro
   assert.equal(messages.some(message => ["thread/start", "thread/resume", "turn/start"].includes(message.method)), false);
   assert.equal(messages.some(message => message.method === "account/rateLimits/read"), false);
 });
+
+
+for (const mode of ["held-overflow", "pattern-overflow", "held-split", "held-short", "plain-short"] as const) {
+  test(`Codex ${mode} diagnostics do not persist credential fragments`, { timeout: 20_000 }, async t => {
+    const token = randomBytes(24).toString("hex");
+    const credential = mode.startsWith("pattern") ? `ghp_${token}` : token;
+    const redactor = createCredentialRedactor(mode.startsWith("pattern") ? [] : [{ name: "FIXTURE_SECRET", value: credential }]);
+    setTextRedactor(redactor.redact);
+    t.after(() => setTextRedactor(null));
+    const overflow = mode.endsWith("overflow") || mode.endsWith("split");
+    const diagnostic = mode === "plain-short" ? "Fixture disconnected safely."
+      : `Fixture output: ${credential}${overflow ? " ".repeat(4080) : "."}`;
+    const f = await fixture(t, mode.endsWith("split") ? "stderr-split" : "stderr-one");
+    const previous = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(f.root, "runs");
+    t.after(() => {
+      if (previous === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+      else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previous;
+    });
+    const run = createCodeAgentRunRecord({ title: "Diagnostic fixture", goalId: "vivary-local-code", cwd: f.root,
+      permissionMode: "auto-edit", metadata: { engine: "codex-cli", model: "gpt-6-astra" } });
+    const result = await executeCodeAgentRun({ runId: run.id, prompt: "Read the fixture.", model: "gpt-6-astra",
+      codexCli: { ...f.options, env: { ...f.options.env, FIXTURE_STDERR_TEXT: diagnostic },
+        permissionMode: "normal", configMode: "native" }, streamToolOutputToStdout: false });
+    assert.equal(result?.status, "errored");
+    const persisted = JSON.stringify({ run: getCodeAgentRunRecord(run.id), events: listCodeAgentTranscriptEvents(run.id) });
+    assert.equal(persisted.includes(credential.slice(-16)), false, "a credential suffix reached persisted state or transcript");
+    if (overflow) assert.match(String(result?.metadata?.executionError), /withheld/);
+    else if (mode === "plain-short") assert.equal(result?.metadata?.executionError, diagnostic);
+    else assert.match(String(result?.metadata?.executionError), /\[redacted FIXTURE_SECRET\]/);
+    const receipt = await f.receipt();
+    assert.throws(() => process.kill(receipt.pid, 0), { code: "ESRCH" });
+  });
+}

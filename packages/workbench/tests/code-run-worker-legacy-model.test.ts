@@ -30,18 +30,19 @@ const coreModules = ["server", "code-agents", "audit", "db", "mcp-client", "secr
   .map(entry => import.meta.resolve(`@agent-native/core/${entry}`));
 
 for (const shape of ["missing", "null"] as const) {
-  test(`public Send resumes a retained Codex conversation with ${shape} model metadata`,
+  test(`public Send retries a retained Codex conversation with ${shape} model metadata after route refusal`,
     { timeout: 60_000, skip: process.platform === "win32" }, async () => {
       const fixture = path.join(root, shape);
       const bin = path.join(fixture, "bin");
       const server = path.join(fixture, ".output", "server");
       const callsFile = path.join(fixture, "calls.jsonl");
       const started = path.join(fixture, "started.json");
+      const refused = path.join(fixture, "refuse-account");
       await mkdir(bin, { recursive: true });
       await mkdir(server, { recursive: true });
       await writeFile(path.join(bin, "claude"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
       await writeFile(path.join(bin, "codex"), `#!${process.execPath}
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
 const record = value => appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify({ pid: process.pid, ...value }) + "\\n");
@@ -51,11 +52,12 @@ if (process.argv[2] === "login") {
   process.exit(0);
 }
 const threadId = "retained-codex-thread", turnId = "retained-codex-turn";
+let clientName;
 createInterface({ input: process.stdin }).on("line", line => {
   const message = JSON.parse(line);
   record({ message });
-  if (message.method === "initialize") emit({ id: message.id, result: {} });
-  if (message.method === "account/read") emit({ id: message.id, result: { account: { type: "chatgpt" } } });
+  if (message.method === "initialize") { clientName = message.params.clientInfo.name; emit({ id: message.id, result: {} }); }
+  if (message.method === "account/read") emit({ id: message.id, result: { account: { type: clientName === "vivary" && existsSync(${JSON.stringify(refused)}) ? "apiKey" : "chatgpt" } } });
   if (message.method === "config/read") emit({ id: message.id, result: { config: { model_provider: "openai" } } });
   if (message.method === "model/list") emit({ id: message.id, result: { data: [
     { model: "gpt-6-astra", displayName: "Astra", isDefault: true }
@@ -96,6 +98,18 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
         process.chdir(fixture);
         process.env.PATH = bin + path.delimiter + (previousPath ?? "");
         assert.equal((await getVivaryRuntimeStatus("codex-cli", { refresh: true })).status, "ready");
+        await writeFile(refused, "Refuse only the executing process after discovery succeeds.");
+        await sendVivaryCodeMessage({ ownerEmail, runId: run.id, engine: "codex-cli",
+          model: "default", message: "First attempt with a stale cached route.", workspace,
+          revalidateWorkspace: async () => workspace });
+        for (let attempt = 0; attempt < 400 && (await getVivaryCodeHostState(ownerEmail)).busy; attempt++) await delay(50);
+        assert.equal((await getVivaryCodeHostState(ownerEmail)).busy, false);
+        const failed = getCodeAgentRunRecord(run.id);
+        assert.equal(failed?.status, "errored");
+        assert.match(String(failed?.metadata?.executionError), /not signed in with ChatGPT/);
+        assert.equal(failed?.metadata?.model, shape === "null" ? null : undefined,
+          "a refusal before native resume preserves the original absent model");
+        await rm(refused);
         const state = await sendVivaryCodeMessage({ ownerEmail, runId: run.id, engine: "codex-cli",
           model: "default", message: "Continue this retained conversation.", workspace,
           revalidateWorkspace: async () => workspace });
@@ -109,7 +123,7 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
         assert.equal(stored?.metadata?.providerSessionMode, "native-resume");
         assert.equal(stored?.metadata?.model, "gpt-6-astra", "the native session reports its effective model");
         const events = listCodeAgentTranscriptEvents(run.id);
-        assert.equal(events.filter(event => event.kind === "user").length, 1);
+        assert.equal(events.filter(event => event.kind === "user").length, 2);
         assert.ok(events.some(event => event.message === "Retained fixture answered."));
         const calls = (await readFile(callsFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
         const resumes = calls.filter(call => call.message?.method === "thread/resume");

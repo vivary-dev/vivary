@@ -17523,3 +17523,63 @@ diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
 +            executionError: error, executionCompletedAt: new Date().toISOString() },
      });
  }
+diff --git a/dist/cli/codex-app-server-executor.js b/dist/cli/codex-app-server-executor.js
+--- a/dist/cli/codex-app-server-executor.js
++++ b/dist/cli/codex-app-server-executor.js
+@@ -5,6 +5,7 @@
+ const REQUEST_TIMEOUT_MS = 15_000;
+ const INTERRUPT_TIMEOUT_MS = 3_000;
+ const MAX_LINE_BYTES = 8 * 1024 * 1024;
++const MAX_STDERR_CHARS = 4096;
+ const MAX_TRACKED_THREADS = 128;
+ const MAX_CACHED_ITEMS = 256;
+ const MAX_CACHED_ITEM_CHARS = 2 * 1024 * 1024;
+@@ -65,6 +66,7 @@
+     let completed = false;
+     let buffer = "";
+     let stderr = "";
++    let stderrWithheld = false;
+     let sequence = 0;
+     let threadId;
+     let effectiveModel;
+@@ -397,7 +399,16 @@
+         } catch (error) { fail(error); }
+     });
+     child.stderr.setEncoding("utf8");
+-    child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-4096); });
++    child.stderr.on("data", chunk => {
++        if (stderrWithheld) return;
++        if (stderr.length + chunk.length > MAX_STDERR_CHARS) {
++            // A truncated credential cannot be recognized by the downstream redactor.
++            stderr = "";
++            stderrWithheld = true;
++            return;
++        }
++        stderr += chunk;
++    });
+     child.stdin.on("error", error => { if (!stopping) fail(error); });
+     child.once("error", fail);
+     child.once("close", () => {
+@@ -405,7 +416,9 @@
+         resolveClose();
+         if (!completed) {
+             try { if (buffer.trim()) receive(buffer); } catch (error) { fail(error); }
+-            if (!completed) fail(new Error(stderr.trim() || "Codex disconnected before the turn finished."));
++            if (!completed) fail(new Error(stderrWithheld
++                ? "Codex disconnected. Oversized diagnostic output was withheld."
++                : stderr.trim() || "Codex disconnected before the turn finished."));
+         }
+     });
+     options.signal?.addEventListener("abort", abort, { once: true });
+diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
+--- a/dist/cli/code-agent-executor.js
++++ b/dist/cli/code-agent-executor.js
+@@ -1295,7 +1295,7 @@
+         progress: { label: status === "completed" ? "Complete" : status === "paused" ? "Stopped" : "Error",
+             completed: status === "completed" ? 1 : 0, total: 1, failed: status === "errored" ? 1 : 0,
+             percent: status === "completed" ? 100 : 0 },
+-        metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? "codex-default",
++        metadata: { engine: CODEX_CLI_ENGINE_NAME, model: effectiveModel ?? options.run.metadata?.model,
+             codexTurnId: result.turnId, codexPermissionMode: native.permissionMode,
+             executionError: error, executionCompletedAt: new Date().toISOString() },
+     });

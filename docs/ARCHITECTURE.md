@@ -424,6 +424,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Codex failure-path review. App-server stderr is retained only while
+the complete diagnostic stays within its existing 4096-character bound. Once it
+exceeds the bound, the executor discards the diagnostic and records a generic
+withheld-output error, so a partial credential cannot bypass downstream
+redaction. Complete short diagnostics keep their existing redaction and error
+behavior. A route refusal before native resume preserves missing or null saved
+model metadata until Codex reports an actual model. The existing public Send
+and actual-worker regression now covers refusal, account repair, and retry for
+both retained model shapes. Direct app-server tests cover held and prefixed
+credentials across the retention boundary, split writes, and short controls.
+No provider, permission, or process-cleanup ownership changes.
+
 2026-10-15 Retained Codex default-model review. The worker now compares an
 omitted Codex IPC model with the host's retained default sentinel. The actual
 executor still receives the omitted model so the native session chooses its own
