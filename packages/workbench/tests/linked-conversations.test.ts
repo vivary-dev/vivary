@@ -553,6 +553,14 @@ process.send({type:"vivary:code-worker:ready"});
       }
     } finally { await db.execute("DROP TRIGGER fail_link_write"); }
     assert.deepEqual(await count(), records);
+    // A fault in the last finalization step, after the link row is written, also leaves no draft, thread or row.
+    const links = Number((await db.execute("SELECT COUNT(*) AS n FROM vivary_conversation_links")).rows[0].n);
+    await db.execute("CREATE TRIGGER fail_target_finalize BEFORE UPDATE ON chat_threads BEGIN SELECT RAISE(ABORT, 'selected finalize fault'); END");
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(create({ engine: "native" }), /selected finalize fault/);
+    } finally { await db.execute("DROP TRIGGER fail_target_finalize"); }
+    assert.deepEqual(await count(), records);
+    assert.equal(Number((await db.execute("SELECT COUNT(*) AS n FROM vivary_conversation_links")).rows[0].n), links);
     assert.equal(JSON.stringify(getCodeAgentRunRecord(source.id)), before);
     assert.deepEqual(await readChatDraft(draftIdentity, "vivary-code:project:project-a:source"), originalDraft);
     const retry = await create({ engine: "codex-cli", model: "fixture-model" });

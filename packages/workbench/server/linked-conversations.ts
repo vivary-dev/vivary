@@ -240,7 +240,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (currentSource.createdAt !== source.createdAt || (await sourcePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
     const linkId = randomUUID(), targetId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);
     let target: ConversationReference, targetCreatedAt: number | string;
-    // Each target owner's cleared draft is written only after the link exists, and removeTarget undoes the creation.
+    // Each target owner's cleared draft is written as the final step, and removeTarget undoes the creation.
     let clearDraft: () => Promise<unknown>, removeTarget: () => Promise<unknown>;
     if (input.target.engine === "native") {
       const chat = createVivaryChatIdentity(identity.owner, identity.orgId,
@@ -272,9 +272,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       await getDbExec().execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
         args: [link.id, target.kind, target.id, JSON.stringify(link)] });
       linked = true;
-      await clearDraft();
       if (target.kind === "code") updateCodeAgentRunRecord(target.id, { metadata: { linkedCreationPending: false } });
       else await updateThreadData(target.id, "{}", title, "", 0);
+      // Last, so no later step can fail after the draft exists. A failed clear writes nothing (compare-and-set).
+      await clearDraft();
     } catch (error) {
       // A failed link leaves no hidden target behind, so each Retry starts clean.
       if (linked) await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE link_id = ?", args: [link.id] }).catch(() => undefined);
