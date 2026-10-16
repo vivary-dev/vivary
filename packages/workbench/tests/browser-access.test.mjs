@@ -615,3 +615,34 @@ test('open refusals that arrive while target or grant admission is pending stay 
     } finally { gateway.close(); installPreviewGateway(undefined); }
   }
 });
+
+test('open issues no ticket when the listener or settings change while the launch check is pending', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const { isActionContractError } = await import('@agent-native/core/action');
+  const { createPreviewGateway, installPreviewGateway } = await import('../server/preview-ingress.mjs');
+  const { runWithBrowserIdentity } = await import('../server/browser-request-context.mjs');
+  const { default: action } = await import('../actions/vivary-remote-preview.ts');
+  const cases = [
+    ['listener drops', state => { state.bound = false; }, unboundPreview],
+    ['settings turn preview off', state => { state.settings.preview = null; }, /^Preview access ended\. Open the preview again\.$/],
+  ];
+  for (const [name, change, expected] of cases) {
+    const state = { bound: true, released: 0, controllers: [],
+      settings: { enabled: true, origin: 'https://fixture.test', preview: { origin: 'https://fixture.test:9443', port: 42301 } } };
+    const gateway = createPreviewGateway({ access: {
+      configuration: () => state.settings,
+      async admitPreviewGrant(_id, controller) { state.controllers.push(controller); return { release() { state.released++; } }; },
+    }, resolveTarget: async () => ({ generation: 'one', initialPath: '/', signal: new AbortController().signal,
+      // The production check awaits the workspace lookup. Host state changes during that await.
+      check: async () => { change(state); await new Promise(resolve => setTimeout(resolve, 10)); } }),
+    listening: () => state.bound });
+    installPreviewGateway(gateway);
+    try {
+      const opening = runWithBrowserIdentity({ kind: 'remote', deviceId: 'device' },
+        () => action.run({ operation: 'open', documentId: randomUUID(), projectId: 'alpha', launchId: randomUUID() }, {}));
+      await assert.rejects(opening, error => isActionContractError(error) && error.statusCode < 500 && expected.test(error.message), name);
+      assert.equal(state.released, 1, name);
+      assert.equal(state.controllers[0].signal.aborted, true, name);
+    } finally { gateway.close(); installPreviewGateway(undefined); }
+  }
+});

@@ -459,6 +459,13 @@ with status 409, giving the listener message when the listener is the cause and
 the gateway keeps its plain errors, because those requests answer with the
 gateway's own refusal text. A further test drops the listener or the settings
 during each pending step and checks the readable error and the released grant.
+A later PR #231 review found the same gap inside the launch check itself: the
+production check awaits the workspace lookup, and `live()` rechecked only the
+aborted controller afterward. It now repeats the full listener, settings,
+expiry and controller conditions after that await, so Open issues its ticket
+only after a final gate that follows its last await. A further test changes
+the listener or the settings while the check is pending and checks that no
+ticket is issued and the grant is released.
 
 2026-10-16 Isolated preview listener state. If the preview origin's loopback
 listener failed to bind, the failure was kept only as a desktop settings message.

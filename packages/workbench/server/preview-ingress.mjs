@@ -46,11 +46,14 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
   const listenerDown = () => fail('Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.',
     { statusCode: 409, errorCode: 'vivary_preview_listener_unavailable' });
   const openEnded = () => listening() ? fail('Preview access ended. Open the preview again.', { statusCode: 409 }) : listenerDown();
+  const active = record => !closed && !record.controller.signal.aborted && config().enabled
+    && config().preview?.origin === record.origin && now() < record.expiresAt && listening();
+  // Check again after the launch check, because the listener or settings can change while it awaits.
+  // Open issues its ticket only after this gate, so it is the final check before the ticket.
   async function live(record, end = ended) {
-    if (closed || record.controller.signal.aborted || !config().enabled || config().preview?.origin !== record.origin
-      || now() >= record.expiresAt || !listening()) end();
+    if (!active(record)) end();
     await record.target.check();
-    if (record.controller.signal.aborted) end();
+    if (!active(record)) end();
   }
   async function command(input, context, deviceId) {
     const key = `${deviceId}:${input.documentId}`;
