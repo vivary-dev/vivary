@@ -194,6 +194,28 @@ def apply_published_workspace_fixture(target: Path, version: str) -> None:
 
 
 class CreateVivaryTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "native Windows rename semantics")
+    def test_windows_atomic_write_commits_in_locked_parent(self):
+        with temp_workspace() as td:
+            target = Path(td)
+            destination = target / ".gitignore"
+            create_vivary._atomic_write_bytes_no_follow(
+                target, destination, b"first\n", replace_existing=False,
+            )
+            self.assertEqual(destination.read_bytes(), b"first\n")
+            self.assertEqual(sorted(p.name for p in target.iterdir()), [".gitignore"])
+
+            create_vivary._atomic_write_bytes_no_follow(
+                target, destination, b"replacement\n", replace_existing=True,
+            )
+            self.assertEqual(destination.read_bytes(), b"replacement\n")
+            with self.assertRaises(create_vivary.ScaffoldError):
+                create_vivary._atomic_write_bytes_no_follow(
+                    target, destination, b"must not replace\n", replace_existing=False,
+                )
+            self.assertEqual(destination.read_bytes(), b"replacement\n")
+            self.assertEqual(sorted(p.name for p in target.iterdir()), [".gitignore"])
+
     def test_symlink_or_junction_uses_windows_reparse_fallback(self):
         class FakeStat:
             st_file_attributes = getattr(
@@ -3302,6 +3324,52 @@ class CreateVivaryTests(unittest.TestCase):
 
 
 class TestAgentFlags(unittest.TestCase):
+    def test_interactive_wizard_json_reports_backend_install_failure(self):
+        with temp_workspace() as td:
+            target = Path(td) / "interactive-wizard-install-failure"
+            target.mkdir()
+            sentinel = target / "owned.txt"
+            sentinel.write_bytes(b"preserve existing bytes\n")
+            output = io.StringIO()
+            prompts = io.StringIO()
+            answers = io.StringIO("2\n2\n")
+            with mock.patch.object(sys, "stdin", answers), \
+                    mock.patch.object(answers, "isatty", return_value=True), \
+                    mock.patch.object(create_vivary, "_ensure_backend_installed",
+                        side_effect=create_vivary.ScaffoldError("optional backend installation failed")) as install, \
+                    redirect_stdout(output), redirect_stderr(prompts):
+                rc = create_vivary.main([
+                    "wizard", str(target), "--json", "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "ok": False, "error": "optional backend installation failed",
+            })
+            install.assert_called_once()
+            self.assertIn("How large", prompts.getvalue())
+            self.assertEqual(sentinel.read_bytes(), b"preserve existing bytes\n")
+            self.assertEqual(list(target.iterdir()), [sentinel])
+
+    def test_wizard_json_reports_backend_install_failure(self):
+        with temp_workspace() as td:
+            target = Path(td) / "wizard-install-failure"
+            target.mkdir()
+            output = io.StringIO()
+            with mock.patch.object(
+                create_vivary, "_ensure_backend_installed",
+                side_effect=create_vivary.ScaffoldError("optional backend installation failed"),
+            ) as install, redirect_stdout(output):
+                rc = create_vivary.main([
+                    "wizard", str(target), "--auto", "--storage", "embedded",
+                    "--provider", "lancedb", "--json", "--repo-root", str(ROOT),
+                ])
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(output.getvalue()), {
+                "ok": False, "error": "optional backend installation failed",
+            })
+            install.assert_called_once_with("lancedb", True)
+            self.assertEqual(list(target.iterdir()), [])
+
     """Tests for --json, --auto, --dry-run, --storage and the wizard subcommand."""
 
     def test_init_json_flag_returns_valid_json(self):
@@ -3509,7 +3577,8 @@ class TestAgentFlags(unittest.TestCase):
             self.assertEqual(out["installed"], [])
             self.assertTrue((target / ".vivary" / "storage.toml").exists())
 
-    def test_wizard_subcommand_writes_storage_toml(self):
+    @mock.patch.object(create_vivary, "_ensure_backend_installed", return_value=[])
+    def test_wizard_subcommand_writes_storage_toml(self, _install):
         with temp_workspace() as td:
             target = Path(td) / "wizard-demo"
             # First scaffold a bare workspace
@@ -3591,7 +3660,8 @@ class TestAgentFlags(unittest.TestCase):
             self.assertFalse((target / ".vivary" / "storage.toml").exists())
 
     @unittest.skipIf(not hasattr(Path, "symlink_to"), "symlinks unavailable")
-    def test_wizard_json_reports_storage_safety_error(self):
+    @mock.patch.object(create_vivary, "_ensure_backend_installed", return_value=[])
+    def test_wizard_json_reports_storage_safety_error(self, _install):
         with temp_workspace() as td:
             target = Path(td) / "wizard-symlink"
             create_vivary.scaffold_workspace(

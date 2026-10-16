@@ -1292,3 +1292,30 @@ test("Windows observation keeps an exited intermediate's grandchild after an una
   assert.equal(later.result, "remaining");
   if (later.result === "remaining") assert.deepEqual(later.remaining.map(process => process.pid), [300]);
 });
+
+
+test("worker failure keeps bounded provider detail and rejects malformed IPC errors", { timeout: WORKER_TEST_TIMEOUT_MS }, async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "vivary-worker-error-detail-"));
+  const server = path.join(fixture, ".output", "server");
+  await mkdir(server, { recursive: true });
+  await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+process.on("message", message => {
+  if (message.type !== "vivary:code-worker:start") return;
+  const errors = { detail: "Codex sign-in expired. [redacted credential]", empty: "", oversized: "x".repeat(701), malformed: {} };
+  process.send({ type: "vivary:code-worker:failed", runId: message.runId, error: errors[message.prompt] });
+});
+process.send({ type: "vivary:code-worker:ready" });
+`);
+  try {
+    process.chdir(fixture);
+    for (const prompt of ["detail", "empty", "oversized", "malformed"]) {
+      await assert.rejects(executeVivaryCodeWorker({ runId: request.runId, prompt,
+        ownerEmail: request.ownerEmail, signal: new AbortController().signal }), {
+        message: prompt === "detail" ? "Codex sign-in expired. [redacted credential]" : "The Native coding executor failed.",
+      });
+    }
+  } finally {
+    process.chdir(originalCwd);
+    await rm(fixture, { recursive: true, force: true });
+  }
+});

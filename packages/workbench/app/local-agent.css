@@ -17,6 +17,12 @@
 .local-agent-runtime-setup { margin: 8px 16px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); border-radius: var(--radius); }
 .local-agent-runtime-setup h3 { font-size: 13px; font-weight: 600; }
 .local-agent-runtime-setup p { color: hsl(var(--muted-foreground)); line-height: 1.6; margin-top: 4px; }
+.local-agent-composer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; max-width: 100%; flex: 1 1 180px; }
+.local-agent-composer-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; color: hsl(var(--muted-foreground)); font-size: 11px; }
+.local-agent-composer-runtime { flex: 0 1 145px; }
+.local-agent-composer-model { flex: 1 1 160px; }
+.local-agent-composer-select { width: 100%; min-width: 0; max-width: 100%; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); color: hsl(var(--foreground)); padding: 4px 6px; font: inherit; text-overflow: ellipsis; }
+.local-agent-composer-select:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .local-agent-limits { color: hsl(var(--muted-foreground)); font-size: 11px; text-align: center; padding: 8px; }
 .local-agent-output { display: none; flex-direction: column; width: min(40%, 460px); min-width: 280px; min-height: 0; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
 .local-agent-layout.is-viewing-files .local-agent-output { display: flex; }

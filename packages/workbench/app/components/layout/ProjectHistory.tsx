@@ -251,7 +251,7 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
           <Button variant="ghost" size="icon" aria-label="Choose conversation runtime" disabled={!workspaceAvailable}><IconChevronDown size={14} /></Button>
         </PopoverTrigger><PopoverContent className="w-60 p-2" align="start">
           <Button variant="ghost" className="w-full justify-start" onClick={newCode}>Code conversation</Button>
-          <Button variant="ghost" className="w-full justify-start" onClick={() => void newNative()}>Native chat</Button>
+          <Button variant="ghost" className="w-full justify-start" onClick={() => void newNative()}>API chat (separate billing)</Button>
         </PopoverContent></Popover>
         {history.canExpand && <Button variant="ghost" size="icon" aria-label={history.disclosureLabel} aria-expanded={history.expanded} onClick={history.toggleExpanded}><IconDots size={14} /></Button>}
       </div>

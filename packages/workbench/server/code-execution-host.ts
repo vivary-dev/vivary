@@ -332,7 +332,12 @@ export async function executeVivaryCodeWorker(input: {
       }
       if (message.type !== "vivary:code-worker:done" && message.type !== "vivary:code-worker:failed") return;
       reported = true;
-      if (message.type === "vivary:code-worker:failed") failure ??= new Error("The Native coding executor failed.");
+      if (message.type === "vivary:code-worker:failed") {
+        const detail = "error" in message && typeof message.error === "string"
+          && message.error.trim() && message.error.length <= 700
+          ? message.error : "The Native coding executor failed.";
+        failure ??= new Error(detail);
+      }
       stopTree();
     };
     const startupDeadline = setTimeout(() => requestStop(
