@@ -12,13 +12,13 @@ const root = await mkdtemp(path.join(tmpdir(), "vivary-code-legacy-model-"));
 const database = `file:${path.join(root, "state.sqlite")}`;
 const original = {
   DATABASE_URL: process.env.DATABASE_URL, DATABASE_URL_UNPOOLED: process.env.DATABASE_URL_UNPOOLED,
-  VIVARY_ACCESS_MODE: process.env.VIVARY_ACCESS_MODE, AGENT_NATIVE_CODE_AGENTS_HOME: process.env.AGENT_NATIVE_CODE_AGENTS_HOME,
+  VIVARY_ACCESS_MODE: process.env.VIVARY_ACCESS_MODE, AGENT_NATIVE_CODE_AGENTS_HOME: process.env.AGENT_NATIVE_CODE_AGENTS_HOME, // guard:allow-env-credential - Saved test mode flag, restored after the suite.
 };
 Object.assign(process.env, { DATABASE_URL: database, DATABASE_URL_UNPOOLED: database,
   VIVARY_ACCESS_MODE: "local", AGENT_NATIVE_CODE_AGENTS_HOME: path.join(root, "runs") });
 after(async () => {
   for (const [name, value] of Object.entries(original)) {
-    if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    if (value === undefined) delete process.env[name]; else process.env[name] = value; // guard:allow-env-credential - Restores the four fixture names saved above.
   }
   await rm(root, { recursive: true, force: true });
 });
@@ -93,10 +93,10 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
         metadata: { app: "vivary-workbench-local-code", ownerEmail, engine: "codex-cli", workspaceRoot: fixture,
           codexSessionId: "retained-codex-thread", ...(shape === "null" ? { model: null } : {}) } });
       const previousCwd = process.cwd();
-      const previousPath = process.env.PATH;
+      const previousPath = process.env.PATH; // guard:allow-env-credential - Fixture CLI search path, restored below.
       try {
         process.chdir(fixture);
-        process.env.PATH = bin + path.delimiter + (previousPath ?? "");
+        process.env.PATH = bin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Puts the inert fixture CLI first.
         assert.equal((await getVivaryRuntimeStatus("codex-cli", { refresh: true })).status, "ready");
         await writeFile(refused, "Refuse only the executing process after discovery succeeds.");
         await sendVivaryCodeMessage({ ownerEmail, runId: run.id, engine: "codex-cli",
@@ -136,7 +136,7 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
       } finally {
         if ((await getVivaryCodeHostState(ownerEmail)).activeRun?.id === run.id) await stopVivaryCodeRun({ ownerEmail, runId: run.id });
         process.chdir(previousCwd);
-        if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+        if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Restores the saved search path.
       }
     });
 }
