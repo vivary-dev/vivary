@@ -241,8 +241,27 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(page.lastPrepared!.entries, 2); assert.equal(page.lastAccepted, null);
     assert.equal((await getThread(linked.target.id))!.messageCount, 0);
     assert.equal(await service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Internal", internalContinuation: true }), undefined);
-    await assert.rejects(runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: { type: "workspace-app", id: "foreign" } } }, () =>
+    // A send pinned outside every Vivary project scope never reads link metadata, so it gets no linked history.
+    assert.equal(await runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: { type: "workspace-app", id: "foreign" } } }, () =>
+      service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Forged" })), undefined);
+    // A send pinned to another project's scope still refuses the linked target.
+    const other = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "project-other", label: "Other" });
+    await assert.rejects(runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: other.scope } }, () =>
       service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Forged" })));
+  });
+  await t.test("an unlinked Native send works before the link table exists, and a personal link still prepares", async () => {
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const { vivaryChatScope } = await import("../app/lib/chat-scope.ts");
+    const scopes = [vivaryChatScope(orgId)!, createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" }).scope,
+      createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" }).scope];
+    // Registry migration 5 creates the table, and project services skip it while unconfigured or before bootstrap finishes.
+    await db.execute("ALTER TABLE vivary_conversation_links RENAME TO vivary_conversation_links_withheld");
+    try {
+      for (const chatScope of scopes)
+        assert.equal(await runWithRequestContext({ userEmail: owner, orgId, run: { chatScope } }, () =>
+          service.prepareNativeMessage({ threadId: "unlinked-thread", ownerEmail: owner, message: "Ordinary request" })), undefined);
+      assert.equal(await service.load(actor, project.projectId, { kind: "native", id: "unlinked-thread" }), null);
+    } finally { await db.execute("ALTER TABLE vivary_conversation_links_withheld RENAME TO vivary_conversation_links"); }
   });
   await t.test("Codex also links to Claude Code and Native without copying either provider session", async () => {
     const codex = code("codex-source", "codex-cli");
@@ -349,6 +368,12 @@ process.send({type:"vivary:code-worker:ready"});
         { errorCode: "vivary_linked_history_unavailable" });
     } finally { personal = { root: personalRoots[0], label: "personal-a" }; }
     assert.equal((await service.load(actor, null, linked.target))!.sourceStatus, "available");
+    // A personal workspace Native target is pinned to a Vivary project scope, so its sends still prepare linked history.
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const personalScope = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" }).scope;
+    assert.match((await runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: personalScope } }, () =>
+      service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Personal request" })))!.message,
+    /Personal answer[\s\S]*Personal request$/);
     // A project run never counts as personal history.
     await assert.rejects(service.create(actor, { projectId: null, source: { kind: "code", id: source.id }, target: { engine: "native" } }),
       { errorCode: "vivary_linked_history_unavailable" });

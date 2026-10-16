@@ -10,6 +10,7 @@ import { codeAgentRunsDir, codeAgentRunTranscriptPath, createCodeAgentRunRecord,
   updateCodeAgentRunRecord, listCodeAgentTranscriptEvents, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { z } from "zod";
 import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-identity";
+import { PROJECT_CHAT_SCOPE_PREFIX } from "./chat-project-scope.mjs";
 import { changeChatDraft, createCodeDraftIdentity } from "./chat-draft";
 import { resolveVivaryCodeProject, resolveVivaryCodeProjectHistory } from "./code-project";
 import { isOwnedRun, resolveWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
@@ -65,6 +66,19 @@ const defaults: Dependencies = { member: isOrgMember, history: resolveVivaryCode
 
 function unavailable(message = "The linked conversation is no longer available in this project."): never {
   fail(message, { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });
+}
+/**
+ * Registry migration 5 creates the link table, and project services skip that migration while unconfigured
+ * or before bootstrap finishes. A missing table holds no links, so ordinary conversations never depend on it.
+ */
+async function linkRows(targetKind: ConversationReference["kind"], targetId: string) {
+  try {
+    return (await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?",
+      args: [targetKind, targetId] })).rows;
+  } catch (error) {
+    if (/no such table: vivary_conversation_links\b|relation "vivary_conversation_links" does not exist/.test(String((error as Error)?.message))) return [];
+    throw error;
+  }
 }
 const isSourceFault = (error: unknown) => error instanceof LinkedSourceChanged
   || (error as { errorCode?: string } | null)?.errorCode === "vivary_linked_history_unavailable";
@@ -159,7 +173,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
 
   async function load(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference, cursor?: string): Promise<LinkedHistoryPage | null> {
     const identity = await scope(ctx, projectId);
-    const { rows } = await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?", args: [target.kind, target.id] });
+    const rows = await linkRows(target.kind, target.id);
     if (!rows.length) {
       if (target.kind === "code" && getCodeAgentRunRecord(target.id)?.metadata?.linkedHistoryId) unavailable();
       return null;
@@ -265,7 +279,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     // An unavailable source supplies nothing, so nothing is recorded as prepared.
     if (page.sourceStatus === "unavailable") return { block: null, portion: null };
     // Preparation is not acceptance or observed provider delivery. The Code send records acceptance on its actual user event after final admission.
-    const { rows } = await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?", args: [target.kind, target.id] });
+    const rows = await linkRows(target.kind, target.id);
     const link = linkSchema.parse(JSON.parse(String(rows[0]?.record_json)));
     link.lastPrepared = { entries: page.suppliedEntries, characters: page.excerpt.length, truncated: page.truncated };
     await getDbExec().execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE link_id = ? AND record_json = ?",
@@ -283,14 +297,17 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   async function prepareNativeMessage(details: { threadId?: string; ownerEmail: string | null;
     message: string; displayMessage?: string; internalContinuation?: boolean }) {
     if (!details.threadId || details.internalContinuation) return;
-    const { rows } = await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = 'native' AND target_id = ?", args: [details.threadId] });
+    // Link targets are always project or personal workspace conversations, which share the project scope prefix.
+    // A send pinned to any other scope never reads link metadata, so it cannot receive linked history.
+    const pinned = getRequestRunContext()?.chatScope;
+    if (pinned?.type !== "workspace-app" || !pinned.id.startsWith(PROJECT_CHAT_SCOPE_PREFIX)) return;
+    const rows = await linkRows("native", details.threadId);
     if (!rows.length) return;
     const link = linkSchema.parse(JSON.parse(String(rows[0].record_json)));
     const orgId = getRequestOrgId(), owner = details.ownerEmail?.trim().toLowerCase();
     if (!orgId || !owner) unavailable();
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: link.projectId, label: "Project" });
-    const pinned = getRequestRunContext()?.chatScope;
-    if (pinned?.type !== identity.scope.type || pinned.id !== identity.scope.id) unavailable();
+    if (pinned.type !== identity.scope.type || pinned.id !== identity.scope.id) unavailable();
     const prepared = await context({ caller: "http", userEmail: owner, orgId, appId: "workbench" },
       link.projectId, { kind: "native", id: details.threadId });
     if (!prepared) unavailable();

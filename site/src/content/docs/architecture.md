@@ -159,7 +159,12 @@ keeps the source selected and offers Retry. The host execution guard is unchange
 `linked-conversations.ts` uses Native records and the existing Workbench database
 migration owner. Its metadata row binds actor, application, organization, project
 binding, source and target creation identities, and the completed source
-boundary with a digest. It contains no transcript copy. Pages and explicit sends
+boundary with a digest. It contains no transcript copy. Registry migration 5
+creates the link table, and project services skip that migration while
+unconfigured or before bootstrap finishes. A missing table therefore counts as no
+link. A Native send reads link metadata only when its pinned chat scope is a
+project or personal workspace scope, the only scopes a link target can have, so
+an ordinary send never depends on the table. Pages and explicit sends
 recheck current membership, project access, both records and the frozen prefix.
 Record ownership matches the project and binding, as `isOwnedRun` does, so a
 project folder reconnect, which changes only the root epoch, keeps the link and
