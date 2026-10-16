@@ -156,6 +156,26 @@ test("an unavailable state document explains why and offers no Prepare", async (
   assert.equal(button("Prepare handoff"), undefined);
 });
 
+test("a run already active at mount disables Prepare until that run ends", async () => {
+  handoffFixture.status = { status: "none", path: "STATE.md" };
+  const probes = [];
+  // Native reads the same active-run state its composer reads on mount.
+  await render({ conversation: { kind: "native", id: "thread-b" },
+    runActive: async () => { probes.push("thread-b"); return true; } }); await settle();
+  assert.deepEqual(probes, ["thread-b"]);
+  assert.equal(button("Prepare handoff").disabled, true);
+  const ended = new window.Event("agentNative.chatRunning");
+  Object.defineProperty(ended, "detail", { value: { tabId: "native-ui-tab", isRunning: false } });
+  await act(async () => window.dispatchEvent(ended)); await settle();
+  assert.equal(button("Prepare handoff").disabled, false);
+  // Code passes the run state its composer already has.
+  await render({ disabled: true }); await settle();
+  assert.equal(button("Prepare handoff").disabled, true);
+  await render({ disabled: false }); await settle();
+  assert.equal(button("Prepare handoff").disabled, false);
+  assert.deepEqual(handoffFixture.submitted, []);
+});
+
 test("Prepare is disabled while a run is active", async () => {
   handoffFixture.status = { status: "none", path: "STATE.md" };
   await render({ disabled: true }); await settle();

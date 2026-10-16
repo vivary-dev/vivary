@@ -12,25 +12,38 @@ import { STALE_REASON_TEXT, type HandoffFreshness, type HandoffPrepareResult, ty
  * separate owner click. Freshness is read on mount and after conversation
  * updates. It never submits anything.
  */
-export function HandoffControl({ projectId, conversation, disabled, submit }: {
+export function HandoffControl({ projectId, conversation, disabled, submit, runActive }: {
   projectId: string; conversation: ConversationReference; disabled: boolean;
   /** Sends the request as a message in this conversation. Resolves false when it was not delivered. */
   submit: (message: string) => Promise<boolean>;
+  /** Native only: whether a run is active now, read on mount. Code passes its run state as `disabled`. */
+  runActive?: () => Promise<boolean>;
 }) {
   const { call, ready } = useNativeActionCaller();
   const key = JSON.stringify([projectId, conversation.kind, conversation.id]);
   const [busy, setBusy] = useState(false), [running, setRunning] = useState(false);
   const [notice, setNotice] = useState<{ text: string; problems?: string[] } | null>(null);
-  const visit = useRef(0);
-  useEffect(() => { visit.current++; setNotice(null); setBusy(false); }, [key]);
+  const visit = useRef(0), runEvents = useRef(0), latestRunActive = useRef(runActive);
+  latestRunActive.current = runActive;
+  useEffect(() => {
+    visit.current++; setNotice(null); setBusy(false); setRunning(false);
+    const probe = latestRunActive.current;
+    if (!probe) return;
+    // A run event that arrives while the read is pending is newer, so it wins.
+    const seen = runEvents.current;
+    let current = true;
+    void probe().then(active => { if (current && runEvents.current === seen) setRunning(active); }, () => {});
+    return () => { current = false; };
+  }, [key]);
   const query = useQuery({ queryKey: ["vivary-handoff-freshness", key], enabled: ready, retry: false, staleTime: 0,
     queryFn: () => call<HandoffFreshness>("vivary-handoff-freshness", { projectId, conversation }) });
   useEffect(() => {
     const refresh = () => { void query.refetch(); };
-    // Native reports its own run state here. Code passes its run state as `disabled`.
+    // Native reports later run changes here.
     const nativeRequest = (event: Event) => {
       const detail = (event as CustomEvent<{ isRunning?: boolean }>).detail;
       if (typeof detail?.isRunning !== "boolean") return;
+      runEvents.current++;
       setRunning(detail.isRunning);
       if (!detail.isRunning) refresh();
     };

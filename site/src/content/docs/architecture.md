@@ -360,7 +360,10 @@ Prepare. A conflict or failed write keeps the previous file and saved record,
 marks the request Failed and offers Retry. Nothing is cleaned, stashed or
 committed. A dirty tree is reported as a count. A new Native conversation
 shows no control until its thread is saved, because nothing in it can be
-handed off yet.
+handed off yet. Prepare is disabled while a run is active, including a run
+already active when the control opens. Native reads the same `runs/active`
+endpoint its composer reads on mount, then follows run events. Code uses the
+run state its composer already has.
 
 Freshness is computed on request, with no timer and no model call. It compares
 the state file version, Git HEAD and branch, the dirty entry list and each dirty

@@ -1,4 +1,5 @@
 import { AgentChatSurface, AssistantChat, clearChatStorage, sendToAgentChatAndConfirm } from "@agent-native/core/client/agent-chat";
+import { agentNativePath } from "@agent-native/core/client/api-path";
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,14 @@ import { LinkedHistoryNotice, NativeLinkOptions, sourceDraftSaver, useLinkSource
 import { HandoffControl } from "./HandoffControl";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
+
+/** The active-run read the Native composer makes when it mounts a thread. */
+async function nativeRunActive(threadId: string): Promise<boolean> {
+  const response = await fetch(`${agentNativePath("/_agent-native/agent-chat")}/runs/active?threadId=${encodeURIComponent(threadId)}`);
+  if (!response.ok) return false;
+  const info = await response.json() as { active?: unknown; status?: unknown };
+  return info.active === true && info.status === "running";
+}
 
 export default function NativeConversation() {
   const [params] = useSearchParams();
@@ -243,7 +252,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
         source={linkSource} engines={linkEngines} saveDraft={sourceDraftSaver(draft, selectedThread)} />
       {identity.projectId && <HandoffControl key={"handoff:" + selectedThread} projectId={identity.projectId}
         conversation={{ kind: "native", id: selectedThread }} disabled={!workspaceAvailable}
-        submit={submitToSelectedThread} />}
+        submit={submitToSelectedThread} runActive={() => nativeRunActive(selectedThread)} />}
     </>}
     <ConversationMatch key={selectedThread} container={matchContainer} messageId={requestedMessage}
       canReturnToLatest={currentMatch !== null && !matchArchived} archived={matchArchived}
