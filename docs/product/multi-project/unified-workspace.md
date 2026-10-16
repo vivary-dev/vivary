@@ -207,6 +207,29 @@ Proposed handoff fields: goal, current source/file versions, decisions, changes,
 
 Freshness is explicit. A reviewed handoff records the project version and completed-event boundary it covers. Later changes can mark it Out of date deterministically. Jeff accepted **Manual by default** on 2026-09-14 through his submitted review of guide snapshot `e86d06ed592a2d3c`. The agent updates the narrative when the user requests it, and the work follows normal authorization. A failed update retains the previous readable version and shows Retry. It does not report a fresh handoff. A future project may propose named completion checkpoints through a separate explicit opt-in.
 
+Implementation status, 2026-10-16: a first unit is implemented on branch
+`feat/prepare-handoff-dev` and is not merged. Jeff decided three details that
+day. Save happens only on a second owner click, **Save handoff**. A project with
+no designated state document, such as a plain workspace or one without its
+`STATE.md`, refuses Prepare with a message that says so. The handoff block goes
+at the end of `STATE.md`, so the first 1,200 characters that load into each
+turn stay as they were.
+
+**Prepare handoff** in a saved project conversation sends a request to that
+conversation. The agent replies with one `vivary-handoff` block, and Vivary
+writes nothing until the owner clicks **Save handoff**. Vivary then checks the
+reply, adds the project version and conversation boundary itself, and replaces
+or appends one marked block in the state document. Every other byte stays. A
+dirty working tree is reported as a count. A changed file, a changed project
+binding or a failed write keeps the previous version and shows Retry. The
+control then reads Fresh, Out of date with its reasons, Unverifiable, Pending
+or Failed. Freshness is checked when the conversation updates, with no timer
+and no model call. Switching harness does not prepare or send anything.
+
+The maintained `test:handoff` target covers these rules with production stores.
+Independent review, the built normal-app journey with a real agent in Code and
+Native, and Windows acceptance remain required.
+
 ## Template distribution
 
 Templates start as an offline baseline. A later optional community collection can use the existing vivary-site to point at source GitHub repositories and downloads. Show a preview before apply. A download remains inert until a separately authorized operation applies it. This is not a marketplace or a separate template site.

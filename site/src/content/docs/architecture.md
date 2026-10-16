@@ -772,6 +772,17 @@ trust boundaries now states this check. Evidence: four new tests in
 closed listener, a later server error or close, the action error type, and the
 rendered refusal.
 
+2026-10-16 Prepare handoff and handoff freshness (A083, A084). New
+`server/handoff.ts`, three owner actions with `agentTool: false`, a
+`HandoffControl` in the Code and Native conversation surfaces, migration 6, the
+creator bridge `observe` operation, and `stateDocument` in project memory. The
+linked conversation service now exposes its owner scope, record check and
+completed-prefix reader instead of duplicating them. The Prepare handoff section
+above describes the design. `test:handoff` covers refused replies, conflicts,
+a failed write, a dirty tree, staleness without a model call, and the control.
+The Python bridge case covers `observe`. Built-app and real-agent acceptance
+remain required.
+
 2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
 slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,
 with its design text above unchanged. Its Code-admission test now gives the
