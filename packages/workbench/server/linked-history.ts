@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { CodeAgentTranscriptEvent } from "@agent-native/core/code-agents";
 
 export const LINK_HISTORY_BYTES = 8 * 1024 * 1024;
+/** Parse bound for a retained Native read. The source may grow after linking, the frozen prefix may not. */
+export const LINK_RETAINED_PARSE_BYTES = 64 * 1024 * 1024;
 export const LINK_EXCERPT_CHARS = 12_000;
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {

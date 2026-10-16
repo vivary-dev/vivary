@@ -190,8 +190,10 @@ The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. Its collapsed view gives the source title, counts and
 stage. Boundary identifiers and session details remain in expanded inspection.
 Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
-Reads are bounded to 8 MiB of source data. An oversized source refuses new linking
-rather than claiming full context. A long individual entry may be shortened with
+New linking reads at most 8 MiB of source data, and an oversized source refuses
+new linking rather than claiming full context. A later read of a Native source
+parses at most 64 MiB and checks only the walked prefix against 8 MiB, so source
+work after the boundary cannot break an existing link. A long individual entry may be shortened with
 an omission notice. The original remains the complete history owner. This is the
 first linked-history slice of issue #38. Prepare handoff and controlled concurrent
 execution remain separate work. Independent review and built UI acceptance of

@@ -168,7 +168,8 @@ and references are quoted as history, never replayed as tool calls. Runtime
 bookkeeping and private reasoning are excluded. An empty saved Native conversation
 has no completed portion and can link onward to Code. A shortened entry or omitted
 page is labeled as truncated, and the original stays readable. New linking refuses sources beyond
-the 8 MiB read limit. An active source with no completed work links with an empty
+the 8 MiB read limit. A source that grows past it after linking keeps its
+frozen prefix. An active source with no completed work links with an empty
 completed-history notice. Optimistic unsent Native drafts are not saved sources.
 
 Metadata stays in the existing Workbench Native-backed database. Native keeps

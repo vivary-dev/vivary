@@ -17,7 +17,7 @@ import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
 import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
-  isCompletedNativeMessage, LINK_HISTORY_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
+  isCompletedNativeMessage, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage, PreparedLinkedContext } from "../shared/linked-conversation";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
@@ -124,7 +124,11 @@ export function createLinkedConversationService(dependencies: Dependencies = def
         digest: historyDigest(end), items: codeHistoryItems(end) };
     }
     const thread = source as ChatThread;
-    if (Buffer.byteLength(thread.threadData) > LINK_HISTORY_BYTES) unavailable("The source history exceeds the safe 8 MiB linking limit.");
+    // New linking bounds the whole thread. A retained read bounds parsing more loosely and the walked prefix exactly,
+    // so later source work past the boundary cannot break an existing link.
+    const threadBytes = Buffer.byteLength(thread.threadData);
+    if (boundaryId === undefined ? threadBytes > LINK_HISTORY_BYTES : threadBytes > LINK_RETAINED_PARSE_BYTES)
+      unavailable("The source history exceeds the safe 8 MiB linking limit.");
     // A retained boundary walks parentId from its own message, not from the current head.
     const path = nativeHistoryPath(thread.threadData, boundaryId ?? undefined);
     let index = boundaryId === undefined ? path.findLastIndex(isCompletedNativeMessage)
@@ -142,6 +146,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     }
     if (boundaryId && path[index]?.message.id !== boundaryId) unavailable();
     const prefix = path.slice(0, index + 1);
+    if (boundaryId !== undefined && Buffer.byteLength(JSON.stringify(prefix)) > LINK_HISTORY_BYTES)
+      unavailable("The source history exceeds the safe 8 MiB linking limit.");
     return { boundaryId: prefix.at(-1)?.message.id ?? null, boundaryBytes: null, digest: historyDigest(prefix), items: nativeHistoryItems(prefix) };
   }
 

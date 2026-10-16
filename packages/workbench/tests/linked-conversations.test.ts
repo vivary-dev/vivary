@@ -325,6 +325,25 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(after.excerpt, before.excerpt); assert.doesNotMatch(after.excerpt, /REGENERATED|EDITED/);
     assert.equal((await service.context(actor, project.projectId, linked.target))!.block, block);
   });
+  await t.test("a Native source that grows past 8 MiB after linking keeps its frozen prefix, while new linking refuses", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "growing-source", orgId, scope: identity.scope });
+    const messages: unknown[] = [{ parentId: null, message: { id: "small-ask", role: "user", content: [{ type: "text", text: "Small request" }] } },
+      { parentId: "small-ask", message: { id: "small-answer", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Small answer" }] } }];
+    await updateThreadData(thread.id, JSON.stringify({ headId: "small-answer", messages }), "Growing", "", messages.length);
+    const linked = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: thread.id },
+      target: { engine: "claude-cli", model: "sonnet" } });
+    const before = (await service.load(actor, project.projectId, linked.target))!;
+    // Later source work after the boundary takes the whole thread past the 8 MiB linking limit.
+    messages.push({ parentId: "small-answer", message: { id: "large-ask", role: "user", content: [{ type: "text", text: "x".repeat(9 * 1024 * 1024) }] } },
+      { parentId: "large-ask", message: { id: "large-answer", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Large answer" }] } });
+    await updateThreadData(thread.id, JSON.stringify({ headId: "large-answer", messages }), "Growing", "", messages.length);
+    const after = (await service.load(actor, project.projectId, linked.target))!;
+    assert.equal(after.sourceStatus, "available"); assert.equal(after.excerpt, before.excerpt);
+    assert.match((await service.context(actor, project.projectId, linked.target))!.block!, /Small answer/);
+    await assert.rejects(service.create(actor, { projectId: project.projectId, source: { kind: "native", id: thread.id },
+      target: { engine: "claude-cli", model: "sonnet" } }), /8 MiB/);
+  });
   await t.test("earlier stopped and failed Native replies inside the completed prefix are not quoted", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
     const thread = await createThread(owner, { id: "stopped-source", orgId, scope: identity.scope });
