@@ -5,6 +5,7 @@ export const LINK_HISTORY_BYTES = 8 * 1024 * 1024;
 /** Parse bound for a retained Native read. The source may grow after linking, the frozen prefix may not. */
 export const LINK_RETAINED_PARSE_BYTES = 64 * 1024 * 1024;
 export const LINK_EXCERPT_CHARS = 12_000;
+const ENTRY_SHORTENED = " [Entry shortened. The original conversation has the full text.]";
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {
   id: string; role: string; content: Array<Record<string, unknown>>; attachments?: Array<Record<string, unknown>>;
@@ -153,10 +154,16 @@ export function historyExcerpt(items: HistoryItem[], binding: string, cursor?: s
   let used = 0, end = start, omittedText = false;
   while (end < items.length && end - start < 100 && used < LINK_EXCERPT_CHARS) {
     const item = items[end], remaining = LINK_EXCERPT_CHARS - used;
-    const rendered = `${item.role} [${item.id}]: ${item.text}`;
-    if (rendered.length > remaining) omittedText = true;
-    parts.push(rendered.slice(0, remaining));
-    used += parts.at(-1)!.length + 2;
+    let rendered = `${item.role} [${item.id}]: ${item.text}`;
+    if (rendered.length > remaining) {
+      // An entry that does not fit starts the next page, so the cursor never skips text.
+      if (parts.length) break;
+      // Only an entry larger than a whole page is cut, and it says so.
+      omittedText = true;
+      rendered = rendered.slice(0, remaining - ENTRY_SHORTENED.length) + ENTRY_SHORTENED;
+    }
+    parts.push(rendered);
+    used += rendered.length + 2;
     end++;
   }
   return { excerpt: parts.join("\n\n"), suppliedEntries: end - start,

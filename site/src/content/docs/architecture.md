@@ -210,8 +210,10 @@ Source-bound continuation revalidates access on every page, with explicit trunca
 New linking reads at most 8 MiB of source data, and an oversized source refuses
 new linking rather than claiming full context. A later read of a Native source
 parses at most 64 MiB and checks only the walked prefix against 8 MiB, so source
-work after the boundary cannot break an existing link. A long individual entry may be shortened with
-an omission notice. The original remains the complete history owner. This is the
+work after the boundary cannot break an existing link. An entry that does not fit
+the rest of a page starts the next page, so paging never skips text. Only an
+entry longer than a whole page is shortened, and its text ends with an omission
+notice that points to the original. The original remains the complete history owner. This is the
 first linked-history slice of issue #38. Prepare handoff and controlled concurrent
 execution remain separate work. Independent review and built UI acceptance of
 this slice remain required.

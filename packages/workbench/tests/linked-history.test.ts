@@ -73,6 +73,19 @@ test("Native attachments and unsupported content parts are named as omitted, nev
   assert.doesNotMatch(answer.text, /PRIVATE REASONING|reasoning content/);
 });
 
+test("an entry that does not fit starts the next page, and only an entry larger than a page is cut with a marker", () => {
+  const binding = historyDigest(["exact-source", "completed-event"]);
+  const items = [{ id: "fits", role: "User", text: "a".repeat(11_000) }, { id: "next", role: "Assistant", text: "b".repeat(5_000) }];
+  const first = historyExcerpt(items, binding);
+  assert.equal(first.excerpt.includes("b"), false, "the second entry is not cut to fill the page");
+  assert.ok(first.nextCursor, "the cursor stays on the entry that did not fit");
+  const second = historyExcerpt(items, binding, first.nextCursor!);
+  assert.ok(second.excerpt.includes("b".repeat(5_000)), "the next page shows the whole entry");
+  const oversized = historyExcerpt([{ id: "huge", role: "Assistant", text: "x".repeat(20_000) }], binding);
+  assert.equal(oversized.excerpt.length, 12_000); assert.equal(oversized.truncated, true);
+  assert.match(oversized.excerpt, /\[Entry shortened\. The original conversation has the full text\.\]$/);
+});
+
 test("bounded pages remain source-bound with stable continuation and explicit oversized omissions", () => {
   const items = Array.from({ length: 251 }, (_, index) => ({ id: "entry-" + index, role: "User", text: "text" }));
   const binding = historyDigest(["exact-source", "completed-event"]);
