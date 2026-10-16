@@ -13,7 +13,8 @@ export type NativeEntry = { parentId?: string | null; message: {
 } };
 /** The retained source can no longer reproduce its frozen prefix. This is a source availability fault, not a link fault. */
 export class LinkedSourceChanged extends Error {}
-export const historyDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+// Personal workspace scopes have no project history, so undefined digests as null instead of throwing.
+export const historyDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 
 /** Only complete JSONL records count. An in-progress final line is never history. */
 export function codeHistoryRecords(text: string, runId: string): CodeAgentTranscriptEvent[] {

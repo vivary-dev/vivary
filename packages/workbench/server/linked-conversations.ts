@@ -41,7 +41,9 @@ const linkSchema = z.object({
   lastSupplied: portionSchema.nullable().optional(),
 }).strict();
 type Link = z.infer<typeof linkSchema>;
-type Scope = { owner: string; orgId: string; projectId: string | null; history: VivaryCodeProjectHistory | undefined };
+type Scope = { owner: string; orgId: string; projectId: string | null; history: VivaryCodeProjectHistory | undefined;
+  /** The configured personal workspace, read only when a personal Code record is checked. */
+  personal: () => Promise<VivaryCodeWorkspace | undefined> };
 type Dependencies = {
   member: typeof isOrgMember;
   history: typeof resolveVivaryCodeProjectHistory;
@@ -73,16 +75,19 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (!owner || !orgId || !["vivary", "workbench"].includes(ctx?.appId ?? "")
       || !["http", "frontend"].includes(ctx?.caller ?? "") || !await dependencies.member(orgId, owner))
       fail("The conversation owner could not be verified.", { statusCode: 403 });
-    return { owner, orgId, projectId, history: await dependencies.history(ctx, projectId ?? undefined) };
+    let personal: Promise<VivaryCodeWorkspace | undefined> | undefined;
+    return { owner, orgId, projectId, history: await dependencies.history(ctx, projectId ?? undefined),
+      // An unconfigured or unavailable personal workspace owns no Code history.
+      personal: () => personal ??= dependencies.workspace(ctx, undefined).catch(() => undefined) };
   }
   async function record(ref: ConversationReference, identity: Scope): Promise<CodeAgentRunRecord | ChatThread> {
     if (ref.kind === "code") {
       const run = getCodeAgentRunRecord(ref.id);
-      if (!run || run.metadata?.app !== "vivary-workbench-local-code"
-        // Project ownership is projectId plus bindingId, as in isOwnedRun. A folder reconnect changes only the root epoch.
-        || (identity.history ? !isOwnedRun(run, identity.owner, identity.orgId, identity.history)
-          : run.metadata?.ownerEmail !== identity.owner || run.metadata?.orgId !== identity.orgId || run.metadata?.projectId != null))
-        unavailable();
+      // The same run scope isOwnedRun applies: projectId plus bindingId for a project, so a folder reconnect keeps
+      // history, and the current personal workspace root otherwise.
+      const runScope = identity.history ?? await identity.personal();
+      if (!run || run.metadata?.app !== "vivary-workbench-local-code" || !runScope
+        || !isOwnedRun(run, identity.owner, identity.orgId, runScope)) unavailable();
       return run;
     }
     const thread = await getThread(ref.id);

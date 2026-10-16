@@ -155,7 +155,9 @@ boundary with a digest. It contains no transcript copy. Pages and explicit sends
 recheck current membership, project access, both records and the frozen prefix.
 Record ownership matches the project and binding, as `isOwnedRun` does, so a
 project folder reconnect, which changes only the root epoch, keeps the link and
-its older sources usable. A replaced binding or an invalid target link record
+its older sources usable. A personal workspace Code record must match the
+currently configured personal workspace root, the same scope `isOwnedRun`
+applies, so a changed personal workspace setting withholds the old root's history. A replaced binding or an invalid target link record
 fails closed. A source that is deleted, revoked or no longer matches its frozen
 prefix is reported as unavailable instead. The target stays usable, its sends
 proceed without linked history, and nothing records a prepared or accepted

@@ -34,12 +34,16 @@ test("linked conversations use Native records and immutable authorized completed
   const actor: ActionRunContext = { userEmail: owner, orgId, appId: "workbench", caller: "http" };
   const project = { projectId: "project-a", label: "Alpha", bindingId: "binding-a", rootId: "root-a", bindingRevision: 1 };
   let revoked = false, discoveryFailure = false;
+  // The configured personal workspace, as resolveWorkspace returns it. Tests move it to another root.
+  const personalRoots = [path.join(root, "personal-a"), path.join(root, "personal-b")];
+  for (const folder of personalRoots) await mkdir(folder);
+  let personal = { root: personalRoots[0], label: "personal-a" };
   const { createLinkedConversationService } = await import("../server/linked-conversations.ts");
   const service = createLinkedConversationService({ member: isOrgMember,
     history: async (_ctx, projectId) => {
-      if (revoked || projectId !== project.projectId) throw Object.assign(new Error("Current project grant refused"), { statusCode: 403 });
-      return project;
-    }, workspace: async () => ({ root, ...project }),
+      if (revoked || (projectId && projectId !== project.projectId)) throw Object.assign(new Error("Current project grant refused"), { statusCode: 403 });
+      return projectId ? project : undefined;
+    }, workspace: async (_ctx, projectId) => projectId ? { root, ...project } : personal,
     targetModel: async choice => { if (discoveryFailure) throw new Error("Discovery unavailable"); return choice.model; } });
   const { createCodeAgentRunRecord, appendCodeAgentTranscriptEvent, getCodeAgentRunRecord, listCodeAgentTranscriptEvents,
     codeAgentRunTranscriptPath, updateCodeAgentRunRecord } = await import("@agent-native/core/code-agents");
@@ -324,6 +328,30 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(after.sourceStatus, "available"); assert.equal(after.boundaryId, "second-answer");
     assert.equal(after.excerpt, before.excerpt); assert.doesNotMatch(after.excerpt, /REGENERATED|EDITED/);
     assert.equal((await service.context(actor, project.projectId, linked.target))!.block, block);
+  });
+  await t.test("a personal Code source follows the current personal workspace root, as isOwnedRun does", async () => {
+    const personalSource = createCodeAgentRunRecord({ id: "personal-source", goalId: "vivary-local-code", title: "Personal source",
+      cwd: personalRoots[0], status: "completed", phase: "complete", needsApproval: false,
+      metadata: { app: "vivary-workbench-local-code", workspaceRoot: personalRoots[0], ownerEmail: owner, orgId, engine: "claude-cli", model: "sonnet" } });
+    appendCodeAgentTranscriptEvent({ runId: personalSource.id, kind: "system", message: "Personal answer", metadata: { role: "assistant" } });
+    appendCodeAgentTranscriptEvent({ runId: personalSource.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
+    const ref = { kind: "code" as const, id: personalSource.id };
+    const linked = await service.create(actor, { projectId: null, source: ref, target: { engine: "native" } });
+    assert.match((await service.load(actor, null, linked.target))!.excerpt, /Personal answer/);
+    try {
+      // The personal workspace setting now points at another folder. The old root's run is not this workspace's history.
+      personal = { root: personalRoots[1], label: "personal-b" };
+      const moved = (await service.load(actor, null, linked.target))!;
+      assert.equal(moved.sourceStatus, "unavailable"); assert.equal(moved.excerpt, "");
+      assert.deepEqual(await service.context(actor, null, linked.target), { block: null, portion: null });
+      assert.deepEqual(await service.sourceAvailable(actor, null, ref).catch(error => error.errorCode), "vivary_linked_history_unavailable");
+      await assert.rejects(service.create(actor, { projectId: null, source: ref, target: { engine: "native" } }),
+        { errorCode: "vivary_linked_history_unavailable" });
+    } finally { personal = { root: personalRoots[0], label: "personal-a" }; }
+    assert.equal((await service.load(actor, null, linked.target))!.sourceStatus, "available");
+    // A project run never counts as personal history.
+    await assert.rejects(service.create(actor, { projectId: null, source: { kind: "code", id: source.id }, target: { engine: "native" } }),
+      { errorCode: "vivary_linked_history_unavailable" });
   });
   await t.test("a Native source that grows past 8 MiB after linking keeps its frozen prefix, while new linking refuses", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
