@@ -47,9 +47,11 @@ compileFunction(bundle.outputFiles[0].text, ["require", "module", "exports"])(re
 let host, root;
 test.beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  globalThis.linkFixture = { calls: [], saves: 0, draft: "Unsent source draft", pendingApproval: "source-ask",
-    saveDraft: async () => { linkFixture.saves++; },
-    call: async (name, input) => { linkFixture.calls.push({ name, input }); throw new Error("Selected creation failure"); } };
+  // One ordered log of every host effect the chooser can cause: draft saves and Native actions.
+  globalThis.linkFixture = { calls: [], effects: [],
+    saveDraft: async (...args) => { linkFixture.effects.push({ effect: "saveDraft", args }); },
+    call: async (name, input) => { linkFixture.calls.push({ name, input }); linkFixture.effects.push({ effect: name });
+      throw new Error("Selected creation failure"); } };
 });
 test.afterEach(async () => { await act(async () => root.unmount()); linkFixture.client?.clear(); host.remove(); });
 const render = kind => act(async () => root.render(module.exports.view(kind)));
@@ -61,26 +63,27 @@ async function choose(engine) {
   await settle();
 }
 
-test("a failed link preserves selection, draft and approval, with an explicit working Retry", async () => {
+test("a failed link saves the draft first, calls only the link action, keeps the source selected, and Retry works", async () => {
   await render("chooser");
   assert.equal(host.querySelector('option[value="claude-cli"]'), null, "same-harness follow-up is not a link choice");
   assert.ok(host.querySelector('option[value="native"]'));
   await choose("codex-cli");
   assert.equal(host.querySelector("#route").textContent, "?run=source");
-  assert.equal(linkFixture.saves, 1);
-  assert.equal(linkFixture.draft, "Unsent source draft"); assert.equal(linkFixture.pendingApproval, "source-ask");
+  // The draft is saved through its owner before creation, and the failed link causes no other effect.
+  assert.deepEqual(linkFixture.effects, [{ effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" }]);
   assert.deepEqual(linkFixture.calls, [{ name: "vivary-conversation-link", input: { projectId: "alpha",
     source: { kind: "code", id: "source" }, target: { engine: "codex-cli", model: "fixture" } } }]);
   assert.match(host.textContent, /Retry link|Nothing is sent/);
-  linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); return { target: { kind: "code", id: "target" }, route: "/?run=target" }; };
+  linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); linkFixture.effects.push({ effect: name });
+    return { target: { kind: "code", id: "target" }, route: "/?run=target" }; };
   // Rerender updates the host transport, just as the real session caller does.
   await render("chooser");
   await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Retry link").click());
   await settle();
   assert.equal(host.querySelector("#route").textContent, "?run=target");
-  assert.equal(linkFixture.saves, 2);
-  assert.equal(linkFixture.pendingApproval, "source-ask");
-  assert.equal(linkFixture.calls.some(call => /send|start|approve/.test(call.name)), false);
+  assert.deepEqual(linkFixture.effects, [{ effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" },
+    { effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" }]);
+  assert.equal(linkFixture.calls.some(call => /send|start|approve|draft|discard/.test(call.name)), false);
 });
 
 test("a draft save failure prevents creation and keeps the original selected", async () => {
