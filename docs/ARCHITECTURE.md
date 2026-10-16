@@ -151,10 +151,17 @@ boundary with a digest. It contains no transcript copy. Pages and explicit sends
 recheck current membership, project access, both records and the frozen prefix.
 Record ownership matches the project and binding, as `isOwnedRun` does, so a
 project folder reconnect, which changes only the root epoch, keeps the link and
-its older sources usable. A replaced binding or changed prefix fails closed. Code retains the server-captured
+its older sources usable. A replaced binding or an invalid target link record
+fails closed. A source that is deleted, revoked or no longer matches its frozen
+prefix is reported as unavailable instead. The target stays usable, its sends
+proceed without linked history, and nothing records a prepared or accepted
+portion for them. Code retains the server-captured
 prefix byte length, never a caller byte cursor, so later appends cannot widen a
-page. Native follows the saved branch and excludes pending approvals, stopped
-turns and live or still-saving execution chunks. No completed prefix means an
+page. Native follows the saved branch when linking and excludes pending approvals, stopped
+turns and live or still-saving execution chunks. Later reads walk parent links
+from the retained boundary message, so editing or regenerating the boundary or an
+earlier message, which moves the head to a sibling branch, leaves the linked
+prefix unchanged. No completed prefix means an
 explicit empty-history notice. Source drafts and approval custody stay unchanged.
 
 An explicit send receives at most 12,000 characters from 100 recorded entries as

@@ -173,6 +173,26 @@ process.send({type:"vivary:code-worker:ready"});
       const reconnectedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
       assert.equal(reconnectedUsers.length, 2);
       assert.equal(reconnectedUsers[1].metadata?.linkedHistory?.entries, 3);
+      // A deleted source transcript leaves the target usable. The send supplies and records no linked portion.
+      await rm(codeAgentRunTranscriptPath(admissionSource.id));
+      const withoutSource = await sendVivaryCodeMessage({ ownerEmail: owner, orgId, runId, workspace: { root, ...project },
+        message: "Source deleted request", engine: "claude-cli", model: "sonnet", loadLinkedContext });
+      assert.equal(withoutSource.run!.id, runId);
+      const unlinkedExecution = host.activeRuns.get(runId)?.execution;
+      let unlinked: { prompt: string } | undefined;
+      for (let attempt = 0; attempt < 100 && !unlinked; attempt++) {
+        try { unlinked = JSON.parse(await readFile(path.join(root, "linked-started.json"), "utf8")); }
+        catch { await new Promise(resolve => setTimeout(resolve, 20)); }
+      }
+      assert.match(unlinked!.prompt, /Source deleted request/);
+      assert.doesNotMatch(unlinked!.prompt, /Actual retained output|Linked conversation history/);
+      await stopVivaryCodeRun({ ownerEmail: owner, orgId, runId, projectId: project.projectId }); await unlinkedExecution;
+      await rm(path.join(root, "linked-started.json"));
+      const unlinkedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
+      assert.equal(unlinkedUsers.length, 3); assert.equal(unlinkedUsers[2].metadata?.linkedHistory, undefined);
+      const unavailablePage = (await service.load(actor, project.projectId, linked.target))!;
+      assert.equal(unavailablePage.sourceStatus, "unavailable"); assert.equal(unavailablePage.excerpt, "");
+      assert.equal(unavailablePage.lastAccepted!.userEventId, reconnectedUsers[1].id, "the receipt stays on the last send that had context");
     } finally {
       Object.assign(project, { rootId: "root-a", bindingRevision: 1 });
       const execution = host.activeRuns.get(runId)?.execution;
@@ -279,6 +299,78 @@ process.send({type:"vivary:code-worker:ready"});
       await assert.rejects(create({ engine: "native" }), { errorCode: "vivary_linked_history_unavailable" });
     } finally { Object.assign(project, { bindingId: "binding-a", rootId: "root-a", bindingRevision: 1 }); }
   });
+  await t.test("editing or regenerating the source boundary or an earlier message keeps the frozen linked prefix", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "branching-source", orgId, scope: identity.scope });
+    const answer = (id: string, parentId: string, text: string) => ({ parentId, message: { id, role: "assistant",
+      status: { type: "complete", reason: "stop" }, content: [{ type: "text", text }] } });
+    const ask = (id: string, parentId: string | null, text: string) => ({ parentId, message: { id, role: "user", content: [{ type: "text", text }] } });
+    const messages: unknown[] = [ask("first-ask", null, "First request"), answer("first-answer", "first-ask", "First answer"),
+      ask("second-ask", "first-answer", "Second request"), answer("second-answer", "second-ask", "Original boundary answer")];
+    const save = (headId: string) => updateThreadData(thread.id, JSON.stringify({ headId, messages }), "Branching", "", messages.length);
+    await save("second-answer");
+    const linked = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: thread.id },
+      target: { engine: "claude-cli", model: "sonnet" } });
+    const before = (await service.load(actor, project.projectId, linked.target))!;
+    const block = (await service.context(actor, project.projectId, linked.target))!.block;
+    assert.equal(before.boundaryId, "second-answer"); assert.match(before.excerpt, /Original boundary answer/);
+    // Regenerating the boundary adds a sibling answer and moves the head. The original stays stored.
+    messages.push(answer("regenerated-answer", "second-ask", "REGENERATED ANSWER"));
+    await save("regenerated-answer");
+    // Editing an earlier message starts a sibling branch from the root.
+    messages.push(ask("edited-ask", null, "EDITED REQUEST"), answer("edited-answer", "edited-ask", "EDITED ANSWER"));
+    await save("edited-answer");
+    const after = (await service.load(actor, project.projectId, linked.target))!;
+    assert.equal(after.sourceStatus, "available"); assert.equal(after.boundaryId, "second-answer");
+    assert.equal(after.excerpt, before.excerpt); assert.doesNotMatch(after.excerpt, /REGENERATED|EDITED/);
+    assert.equal((await service.context(actor, project.projectId, linked.target))!.block, block);
+  });
+  await t.test("a deleted source leaves the target usable without linked context, while a tampered link record refuses", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const { runWithRequestContext, deleteThread } = await import("@agent-native/core/server");
+    const linkRecord = async (id: string) => String((await db.execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_id = ?", args: [id] })).rows[0].record_json);
+    // Native source to Code target. The Native thread is deleted through its owner.
+    const nativeSource = await createThread(owner, { id: "deleted-native-source", orgId, scope: identity.scope });
+    const messages = [{ parentId: null, message: { id: "deleted-ask", role: "user", content: [{ type: "text", text: "Deleted request" }] } },
+      { parentId: "deleted-ask", message: { id: "deleted-answer", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Deleted answer" }] } }];
+    await updateThreadData(nativeSource.id, JSON.stringify({ headId: "deleted-answer", messages }), "Deleted source", "", 2);
+    const codeLinked = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: nativeSource.id },
+      target: { engine: "claude-cli", model: "sonnet" } });
+    assert.match((await service.context(actor, project.projectId, codeLinked.target))!.block!, /Deleted answer/);
+    const prepared = await linkRecord(codeLinked.target.id);
+    assert.equal(await deleteThread(nativeSource.id), true);
+    const page = (await service.load(actor, project.projectId, codeLinked.target))!;
+    assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.sourceTitle, "Deleted source");
+    assert.equal(page.excerpt, ""); assert.equal(page.availableEntries, 0); assert.equal(page.suppliedEntries, 0);
+    assert.equal(page.nextCursor, null); assert.equal(page.lastAccepted, null);
+    assert.deepEqual(await service.context(actor, project.projectId, codeLinked.target), { block: null, portion: null });
+    assert.equal(await linkRecord(codeLinked.target.id), prepared, "an unavailable source records no prepared portion");
+    await assert.rejects(service.load(actor, project.projectId, codeLinked.target, "0".repeat(64) + ":1"), { errorCode: "vivary_linked_history_unavailable" });
+    // Code source to Native target. The Native send proceeds with the unchanged request.
+    const codeSource = code("deleted-code-source");
+    appendCodeAgentTranscriptEvent({ runId: codeSource.id, kind: "system", message: "Code answer", metadata: { role: "assistant" } });
+    appendCodeAgentTranscriptEvent({ runId: codeSource.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    const nativeLinked = await create({ engine: "native" }, { kind: "code", id: codeSource.id });
+    const prepareNative = () => runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: identity.scope } }, () =>
+      service.prepareNativeMessage({ threadId: nativeLinked.target.id, ownerEmail: owner, message: "Native request" }));
+    assert.match((await prepareNative())!.message, /Code answer[\s\S]*Native request$/);
+    const nativePrepared = await linkRecord(nativeLinked.target.id);
+    await rm(codeAgentRunTranscriptPath(codeSource.id));
+    assert.equal(await prepareNative(), undefined, "the request proceeds unchanged without linked context");
+    assert.equal(await linkRecord(nativeLinked.target.id), nativePrepared);
+    assert.equal((await service.load(actor, project.projectId, nativeLinked.target))!.sourceStatus, "unavailable");
+    // A target link record that belongs to someone else or fails its schema is a safety refusal, not an unavailable source.
+    const tamper = (record: string) => db.execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE target_id = ?", args: [record, nativeLinked.target.id] });
+    for (const forged of [{ ...JSON.parse(nativePrepared), owner: "foreign@example.test" }, { ...JSON.parse(nativePrepared), injected: true }]) {
+      await tamper(JSON.stringify(forged));
+      await assert.rejects(service.load(actor, project.projectId, nativeLinked.target));
+      await assert.rejects(prepareNative());
+    }
+    await tamper(nativePrepared);
+    await db.execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_id = ?", args: [codeLinked.target.id] });
+    await assert.rejects(service.load(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
+    await assert.rejects(service.context(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
+  });
   await t.test("appended and partial source events cannot widen a retained boundary", async () => {
     await appendFile(codeAgentRunTranscriptPath(source.id), '{"runId":"source","id":"in-progress"');
     assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.boundaryId, "source-done");
@@ -292,7 +384,7 @@ process.send({type:"vivary:code-worker:ready"});
     const later = await readFile(codeAgentRunTranscriptPath(source.id), "utf8");
     await writeFile(codeAgentRunTranscriptPath(source.id), later.replace("malformed-after-boundary\n", ""));
   });
-  await t.test("foreign actor/app/org/project, revocation and changed source binding fail closed", async () => {
+  await t.test("foreign actor/app/org/project and revocation refuse, while a changed source binding or prefix withholds its history", async () => {
     await db.execute({ sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
       args: ["other-member", orgId, "foreign@example.test", "member", Date.now()] });
     for (const patch of [{ userEmail: "foreign@example.test" }, { appId: "foreign-app" }, { orgId: "foreign-org" }, { caller: "tool" as const }])
@@ -302,13 +394,20 @@ process.send({type:"vivary:code-worker:ready"});
     await db.execute({ sql: "DELETE FROM org_members WHERE id = ?", args: ["linked-member"] });
     await assert.rejects(service.load(actor, project.projectId, codeTarget.target));
     await db.execute({ sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)", args: ["linked-member", orgId, owner, "owner", Date.now()] });
+    // A source that moved binding or changed its prefix supplies nothing. The valid target link stays usable without it.
+    const sourceWithheld = async () => {
+      const page = (await service.load(actor, project.projectId, codeTarget.target))!;
+      assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.excerpt, ""); assert.doesNotMatch(JSON.stringify(page), /Replaced answer|Completed answer/);
+      assert.deepEqual(await service.context(actor, project.projectId, codeTarget.target), { block: null, portion: null });
+    };
     updateCodeAgentRunRecord(source.id, { metadata: { bindingId: "forged" } });
-    await assert.rejects(service.load(actor, project.projectId, codeTarget.target));
+    await sourceWithheld();
     updateCodeAgentRunRecord(source.id, { metadata: { bindingId: project.bindingId } });
     const text = await readFile(codeAgentRunTranscriptPath(source.id), "utf8");
     await writeFile(codeAgentRunTranscriptPath(source.id), text.replace("Completed answer", "Replaced answer"));
-    await assert.rejects(service.load(actor, project.projectId, codeTarget.target));
+    await sourceWithheld();
     await writeFile(codeAgentRunTranscriptPath(source.id), text);
+    assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.sourceStatus, "available");
   });
   await t.test("failed target discovery preserves the original and a retry creates an inert target", async () => {
     const before = JSON.stringify(getCodeAgentRunRecord(source.id));

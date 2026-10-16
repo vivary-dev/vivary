@@ -17,7 +17,7 @@ import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
 import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
-  isCompletedNativeMessage, LINK_HISTORY_BYTES, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
+  isCompletedNativeMessage, LINK_HISTORY_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage, PreparedLinkedContext } from "../shared/linked-conversation";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
@@ -63,6 +63,8 @@ const defaults: Dependencies = { member: isOrgMember, history: resolveVivaryCode
 function unavailable(message = "The linked conversation is no longer available in this project."): never {
   fail(message, { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });
 }
+const isSourceFault = (error: unknown) => error instanceof LinkedSourceChanged
+  || (error as { errorCode?: string } | null)?.errorCode === "vivary_linked_history_unavailable";
 
 /** Existing Native record owners plus a metadata row, never a copied transcript. */
 export function createLinkedConversationService(dependencies: Dependencies = defaults) {
@@ -123,9 +125,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     }
     const thread = source as ChatThread;
     if (Buffer.byteLength(thread.threadData) > LINK_HISTORY_BYTES) unavailable("The source history exceeds the safe 8 MiB linking limit.");
-    const path = nativeHistoryPath(thread.threadData);
+    // A retained boundary walks parentId from its own message, not from the current head.
+    const path = nativeHistoryPath(thread.threadData, boundaryId ?? undefined);
     let index = boundaryId === undefined ? path.findLastIndex(isCompletedNativeMessage)
-      : boundaryId === null ? -1 : path.findIndex(entry => entry.message.id === boundaryId);
+      : boundaryId === null ? -1 : path.length - 1;
     // A persisted assistant snapshot is not complete while its Native execution is live or saving.
     while (index >= 0) {
       const entry = path[index], folded = entry.message.metadata?.custom?.foldedRunIds;
@@ -157,20 +160,27 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       || link.bindingId !== (identity.history?.bindingId ?? null)
       || historyDigest(link.target) !== historyDigest(target) || link.targetCreatedAt !== currentTarget.createdAt
       || (target.kind === "code" && (currentTarget as CodeAgentRunRecord).metadata?.linkedHistoryId !== link.id)) unavailable();
-    const source = await record(link.source, identity);
-    if (source.createdAt !== link.sourceCreatedAt) unavailable("The source conversation was replaced.");
-    const prefix = await sourcePrefix(link.source, source, link.boundaryId, link.boundaryBytes);
-    if (prefix.digest !== link.boundaryDigest) unavailable("The completed source history changed. Open the original conversation.");
+    // The target link is valid from here. A deleted, revoked or changed source leaves the target usable without linked context.
+    let items: Awaited<ReturnType<typeof sourcePrefix>>["items"] | null = null;
+    try {
+      const source = await record(link.source, identity);
+      if (source.createdAt !== link.sourceCreatedAt) unavailable("The source conversation was replaced.");
+      const prefix = await sourcePrefix(link.source, source, link.boundaryId, link.boundaryBytes);
+      if (prefix.digest !== link.boundaryDigest) unavailable("The completed source history changed.");
+      items = prefix.items;
+    } catch (error) { if (!isSourceFault(error)) throw error; }
+    if (!items && cursor) unavailable("The original conversation is unavailable.");
     await refreshHeldCredentials();
-    const items = prefix.items.map(item => ({ ...item, text: redactCredentialsInValue(item.text) }));
-    const page = historyExcerpt(items, historyDigest([link.id, link.source, link.boundaryId, link.boundaryDigest]), cursor);
+    const redacted = (items ?? []).map(item => ({ ...item, text: redactCredentialsInValue(item.text) }));
+    const page = items ? historyExcerpt(redacted, historyDigest([link.id, link.source, link.boundaryId, link.boundaryDigest]), cursor)
+      : { excerpt: "", suppliedEntries: 0, truncated: false, nextCursor: null };
     const accepted = target.kind === "code" ? listCodeAgentTranscriptEvents(target.id).findLast(event => {
       const parsed = acceptedPortionSchema.safeParse(event.metadata?.linkedHistory);
       return event.kind === "user" && parsed.success && parsed.data.linkId === link.id && parsed.data.boundaryDigest === link.boundaryDigest;
     }) : undefined;
     const acceptedPortion = accepted ? acceptedPortionSchema.parse(accepted.metadata?.linkedHistory) : null;
-    return { ...page, source: link.source, sourceTitle: link.sourceTitle, boundaryId: link.boundaryId,
-      availableEntries: items.length, nativeContinuity: false, lastPrepared: link.lastPrepared,
+    return { ...page, sourceStatus: items ? "available" : "unavailable", source: link.source, sourceTitle: link.sourceTitle,
+      boundaryId: link.boundaryId, availableEntries: redacted.length, nativeContinuity: false, lastPrepared: link.lastPrepared,
       lastAccepted: acceptedPortion && accepted ? { entries: acceptedPortion.entries, characters: acceptedPortion.characters,
         truncated: acceptedPortion.truncated, userEventId: accepted.id } : null };
   }
@@ -225,6 +235,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   async function context(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference): Promise<PreparedLinkedContext | null> {
     const page = await load(ctx, projectId, target);
     if (!page) return null;
+    // An unavailable source supplies nothing, so nothing is recorded as prepared.
+    if (page.sourceStatus === "unavailable") return { block: null, portion: null };
     // Preparation is not acceptance or observed provider delivery. The Code send records acceptance on its actual user event after final admission.
     const { rows } = await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?", args: [target.kind, target.id] });
     const link = linkSchema.parse(JSON.parse(String(rows[0]?.record_json)));
@@ -255,6 +267,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const prepared = await context({ caller: "http", userEmail: owner, orgId, appId: "workbench" },
       link.projectId, { kind: "native", id: details.threadId });
     if (!prepared) unavailable();
+    // The source is unavailable, so the request proceeds unchanged without linked context.
+    if (!prepared.block) return;
     return { message: `${prepared.block}\n\n# Current request\n${details.message}`,
       displayMessage: details.displayMessage ?? details.message };
   }

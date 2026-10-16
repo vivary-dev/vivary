@@ -1065,12 +1065,13 @@ export async function sendVivaryCodeMessage(input: {
   });
 
   const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine,
-    linkedContext ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
+    linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
     input.projectContext?.block);
   appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
     metadata: { source: "vivary-workbench", permissionMode,
       // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
-      ...(linkedContext ? { linkedHistory: linkedContext.portion } : {}),
+      // An unavailable source supplies no block and no portion, so nothing claims linked context.
+      ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
       ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
         draftThreadId: input.draftThreadId } : {}) } });
   if (input.projectContext) {

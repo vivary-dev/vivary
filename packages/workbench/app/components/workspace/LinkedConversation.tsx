@@ -88,6 +88,11 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
   if (query.isError) return <div className="local-agent-notice" role="alert">Linked history could not be verified.
     <Button size="sm" variant="outline" onClick={() => void query.refetch()}>Retry history</Button></div>;
   if (!page) return null;
+  if (page.sourceStatus === "unavailable") return <div className="local-agent-notice text-sm" role="status">
+    <p>Linked to {page.sourceTitle || "Original conversation"}, which is unavailable. Sends continue without its history.</p>
+    {page.lastAccepted ? <p>Earlier, the last accepted Code send included {page.lastAccepted.entries} linked entries.</p>
+      : page.lastPrepared ? <p>Earlier, the last prepared request included {page.lastPrepared.entries} linked entries.</p> : null}
+  </div>;
   const shown = [page, ...pages], cursor = shown.at(-1)?.nextCursor;
   const route = page.source.kind === "code" ? `/?run=${encodeURIComponent(page.source.id)}`
     : `/?runtime=native&history=project&thread=${encodeURIComponent(page.source.id)}`;

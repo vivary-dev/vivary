@@ -9,15 +9,17 @@ export type NativeEntry = { parentId?: string | null; message: {
   status?: { type?: string; reason?: string };
   metadata?: { runId?: string; custom?: Record<string, unknown> };
 } };
+/** The retained source can no longer reproduce its frozen prefix. This is a source availability fault, not a link fault. */
+export class LinkedSourceChanged extends Error {}
 export const historyDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 /** Only complete JSONL records count. An in-progress final line is never history. */
 export function codeHistoryRecords(text: string, runId: string): CodeAgentTranscriptEvent[] {
   return text.split("\n").slice(0, -1).filter(line => line.trim()).map(line => {
     let value: CodeAgentTranscriptEvent;
-    try { value = JSON.parse(line); } catch { throw new Error("The recorded source history is malformed."); }
+    try { value = JSON.parse(line); } catch { throw new LinkedSourceChanged("The recorded source history is malformed."); }
     if (value.runId !== runId || typeof value.id !== "string" || typeof value.message !== "string")
-      throw new Error("The recorded source history binding changed.");
+      throw new LinkedSourceChanged("The recorded source history binding changed.");
     return value;
   });
 }
@@ -35,27 +37,32 @@ export function codeBoundaryBytes(text: string, boundaryId: string | null): numb
     bytes += Buffer.byteLength(line + "\n");
     if (line.trim() && JSON.parse(line).id === boundaryId) return bytes;
   }
-  throw new Error("The completed source event is missing.");
+  throw new LinkedSourceChanged("The completed source event is missing.");
 }
 
-/** Follow the selected Native branch, rather than leaking an unrelated stored branch. */
-export function nativeHistoryPath(threadData: string): NativeEntry[] {
-  const repo = JSON.parse(threadData);
+/**
+ * Follow the selected Native branch, rather than leaking an unrelated stored branch.
+ * A retained boundary passes its own message ID, so a later edit or regeneration that
+ * moves the head to a sibling branch leaves the frozen prefix unchanged.
+ */
+export function nativeHistoryPath(threadData: string, startId?: string): NativeEntry[] {
+  let repo;
+  try { repo = JSON.parse(threadData); } catch { throw new LinkedSourceChanged("The source conversation is malformed."); }
   if (repo && !Array.isArray(repo) && typeof repo === "object" && Object.keys(repo).length === 0) return [];
-  if (!repo || !Array.isArray(repo.messages)) throw new Error("The source conversation is unavailable.");
+  if (!repo || !Array.isArray(repo.messages)) throw new LinkedSourceChanged("The source conversation is unavailable.");
   const entries = new Map<string, NativeEntry>();
   for (const entry of repo.messages) {
     const message = entry?.message;
     if (!message || typeof message.id !== "string" || !Array.isArray(message.content)
       || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id))
-      throw new Error("The source conversation is malformed.");
+      throw new LinkedSourceChanged("The source conversation is malformed.");
     entries.set(message.id, entry);
   }
-  let id = repo.headId ?? repo.messages.at(-1)?.message.id ?? null;
+  let id = startId ?? repo.headId ?? repo.messages.at(-1)?.message.id ?? null;
   const path: NativeEntry[] = [], visited = new Set<string>();
   while (id !== null) {
     if (typeof id !== "string" || visited.has(id) || !entries.has(id))
-      throw new Error("The source conversation path changed.");
+      throw new LinkedSourceChanged("The source conversation path changed.");
     visited.add(id);
     const entry = entries.get(id)!;
     path.push(entry);

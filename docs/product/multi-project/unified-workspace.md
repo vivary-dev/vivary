@@ -175,8 +175,12 @@ Metadata stays in the existing Workbench Native-backed database. Native keeps
 messages and Code transcripts. The link binds both creation identities, project
 binding, owner and organization, and an exact completed-prefix digest. A project
 folder reconnect keeps the binding, so the link and its older sources stay usable.
-A foreign source, revoked membership, replaced binding, changed prefix or foreign
-page cursor is refused. Historical text and tool results are quoted data, with
+Revoked membership, a replaced binding, an invalid target link record or a
+foreign page cursor is refused. Editing or regenerating a Native source message
+keeps the linked prefix, because it is read from the retained boundary message.
+When the original is deleted, revoked or no longer matches its frozen prefix, the
+notice shows it as unavailable and sends continue without linked history. No
+prepared or accepted portion is recorded for those sends. Historical text and tool results are quoted data, with
 no raw tool replay, transferred grant or copied provider resume ID. The target's
 existing project tools, permission policy and host admission still apply.
 

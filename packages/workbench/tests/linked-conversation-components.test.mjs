@@ -91,7 +91,7 @@ test("a draft save failure prevents creation and keeps the original selected", a
   assert.match(host.textContent, /Retry link/);
 });
 
-const noticePage = () => ({ source: { kind: "native", id: "original" }, sourceTitle: "Original history",
+const noticePage = () => ({ source: { kind: "native", id: "original" }, sourceTitle: "Original history", sourceStatus: "available",
   boundaryId: "opaque-completed-message", availableEntries: 211, suppliedEntries: 100, excerpt: "Quoted history",
   truncated: true, nextCursor: null, nativeContinuity: false,
   lastPrepared: { entries: 100, characters: 12_000, truncated: true }, lastAccepted: null });
@@ -135,4 +135,15 @@ test("a mounted Native notice refreshes preparation through Native request compl
   assert.match(host.textContent, /Last request prepared: 100 entries/);
   assert.match(host.textContent, /Delivery not observed/);
   assert.doesNotMatch(host.textContent, /Last accepted Code send/);
+});
+
+test("an unavailable source keeps the notice truthful and claims no prepared or supplied context for later sends", async () => {
+  linkFixture.call = async () => ({ ...noticePage(), sourceStatus: "unavailable", availableEntries: 0, suppliedEntries: 0,
+    excerpt: "", truncated: false, lastAccepted: { entries: 3, characters: 120, truncated: false, userEventId: "earlier-user" } });
+  await render("notice"); await settle(); await notify();
+  assert.match(host.textContent, /Original history, which is unavailable\. Sends continue without its history\./);
+  assert.match(host.textContent, /Earlier, the last accepted Code send included 3 linked entries/);
+  assert.doesNotMatch(host.textContent, /Next send can prepare|Last request prepared|completed-history entries available|could not be verified/);
+  assert.equal(host.querySelector("a"), null, "the unavailable original is not offered as a readable link");
+  assert.equal([...host.querySelectorAll("button")].some(button => /Inspect linked history|Retry history/.test(button.textContent)), false);
 });
