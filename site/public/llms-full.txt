@@ -7453,7 +7453,9 @@ conversation is not a source until its first request saves it. The chooser
 rechecks eligibility when Native reports a finished request or a thread list
 update, and stops rechecking once the conversation is a source. Selection saves
 the source draft through its current owner, then creates a paused Code record or
-an empty Native thread and its cleared draft. It submits no prompt, requests no
+an empty Native thread and its cleared draft. Project history lists that empty
+thread by its "Linked:" title, and `native-history-rows.ts` keeps one row per
+thread, so an unsent draft in the target never adds a second row. It submits no prompt, requests no
 worker, consumes no approval and transfers no provider session. The target's
 cleared draft is written only after the link metadata row exists. If that row or
 a later creation step fails, the service removes the new Code record or Native

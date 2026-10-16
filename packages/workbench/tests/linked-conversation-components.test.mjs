@@ -26,6 +26,7 @@ const bundle = await build({ stdin: { contents: `
   import { MemoryRouter, useLocation } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { LinkedConversationChooser, LinkedHistoryNotice, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
+  export { nativeHistoryRows } from "./app/lib/native-history-rows";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   function Eligibility() {
     const source = useLinkSourceEligibility({ projectId: "alpha", storageKey: "alpha", threadId: "new-thread", enabled: true });
@@ -172,4 +173,16 @@ test("a new Native conversation becomes a link source when its first request sav
   const settled = reads;
   await act(async () => window.dispatchEvent(completion)); await settle(); await notify();
   assert.equal(reads, settled);
+});
+
+test("an empty linked Native target with an unsent draft is listed once, under one row key", () => {
+  const threads = [{ id: "linked-target", title: "Linked: Source", messageCount: 0, archivedAt: null },
+    { id: "empty-plain", title: "", messageCount: 0, archivedAt: null }, { id: "saved", title: "Saved", messageCount: 2, archivedAt: null }];
+  const drafts = [{ threadId: "linked-target", preview: "Typed in the target" }, { threadId: "empty-plain", preview: "Optimistic draft" },
+    { threadId: "saved", preview: "Follow-up" }];
+  const rows = module.exports.nativeHistoryRows(threads, drafts);
+  // ProjectHistory keys both kinds of row as native:<threadId>.
+  const keys = [...rows.threads.map(thread => "native:" + thread.id), ...rows.drafts.map(draft => "native:" + draft.threadId)].sort();
+  assert.deepEqual(keys, ["native:empty-plain", "native:linked-target", "native:saved"]);
+  assert.deepEqual(rows.drafts.map(draft => draft.threadId), ["empty-plain"], "only an unlisted conversation keeps its draft row");
 });
