@@ -702,7 +702,7 @@ jobs:
           node --test packages/desktop/tests/main.test.mjs packages/desktop/tests/original-runtime.test.mjs packages/desktop/tests/package-snapshot.test.mjs packages/workbench/tests/startup.test.mjs
           python packages/workbench/tests/managed-projects-python.test.py
           pnpm --dir packages/workbench typecheck
-          pnpm --dir packages/workbench doctor
+          pnpm --dir packages/workbench run doctor
 
   workbench-maintained:
     name: maintained workbench checks
