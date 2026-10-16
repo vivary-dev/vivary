@@ -7737,6 +7737,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Linux preview socket ownership before accept. The Linux ownership
+check in `server/preview-socket-owner.ts` finds the preview server's side of the
+established connection in `/proc/net/tcp` and follows its socket inode to a
+process in the launch group. Linux lists a connection that the server has not
+accepted yet with inode 0, so a slow accept made the check refuse a socket the
+launch owned. The gateway then answered 502, and the gateway test failed about
+once in ten runs on `dev` and on this branch. The check now rereads the table
+with a backoff from 10 ms up to 200 ms until the inode appears. Inode 0 never
+counts as owned, and the existing three second connection deadline still
+refuses a connection that is never accepted. Ownership rules and owners are
+unchanged, so the remote preview description holds. Evidence: two tests in
+`tests/preview-socket-owner.test.ts` feed the check unaccepted reads, and the
+gateway test passed in repeated runs.
+
 2026-10-16 Isolated preview refusal text. The remaining Open refusals in
 `server/preview-ingress.mjs` (no gateway installed, a caller that is not the
 paired browser, the preview origin turned off, too many preview documents, a
