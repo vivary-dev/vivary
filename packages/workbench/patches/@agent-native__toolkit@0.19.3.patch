@@ -358,3 +358,49 @@ index 2552d3be034fe8cecde3d2347fa8bb6da3487e6b..232df8bf279cf7b58730c4efae305805
          useConnectFlow: () => fallbackBuilderFlow,
          tryDelegateBuildRequest: () => false,
          isTrustedFrameMessage: () => false,
+diff --git a/dist/editor/SharedRichEditor.js b/dist/editor/SharedRichEditor.js
+index 8b22c2c5110521fc52062b37aa1fa948fe803fb0..dd31ea138219d91682a86746c00cc9ad6261f087 100644
+--- a/dist/editor/SharedRichEditor.js
++++ b/dist/editor/SharedRichEditor.js
+@@ -94,6 +94,9 @@ export function SharedRichEditor({ value, onChange, onBlur, contentUpdatedAt, ed
+             },
+         },
+         onUpdate: ({ editor, transaction }) => {
++            // Editability and selection updates do not change saved content.
++            if (!transaction.docChanged)
++                return;
+             const guards = guardsRef.current;
+             if (!guards || guards.shouldIgnoreUpdate(transaction))
+                 return;
+@@ -135,7 +138,7 @@ export function SharedRichEditor({ value, onChange, onBlur, contentUpdatedAt, ed
+     useEffect(() => {
+         if (!editor || editor.isDestroyed)
+             return;
+-        editor.setEditable(editable);
++        editor.setEditable(editable, false);
+     }, [editable, editor]);
+     useEffect(() => {
+         if (editor)
+diff --git a/src/editor/SharedRichEditor.tsx b/src/editor/SharedRichEditor.tsx
+index 60b87f649b6bd2f3e9007fd07ca4e708c1bb28ee..81a91e98232e720a025c332893e4c7987c3280a2 100644
+--- a/src/editor/SharedRichEditor.tsx
++++ b/src/editor/SharedRichEditor.tsx
+@@ -260,6 +260,9 @@ export function SharedRichEditor({
+         },
+       },
+       onUpdate: ({ editor, transaction }) => {
++        // Editability and selection updates do not change saved content.
++        if (!transaction.docChanged)
++          return;
+         const guards = guardsRef.current;
+         if (!guards || guards.shouldIgnoreUpdate(transaction)) return;
+         try {
+@@ -301,7 +304,7 @@ export function SharedRichEditor({
+ 
+   useEffect(() => {
+     if (!editor || editor.isDestroyed) return;
+-    editor.setEditable(editable);
++    editor.setEditable(editable, false);
+   }, [editable, editor]);
+ 
+   useEffect(() => {

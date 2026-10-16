@@ -45,6 +45,95 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](product/multi-project/specification/harness-adapters.md), [Native owner map](product/multi-project/native-owners.md), and [runtime source map](product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
+### Coding model selection and provider routes
+
+The Code composer embeds the runtime and model selectors inside its existing
+toolbar. Saved draft choices remain unchanged when a model catalog changes.
+Unavailable selections keep the composer disabled with a reason to choose another
+model, update Claude Code, or verify its installed version. Retained conversations
+keep their recorded model ID. A historical Claude run
+without a model still means the legacy `sonnet` alias, independently of the exact
+`claude-sonnet-5-5` default for new conversations.
+
+[`shared/claude-models.ts`](../packages/workbench/shared/claude-models.ts) owns the
+Claude Code IDs, minimum CLI versions, and API list price references, verified
+2026-10-13 against Anthropic's
+[model overview](https://platform.claude.com/docs/en/models/overview),
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
+[Claude Code configuration](https://code.claude.com/docs/en/model-config).
+Installation manifests establish CLI version support without an account call.
+When native Claude has no usable manifest, Workbench runs `--version` through
+the same resolved executable, launch prefix, and filtered environment. It accepts
+only a successful complete Claude version response. This local probe retains the
+existing ten-second process timeout and output bound and creates no model turn.
+An unknown installation version remains unverified. A discovered version stays
+visible while signed out, so compatibility is independent of sign-in state. The
+send boundary checks the
+selected Claude catalog ID against that installed version before creating a run,
+appending a message, or launching a worker, including resumed conversations after
+a CLI downgrade. Legacy aliases and retained historical IDs keep their existing
+admission behavior. Codex's account-effective
+`model/list` remains its model authority. API list prices do not establish a
+subscription bill or included model entitlement.
+
+Native's [maintained API patch](../packages/workbench/patches/README.md#native-api-claude-catalog)
+separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
+use `claude-sonnet-5-5`. Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1 have
+documented 1M context and 128K output limits. Older catalog IDs and saved choices
+remain intact, including Sonnet 4.6 and Sonnet 5 regardless of Native's legacy
+Sonnet switch. A fresh, unconfigured Native instance reports Anthropic with its
+registered Sonnet 5.5 default and `chosen: false`, so Custom keys starts with a model
+from the displayed provider. Explicit stored/app choices and custom-model handling
+retain their existing paths. Builder and OpenRouter keep their own IDs and defaults. No account
+availability is inferred from the catalog, and the optional AI-SDK Anthropic
+adapter remains hidden by Workbench. The pinned dependency graph includes its SDK.
+
+The API estimator requires the actual direct engine identity before applying
+these new rates. It prices Haiku per request, using total prompt tokens including
+cache reads and writes to choose the tier above 100,000 tokens. Observed cache-write
+duration determines the 5-minute or 1-hour rate. Native's existing turn owner sums
+request estimates. Missing route, request-length, or cache-duration evidence stays
+unknown, including aggregates that cannot establish a Haiku tier. Provider-reported
+cost takes precedence. These are standard global API estimates, not bills, plan
+entitlements, or controls preventing paid usage. Historical estimates for these
+model IDs are not recalculated. Existing Native usage labels and unknown-cost
+display remain the owners of presentation.
+
+Exact new models use adaptive thinking and omit withdrawn sampling parameters.
+Supported explicit thinking settings remain usable. The pinned AI SDK cannot
+encode Sonnet's `between_tools` mode, so that adapter refuses it locally. Incompatible saved settings
+receive a local error before provider transport. Native preserves signed thinking
+blocks, but offline request checks cannot verify provider-side signature binding
+after a change to earlier history. Live API and installed optional-adapter
+acceptance remain separate from fake-transport validation.
+
+Runtime readiness requires Claude Code to report both `authMethod: "claude.ai"`
+and `apiProvider: "firstParty"`, with a nonempty `subscriptionType`, or Codex to
+report ChatGPT sign-in. Claude API-key,
+cloud-provider, and unknown auth routes stay unavailable in Code. Native API
+providers remain a separate selection. These checks do not change saved runtime,
+model, or conversation selections.
+
+Code uses the selected signed-in runtime and model for new and resumed turns.
+Native API chat remains an explicit separate surface with its selected provider,
+credentials, and model. Vivary does not enforce an app-wide funding policy, read
+usage-credit switches, or block a supported route because its billing controls
+are unknown. The provider owns its account limits and billing behavior.
+
+The send owner still checks sign-in, model support, project ownership, and cleanup
+before writing a turn. The execution worker resolves only the selected runtime. Codex reads its account
+and provider configuration in that process before starting a thread, so a stale
+status cache cannot admit API-key or custom-provider routing. These reads check
+route identity, not funding. Provider errors remain on that conversation, including authentication failures,
+unavailable models, and usage-limit rejections. Vivary does not switch runtimes,
+models, or API surfaces after a failure. Retained funding metadata is ignored.
+Saved choices, native session continuity, approval requests, and Stop keep their
+existing owners. The maintained Native patch preserves resolved Claude launcher
+prefixes and Windows SystemRoot while retaining credential filtering.
+
+Offline runtime fixtures cover route selection and error handling. Live provider
+execution and packaged Windows acceptance remain separate checks.
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](COMMANDS.md) and [package manifests](../packages).
@@ -106,6 +195,29 @@ Coordinated releases publish Core before its dependent role packages.
 
 ## Runtime flows
 
+Desktop outgoing OAuth setup and browser reauthorization are unavailable
+under the existing desktop callback and navigation controls. Connection forms
+explain this before sign-in. Saved OAuth Test and retry can still use a valid
+grant or a successful bound refresh. When no usable grant remains, they explain
+that signing in again is unavailable and retain the saved connection. Other
+launches and non-OAuth connections retain their existing flow. The
+[maintained OAuth contract](../packages/workbench/patches/README.md#desktop-outgoing-oauth-availability)
+owns the request and credential details.
+
+Search Vivary uses Native's command menu. Closing returns focus to its connected
+opener while the same route remains current and another control has not taken
+focus. The [maintained focus owner](../packages/workbench/patches/README.md#command-menu-return-focus)
+keeps this contract separate from menu navigation.
+
+Resource editing separates viewing from content changes. Toolkit's shared rich
+editor emits saved content only for document-changing transactions and changes
+editability without an update event. Opening Visual or switching views therefore
+does not autosave a serialized replacement of the stored source. Settings gives
+the existing resource panel a responsive height within its normal scrolling page,
+so Code uses the panel's available editing space rather than two intrinsic rows.
+The [maintained editor contract](../packages/workbench/patches/README.md#resource-editor-preservation-and-height)
+keeps schema support and the existing one-second autosave owner unchanged.
+
 1. **Select a project.** Workbench resolves the authenticated actor, stable project ID, current binding, policy revision, and observed root. Project selection changes the files and history shown. A missing folder leaves authorized history available but blocks file-dependent execution. [Project registry](product/multi-project/source-map/modules/project-registry/index.md) owns the identity contract.
 2. **Send and continue.** A Native chat send rechecks its pinned project scope before model or attachment work. A Code send starts or resumes the selected native session against its bound project. Native stores the resulting run and transcript. A model choice or project switch cannot silently move an active run. [`native-chat-project.ts`](../packages/workbench/server/native-chat-project.ts), [`local-code-agent.ts`](../packages/workbench/server/local-code-agent.ts), and the [session model](product/multi-project/desktop-release.md#one-understandable-model) own this flow.
    Each project message also loads the project's context when it starts. [`project-memory.ts`](../packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs and Claude or Codex follow-ups. A resumed provider session therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a session never depends on an earlier block that its runtime may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
@@ -119,6 +231,11 @@ Coordinated releases publish Core before its dependent role packages.
 8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](../packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
 
 ## Data and trust boundaries
+
+Outgoing OAuth availability uses the existing listener-owned desktop
+request identity. Core refuses an unavailable interactive start before discovery
+or registration. This adds no origin, callback, cookie, capability or navigation
+authority. Existing manager startup and tool-call ownership remain unchanged.
 
 | Data or effect | Owner and boundary |
 | --- | --- |
@@ -306,6 +423,166 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-15 Retained Codex default-model review. The worker now compares an
+omitted Codex IPC model with the host's retained default sentinel. The actual
+executor still receives the omitted model so the native session chooses its own
+model. Claude comparisons and explicit model mismatch refusals remain strict.
+The public Send regression reproduces the previous worker refusal for both
+missing and null saved Codex model metadata. It uses the real host request and
+worker with an inert Codex app-server fixture, checks native resume without a
+model override, and preserves the single user event. Existing worker tests also
+reject changed, default, and omitted model inputs for explicit saved models.
+The regression is included in the maintained credential-redaction command.
+Execution, account, credential, and cleanup ownership boundaries are unchanged.
+
+2026-10-15 Code regression coverage review. Successful-send fixtures again
+exercise the public host path for slot exclusion, permission snapshots, draft
+reconciliation, Stop ownership, and fresh project context on each turn. Their
+inert CLI fixtures report the subscription route and version required by current
+runtime admission. Cleanup-refusal tests also use public Send after cleanup,
+instead of exporting the private execution starter from a fixture bundle. The
+maintained shared-UI command now includes editor content-preservation and command
+menu focus regressions. Review compared removed assertions with the baseline,
+checked the fixture call sites, and traced maintained commands from CI. These
+changes restore coverage without changing runtime behavior or bringing back the
+obsolete funding gate. The execution and credential boundaries remain unchanged.
+
+2026-10-15 Code model-choice review. The composer and send adapter now share
+new-conversation model admission from the current catalog. Exact historical IDs
+remain available for retained conversations, and saved supported Claude aliases
+pass both layers without replacing their identity. The server still owns runtime
+compatibility, record ownership, and retained-route immutability. The picker and
+actual-adapter regressions reproduced the mismatches before their fixes. The
+restored real-host and worker fixture verifies opaque held-value fingerprint
+delivery and redaction in transcripts, state, and follow-up context, alongside the
+existing Claude and Codex route fixtures. The 25-test worker and composer run and
+the final 24-test adapter and composer run passed without skips, with unchanged
+worker sources in the latter. Type checking passed. Maintained CI discovers the
+new tests. Execution ownership and credential boundaries remain as described
+above. Live provider and Windows package acceptance remain separate.
+
+2026-10-15 provider route correction. The app-wide included-only policy and its
+metadata probes, funding bindings, and pre-prompt control exchange are removed.
+The selected Code runtime or Native API provider remains authoritative. Send and
+worker fixtures cover new and resumed turns, provider failures, and unchanged
+route choices. Claude error result envelopes and rejected rate-limit events now
+produce an errored conversation instead of a completed turn. Error redaction
+precedes normalization and truncation. The Codex execution process checks its
+actual sign-in and provider configuration before a thread or turn. The earlier
+subscription sign-in and Windows SystemRoot fixes remain intact. This replaces
+the funding admission described in the dated reviews below. Live provider and
+Windows package acceptance are still separate.
+
+The Native Claude participant retains only the Windows SystemRoot setting across case variants so Node-based runtimes can initialize crypto. Its existing credential and environment allowlist boundary stays in place. Claude 2.1.300 joins the experimentally verified control-protocol versions after native and SDK metadata-only Windows checks. Funding admission, shared allowance limits, record ownership, and the unknown-version refusal remain unchanged.
+
+2026-10-14 Windows Claude control compatibility. A metadata-only probe used
+the existing packaged SDK 0.3.288 and Windows CLI 2.1.296, allowed only initialize
+and get_usage input, read the same explicit OFF fields and exhausted weekly
+allowance, and verified all owned processes closed. The allowlist now accepts
+that exact version alongside server 2.1.289. Bindings retain the observed version
+so model minimum versions use the actual runtime. Unknown versions still refuse.
+This establishes control-read compatibility only. Positive model execution and
+the package containing this source remain separate acceptance gates.
+
+2026-10-14 conditional Code funding admission. Claude's exact installed
+experimental control bridge replaces unconditional refusal with explicit-off,
+allowance, account, runtime, and workspace checks at send and Native execution.
+Focused fixtures cover positive new and resumed turns, refusal before writes,
+changed account and credits, model-specific UI messages, and private control
+metadata. The provider UI OFF change and matching metadata read established the
+version-specific control shape. Actual weekly allowance remained exhausted.
+Codex stays blocked for the precise missing overflow-control capability. The
+maintained Core patch adds an optional pre-prompt callback, preserving other
+participant callers. Source tests do not establish live execution or package
+acceptance.
+
+2026-10-14, Code subscription authentication: Claude readiness now requires its
+reported Claude sign-in method, first-party provider, and subscription type.
+This matches the existing Native executor and Codex's ChatGPT-only route check. Focused status tests cover API keys, cloud routes, missing
+fields, and private account data. This establishes route separation only. The
+included-only funding guarantee and live subscription acceptance remain separate.
+
+2026-10-13 desktop outgoing OAuth and hourly schedule summary. Native's
+production origin fallback, desktop redirect restriction and callback admission
+cannot complete the current browser sign-in journey. The maintained Core patch
+accepts Workbench's trusted availability policy and carries its reason to the
+existing forms. Saved Test and retry preserve valid grants and bound refresh.
+Only an unusable grant reports that reauthorization is unavailable. Installed
+handler and rendered-component fixtures cover these paths without a provider.
+The Custom hourly preview now states the interval and minute while preserving
+Native's cron generator. Issuer and desktop capability regressions remain part
+of focused validation. This is source evidence. A new package and its native
+Windows acceptance remain separate gates.
+
+2026-10-13 Native usage record ID collisions. The usage writer retains its numeric
+primary key and existing schema. If another writer already inserted its generated
+ID, it tries the next ID, up to 16 candidates. Only primary-key conflicts retry.
+Other database failures and exhaustion still reject the write, existing records
+are never replaced, and alert evaluation starts only after a successful insert.
+The regression forces independent store modules to choose the same clock/random
+candidate and checks that both records retain their costs. A second case fills
+all candidates and checks explicit failure without changing those records.
+Pricing, aggregation, provider execution, and funding admission are unchanged,
+so the existing Native usage flow and trust boundaries still hold.
+
+2026-10-13 resource editor preservation and height. Windows acceptance reproduced
+an untouched instruction table being flattened and saved merely by opening Visual.
+Toolkit's editability effect emitted an update without a document change, and the
+shared callback serialized that snapshot. The effect now suppresses emission and
+the callback rejects non-document updates before serialization. Real local edits
+retain the existing reconciliation guards and host callback. Separately, Settings
+mounted the percentage-height resource editor in normal document flow, leaving
+Code at its two-row intrinsic height. A responsive height at the Settings panel
+boundary now supplies the definite space its existing flex layout requires.
+The installed-editor regression uses the supported JSON-document seam because the
+existing DOM fixture cannot establish Markdown display fidelity. It also exercises
+the real resource view-switch/autosave boundary and renders the Settings height
+owner. Actual Markdown rendering, pixel layout, and Windows acceptance remain
+required. Resource schema features, autosave timing, provider behavior, and file
+version guards are unchanged.
+
+2026-10-13 Search Vivary return focus. Native's controlled command menu has no
+registered dialog trigger. Its focus owner now captures the actual focused opener
+before opening and restores that connected element on close only while the same
+route remains current and no other control has taken focus. Keyboard opening,
+menu commands, and navigation keep their existing owners. Focus-contract tests
+cover button and keyboard openers, removed openers, route/query changes, and focus
+already held elsewhere. Delayed close events cannot take focus from a reopened
+menu. The existing DOM component fixture could not initialize
+the real menu within its bound, so rendered dialog and Windows keyboard acceptance
+remain required. File-version conflict guards are unchanged because the observed
+Alpha save conflict has not been reproduced with its identity/stat tuple.
+
+2026-10-13 fresh Native provider fallback. Rendered acceptance found that a fresh
+unconfigured instance reported Anthropic with the global Builder model. Core's
+engine-list owner now pairs that fallback with the registered Anthropic default,
+without writing settings or changing saved/app candidates, custom normalization,
+readiness, or funding. A real installed action regression reproduces the prior
+mismatch and checks fresh, saved legacy, and custom choices through disposable
+storage with outbound transport refused. The provider catalog and request owners
+above remain accurate. Final rendered and package checks remain separate gates.
+
+2026-10-13 Native API catalog. The maintained Core patch updates only direct
+Anthropic model metadata and defaults, preserves older saved selections, and leaves
+gateway catalogs unchanged. Actual engine identity, individual Haiku prompt length,
+and observed cache-write duration govern new API estimates. Missing evidence is
+unknown and reported cost wins. The existing usage, budget, and trace owners retain
+that distinction without adding an account or funding probe. Focused regressions
+inspect real SDK requests through intercepted transport, catalog separation,
+saved choices, tier boundaries, cache durations, and unknown estimates. Code's
+included-only refusal remains unchanged. Live API, rendered UI, and packaged
+Windows acceptance remain separate gates.
+
+2026-10-13 Code catalog, funding, and composer. Workbench uses exact Claude
+model IDs, keeps saved choices and historical model interpretation, and embeds
+the existing selectors through Native's public composer toolbar slot. Installed
+metadata determines version support. Subscription authentication remains separate
+from funding verification. The server send boundary and coding worker refuse
+unverified included-only execution before any provider work. The affected tests
+check no execution or transcript mutation on new and resumed requests, retained
+identity, version support, and draft recovery. Build, real provider execution,
+and packaged Windows acceptance remain separate gates.
 
 Explicit Native history selection. The maintained Core tab initialization and
 active-tab inclusion retain the conversation named by the URL even when its last
