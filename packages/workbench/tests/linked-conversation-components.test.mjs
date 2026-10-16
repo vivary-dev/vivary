@@ -25,8 +25,12 @@ const bundle = await build({ stdin: { contents: `
   import { createElement } from "react";
   import { MemoryRouter, useLocation } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-  import { LinkedConversationChooser, LinkedHistoryNotice } from "./app/components/workspace/LinkedConversation";
+  import { LinkedConversationChooser, LinkedHistoryNotice, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
+  function Eligibility() {
+    const source = useLinkSourceEligibility({ projectId: "alpha", storageKey: "alpha", threadId: "new-thread", enabled: true });
+    return createElement("output", { id: "eligible" }, String(source.data?.available));
+  }
   export function view(kind) {
     const props = { projectId: "alpha", source: { kind: "code", id: "source" }, sourceEngine: "claude-cli",
       engines: [{ engine: "claude-cli", label: "Claude Code", configured: true, models: ["sonnet"] },
@@ -34,7 +38,7 @@ const bundle = await build({ stdin: { contents: `
       saveDraft: globalThis.linkFixture.saveDraft };
     const client = globalThis.linkFixture.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
-      kind === "chooser" ? createElement(LinkedConversationChooser, props)
+      kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
         : createElement(LinkedHistoryNotice, { projectId: "alpha", target: { kind: kind === "native-notice" ? "native" : "code", id: "target" } }), createElement(Location)));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", external: ["react", "react/*", "react-dom/*", "react-router"],
@@ -149,4 +153,23 @@ test("an unavailable source keeps the notice truthful and claims no prepared or 
   assert.doesNotMatch(host.textContent, /Next send can prepare|Last request prepared|completed-history entries available|could not be verified/);
   assert.equal(host.querySelector("a"), null, "the unavailable original is not offered as a readable link");
   assert.equal([...host.querySelectorAll("button")].some(button => /Inspect linked history|Retry history/.test(button.textContent)), false);
+});
+
+test("a new Native conversation becomes a link source when its first request saves it", async () => {
+  let saved = false, reads = 0;
+  linkFixture.call = async (name, input) => { reads++; linkFixture.calls.push({ name, input }); return { available: saved }; };
+  await render("eligibility"); await settle(); await notify();
+  // The optimistic thread is not saved before its first request, so it is not a source yet.
+  assert.equal(host.querySelector("#eligible").textContent, "false");
+  saved = true;
+  const completion = new window.Event("agentNative.chatRunning");
+  Object.defineProperty(completion, "detail", { value: { tabId: "native-ui-tab", isRunning: false } });
+  await act(async () => window.dispatchEvent(completion)); await settle(); await notify();
+  assert.equal(host.querySelector("#eligible").textContent, "true");
+  assert.deepEqual(linkFixture.calls.at(-1), { name: "vivary-linked-history",
+    input: { operation: "source", projectId: "alpha", target: { kind: "native", id: "new-thread" } } });
+  // Once the conversation is a source, later requests cause no further eligibility reads.
+  const settled = reads;
+  await act(async () => window.dispatchEvent(completion)); await settle(); await notify();
+  assert.equal(reads, settled);
 });

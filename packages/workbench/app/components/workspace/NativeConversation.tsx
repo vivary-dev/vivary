@@ -15,7 +15,7 @@ import { useProjects } from "../projects/ProjectContext";
 import { nativeMatchRepository } from "@/lib/native-match-repository";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { ConversationMatch } from "./ConversationMatch";
-import { LinkedConversationChooser, LinkedHistoryNotice } from "./LinkedConversation";
+import { LinkedConversationChooser, LinkedHistoryNotice, useLinkSourceEligibility } from "./LinkedConversation";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
 
@@ -142,10 +142,8 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
     && /^[A-Za-z0-9_-]{1,128}$/.test(savedSelection.threadId)
       ? savedSelection.threadId : null;
   const { call, ready: draftOwnerReady, sessionStatus, retrySession } = useNativeActionCaller();
-  const linkSource = useQuery({ queryKey: ["vivary-link-source", identity.storageKey, selectedThread],
-    enabled: !unassigned && !requestedMessage && !!selectedThread && draftOwnerReady, retry: false,
-    queryFn: () => call<{ available: boolean }>("vivary-linked-history", { operation: "source",
-      projectId: identity.projectId, target: { kind: "native", id: selectedThread } }) });
+  const linkSource = useLinkSourceEligibility({ projectId: identity.projectId, storageKey: identity.storageKey,
+    threadId: selectedThread, enabled: !unassigned && !requestedMessage && draftOwnerReady });
   const linkEngines = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: identity.projectId ?? undefined },
     { enabled: linkSource.data?.available === true && workspaceAvailable, retry: false });
   const savedThreadCheck = useQuery({

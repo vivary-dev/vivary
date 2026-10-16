@@ -61,6 +61,33 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
   </div>;
 }
 
+/** Whether a Native conversation is saved, so it can be a link source. An optimistic thread is not saved yet. */
+export function useLinkSourceEligibility({ projectId, storageKey, threadId, enabled }: {
+  projectId: string | null; storageKey: string; threadId: string | null; enabled: boolean;
+}) {
+  const { call, ready } = useNativeActionCaller();
+  const query = useQuery({ queryKey: ["vivary-link-source", storageKey, threadId],
+    enabled: enabled && !!threadId && ready, retry: false,
+    queryFn: () => call<{ available: boolean }>("vivary-linked-history", { operation: "source",
+      projectId, target: { kind: "native", id: threadId! } }) });
+  const saved = query.data?.available === true, active = enabled && !!threadId && ready;
+  useEffect(() => {
+    if (saved || !active) return;
+    // The first request saves the thread. Native reports request completion with its UI tab key, not the thread ID.
+    const refresh = () => { void query.refetch(); };
+    const nativeRequest = (event: Event) => {
+      if ((event as CustomEvent<{ isRunning?: boolean }>).detail?.isRunning === false) refresh();
+    };
+    window.addEventListener("agent-chat:threads-updated", refresh);
+    window.addEventListener("agentNative.chatRunning", nativeRequest);
+    return () => {
+      window.removeEventListener("agent-chat:threads-updated", refresh);
+      window.removeEventListener("agentNative.chatRunning", nativeRequest);
+    };
+  }, [saved, active, query.refetch]);
+  return query;
+}
+
 export function LinkedHistoryNotice({ projectId, target }: { projectId: string | null; target: ConversationReference }) {
   const { call, ready } = useNativeActionCaller();
   const key = JSON.stringify([projectId, target.kind, target.id]);

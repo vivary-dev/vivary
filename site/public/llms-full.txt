@@ -7448,7 +7448,10 @@ execution and packaged Windows acceptance remain separate checks.
 
 The saved Code and Native conversation surfaces can open a linked inactive target
 in the same authorized project. Claude Code and Codex can link to each other or to
-Native chat. Native can link to either configured Code harness. Selection saves
+Native chat. Native can link to either configured Code harness. A new Native
+conversation is not a source until its first request saves it. The chooser
+rechecks eligibility when Native reports a finished request or a thread list
+update, and stops rechecking once the conversation is a source. Selection saves
 the source draft through its current owner, then creates a paused Code record or
 an empty Native thread and its cleared draft. It submits no prompt, requests no
 worker, consumes no approval and transfers no provider session. The target's
