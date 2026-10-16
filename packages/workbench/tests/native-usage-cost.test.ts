@@ -73,6 +73,11 @@ const cutByProviderError: Respond = response => {
   send(response, { error: { code: 502, message: "Upstream provider failed" } });
   response.end("data: [DONE]\n\n");
 };
+// A dropped connection after streamed text, which the loop retries.
+const resetAfterText: Respond = response => {
+  send(response, chunkOf({ choices: [{ index: 0, delta: { role: "assistant", content: "Partial" }, finish_reason: null }] }));
+  setTimeout(() => response.destroy(), 20);
+};
 const answerWithoutUsage: Respond = response => {
   send(response, chunkOf({ choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }] }));
   send(response, chunkOf({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }));
@@ -141,7 +146,7 @@ async function runTurn(model: string, respond: Respond, { stopOnText = false, th
     await runWithRequestContext({ userEmail: owner, run: {} }, () => runAgentLoop({ engine: provider.engine, model,
       systemPrompt: "", tools: actionsToEngineTools(actions), actions, messages: userTurn, signal: stop.signal,
       send: (event: { type: string }) => { if (stopOnText && event.type === "text") stop.abort(); },
-      onUsage: turn.add, onModelCall: turn.startCall })).catch((error: unknown) => {
+      onUsage: turn.add, onModelCall: turn.startCall, onModelCallRefused: turn.refuseCall })).catch((error: unknown) => {
       if (stop.signal.aborted) return;
       if (!throws) throw error;
       threw = true;
@@ -203,6 +208,15 @@ const turns: Array<{ name: string; model: string; respond: Respond; stopOnText?:
   { name: "a turn whose second call reports no usage records no reported cost", model: "probe/paid-model",
     respond: (response, index) => (index === 0 ? callTool(0.0123) : answerWithoutUsage)(response, index), requests: 2,
     row: { centicents: 0, source: "unavailable" } },
+  // A retried attempt that streamed output before failing may have been charged, and it reports no
+  // usage, so the retry's reported cost is not the turn's cost.
+  { name: "a connection reset after streamed text and a retry that reports a cost records no reported cost",
+    model: "probe/paid-model", respond: (response, index) => (index === 0 ? resetAfterText : answer(0.0123))(response, index),
+    requests: 2, row: { centicents: 0, source: "unavailable" } },
+  // A rate limit rejects the request before the model runs, so the retry's reported cost is the turn's cost.
+  { name: "a rate-limited attempt and a retry that reports a cost record that cost", model: "probe/paid-model",
+    respond: (response, index) => (index === 0 ? rateLimited : answer(0.0123))(response, index), requests: 2,
+    row: { centicents: 123, source: "reported" } },
 ];
 
 test("a main chat turn records its cost", async t => {
@@ -583,4 +597,47 @@ test("incomplete new API evidence records Unknown and gateway reported cost wins
   const routed = await recordTurn("anthropic/claude-sonnet-5-5", answer(0.0123));
   assert.equal(routed.rows[0].centicents, 123);
   assert.equal(routed.rows[0].source, "reported");
+});
+
+test("a turn counts every attempt, keeps each attempt's usage, and settles a refused attempt at $0", () => {
+  const model = "probe/paid-model";
+  const usage = { model, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, cacheReadTokens: 0,
+    cacheWriteTokens: 0, engineName: "ai-sdk:openrouter" };
+  // Both attempts reported a cost, so the total is known even though the first one failed.
+  const bothReported = agent.createTurnUsage(model);
+  bothReported.startCall(); bothReported.add({ ...usage, costUsd: 0.01 });
+  bothReported.startCall(); bothReported.add({ ...usage, costUsd: 0.02 });
+  assert.deepEqual(bothReported.usageRecord(), { inputTokens: 2 * INPUT_TOKENS, outputTokens: 2 * OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model, costCentsX100: 300, costSource: "reported" });
+  // A refused attempt is a known $0 call with no tokens.
+  const refused = agent.createTurnUsage(model);
+  refused.startCall(); refused.refuseCall();
+  refused.startCall(); refused.add({ ...usage, costUsd: 0.0123 });
+  assert.deepEqual(refused.usageRecord(), { inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model, costCentsX100: 123, costSource: "reported" });
+  // An attempt with no usage and no refusal has an unknown cost. The retry's tokens stay recorded.
+  const partial = agent.createTurnUsage(model);
+  partial.startCall();
+  partial.startCall(); partial.add({ ...usage, costUsd: 0.0123 });
+  assert.deepEqual(partial.usageRecord(), { inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model });
+  // A priced model cannot estimate the unknown attempt either.
+  const pricedModel = "claude-haiku-5-5";
+  const pricedUsage = { ...usage, model: pricedModel, engineName: "anthropic", cacheWrite1hTokens: 0 };
+  const priced = agent.createTurnUsage(pricedModel);
+  priced.startCall();
+  priced.startCall(); priced.add(pricedUsage);
+  assert.equal(priced.usageRecord().costSource, "unavailable");
+  assert.equal(priced.usageRecord().costCentsX100, undefined);
+  const pricedRefused = agent.createTurnUsage(pricedModel);
+  pricedRefused.startCall(); pricedRefused.refuseCall();
+  pricedRefused.startCall(); pricedRefused.add(pricedUsage);
+  assert.equal(pricedRefused.usageRecord().costSource, "estimated");
+  // A refused attempt that already sent a $0 usage report counts once.
+  const reportedThenRefused = agent.createTurnUsage(model);
+  reportedThenRefused.startCall(); reportedThenRefused.add({ ...usage, inputTokens: 0, outputTokens: 0, costUsd: 0 });
+  reportedThenRefused.refuseCall();
+  reportedThenRefused.startCall(); reportedThenRefused.add({ ...usage, costUsd: 0.0123 });
+  assert.equal(reportedThenRefused.usageRecord().costCentsX100, 123);
+  assert.equal(reportedThenRefused.usageRecord().costSource, "reported");
 });

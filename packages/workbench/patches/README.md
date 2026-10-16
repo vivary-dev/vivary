@@ -694,10 +694,12 @@ The patch changes these files:
   declares the field.
 - `agent/production-agent.js` passes `costUsd` from the agent loop to
   `onUsage`, and the loop calls the new `onModelCall` as each model call
-  starts, with `retry` set when the call retries a failed attempt. The new
-  `createTurnUsage` sums a turn's usage over its model calls and internal
-  continuations. A retry replaces the attempt it retries, so a rate-limited
-  attempt adds no call. The turn records the sum as a reported cost, in
+  starts, retries included. When an attempt fails before the model produced
+  output and the provider refused it (a rate limit, an overload, or a context
+  overflow), the loop also calls `onModelCallRefused`. A usage report with no
+  tokens and no cost does not count as output. The new `createTurnUsage` sums
+  a turn's usage over its model calls and internal continuations, and settles
+  a refused attempt as a known $0 call. The turn records the sum as a reported cost, in
   centicents rounded as `calculateCost` rounds, only when every call it counts
   reported a cost. Otherwise the turn passes no cost and the store decides.
 - `usage/store.js` gives Sonnet ids their own price entry and removes the
@@ -758,9 +760,9 @@ These limits remain:
   off by Stop, by a dropped connection, or by an in-stream provider error
   after text reports none, and so does a call whose stream ends with no usage
   chunk. The table prices that turn, or it shows as Unknown.
-- A retry replaces the attempt it retries. OpenRouter can bill output that an
-  attempt streamed before it failed, and a turn whose retry reports a cost
-  leaves that output out.
+- A retried attempt that was not refused has an unknown cost, because
+  OpenRouter can bill output that an attempt streamed before it failed. Its
+  turn shows Unknown even when the retry reports a cost.
 - An integration run of an unpriced model whose provider reports no cost,
   such as a model reached through a provider other than OpenRouter, fills a
   budget cap at the $5 reservation per run, however little it cost.

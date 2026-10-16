@@ -428,6 +428,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-16 Native retry cost review. A failed model attempt that the agent loop
+retries now counts as a call in the turn's usage, so a turn whose first attempt
+streamed output and then dropped no longer records the retry's reported cost as
+the complete turn cost. It records the tokens it knows and an unknown cost. An
+attempt refused before the model produced output, by a rate limit, an overload,
+or a context overflow, counts as a known $0 call, so a rate-limited attempt and
+a retry that reports a cost still record that cost. A usage report with no
+tokens and no cost, which the AI SDK sends before a refusal, is not output. The
+chat handler and the webhook handler wire the same hook. The usage store, the
+Usage tab, and budgets are unchanged, so the design description holds. Loop
+tests drive a dropped connection after streamed text and two rate-limited
+attempts through the real agent loop, and direct tests cover both attempts
+reporting, a refused attempt, an attempt with unknown cost, and a refused
+attempt that already reported $0.
+
 2026-10-16 Claude failure-path and local first-run review. Claude Code stderr
 is retained only while the complete diagnostic stays within its existing
 128 KiB bound. A write that would exceed the bound discards the retained
@@ -1860,9 +1875,10 @@ register records it and the `0697293f` packaged check. Documentation only, so th
 
 Issue #103, Native usage cost. The maintained Core patch records the cost that a provider reports for a Native model
 call and never guesses one. The AI SDK engine reads OpenRouter's reported cost from the step's `finish-step` part and
-puts it on its usage event. `createTurnUsage` sums a turn's usage over its model calls and internal continuations. A
-retry replaces the attempt it retries, and the turn passes the sum as a reported cost only when every counted call
-reported one. Otherwise the usage store prices the tokens from its table, which has a Sonnet entry and no catch-all
+puts it on its usage event. `createTurnUsage` sums a turn's usage over its model calls and internal continuations. It
+counts every attempt, retries included. An attempt the provider refused before the model produced output (a rate
+limit, an overload, or a context overflow) counts as a known $0 call. The turn passes the sum as a reported cost only
+when every counted call reported one. Otherwise the usage store prices the tokens from its table, which has a Sonnet entry and no catch-all
 price, or it records the cost as unknown. The table setup marks the old estimates for unpriced models unknown once.
 The Settings Usage tab, the usage metrics, and cost alerts show an unknown cost as Unknown, add only known costs, and
 count the calls of unknown cost. An integration run sums its usage the same way, and the webhook handler writes the

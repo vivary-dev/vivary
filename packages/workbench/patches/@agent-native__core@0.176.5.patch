@@ -17646,3 +17646,216 @@ diff --git a/dist/client/onboarding/FirstRunOnboarding.js b/dist/client/onboardi
                                              trackFirstRunStepCompleted("manual");
                                              setScreen(skipIntegrations ? "role" : "tools");
                                          }, children: skipIntegrations ? "Continue" : "Continue to tools" })] })] })] }) }));
+diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+--- a/dist/agent/production-agent.js
++++ b/dist/agent/production-agent.js
+@@ -1030,6 +1030,45 @@
+         msg.includes("inactivity timeout") ||
+         msg.includes("too much time has passed without sending any data"));
+ }
++/**
++ * Whether a failed model call was refused before the model ran, so the
++ * provider charged nothing for it: a rate limit, an overload, or a context
++ * overflow. The caller also requires that the call produced no model output.
++ */
++function isRefusedBeforeGeneration(err) {
++    if (!(err instanceof Error))
++        return false;
++    if (isContextTooLongError(err))
++        return true;
++    const statusCode = err instanceof EngineError ? err.statusCode : undefined;
++    if (statusCode === 429 || statusCode === 529)
++        return true;
++    const msg = err.message.toLowerCase();
++    return (/\b(?:429|529)\b/.test(msg) ||
++        msg.includes("rate limit") ||
++        msg.includes("rate_limit") ||
++        msg.includes("too many requests") ||
++        msg.includes("overloaded") ||
++        msg.includes("resource_exhausted"));
++}
++/**
++ * Whether a stream event shows that the model produced output, so its call may
++ * have been charged. A keepalive, empty content, and a usage report with no
++ * tokens and no cost do not. An engine can send the last two before a refusal.
++ */
++function isModelOutputEvent(event) {
++    switch (event.type) {
++        case "stop":
++        case "gateway-heartbeat":
++            return false;
++        case "assistant-content":
++            return event.parts.length > 0;
++        case "usage":
++            return (event.inputTokens ?? 0) > 0 || (event.outputTokens ?? 0) > 0 || (event.costUsd ?? 0) > 0;
++        default:
++            return true;
++    }
++}
+ // ---------------------------------------------------------------------------
+ // Context-window overflow recovery
+ // ---------------------------------------------------------------------------
+@@ -3368,9 +3407,11 @@
+ }
+ /**
+  * Usage for one agent turn, summed over its model calls and internal
+- * continuations. `startCall` counts each model call the agent loop starts. A
+- * retry replaces the failed attempt it retries, so it adds no call. `add` sums
+- * the usage each call reports and counts the calls whose usage holds a cost.
++ * continuations. `startCall` counts each model call the agent loop starts,
++ * retries included, because a failed attempt may already have been charged.
++ * `refuseCall` settles an attempt the provider refused before the model ran,
++ * which costs nothing. `add` sums the usage each call reports and counts the
++ * calls whose usage holds a cost.
+  * The provider's reported cost is the turn's cost only when every counted call
+  * reported one. A call cut off by Stop, a dropped connection, or an in-stream
+  * error reports no cost, and so does a stream that ends with no usage chunk.
+@@ -3381,6 +3422,9 @@
+     const requestPriced = Boolean(ANTHROPIC_API_MODELS[model]);
+     let pricedCalls = 0;
+     let estimatedCost = 0;
++    // Whether the current attempt already counts as reported or priced.
++    let attemptReported = false;
++    let attemptPriced = false;
+     const turn = {
+         inputTokens: 0,
+         outputTokens: 0,
+@@ -3390,9 +3434,21 @@
+         startedCalls: 0,
+         reportedCalls: 0,
+         reportedCostUsd: 0,
+-        startCall(call) {
+-            if (!call?.retry)
+-                turn.startedCalls += 1;
++        startCall() {
++            turn.startedCalls += 1;
++            attemptReported = false;
++            attemptPriced = false;
++        },
++        refuseCall() {
++            // A known $0 call. A usage report it already sent counts once.
++            if (!attemptReported) {
++                turn.reportedCalls += 1;
++                attemptReported = true;
++            }
++            if (requestPriced && !attemptPriced) {
++                pricedCalls += 1;
++                attemptPriced = true;
++            }
+         },
+         add(usage) {
+             turn.inputTokens += usage.inputTokens;
+@@ -3403,12 +3459,13 @@
+             if (requestPriced) {
+                 const cost = usage.costUsd !== undefined ? (usage.costUsd > 0 ? Math.max(1, Math.round(usage.costUsd * 10_000)) : 0)
+                     : estimateUsageCost(usage, { perRequest: true });
+-                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; }
++                if (cost !== undefined) { pricedCalls += 1; estimatedCost += cost; attemptPriced = true; }
+             }
+             if (usage.costUsd === undefined)
+                 return;
+             turn.reportedCalls += 1;
+             turn.reportedCostUsd += usage.costUsd;
++            attemptReported = true;
+         },
+         usageRecord() {
+             const record = {
+@@ -3710,6 +3767,7 @@
+         }
+         for (let retry = 0;; retry++) {
+             const attemptStartedAt = Date.now();
++            let attemptProducedOutput = false;
+             assistantContent = undefined;
+             streamedAssistantText = "";
+             streamedAssistantToolCalls.length = 0;
+@@ -3729,7 +3787,7 @@
+                     providerOptions: opts.providerOptions,
+                 };
+                 usage.llmCalls = (usage.llmCalls ?? 0) + 1;
+-                opts.onModelCall?.({ retry: retry > 0 });
++                opts.onModelCall?.();
+                 const eventStream = engine.stream(streamOpts);
+                 let thinkingBuffer = "";
+                 const toolInputNames = new Map();
+@@ -3932,6 +3990,8 @@
+                             break;
+                         }
+                         const event = nextEvent.value;
++                        if (isModelOutputEvent(event))
++                            attemptProducedOutput = true;
+                         if (hasNoProgressStalled()) {
+                             checkpointNoProgress();
+                             break;
+@@ -4103,6 +4163,9 @@
+             catch (err) {
+                 if (signal.aborted)
+                     throw err;
++                // Every other failed call keeps an unknown cost, so the turn's total is incomplete.
++                if (!attemptProducedOutput && isRefusedBeforeGeneration(err))
++                    opts.onModelCallRefused?.();
+                 if (isContextTooLongError(err)) {
+                     // ── One-shot recovery: trim old tool results and retry once ────────
+                     // Only attempt recovery on the first overflow (retry === 0) to avoid
+@@ -8437,6 +8500,7 @@
+                 signal,
+                 onUsage: turnUsage.add,
+                 onModelCall: turnUsage.startCall,
++                onModelCallRefused: turnUsage.refuseCall,
+                 ownerEmail,
+                 orgId: getRequestOrgId() ?? null,
+                 attachments: requestAttachments,
+diff --git a/dist/agent/production-agent.d.ts b/dist/agent/production-agent.d.ts
+--- a/dist/agent/production-agent.d.ts
++++ b/dist/agent/production-agent.d.ts
+@@ -847,7 +847,8 @@
+ } | null;
+ /**
+  * Usage for one agent turn. Pass `startCall` as the agent loop's
+- * `onModelCall` and `add` as its `onUsage`. `usageRecord` returns the fields
++ * `onModelCall`, `refuseCall` as its `onModelCallRefused`, and `add` as
++ * its `onUsage`. `usageRecord` returns the fields
+  * `recordUsage` stores.
+  */
+ export interface TurnUsage {
+@@ -859,9 +860,8 @@
+     startedCalls: number;
+     reportedCalls: number;
+     reportedCostUsd: number;
+-    startCall(call?: {
+-        retry: boolean;
+-    }): void;
++    startCall(): void;
++    refuseCall(): void;
+     add(usage: AgentLoopUsage): void;
+     usageRecord(): {
+         inputTokens: number;
+@@ -892,13 +892,13 @@
+     signal: AbortSignal;
+     /** Observe usage as each model response reports it, including aborted loops. */
+     onUsage?: (usage: AgentLoopUsage) => void;
++    /** Observe each model call as it starts, retries included. */
++    onModelCall?: () => void;
+     /**
+-     * Observe each model call as it starts. `retry` is true when the call
+-     * retries a failed attempt, which it replaces.
++     * Observe a failed call the provider refused before the model produced
++     * output: a rate limit, an overload, or a context overflow.
+      */
+-    onModelCall?: (call: {
+-        retry: boolean;
+-    }) => void;
++    onModelCallRefused?: () => void;
+     /** Observe the attempt's typed terminal state separately from chat events. */
+     onOutcome?: (outcome: AgentLoopOutcome) => void;
+     ownerEmail?: string | null;
+diff --git a/dist/integrations/webhook-handler.js b/dist/integrations/webhook-handler.js
+--- a/dist/integrations/webhook-handler.js
++++ b/dist/integrations/webhook-handler.js
+@@ -985,6 +985,7 @@
+                             reasoningEffort: normalizeReasoningEffortForRequest(target.model, undefined),
+                             onUsage: turnUsage.add,
+                             onModelCall: turnUsage.startCall,
++                            onModelCallRefused: turnUsage.refuseCall,
+                         }, undefined, {
+                             useHostedDefault: true,
+                             backgroundFunction: isInBackgroundFunctionRuntime(),
