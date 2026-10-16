@@ -63,6 +63,23 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
   </div>;
 }
 
+type Probe<T> = { data?: T; isError: boolean; refetch: () => unknown };
+
+/** The Native chooser once its source eligibility and runtime state have loaded. A failed prerequisite offers Retry. */
+export function NativeLinkOptions({ projectId, threadId, source, engines, saveDraft }: {
+  projectId: string | null; threadId: string; source: Probe<{ available: boolean }>; engines: Probe<VivaryCodeState>;
+  saveDraft: () => Promise<void>;
+}) {
+  const eligible = source.data?.available === true;
+  if (source.isError || (eligible && engines.isError)) return <div className="local-agent-notice" role="alert">
+    Linked conversation options could not load.
+    <Button size="sm" variant="outline" onClick={() => { void source.refetch(); if (eligible) void engines.refetch(); }}>
+      Retry linked conversation</Button></div>;
+  if (!eligible || !engines.data) return null;
+  return <LinkedConversationChooser projectId={projectId} source={{ kind: "native", id: threadId }} sourceEngine="native"
+    engines={engines.data.engines} saveDraft={saveDraft} />;
+}
+
 /** Whether a Native conversation is saved, so it can be a link source. An optimistic thread is not saved yet. */
 export function useLinkSourceEligibility({ projectId, storageKey, threadId, enabled }: {
   projectId: string | null; storageKey: string; threadId: string | null; enabled: boolean;

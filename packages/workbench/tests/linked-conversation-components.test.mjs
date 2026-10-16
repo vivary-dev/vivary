@@ -25,7 +25,7 @@ const bundle = await build({ stdin: { contents: `
   import { createElement } from "react";
   import { MemoryRouter, useLocation } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-  import { LinkedConversationChooser, LinkedHistoryNotice, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
+  import { LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
   export { nativeHistoryRows } from "./app/lib/native-history-rows";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   function Eligibility() {
@@ -40,6 +40,8 @@ const bundle = await build({ stdin: { contents: `
     const client = globalThis.linkFixture.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
       kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
+        : kind === "native-options" ? createElement(NativeLinkOptions, { projectId: "alpha", threadId: "native-source",
+          saveDraft: globalThis.linkFixture.saveDraft, ...globalThis.linkFixture.options })
         : kind === "chooser-from-codex" ? createElement(LinkedConversationChooser, { ...props, sourceEngine: "codex-cli",
           engines: [{ engine: "claude-cli", label: "Claude Code", configured: true, models: ["claude-sonnet-5-5", "claude-opus-5-5"],
             claudeModels: globalThis.linkFixture.claudeModels }] })
@@ -198,4 +200,28 @@ test("linking to Claude Code picks the first model the installed CLI supports, a
   linkFixture.claudeModels = [{ id: "claude-sonnet-5-5", support: "upgrade-required" }, { id: "claude-opus-5-5", support: "unverified" }];
   await render("chooser-from-codex");
   assert.equal(host.querySelector('option[value="claude-cli"]'), null, "a harness with no supported model is not offered");
+});
+
+test("a failed Native link prerequisite shows an explicit retry instead of hiding the chooser", async () => {
+  const refetches = [];
+  const probe = (name, result) => ({ ...result, refetch: async () => { refetches.push(name); } });
+  const engines = { engines: [{ engine: "codex-cli", label: "Codex", configured: true, models: ["fixture"],
+    modelCatalog: { status: "ready", defaultModel: "fixture" } }] };
+  // The eligibility probe failed.
+  linkFixture.options = { source: probe("source", { isError: true }), engines: probe("engines", { isError: false }) };
+  await render("native-options");
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Retry linked conversation").click());
+  assert.match(host.querySelector('[role="alert"]').textContent, /Linked conversation options could not load/);
+  assert.deepEqual(refetches, ["source"]);
+  // The source is eligible, but runtime state failed to load.
+  refetches.length = 0;
+  linkFixture.options = { source: probe("source", { isError: false, data: { available: true } }), engines: probe("engines", { isError: true }) };
+  await render("native-options");
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Retry linked conversation").click());
+  assert.deepEqual(refetches, ["source", "engines"]);
+  // Both loaded: the chooser itself renders.
+  linkFixture.options = { source: probe("source", { isError: false, data: { available: true } }), engines: probe("engines", { isError: false, data: engines }) };
+  await render("native-options");
+  assert.ok(host.querySelector('select[aria-label="Open linked conversation in another harness"]'));
+  assert.equal(host.querySelector('[role="alert"]'), null);
 });

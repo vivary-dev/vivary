@@ -145,7 +145,9 @@ in the same authorized project. Claude Code and Codex can link to each other or 
 Native chat. Native can link to either configured Code harness. A Claude Code
 target gets the first model the installed Claude Code supports, and the service
 refuses an unsupported Claude model with the same check a send makes, so a
-target is never pinned to a model it cannot use. A new Native
+target is never pinned to a model it cannot use. If the Native eligibility check
+or the runtime state fails to load, the conversation shows that failure with
+Retry instead of hiding the chooser. A new Native
 conversation is not a source until its first request saves it. The chooser
 rechecks eligibility when Native reports a finished request or a thread list
 update, and stops rechecking once the conversation is a source. Selection saves
