@@ -589,7 +589,18 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     return runId ? () => context(ctx, projectId, { kind: "code", id: runId }) : undefined;
   }
 
-  return { create, load, context, sourceAvailable, prepareNativeMessage, codeSendLinkedContext };
+  /** Prepare handoff reads the same verified records. It stores the link boundary, never compares it.
+   * An unfinished link is not a link yet, and a missing table holds no links. */
+  async function linkFor(target: ConversationReference) {
+    const rows = await linkRows(target.kind, target.id);
+    if (!rows.length) return null;
+    const link = linkSchema.parse(JSON.parse(String(rows[0].record_json)));
+    if (link.creationPending) return null;
+    return { linkId: link.id, source: link.source, boundaryId: link.boundaryId, boundaryDigest: link.boundaryDigest };
+  }
+
+  return { create, load, context, sourceAvailable, prepareNativeMessage, codeSendLinkedContext,
+    scope, record, completedPrefix: sourcePrefix, linkFor };
 }
 export const linkedConversations = createLinkedConversationService();
 

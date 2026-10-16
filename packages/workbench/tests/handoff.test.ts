@@ -16,7 +16,7 @@ test("handoffs are written through the file owner and go stale without a model c
   t.after(async () => {
     const { closeDbExec } = await import("@agent-native/core/db");
     await closeDbExec();
-    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key]; // guard:allow-env-credential - Removes only names this disposable fixture added, then restores the saved environment.
     Object.assign(process.env, previous);
     await rm(root, { recursive: true, force: true });
   });
@@ -44,7 +44,6 @@ test("handoffs are written through the file owner and go stale without a model c
   await writeFile(path.join(projectRoot, "STATE.md"), "# State\nFocus: relay beta\n");
   await writeFile(path.join(projectRoot, "notes.txt"), "tracked\n");
   await writeFile(path.join(projectRoot, "dirty.txt"), "base\n");
-  // guard:allow-env-credential - The fixture Git reads only the host PATH, never a credential.
   const hostPath = previous.PATH ?? "/usr/bin:/bin";
   const git = (...args: string[]) => {
     const result = spawnSync("git", ["-C", projectRoot, ...args], { encoding: "utf8", timeout: 10_000,

@@ -107,4 +107,15 @@ export const migrateRegistry = runMigrations([{
   );
   CREATE UNIQUE INDEX IF NOT EXISTS vivary_conversation_link_target
     ON vivary_conversation_links(target_kind, target_id);`,
+}, {
+  version: 6,
+  name: "vivary-handoff-records-v1",
+  sql: `CREATE TABLE IF NOT EXISTS vivary_handoff_records (
+    project_id TEXT NOT NULL,
+    binding_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    record_json TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS vivary_handoff_record_document
+    ON vivary_handoff_records(project_id, binding_id, path);`,
 }], { table: "vivary_workbench_registry_migrations" });

@@ -7643,9 +7643,39 @@ work after the boundary cannot break an existing link. An entry that does not fi
 the rest of a page starts the next page, so paging never skips text. Only an
 entry longer than a whole page is shortened, and its text ends with an omission
 notice that points to the original. The original remains the complete history owner. This is the
-first linked-history slice of issue #38. Prepare handoff and controlled concurrent
-execution remain separate work. Independent review and built UI acceptance of
+first linked-history slice of issue #38. Controlled concurrent execution remains
+separate work under issue #228. Independent review and built UI acceptance of
 this slice remain required.
+
+### Prepare handoff
+
+A saved project conversation shows a handoff control beside the linked-history
+notice. **Prepare handoff** records the project facts in one pending row and
+submits a request message to that conversation. A Code conversation sends it
+through its own chat handle and adapter. Native sends it with Core's same-window
+submit, which only Native chats receive. Neither path changes the composer draft.
+The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+is a second owner click. `handoff.ts` reads the reply from the conversation's
+completed history, never from the client. It refuses a missing field, a second
+block, another request ID, an unknown key, or a passed or failed check without a
+completed evidence event. It fills every fact itself, redacts held credentials,
+and writes one marked block at the end of the workspace's designated state
+document through `projectFileService.save` with the prepared version and
+binding. A plain workspace or a missing, private or protected state file refuses
+Prepare. A conflict or failed write keeps the previous file and saved record,
+marks the request Failed and offers Retry. Nothing is cleaned, stashed or
+committed. A dirty tree is reported as a count.
+
+Freshness is computed on request, with no timer and no model call. It compares
+the state file version, Git HEAD and branch, the dirty entry list and each dirty
+file's size and modified time, or the bounded file listing without Git, and the
+covered completed conversation boundary and prefix digest. The state file is
+excluded from the project facts because its own version is compared. A listing
+at its cap or an unknown Git state is Unverifiable, never Fresh. Git facts come
+from a read-only `observe` creator bridge operation over
+`vivary_core.workspace_observe`, gated like `context` and reported relative to
+the project folder. Migration 6 adds `vivary_handoff_records`, one row per
+project binding and document, holding the pending request and the saved record.
 
 
 ### Original engine
