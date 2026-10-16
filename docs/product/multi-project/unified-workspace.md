@@ -173,7 +173,8 @@ completed-history notice. Optimistic unsent Native drafts are not saved sources.
 
 Metadata stays in the existing Workbench Native-backed database. Native keeps
 messages and Code transcripts. The link binds both creation identities, project
-and root binding, owner and organization, and an exact completed-prefix digest.
+binding, owner and organization, and an exact completed-prefix digest. A project
+folder reconnect keeps the binding, so the link and its older sources stay usable.
 A foreign source, revoked membership, replaced binding, changed prefix or foreign
 page cursor is refused. Historical text and tool results are quoted data, with
 no raw tool replay, transferred grant or copied provider resume ID. The target's

@@ -77,8 +77,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (ref.kind === "code") {
       const run = getCodeAgentRunRecord(ref.id);
       if (!run || run.metadata?.app !== "vivary-workbench-local-code"
+        // Project ownership is projectId plus bindingId, as in isOwnedRun. A folder reconnect changes only the root epoch.
         || (identity.history ? !isOwnedRun(run, identity.owner, identity.orgId, identity.history)
-          || run.metadata?.rootId !== identity.history.rootId
           : run.metadata?.ownerEmail !== identity.owner || run.metadata?.orgId !== identity.orgId || run.metadata?.projectId != null))
         unavailable();
       return run;
@@ -154,7 +154,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (!parsed.success) unavailable();
     const link = parsed.data;
     if (link.owner !== identity.owner || link.orgId !== identity.orgId || link.projectId !== projectId
-      || link.bindingId !== (identity.history?.bindingId ?? null) || link.rootId !== (identity.history?.rootId ?? null)
+      || link.bindingId !== (identity.history?.bindingId ?? null)
       || historyDigest(link.target) !== historyDigest(target) || link.targetCreatedAt !== currentTarget.createdAt
       || (target.kind === "code" && (currentTarget as CodeAgentRunRecord).metadata?.linkedHistoryId !== link.id)) unavailable();
     const source = await record(link.source, identity);

@@ -146,10 +146,12 @@ keeps the source selected and offers Retry. The host execution guard is unchange
 
 `linked-conversations.ts` uses Native records and the existing Workbench database
 migration owner. Its metadata row binds actor, application, organization, project
-and root binding, source and target creation identities, and the completed source
+binding, source and target creation identities, and the completed source
 boundary with a digest. It contains no transcript copy. Pages and explicit sends
 recheck current membership, project access, both records and the frozen prefix.
-A replaced binding or changed prefix fails closed. Code retains the server-captured
+Record ownership matches the project and binding, as `isOwnedRun` does, so a
+project folder reconnect, which changes only the root epoch, keeps the link and
+its older sources usable. A replaced binding or changed prefix fails closed. Code retains the server-captured
 prefix byte length, never a caller byte cursor, so later appends cannot widen a
 page. Native follows the saved branch and excludes pending approvals, stopped
 turns and live or still-saving execution chunks. No completed prefix means an

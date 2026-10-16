@@ -156,7 +156,25 @@ process.send({type:"vivary:code-worker:ready"});
       assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
       assert.equal(host.activeRuns.size, 0);
       await assert.rejects(readFile(path.join(root, "linked-started.json")), { code: "ENOENT" });
+      // A folder reconnect allocates a new root epoch for the same binding. The linked target still sends with its context.
+      Object.assign(project, { rootId: "root-reconnected", bindingRevision: 2 });
+      const reconnected = await sendVivaryCodeMessage({ ownerEmail: owner, orgId, runId, workspace: { root, ...project },
+        message: "After reconnect", engine: "claude-cli", model: "sonnet", loadLinkedContext });
+      assert.equal(reconnected.run!.id, runId);
+      const reconnectedExecution = host.activeRuns.get(runId)?.execution;
+      let restarted: { prompt: string } | undefined;
+      for (let attempt = 0; attempt < 100 && !restarted; attempt++) {
+        try { restarted = JSON.parse(await readFile(path.join(root, "linked-started.json"), "utf8")); }
+        catch { await new Promise(resolve => setTimeout(resolve, 20)); }
+      }
+      assert.match(restarted!.prompt, /Actual retained output[\s\S]*After reconnect/);
+      await stopVivaryCodeRun({ ownerEmail: owner, orgId, runId, projectId: project.projectId }); await reconnectedExecution;
+      await rm(path.join(root, "linked-started.json"));
+      const reconnectedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
+      assert.equal(reconnectedUsers.length, 2);
+      assert.equal(reconnectedUsers[1].metadata?.linkedHistory?.entries, 3);
     } finally {
+      Object.assign(project, { rootId: "root-a", bindingRevision: 1 });
       const execution = host.activeRuns.get(runId)?.execution;
       if (execution) { await stopVivaryCodeRun({ ownerEmail: owner, orgId, runId, projectId: project.projectId }).catch(() => undefined); await execution; }
       process.chdir(previousCwd);
@@ -239,6 +257,27 @@ process.send({type:"vivary:code-worker:ready"});
     }
     assert.equal((await getThread(thread.id))!.threadData, before);
     assert.equal((await readChatDraft(identity, thread.id))!.text, "Native unsent");
+  });
+  await t.test("a project folder reconnect keeps links and older sources usable for the same binding only", async () => {
+    const native = await create({ engine: "native" });
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const prepareNative = () => runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: identity.scope } }, () =>
+      service.prepareNativeMessage({ threadId: native.target.id, ownerEmail: owner, message: "After reconnect" }));
+    try {
+      // Reconnection allocates a new root epoch and keeps the binding, as in local-code-agent.test.ts.
+      Object.assign(project, { rootId: "root-reconnected", bindingRevision: 2 });
+      assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.boundaryId, "source-done");
+      assert.match((await service.context(actor, project.projectId, codeTarget.target))!.block!, /Completed answer/);
+      assert.match((await prepareNative())!.message, /Completed answer[\s\S]*# Current request\nAfter reconnect$/);
+      const older = await create({ engine: "native" });
+      assert.match((await service.load(actor, project.projectId, older.target))!.excerpt, /Completed answer/);
+      // A different binding is a different folder grant, so every read and new link still refuses.
+      project.bindingId = "binding-other";
+      await assert.rejects(service.load(actor, project.projectId, codeTarget.target), { errorCode: "vivary_linked_history_unavailable" });
+      await assert.rejects(service.context(actor, project.projectId, native.target), { errorCode: "vivary_linked_history_unavailable" });
+      await assert.rejects(create({ engine: "native" }), { errorCode: "vivary_linked_history_unavailable" });
+    } finally { Object.assign(project, { bindingId: "binding-a", rootId: "root-a", bindingRevision: 1 }); }
   });
   await t.test("appended and partial source events cannot widen a retained boundary", async () => {
     await appendFile(codeAgentRunTranscriptPath(source.id), '{"runId":"source","id":"in-progress"');
