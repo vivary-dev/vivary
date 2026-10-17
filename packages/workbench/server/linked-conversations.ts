@@ -462,12 +462,15 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       || link.projectId !== input.projectId || historyDigest(link.source) !== historyDigest(input.source) || engine !== input.target.engine)
       fail("This link request was already used for a different choice. Choose the harness again.",
         { errorCode: "vivary_link_operation_mismatch", statusCode: 409 });
-    // A finished link whose target was not yet published (a crash after its row was finished) is published now.
-    await publishTarget(link.target);
     // The route must still open: the current project binding or personal workspace and the target's own link are
-    // checked as a page read checks them. A rebind or workspace move since creation refuses instead.
-    try { await load(ctx, input.projectId, link.target); }
-    catch (error) {
+    // checked as a page read checks them. A rebind or workspace move since creation refuses instead. Custody is
+    // checked before a target left unpublished by a crash is published, so an unusable target never appears.
+    try {
+      if (link.bindingId !== (identity.history?.bindingId ?? null)) unavailable();
+      await record(link.target, identity);
+      await publishTarget(link.target);
+      await load(ctx, input.projectId, link.target);
+    } catch (error) {
       if ((error as { errorCode?: string } | null)?.errorCode !== "vivary_linked_history_unavailable") throw error;
       fail("The project folder or workspace changed after this link was made, so it no longer opens here. Choose the harness again.",
         { errorCode: "vivary_link_operation_stale", statusCode: 409 });

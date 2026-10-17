@@ -854,6 +854,25 @@ process.send({type:"vivary:code-worker:ready"});
     const finished = await first;
     assert.deepEqual(await slow.create(actor, { projectId: project.projectId, source: ref, target, operationId }), finished);
   });
+  await t.test("a stale replay refuses before it publishes a hidden target", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const trigger = (name: string, when: string) =>
+      db.execute(`CREATE TRIGGER ${name} ${when} BEGIN SELECT RAISE(ABORT, 'selected ${name} fault'); END`);
+    const drop = (...names: string[]) => Promise.all(names.map(name => db.execute(`DROP TRIGGER IF EXISTS ${name}`)));
+    const operationId = randomUUID();
+    const native = () => service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "native" }, operationId });
+    // The row is finished, then the process stops before publishing (simulated by a publish fault and a failed rollback).
+    await trigger("publish", "BEFORE UPDATE OF source_url ON chat_threads");
+    await trigger("keep_link", "BEFORE DELETE ON vivary_conversation_links"); await trigger("keep_thread", "BEFORE DELETE ON chat_threads");
+    try { await assert.rejects(native(), /selected publish fault/); }
+    finally { await drop("publish", "keep_link", "keep_thread"); }
+    const hidden = String((await db.execute({ sql: "SELECT target_id FROM vivary_conversation_links WHERE json_extract(record_json, '$.operationId') = ?", args: [operationId] })).rows[0].target_id);
+    try {
+      project.bindingId = "binding-rebound";
+      await assert.rejects(native(), { errorCode: "vivary_link_operation_stale" });
+      assert.equal((await getThread(hidden))!.source?.url, undefined, "an unusable target is never published to history");
+    } finally { project.bindingId = "binding-a"; }
+  });
   await t.test("a target stays hidden until its link row is finished, and a Retry publishes a finished one", async () => {
     const { randomUUID } = await import("node:crypto");
     const trigger = (name: string, when: string) =>
