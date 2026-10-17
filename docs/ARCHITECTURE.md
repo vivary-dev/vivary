@@ -257,7 +257,8 @@ earlier entries it says so, and a boundary entry longer than the whole block kee
 its latest text behind an omission notice. The limit counts the block as it is
 encoded, JSON escaping included, so the prompt block and the reported characters
 agree. Every rendered entry, its label included, stays within the block, and a transcript event or Native message ID
-longer than 256 characters makes the source unavailable as malformed history.
+longer than 256 characters makes the source unavailable as malformed history,
+as does a transcript line that is valid JSON but not an event object.
 Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime

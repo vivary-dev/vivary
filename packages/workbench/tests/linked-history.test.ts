@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt, historyLatest,
-  isCompletedNativeMessage, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "../server/linked-history.ts";
+  isCompletedNativeMessage, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "../server/linked-history.ts";
 
 const event = (id: string, kind: "user" | "system" | "status", message: string, metadata = {}) => ({
   schemaVersion: 1 as const, id, runId: "source", kind, message, createdAt: "2026-10-08", metadata,
@@ -191,4 +191,9 @@ test("the send block's limit counts JSON escaping, so the encoded block and its 
     const block = quotedLinkedHistory({ kind: "code", id: "source" }, "boundary", { ...latest, availableEntries: items.length });
     assert.equal(block.split(String.fromCharCode(10)).some(line => line.length > 12_002), false);
   }
+});
+
+test("a transcript line that is valid JSON but not an event object is malformed history", () => {
+  for (const line of ["null", "[]", "1", JSON.stringify("text"), "true"])
+    assert.throws(() => codeHistoryRecords(line + String.fromCharCode(10), "source"), LinkedSourceChanged, line);
 });

@@ -24,6 +24,9 @@ export function codeHistoryRecords(text: string, runId: string): CodeAgentTransc
   return text.split("\n").slice(0, -1).filter(line => line.trim()).map(line => {
     let value: CodeAgentTranscriptEvent;
     try { value = JSON.parse(line); } catch { throw new LinkedSourceChanged("The recorded source history is malformed."); }
+    // A line can be valid JSON without being an event, such as null, an array, a number or a string.
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      throw new LinkedSourceChanged("The recorded source history is malformed.");
     if (value.runId !== runId || typeof value.id !== "string" || typeof value.message !== "string")
       throw new LinkedSourceChanged("The recorded source history binding changed.");
     if (value.id.length > HISTORY_ID_CHARS) throw new LinkedSourceChanged("The recorded source history has an invalid event ID.");
