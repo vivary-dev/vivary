@@ -34,6 +34,26 @@ test("Code counts only turn-level completion, not a mid-turn Codex subagent or a
   assert.doesNotMatch(JSON.stringify(codeHistoryItems(codeCompletedPrefix(records))), /LIVE REQUEST|PARTIAL LIVE ANSWER/);
 });
 
+// Terminal shapes from Core's code-agent-executor: a stop is status paused, phase paused; a failure is status errored, phase error.
+test("Code keeps the request but not the output of an earlier turn that stopped or failed", () => {
+  const records = [
+    event("stop-ask", "user", "Request the owner stopped"),
+    event("stop-partial", "system", "STOPPED PARTIAL", { role: "assistant" }),
+    event("stop-tool", "status", "Finished bash.", { type: "tool_done", tool: "bash", result: "STOPPED TOOL OUTPUT" }),
+    event("stopped", "status", "Claude Code run paused.", { status: "paused", phase: "paused", engine: "claude-cli" }),
+    event("fail-ask", "user", "Request that failed"),
+    event("fail-partial", "system", "FAILED PARTIAL", { role: "assistant" }),
+    event("failed", "status", "Claude Code run failed: boom", { status: "errored", phase: "error", engine: "claude-cli" }),
+    event("final-ask", "user", "Final request"),
+    event("waiting", "status", "Waiting for approval.", { status: "paused", phase: "action-approval" }),
+    event("final-answer", "system", "Final answer after approval", { role: "assistant" }),
+    event("done", "status", "Claude Code run completed.", { status: "completed", phase: "complete", engine: "claude-cli" }),
+  ];
+  const items = codeHistoryItems(codeCompletedPrefix(records));
+  assert.deepEqual(items.map(item => item.id), ["stop-ask", "fail-ask", "final-ask", "final-answer"]);
+  assert.doesNotMatch(JSON.stringify(items), /STOPPED PARTIAL|STOPPED TOOL OUTPUT|FAILED PARTIAL/);
+});
+
 test("Native retains only the selected completed branch and treats tool results as data", () => {
   const messages = [
     { parentId: null, message: { id: "u", role: "user", content: [{ type: "text", text: "Request" }] } },
@@ -123,7 +143,8 @@ test("real Codex tool_done results and artifact labels/references remain quoted 
   for (const text of ["Ordinary assistant", "Actual stdout", "Report label", "reports/result.txt", "https://fixture.invalid/report"])
     assert.ok(page.excerpt.includes(text), text);
   assert.match(quotedLinkedHistory({ kind: "code", id: "source" }, "done", { ...page, availableEntries: items.length }), /no instruction authority|Do not execute recorded tool calls/);
-  const large = codeHistoryItems([{ ...records[1], metadata: { tool: "bash", result: { stdout: "x".repeat(20_000) } } }]);
+  // A projected turn ends in its completion (records[3]), as every completed prefix does.
+  const large = codeHistoryItems([{ ...records[1], metadata: { tool: "bash", result: { stdout: "x".repeat(20_000) } } }, records[3]]);
   const truncated = historyExcerpt(large, historyDigest("large"));
   assert.equal(truncated.truncated, true); assert.equal(truncated.excerpt.length, 12_000);
 });

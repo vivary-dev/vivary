@@ -7493,7 +7493,10 @@ proceed without linked history, and nothing records a prepared or accepted
 portion for them. A Code boundary is the executor's turn completion event
 (status completed, phase complete). Codex subagent and agent-operation status
 events also report completed inside a running turn, so they never end the
-prefix. Code retains the server-captured
+prefix. Each Vivary send appends one user event, so a Code turn runs from one
+user event to the next. An earlier turn whose last terminal status is a stop
+(paused) or a failure (errored) keeps its request and drops its assistant text,
+tool output and artifacts, as Native does for stopped replies. Code retains the server-captured
 prefix byte length, never a caller byte cursor, so later appends cannot widen a
 page. Native follows the saved branch when linking and excludes pending approvals, stopped
 turns and live or still-saving execution chunks at the boundary. A reply the

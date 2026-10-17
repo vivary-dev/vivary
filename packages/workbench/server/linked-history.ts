@@ -99,8 +99,33 @@ export function isCompletedNativeMessage(entry: NativeEntry): boolean {
     && !message.content.some(part => part.type === "tool-call" && part.approval);
 }
 
+/** A run's terminal status event: a completion, a stop (paused) or a failure (errored). */
+function isCodeTurnEnd(event: CodeAgentTranscriptEvent): boolean {
+  const metadata = event.metadata;
+  return event.kind === "status" && metadata?.type === undefined && metadata?.tool === undefined
+    && ["completed", "paused", "errored"].includes(String(metadata?.status));
+}
+
+/**
+ * Each Vivary send appends one user event, so a turn runs from one user event to the next. A turn whose last
+ * terminal status is not a completion (stopped, failed or never finished) keeps its request and drops its output.
+ * An approval pause followed by a completion in the same turn still counts as completed.
+ */
+function completedTurnEvents(events: CodeAgentTranscriptEvent[]): CodeAgentTranscriptEvent[] {
+  const kept: CodeAgentTranscriptEvent[] = [];
+  let turn: CodeAgentTranscriptEvent[] = [];
+  const close = () => {
+    const end = turn.findLast(isCodeTurnEnd);
+    kept.push(...(end && isCodeTurnCompletion(end) ? turn : turn.filter(event => event.kind === "user")));
+    turn = [];
+  };
+  for (const event of events) { if (event.kind === "user" && turn.length) close(); turn.push(event); }
+  if (turn.length) close();
+  return kept;
+}
+
 export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryItem[] {
-  return events.flatMap(event => {
+  return completedTurnEvents(events).flatMap(event => {
     if (event.kind === "user" || event.metadata?.role === "assistant")
       return [{ id: event.id, role: event.kind === "user" ? "User" : "Assistant", text: event.message }];
     if (event.kind === "artifact") {
