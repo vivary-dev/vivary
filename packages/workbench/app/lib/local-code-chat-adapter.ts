@@ -81,6 +81,9 @@ export function createLocalCodeChatAdapter(
           return state;
         } catch (error) {
           if (draftSubmitId && isPreAppendCodeRejection(error)) await options.onKnownRejected(draftSubmitId);
+          // A late project or host refusal can follow linked preparation, which the server already recorded.
+          // Refresh only the linked-history notice. The request was not accepted, so no thread update is sent.
+          if (typeof window !== "undefined") window.dispatchEvent(new Event("vivary:linked-history-updated"));
           throw error;
         }
       };

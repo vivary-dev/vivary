@@ -158,9 +158,11 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
       if (target.kind === "native" && typeof detail?.isRunning === "boolean") refresh();
     };
     window.addEventListener("agent-chat:threads-updated", refresh);
+    window.addEventListener("vivary:linked-history-updated", refresh);
     window.addEventListener("agentNative.chatRunning", nativeRequest);
     return () => {
       window.removeEventListener("agent-chat:threads-updated", refresh);
+      window.removeEventListener("vivary:linked-history-updated", refresh);
       window.removeEventListener("agentNative.chatRunning", nativeRequest);
     };
   }, [key, target.kind, target.id, query.refetch]);

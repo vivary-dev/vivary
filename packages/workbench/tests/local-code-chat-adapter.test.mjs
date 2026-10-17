@@ -106,5 +106,6 @@ test("accepted owner sends refresh linked history while refused sends emit no ac
   await assert.rejects(async () => { for await (const _ of refused.run({
     messages: [{ role: "user", content: [{ type: "text", text: "Refused send" }] }], abortSignal: new AbortController().signal,
   })) {} }, /Final owner refusal/);
-  assert.deepEqual(events, ["agent-chat:threads-updated"]);
+  // A refusal after linked preparation refreshes only the linked-history notice. No accepted lifecycle update is sent.
+  assert.deepEqual(events, ["agent-chat:threads-updated", "vivary:linked-history-updated"]);
 });

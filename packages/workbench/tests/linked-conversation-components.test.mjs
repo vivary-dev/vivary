@@ -149,6 +149,17 @@ test("a mounted notice refreshes accepted-send disclosure through the ordinary t
   assert.equal(host.querySelector("#route").textContent, "?run=source", "no navigation or focus is needed");
 });
 
+test("a Code send refused after linked preparation refreshes the notice's prepared stage without an accepted receipt", async () => {
+  let page = { ...noticePage(), lastPrepared: null };
+  linkFixture.call = async () => page;
+  await render("notice"); await settle(); await notify();
+  assert.match(host.textContent, /No linked history prepared yet/);
+  page = noticePage();
+  await act(async () => window.dispatchEvent(new window.Event("vivary:linked-history-updated"))); await settle(); await notify();
+  assert.match(host.textContent, /Last request prepared: 100 entries/);
+  assert.doesNotMatch(host.textContent, /Last accepted Code send/);
+});
+
 test("a mounted Native notice refreshes preparation through Native request completion with a separate tab identity", async () => {
   let page = { ...noticePage(), lastPrepared: null };
   linkFixture.call = async () => page;
