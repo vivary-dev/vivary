@@ -9,6 +9,7 @@ export function nativeHistoryRows<
   // not its renameable title, identifies it.
   const listed = threads.filter(thread => (thread.messageCount > 0 || thread.source?.url === LINKED_TARGET_SOURCE_URL) && !thread.archivedAt);
   // A draft row stands for a conversation with no row of its own. Both kinds share the key native:<threadId>.
+  // An archived thread keeps its draft out of the active rows, so archiving never recreates it as a draft.
   return { threads: listed, drafts: drafts.filter(draft => !threads.some(thread => thread.id === draft.threadId
-    && (thread.messageCount > 0 || listed.includes(thread)))) };
+    && (thread.messageCount > 0 || Boolean(thread.archivedAt) || listed.includes(thread)))) };
 }

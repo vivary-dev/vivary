@@ -161,7 +161,8 @@ an empty Native thread and its cleared draft. Project history lists that empty
 thread by a durable thread source URL, `vivary:linked-conversation`, set when the
 target is created. Core never overwrites a thread's source and rename changes
 only the title, so a renamed empty target stays listed. `native-history-rows.ts`
-keeps one row per thread, so an unsent draft in the target never adds a second row. It submits no prompt, requests no
+keeps one row per thread, so an unsent draft in the target never adds a second row,
+and an archived thread's draft never returns as an active draft row. It submits no prompt, requests no
 worker, consumes no approval and transfers no provider session. The target's
 cleared draft is written last, after the link metadata row and the target's
 finalization, so no later step can fail once the draft exists. If any creation

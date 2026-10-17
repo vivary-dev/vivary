@@ -271,3 +271,9 @@ test("a Native source shows no chooser when no Code harness has a usable model, 
   await render("native-options");
   assert.equal(Boolean(chooser()), true); assert.equal(Boolean(host.querySelector('option[value="claude-cli"]')), true);
 });
+
+test("an archived empty linked target with an unsent draft stays archived, with no active draft row", () => {
+  const threads = [{ id: "archived-target", title: "Linked: Source", messageCount: 0, archivedAt: 1_700_000_000_000, source: linkedSource }];
+  const rows = module.exports.nativeHistoryRows(threads, [{ threadId: "archived-target", preview: "Unsent" }]);
+  assert.deepEqual([rows.threads.length, rows.drafts.length], [0, 0]);
+});
