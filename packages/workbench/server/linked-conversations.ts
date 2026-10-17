@@ -11,7 +11,9 @@ import { codeAgentRunsDir, codeAgentRunTranscriptPath, createCodeAgentRunRecord,
 import { z } from "zod";
 import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-identity";
 import { PROJECT_CHAT_SCOPE_PREFIX } from "./chat-project-scope.mjs";
-import { changeChatDraft, createCodeDraftIdentity } from "./chat-draft";
+import { changeChatDraft, chatDraftKey, createCodeDraftIdentity, type ChatDraftRecord } from "./chat-draft";
+import { compareAndSetAppState } from "@agent-native/core/application-state";
+import type { VivaryChatIdentity } from "../app/lib/chat-scope";
 import { resolveVivaryCodeProject, resolveVivaryCodeProjectHistory } from "./code-project";
 import { isOwnedRun, providerSessionId, resolveWorkspace, sameWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
   type VivaryCodeWorkspace } from "./local-code-agent";
@@ -358,8 +360,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (currentSource.createdAt !== source.createdAt || (await sourcePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
     const linkId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);
     let target: ConversationReference, targetCreatedAt: number | string;
-    // Each target owner's cleared draft is written as the final step, and removeTarget undoes the creation.
-    let clearDraft: () => Promise<unknown>, removeTarget: () => Promise<unknown>;
+    // Each target owner's cleared draft is written after finalization, and rollback removes it with the target.
+    let draftOwner: { identity: Pick<VivaryChatIdentity, "storageKey">; threadId: string }, removeTarget: () => Promise<unknown>;
     if (input.target.engine === "native") {
       const chat = createVivaryChatIdentity(identity.owner, identity.orgId,
         { kind: "project", projectId: input.projectId, label: identity.history?.label ?? "Personal workspace" });
@@ -367,7 +369,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       const thread = await createThread(identity.owner, { id: targetId, scope: chat.scope, orgId: identity.orgId,
         source: { appId: "vivary" } });
       target = { kind: "native", id: thread.id }; targetCreatedAt = thread.createdAt;
-      clearDraft = () => changeChatDraft(chat, thread.id, null, { status: "cleared", text: "", submitId: null });
+      draftOwner = { identity: chat, threadId: thread.id };
       removeTarget = () => deleteThread(thread.id);
     } else {
       const draftThreadId = `vivary-code:${input.projectId ? "project:" + input.projectId + ":" : ""}${targetId}`;
@@ -378,8 +380,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
           engine: input.target.engine, model, workspaceRoot: workspace!.root,
           ...(identity.history ? { ...identity.history } : {}), draftThreadId, linkedHistoryId: linkId, linkedCreationPending: true } });
       target = { kind: "code", id: run.id }; targetCreatedAt = run.createdAt;
-      clearDraft = () => changeChatDraft(createCodeDraftIdentity(identity.owner, identity.orgId, input.projectId), draftThreadId, null,
-        { status: "cleared", text: "", submitId: null });
+      draftOwner = { identity: createCodeDraftIdentity(identity.owner, identity.orgId, input.projectId), threadId: draftThreadId };
       // Core has no run removal. Its record is <id>.json in codeAgentRunsDir.
       removeTarget = () => rm(join(codeAgentRunsDir(), `${run.id}.json`), { force: true });
     }
@@ -389,7 +390,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, boundaryDigest: prefix.digest, lastPrepared: null, operationId,
       creationPending: true };
     const pendingJson = JSON.stringify(link);
-    let linked = false;
+    let linked = false, clearedDraft: ChatDraftRecord | null = null;
     try {
       await getDbExec().execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
         args: [link.id, target.kind, target.id, pendingJson] });
@@ -401,8 +402,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
         await getDbExec().execute({ sql: "UPDATE chat_threads SET source_url = COALESCE(source_url, ?) WHERE id = ?",
           args: [LINKED_TARGET_SOURCE_URL, target.id] });
       }
-      // A failed clear writes nothing (compare-and-set).
-      await clearDraft();
+      // A failed clear writes nothing (compare-and-set). A written one is removed again if a later step fails.
+      const cleared = await changeChatDraft(draftOwner.identity, draftOwner.threadId, null, { status: "cleared", text: "", submitId: null });
+      if (cleared.changed) clearedDraft = cleared.record;
       const { creationPending: _pending, ...finished } = link;
       const result = await getDbExec().execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE link_id = ? AND record_json = ?",
         args: [JSON.stringify(finished), link.id, pendingJson] });
@@ -410,6 +412,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     } catch (error) {
       // A failed link leaves no hidden target behind, so each Retry starts clean.
       if (linked) await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE link_id = ?", args: [link.id] }).catch(() => undefined);
+      if (clearedDraft) await compareAndSetAppState(chatDraftKey(draftOwner.identity, draftOwner.threadId), clearedDraft, null).catch(() => undefined);
       await removeTarget().catch(() => undefined);
       throw error;
     }

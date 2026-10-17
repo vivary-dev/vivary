@@ -172,7 +172,7 @@ cleared draft is written after the link metadata row and the target's
 finalization. The row is inserted with `creationPending` and loses it only as the
 last step, so a link is finished only when its row says so, and pages and sends
 refuse an unfinished one. If a creation step fails, the service removes the new
-Code record or Native thread (and the row, when written).
+Code record or Native thread, the row and the cleared draft, whichever were written.
 Creation is idempotent per choice. The chooser sends one operation ID for a choice
 and reuses it on Retry. The target ID derives from the owner, organization and that
 ID, and the link stores it, so a retry after a lost response returns the finished
