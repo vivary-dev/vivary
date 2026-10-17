@@ -246,3 +246,18 @@ test("a Native message whose status is present but not an object is malformed hi
     assert.throws(() => nativeHistoryItems(nativeHistoryPath(data)), LinkedSourceChanged, JSON.stringify(status));
   }
 });
+
+test("unrelated Native messages with invalid or duplicate IDs leave the walked prefix intact, while the walked ancestry stays strict", () => {
+  const ask = { parentId: null, message: { id: "ask", role: "user", content: [{ type: "text", text: "Request" }] } };
+  const answer = { parentId: "ask", message: { id: "answer", role: "assistant", status: { type: "complete" }, content: [{ type: "text", text: "Answer" }] } };
+  const unrelated = [{ parentId: "answer", message: { id: "bad id", role: "user", content: [] } },
+    { parentId: "answer", message: { id: "twin", role: "user", content: [] } }, { parentId: "answer", message: { id: "twin", role: "user", content: [] } },
+    { parentId: "answer", message: null }, {}];
+  const data = JSON.stringify({ headId: "twin", messages: [ask, answer, ...unrelated] });
+  assert.deepEqual(nativeHistoryPath(data, "answer").map(entry => entry.message.id), ["ask", "answer"]);
+  // Walking to an ambiguous or invalid ID still refuses.
+  assert.throws(() => nativeHistoryPath(data, "twin"), LinkedSourceChanged);
+  assert.throws(() => nativeHistoryPath(data, "bad id"), LinkedSourceChanged);
+  const ambiguousAncestor = JSON.stringify({ headId: "answer", messages: [ask, { ...ask }, answer] });
+  assert.throws(() => nativeHistoryPath(ambiguousAncestor, "answer"), LinkedSourceChanged);
+});

@@ -83,19 +83,20 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   try { repo = JSON.parse(threadData); } catch { throw new LinkedSourceChanged("The source conversation is malformed."); }
   if (repo && !Array.isArray(repo) && typeof repo === "object" && Object.keys(repo).length === 0) return [];
   if (!repo || !Array.isArray(repo.messages)) throw new LinkedSourceChanged("The source conversation is unavailable.");
-  // The ID and parent map needs only what the walk uses. Content is checked on the walked path alone, so a malformed
-  // sibling or newer message cannot make an intact frozen prefix unavailable.
-  const entries = new Map<string, NativeEntry>();
+  // Index without judging unrelated messages: a malformed, invalid or duplicated sibling or newer message cannot make
+  // an intact frozen prefix unavailable. Only the walked ancestry must be unambiguous, valid and well formed.
+  const entries = new Map<string, NativeEntry>(), ambiguous = new Set<string>();
   for (const entry of repo.messages) {
-    const message = entry?.message;
-    if (!isRecord(message) || !isHistoryId(message.id) || entries.has(message.id))
-      throw new LinkedSourceChanged("The source conversation is malformed.");
-    entries.set(message.id, entry);
+    const message = isRecord(entry) ? entry.message : undefined;
+    if (!isRecord(message) || !isHistoryId(message.id)) continue;
+    if (entries.has(message.id)) ambiguous.add(message.id);
+    else entries.set(message.id, entry as NativeEntry);
   }
-  let id = startId ?? repo.headId ?? repo.messages.at(-1)?.message.id ?? null;
+  const last = repo.messages.at(-1);
+  let id = startId ?? repo.headId ?? (isRecord(last) && isRecord(last.message) ? last.message.id : null) ?? null;
   const path: NativeEntry[] = [], visited = new Set<string>();
   while (id !== null) {
-    if (typeof id !== "string" || visited.has(id) || !entries.has(id))
+    if (!isHistoryId(id) || visited.has(id) || ambiguous.has(id) || !entries.has(id))
       throw new LinkedSourceChanged("The source conversation path changed.");
     visited.add(id);
     const entry = entries.get(id)!, message = entry.message as unknown as Record<string, unknown>;
