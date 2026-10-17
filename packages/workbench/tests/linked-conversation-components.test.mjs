@@ -353,3 +353,17 @@ test("the Code chooser appears only after the same source eligibility check Nati
   await render("code-options"); await settle(); await notify();
   assert.equal(chooser(), true);
 });
+
+test("a stale or mismatched link operation shows the server's reason and the next attempt starts a new operation", async () => {
+  for (const errorCode of ["vivary_link_operation_stale", "vivary_link_operation_mismatch"]) {
+    linkFixture.calls = [];
+    const reason = errorCode + ": choose the harness again.";
+    linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); throw Object.assign(new Error(reason), { errorCode }); };
+    await render("chooser"); await choose("codex-cli");
+    assert.equal(host.textContent.includes(reason), true, "the server's reason is shown");
+    await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Retry link").click());
+    await settle();
+    assert.equal(linkFixture.calls.length, 2);
+    assert.notEqual(linkFixture.calls[0].input.operationId, linkFixture.calls[1].input.operationId, "Retry does not reuse a refused operation");
+  }
+});

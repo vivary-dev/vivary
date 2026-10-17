@@ -67,10 +67,13 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
       window.dispatchEvent(new Event("agent-chat:threads-updated"));
       navigate(result.route);
     } catch (error) {
+      const errorCode = error instanceof Error && "errorCode" in error ? error.errorCode : undefined;
+      // A refused operation ID can never succeed, so the next attempt, Retry included, starts a new operation.
+      if (errorCode === "vivary_link_operation_stale" || errorCode === "vivary_link_operation_mismatch") operation.current = null;
       if (generation === visit.current) {
         setFailedChoice(engine);
-        setFailure(error instanceof Error && "errorCode" in error && error.errorCode === "vivary_linked_history_unavailable"
-          ? error.message : "The linked conversation could not open.");
+        setFailure(errorCode === "vivary_linked_history_unavailable" || errorCode === "vivary_link_operation_stale"
+          || errorCode === "vivary_link_operation_mismatch" ? (error as Error).message : "The linked conversation could not open.");
       }
     } finally {
       inFlight.current = false;

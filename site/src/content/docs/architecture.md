@@ -185,6 +185,8 @@ row or target with no request in flight treats it as left by a failed rollback o
 process exit: it removes that row and target and creates the link again. A
 finished-looking target with no row is damage and refuses. Reusing an ID for
 another project, source or harness refuses with `vivary_link_operation_mismatch`.
+After a stale or mismatched refusal the chooser shows the server's reason and
+drops that operation ID, so the next attempt, Retry included, starts a new one.
 Core has no Code run removal, so the service deletes the record file in
 `codeAgentRunsDir`. A failed link
 keeps the source selected and offers Retry. The host execution guard is unchanged.
