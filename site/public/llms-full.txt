@@ -7751,7 +7751,11 @@ existing three second deadline still refuses a connection that never qualifies.
 Ownership rules and owners are unchanged, so the remote preview description
 holds. Evidence: two tests in `tests/preview-socket-owner.test.ts` feed the
 check a missing row, a handshake row, a repeated row, a row that never appears
-and conflicting rows.
+and conflicting rows. PR #233 review found that a torn read crossing the accept
+can list one connection with inode 0 and with its real inode. Inode 0 now means
+not yet accepted, never a second socket, so only two different nonzero inodes
+refuse at once. A further test lists both forms of the row, and the tests no
+longer assume how many reads happen before the server accepts.
 
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6

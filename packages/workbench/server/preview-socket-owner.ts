@@ -38,10 +38,12 @@ async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: Ab
     const rows = (await readTcpTable()).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
     const inodes = new Set(rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort)
       && row[3] === '01').map(row => row[9]));
+    // Inode 0 means not yet accepted, not another socket. A torn read can list both states of one row.
+    inodes.delete('0');
     // Two rows naming different sockets for one connection are conflicting evidence, never a timing gap.
     if (inodes.size > 1) throw refused();
     inode = [...inodes][0];
-    if (inode !== undefined && inode !== '0') break;
+    if (inode !== undefined) break;
     await delay(wait, undefined, { signal });
   }
   if (!inode || !/^\d+$/.test(inode)) throw refused();

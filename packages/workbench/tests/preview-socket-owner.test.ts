@@ -82,7 +82,7 @@ test('ownership waits for the preview server to accept a connection before check
     assert.ok(identity);
     const table = tcpTableWithUnacceptedReads(2);
     const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
-    assert.equal(table.reads.count, 3);
+    assert.ok(table.reads.count >= 3, `read the table ${table.reads.count} times`);
     socket.destroy();
   } finally { await close(owned.child); }
 });
@@ -127,7 +127,8 @@ test('ownership waits while the server row is missing, still in handshake, or li
     for (const [name, rewrite] of [['missing', missingRow], ['handshake', handshakeRow], ['repeated', repeatedRow]] as const) {
       const table = tcpTableRewritingServerRow(owned.port, 2, rewrite);
       const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
-      assert.equal(table.reads.count, name === 'repeated' ? 1 : 3, name);
+      // A repeated row never refuses. The read count depends on when the server accepts.
+      if (name !== 'repeated') assert.ok(table.reads.count >= 3, name);
       socket.destroy();
     }
   } finally { await close(owned.child); }
@@ -141,11 +142,23 @@ test('ownership refuses at the deadline when the server row never appears, and a
     let started = Date.now();
     await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: missing.read }), /ownership/);
     assert.ok(missing.reads.count > 2 && Date.now() - started >= 2500, 'a row that never appears is refused at the deadline');
-    const conflicting = tcpTableRewritingServerRow(owned.port, Infinity, parts => [parts, Object.assign([...parts], { 9: String(Number(parts[9]) + 1) })]);
+    const conflicting = tcpTableRewritingServerRow(owned.port, Infinity,
+      parts => [Object.assign([...parts], { 9: '900000001' }), Object.assign([...parts], { 9: '900000002' })]);
     started = Date.now();
     await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: conflicting.read }), /ownership/);
     assert.equal(conflicting.reads.count, 1);
     assert.ok(Date.now() - started < 1000, 'two rows naming different sockets are refused at once');
     owned.child.send('bytes'); assert.equal((await once(owned.child, 'message'))[0], 0);
+  } finally { await close(owned.child); }
+});
+test('ownership treats a row listed with inode 0 beside its accepted inode as one connection', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const owned = await launch();
+  try {
+    const identity = await capturePreviewProcess(owned.child);
+    assert.ok(identity);
+    // A torn read that crosses the accept can list the connection once before and once after it.
+    const table = tcpTableRewritingServerRow(owned.port, Infinity, parts => [Object.assign([...parts], { 9: '0' }), parts]);
+    const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
+    socket.destroy();
   } finally { await close(owned.child); }
 });
