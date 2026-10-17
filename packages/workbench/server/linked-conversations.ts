@@ -161,7 +161,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       let file;
       try {
         const transcript = codeAgentRunTranscriptPath(ref.id);
-        file = await open(transcript, constants.O_RDONLY | (dependencies.noFollowFlag ?? constants.O_NOFOLLOW ?? 0));
+        // O_NONBLOCK keeps a FIFO with no writer from blocking the open. The checks below then reject it as not a
+        // regular file. Reads of a regular file are unaffected.
+        file = await open(transcript, constants.O_RDONLY | (dependencies.noFollowFlag ?? constants.O_NOFOLLOW ?? 0)
+          | (constants.O_NONBLOCK ?? 0));
         // Windows has no O_NOFOLLOW, so the opened file must be the path's own regular file, as in original-runtime.ts.
         const [stat, named] = await Promise.all([file.stat(), lstat(transcript)]);
         if (!named.isFile() || stat.ino !== named.ino || stat.dev !== named.dev)

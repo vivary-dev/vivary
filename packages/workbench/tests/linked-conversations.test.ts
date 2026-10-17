@@ -586,6 +586,26 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(service.load(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
     await assert.rejects(service.context(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("a retained Code transcript replaced by a FIFO is withheld without blocking", { skip: process.platform === "win32" }, async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { rename, open: openFile } = await import("node:fs/promises");
+    const { constants: fsConstants } = await import("node:fs");
+    const transcript = codeAgentRunTranscriptPath(source.id);
+    await rename(transcript, transcript + ".kept");
+    execFileSync("mkfifo", [transcript]);
+    try {
+      // A FIFO with no writer blocks a plain read-only open, so a bounded race shows a hang as a failure.
+      const page = await Promise.race([service.load(actor, project.projectId, codeTarget.target),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("load blocked on the FIFO")), 5_000))]);
+      assert.equal(page!.sourceStatus, "unavailable"); assert.equal(page!.excerpt, "");
+    } finally {
+      // Release any reader still blocked in open(), then restore the transcript.
+      const writer = await openFile(transcript, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK).catch(() => null);
+      await writer?.close();
+      await rm(transcript, { force: true }); await rename(transcript + ".kept", transcript);
+    }
+    assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.sourceStatus, "available");
+  });
   await t.test("a retained Code transcript replaced by a symbolic link is withheld, never followed", async () => {
     const { symlink, rename } = await import("node:fs/promises");
     const transcript = codeAgentRunTranscriptPath(source.id), copy = path.join(root, "symlinked-transcript.jsonl");
