@@ -271,6 +271,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const identity = await scope(ctx, input.projectId);
     await requireLinkTable();
     const source = await record(input.source, identity);
+    // A linked target used as a source must still be a valid link itself, so its frozen history is not bypassed.
+    await validateMarkedSource(ctx, input.projectId, input.source);
     if (input.source.kind === "code" && input.target.engine === (source as CodeAgentRunRecord).metadata?.engine)
       fail("Choose a different harness for a linked conversation.", { statusCode: 400 });
     if (input.source.kind === "native" && input.target.engine === "native") fail("Choose a different harness.", { statusCode: 400 });
@@ -352,6 +354,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     return { block: quotedLinkedHistory(page.source, page.boundaryId, page),
       portion: { ...link.lastPrepared, linkId: link.id, boundaryDigest: link.boundaryDigest } };
   }
+  /** A durably marked target is a source only while its own link metadata passes load()'s validation. */
+  async function validateMarkedSource(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
+    if (await isMarkedLinkTarget(source)) await load(ctx, projectId, source);
+  }
   async function sourceAvailable(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
     // A project with no connected folder has no project history to link from. That is a state, not a failure,
     // so the chooser stays hidden without an alert. Refused access and other faults still fail and keep Retry.
@@ -363,6 +369,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     }
     if (source.kind === "native" && !await getThread(source.id)) return { available: false };
     await record(source, identity);
+    // An invalid linked target is not offered as a source. create() refuses it too.
+    try { await validateMarkedSource(ctx, projectId, source); }
+    catch (error) {
+      if ((error as { errorCode?: string } | null)?.errorCode === "vivary_linked_history_unavailable") return { available: false };
+      throw error;
+    }
     return { available: true };
   }
   /** Template prepareRequest is before model/attachment work and preserves visible user text. */

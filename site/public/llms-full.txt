@@ -7487,7 +7487,9 @@ unconfigured or before bootstrap finishes. A missing table therefore counts as n
 link for an ordinary conversation. A target records that it is linked (a Code
 run in `linkedHistoryId`, a Native thread in its source URL), so a marked target
 whose row or table is missing refuses its pages and sends instead of continuing
-without its history. Creating a link refuses with a clear message before it makes any
+without its history. A marked target used as a source must pass the same link
+validation, so an invalid target is neither offered as a source nor linked
+onward. Creating a link refuses with a clear message before it makes any
 target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
 project or personal workspace scope, the only scopes a link target can have, so
 an ordinary send never depends on the table. Pages and explicit sends

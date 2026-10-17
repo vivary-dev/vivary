@@ -690,6 +690,26 @@ process.send({type:"vivary:code-worker:ready"});
     const page = await service.load(actor, project.projectId, linked.target);
     assert.equal(page!.boundaryId, null); assert.equal(page!.availableEntries, 0); assert.equal(page!.excerpt, "");
   });
+  await t.test("a linked target whose own link metadata is missing or malformed cannot link onward as a source", async () => {
+    const nativeTarget = await create({ engine: "native" });
+    const codeTarget2 = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });
+    for (const target of [nativeTarget.target, codeTarget2.target]) {
+      const onward = target.kind === "native" ? { engine: "claude-cli" as const, model: "sonnet" } : { engine: "native" as const };
+      const row = (await db.execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_id = ?", args: [target.id] })).rows[0];
+      for (const fault of ["missing", "malformed"]) {
+        if (fault === "missing") await db.execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_id = ?", args: [target.id] });
+        else await db.execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE target_id = ?", args: ["{}", target.id] });
+        await assert.rejects(service.create(actor, { projectId: project.projectId, source: target, target: onward }),
+          { errorCode: "vivary_linked_history_unavailable" }, `${target.kind} ${fault}`);
+        assert.deepEqual(await service.sourceAvailable(actor, project.projectId, target), { available: false });
+        if (fault === "missing") await db.execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
+          args: [JSON.parse(String(row.record_json)).id, target.kind, target.id, row.record_json] });
+      }
+      await db.execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE target_id = ?", args: [row.record_json, target.id] });
+      // With valid metadata, the target links onward.
+      await service.create(actor, { projectId: project.projectId, source: target, target: onward });
+    }
+  });
   await t.test("new linking refuses a Code source whose transcript was deleted, but not an inactive target that never sent", async () => {
     const deleted = code("transcript-deleted");
     appendCodeAgentTranscriptEvent({ runId: deleted.id, kind: "system", message: "Gone answer", metadata: { role: "assistant" } });
