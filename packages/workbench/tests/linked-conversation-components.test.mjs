@@ -272,6 +272,16 @@ test("a Native source shows no chooser when no Code harness has a usable model, 
   assert.equal(Boolean(chooser()), true); assert.equal(Boolean(host.querySelector('option[value="claude-cli"]')), true);
 });
 
+test("opening the original conversation routes inside the app, with no document navigation that could drop a draft", async () => {
+  linkFixture.call = async () => noticePage();
+  await render("notice"); await settle(); await notify();
+  const click = new window.Event("click", { bubbles: true, cancelable: true });
+  Object.defineProperty(click, "button", { value: 0 });
+  await act(async () => host.querySelector("a").dispatchEvent(click)); await settle();
+  assert.equal(click.defaultPrevented, true, "the browser does not perform a document navigation");
+  assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=original");
+});
+
 test("an archived empty linked target with an unsent draft stays archived, with no active draft row", () => {
   const threads = [{ id: "archived-target", title: "Linked: Source", messageCount: 0, archivedAt: 1_700_000_000_000, source: linkedSource }];
   const rows = module.exports.nativeHistoryRows(threads, [{ threadId: "archived-target", preview: "Unsent" }]);

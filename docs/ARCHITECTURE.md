@@ -232,7 +232,8 @@ history only when a row exists. An unlinked conversation in a project whose
 folder is not connected therefore shows no notice and no false verification error.
 The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. Its collapsed view gives the source title, counts and
-stage. Boundary identifiers and session details remain in expanded inspection.
+stage. The source title opens the original through router navigation, never a
+document load, so a pending draft in the target still saves. Boundary identifiers and session details remain in expanded inspection.
 Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
 Each refreshed first page replaces the later pages already shown, so a redaction
 or access change applies to the whole displayed excerpt.

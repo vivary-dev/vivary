@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@agent-native/toolkit/ui";
 import { useNativeActionCaller } from "@/lib/native-actions";
@@ -162,7 +162,8 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
     finally { if (generation === visit.current) setPaging(false); }
   }
   return <div className="local-agent-notice text-sm">
-    <p>Linked to <a href={route} className="underline">{page.sourceTitle || "Original conversation"}</a>.</p>
+    {/* Router navigation keeps the mounted draft owner alive, so a pending target draft still saves. */}
+    <p>Linked to <Link to={route} className="underline">{page.sourceTitle || "Original conversation"}</Link>.</p>
     <p>{page.availableEntries} completed-history entries available. Next send can prepare {page.suppliedEntries}{page.truncated ? " (truncated)" : ""}.</p>
     <p>{page.lastAccepted ? `Last accepted Code send: ${page.lastAccepted.entries} entries.`
       : page.lastPrepared ? `Last request prepared: ${page.lastPrepared.entries} entries.${target.kind === "code" ? " No accepted Code send recorded." : " Delivery not observed."}`
