@@ -100,11 +100,13 @@ export async function connectOwnedPreview({ port, identity, signal, readTcpTable
 }): Promise<Socket> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || signal.aborted) throw refused();
   const deadline = new AbortController();
-  const verificationSignal = AbortSignal.any([signal, deadline.signal]);
+  // A connection the preview closes or resets can never prove ownership, so its close ends verification.
+  const lost = new AbortController();
+  const verificationSignal = AbortSignal.any([signal, deadline.signal, lost.signal]);
   const socket = createConnection({ host: '127.0.0.1', port });
   const abort = () => socket.destroy();
   signal.addEventListener('abort', abort, { once: true });
-  socket.once('close', () => signal.removeEventListener('abort', abort));
+  socket.once('close', () => { signal.removeEventListener('abort', abort); lost.abort(); });
   const timer = setTimeout(() => { deadline.abort(); abort(); }, 3000);
   try {
     await new Promise<void>((resolve, reject) => {

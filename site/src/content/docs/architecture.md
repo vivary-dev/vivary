@@ -455,7 +455,12 @@ and conflicting rows. PR #233 review found that a torn read crossing the accept
 can list one connection with inode 0 and with its real inode. Inode 0 now means
 not yet accepted, never a second socket, so only two different nonzero inodes
 refuse at once. A further test lists both forms of the row, and the tests no
-longer assume how many reads happen before the server accepts.
+longer assume how many reads happen before the server accepts. A later review
+found that a preview that accepts and then closes or resets the connection left
+the check waiting for the full deadline, so every asset request stalled for
+three seconds before its 502. The socket's close now ends verification, and a
+test closes the connection before its row is visible and expects an early
+refusal.
 
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6

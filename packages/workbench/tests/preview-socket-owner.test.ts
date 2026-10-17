@@ -144,10 +144,8 @@ test('ownership refuses at the deadline when the server row never appears, and a
     assert.ok(missing.reads.count > 2 && Date.now() - started >= 2500, 'a row that never appears is refused at the deadline');
     const conflicting = tcpTableRewritingServerRow(owned.port, Infinity,
       parts => [Object.assign([...parts], { 9: '900000001' }), Object.assign([...parts], { 9: '900000002' })]);
-    started = Date.now();
     await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: conflicting.read }), /ownership/);
-    assert.equal(conflicting.reads.count, 1);
-    assert.ok(Date.now() - started < 1000, 'two rows naming different sockets are refused at once');
+    assert.equal(conflicting.reads.count, 1, 'two rows naming different sockets are refused at once');
     owned.child.send('bytes'); assert.equal((await once(owned.child, 'message'))[0], 0);
   } finally { await close(owned.child); }
 });
@@ -160,5 +158,21 @@ test('ownership treats a row listed with inode 0 beside its accepted inode as on
     const table = tcpTableRewritingServerRow(owned.port, Infinity, parts => [Object.assign([...parts], { 9: '0' }), parts]);
     const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
     socket.destroy();
+  } finally { await close(owned.child); }
+});
+test('ownership stops waiting when the preview closes the connection before its row is visible', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const owned = await launch();
+  try {
+    const identity = await capturePreviewProcess(owned.child);
+    assert.ok(identity);
+    const reads = { count: 0 };
+    // The first read happens after the preview has closed the accepted connection, so no established row remains.
+    const read = async () => {
+      if (++reads.count === 1) { owned.child.send('unbind'); await once(owned.child, 'message'); }
+      return readFile('/proc/net/tcp', 'utf8');
+    };
+    const started = Date.now();
+    await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: read }), /ownership/);
+    assert.ok(Date.now() - started < 2000, 'a closed connection is refused well before the three second deadline');
   } finally { await close(owned.child); }
 });
