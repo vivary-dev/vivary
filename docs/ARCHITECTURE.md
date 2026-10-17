@@ -631,6 +631,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-17 Windows app icon. The Windows packager now passes
+`packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
+`vivary.exe`. The icon is a multi-size copy of the site mark. The executable
+name, product name and window title were already Vivary. The packaging flow,
+its source-snapshot inputs and the packaged layout are unchanged, so the design
+description holds.
+
 2026-10-17 Site TOML parser update. The documentation site's lockfile moves
 `smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is
 built statically, so the parser runs only at build time. The new version has no
