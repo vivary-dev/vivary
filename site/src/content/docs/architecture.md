@@ -198,8 +198,9 @@ run in `linkedHistoryId`, a Native thread in its source URL), so a marked target
 whose row or table is missing refuses its pages and sends instead of continuing
 without its history. The marker alone does not gate a Code send: every send to
 an existing run probes link metadata, so a run that lost its marker but still has
-a link row refuses rather than sending without its history. A marked target used as a source must pass the same link
-validation, so an invalid target is neither offered as a source nor linked
+a link row refuses rather than sending without its history. Every source is
+checked the same way, marked or not, so a target whose link is invalid, or that
+lost its marker but kept its row, is neither offered as a source nor linked
 onward. Creating a link refuses with a clear message before it makes any
 target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
 project or personal workspace scope, the only scopes a link target can have, so

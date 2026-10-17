@@ -813,6 +813,12 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(listCodeAgentRunRecords("vivary-local-code").length, runs, "Retry replaced the leftover record");
     assert.equal(getCodeAgentRunRecord(code.target.id)!.metadata?.linkedCreationPending, false);
   });
+  await t.test("a Code target that lost its marker but keeps its link row is not linked onward from its local transcript", async () => {
+    const linked = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });
+    updateCodeAgentRunRecord(linked.target.id, { metadata: { linkedHistoryId: null } });
+    assert.deepEqual(await service.sourceAvailable(actor, project.projectId, linked.target), { available: false });
+    await assert.rejects(create({ engine: "native" }, linked.target), { errorCode: "vivary_linked_history_unavailable" });
+  });
   await t.test("a linked target whose own link metadata is missing or malformed cannot link onward as a source", async () => {
     const nativeTarget = await create({ engine: "native" });
     const codeTarget2 = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });

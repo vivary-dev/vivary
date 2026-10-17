@@ -457,7 +457,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   }
   /** A durably marked target is a source only while its own link metadata passes load()'s validation. */
   async function validateMarkedSource(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
-    if (await isMarkedLinkTarget(source)) await load(ctx, projectId, source);
+    // The marker is mutable, so every source is probed. load() returns null for an ordinary source and refuses a
+    // link row that no longer matches its target, as a Code send does.
+    await load(ctx, projectId, source);
   }
   async function sourceAvailable(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
     // A project with no connected folder has no project history to link from. That is a state, not a failure,
