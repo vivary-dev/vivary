@@ -279,7 +279,8 @@ unavailable when a Native status or metadata on the walked prefix is present but
 not an object, when a Native content part or attachment on the walked prefix is not
 an object, when the walked ancestry reaches a missing, invalid or duplicated
 message ID (an unrelated malformed, invalid or duplicated sibling or newer message
-cannot break a frozen link), when a
+cannot break a frozen link), when a Native run ID is not a generated identifier,
+when a
 transcript line is valid JSON but not an event object, or when a transcript
 repeats an event ID, so the boundary byte length and the prefix
 can never describe different events.

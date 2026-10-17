@@ -11,7 +11,7 @@ export const LINK_EXCERPT_CHARS = 12_000;
  * framing of the send block, is malformed history.
  */
 const HISTORY_ID = /^[A-Za-z0-9._:-]{1,256}$/;
-const isHistoryId = (value: unknown): value is string => typeof value === "string" && HISTORY_ID.test(value);
+export const isHistoryId = (value: unknown): value is string => typeof value === "string" && HISTORY_ID.test(value);
 const ENTRY_SHORTENED = " [Entry shortened. The original conversation has the full text.]";
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {

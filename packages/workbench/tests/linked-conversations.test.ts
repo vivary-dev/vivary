@@ -993,6 +993,17 @@ process.send({type:"vivary:code-worker:ready"});
     const onward = await create({ engine: "native" }, inactive.target);
     assert.equal((await service.load(actor, project.projectId, onward.target))!.boundaryId, null);
   });
+  await t.test("a malformed Native run ID is malformed history, never a database binding error", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    for (const [id, metadata] of [["object-run", { runId: {} }], ["folded-run", { custom: { foldedRunIds: [{}] } }], ["spaced-run", { runId: "run id" }]] as const) {
+      await createThread(owner, { id, orgId, scope: identity.scope });
+      await db.execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?", args: [JSON.stringify({ headId: "answer", messages: [{ parentId: null,
+        message: { id: "answer", role: "assistant", status: { type: "complete" }, metadata, content: [{ type: "text", text: "Answer" }] } }] }), id] });
+      await assert.rejects(service.create(actor, { projectId: project.projectId, source: { kind: "native", id }, target: { engine: "claude-cli", model: "sonnet" } }),
+        { errorCode: "vivary_linked_history_unavailable" }, id);
+      assert.deepEqual(await service.sourceAvailable(actor, project.projectId, { kind: "native", id }), { available: false });
+    }
+  });
   await t.test("a live Native persistence chunk is excluded despite a complete-looking assistant snapshot", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
     await createThread(owner, { id: "saving-source", orgId, scope: identity.scope });

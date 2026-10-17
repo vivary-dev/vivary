@@ -22,7 +22,7 @@ import { getCodexModels } from "./codex-models";
 import { claudeCodeModelChoices } from "../shared/claude-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
 import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt, historyLatest,
-  isCompletedNativeMessage, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
+  isCompletedNativeMessage, isHistoryId, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
 import { LINKED_TARGET_SOURCE_URL, type ConversationReference, type LinkedConversationResult, type LinkedHistoryPage,
   type PreparedLinkedContext } from "../shared/linked-conversation";
 
@@ -234,8 +234,11 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     // A persisted assistant snapshot is not complete while its Native execution is live or saving.
     while (index >= 0) {
       const entry = path[index], folded = entry.message.metadata?.custom?.foldedRunIds;
-      const runId = Array.isArray(folded) ? folded.at(-1) : entry.message.metadata?.runId;
+      const runId: unknown = Array.isArray(folded) ? folded.at(-1) : entry.message.metadata?.runId;
       if (!isCompletedNativeMessage(entry)) { if (boundaryId) unavailable(); index--; continue; }
+      // A run ID goes into a query, so it must be a generated identifier. Anything else is malformed history.
+      if (runId !== undefined && runId !== null && !isHistoryId(runId))
+        throw new LinkedSourceChanged("The source conversation has an invalid run ID.");
       if (runId) {
         const { rows } = await getDbExec().execute({ sql: "SELECT status FROM agent_runs WHERE id = ? AND thread_id = ?", args: [runId, ref.id] });
         if (rows.length && rows[0].status !== "completed") { if (boundaryId) unavailable(); index--; continue; }
@@ -253,6 +256,11 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     return (await loadWithLatest(ctx, projectId, target, cursor))?.page ?? null;
   }
   /** The inspection page from the cursor, plus the send block's latest-entries excerpt. */
+  /** A new link refuses malformed source history as an unavailable source, with the parser's reason. */
+  async function linkablePrefix(...args: Parameters<typeof sourcePrefix>) {
+    try { return await sourcePrefix(...args); }
+    catch (error) { if (error instanceof LinkedSourceChanged) unavailable(error.message); throw error; }
+  }
   async function loadWithLatest(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference,
     cursor?: string): Promise<{ page: LinkedHistoryPage; latestExcerpt: string } | null> {
     // An unlinked conversation needs only a verified caller, with or without an organization. Project history, which
@@ -347,7 +355,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (input.source.kind === "code" && input.target.engine === (source as CodeAgentRunRecord).metadata?.engine)
       fail("Choose a different harness for a linked conversation.", { statusCode: 400 });
     if (input.source.kind === "native" && input.target.engine === "native") fail("Choose a different harness.", { statusCode: 400 });
-    const prefix = await sourcePrefix(input.source, source);
+    const prefix = await linkablePrefix(input.source, source);
     const workspace = input.target.engine !== "native" ? await dependencies.workspace(ctx, input.projectId ?? undefined) : undefined;
     // Registered projects require a folder to create a Code record. Native history creation needs none.
     if (input.target.engine !== "native" && !workspace) unavailable("Select a connected project before linking a Code conversation.");
@@ -361,7 +369,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       if (!current || !sameWorkspace(current, workspace)) unavailable("The workspace folder changed. Retry the link.");
     }
     const currentSource = await record(input.source, again);
-    if (currentSource.createdAt !== source.createdAt || (await sourcePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
+    if (currentSource.createdAt !== source.createdAt || (await linkablePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
     const linkId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);
     let target: ConversationReference, targetCreatedAt: number | string;
     // Each target owner's cleared draft is written after finalization, and rollback removes it with the target.
