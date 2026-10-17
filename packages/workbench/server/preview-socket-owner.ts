@@ -30,13 +30,18 @@ async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: Ab
   const localPort = socket.localPort, remotePort = socket.remotePort;
   if (!localPort || !remotePort) throw refused();
   let inode: string | undefined;
-  // A connection still in the server's accept queue is listed with inode 0, which proves no owner.
-  // Wait with a bounded backoff until the server accepts it. The caller's deadline aborts `signal`.
+  // The server's row proves nothing yet while it is missing, still in the handshake, or listed with
+  // inode 0 because the server has not accepted the connection. A read of this table is not atomic,
+  // so a busy host can also skip the row or list it twice. Wait with a bounded backoff in those cases.
+  // The caller's deadline aborts `signal`, so a connection that never qualifies is still refused.
   for (let wait = 10; ; wait = Math.min(wait * 2, 200)) {
     const rows = (await readTcpTable()).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
-    const matches = rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort) && row[3] === '01');
-    inode = matches.length === 1 ? matches[0]?.[9] : undefined;
-    if (inode !== '0') break;
+    const inodes = new Set(rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort)
+      && row[3] === '01').map(row => row[9]));
+    // Two rows naming different sockets for one connection are conflicting evidence, never a timing gap.
+    if (inodes.size > 1) throw refused();
+    inode = [...inodes][0];
+    if (inode !== undefined && inode !== '0') break;
     await delay(wait, undefined, { signal });
   }
   if (!inode || !/^\d+$/.test(inode)) throw refused();

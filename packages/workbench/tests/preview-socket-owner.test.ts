@@ -99,3 +99,53 @@ test('ownership refuses a connection that is never accepted once the deadline en
     owned.child.send('bytes'); assert.equal((await once(owned.child, 'message'))[0], 0);
   } finally { await close(owned.child); }
 });
+
+// Rewrites the server-side row of the preview connection for the first `early` reads.
+function tcpTableRewritingServerRow(port: number, early: number, rewrite: (parts: string[]) => string[][]) {
+  const reads = { count: 0 };
+  const local = `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`;
+  const read = async () => {
+    reads.count++;
+    const table = await readFile('/proc/net/tcp', 'utf8');
+    if (reads.count > early) return table;
+    const [header, ...rows] = table.trim().split('\n');
+    return [header, ...rows.flatMap(row => {
+      const parts = row.trim().split(/\s+/);
+      return parts[1] === local && parts[3] === '01' ? rewrite(parts).map(item => item.join(' ')) : [parts.join(' ')];
+    })].join('\n');
+  };
+  return { reads, read };
+}
+const missingRow = () => [];
+const handshakeRow = (parts: string[]) => [Object.assign([...parts], { 3: '03' })];
+const repeatedRow = (parts: string[]) => [parts, parts];
+test('ownership waits while the server row is missing, still in handshake, or listed twice by a torn table read', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const owned = await launch();
+  try {
+    const identity = await capturePreviewProcess(owned.child);
+    assert.ok(identity);
+    for (const [name, rewrite] of [['missing', missingRow], ['handshake', handshakeRow], ['repeated', repeatedRow]] as const) {
+      const table = tcpTableRewritingServerRow(owned.port, 2, rewrite);
+      const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
+      assert.equal(table.reads.count, name === 'repeated' ? 1 : 3, name);
+      socket.destroy();
+    }
+  } finally { await close(owned.child); }
+});
+test('ownership refuses at the deadline when the server row never appears, and at once for conflicting rows', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const owned = await launch();
+  try {
+    const identity = await capturePreviewProcess(owned.child);
+    assert.ok(identity);
+    const missing = tcpTableRewritingServerRow(owned.port, Infinity, missingRow);
+    let started = Date.now();
+    await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: missing.read }), /ownership/);
+    assert.ok(missing.reads.count > 2 && Date.now() - started >= 2500, 'a row that never appears is refused at the deadline');
+    const conflicting = tcpTableRewritingServerRow(owned.port, Infinity, parts => [parts, Object.assign([...parts], { 9: String(Number(parts[9]) + 1) })]);
+    started = Date.now();
+    await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: conflicting.read }), /ownership/);
+    assert.equal(conflicting.reads.count, 1);
+    assert.ok(Date.now() - started < 1000, 'two rows naming different sockets are refused at once');
+    owned.child.send('bytes'); assert.equal((await once(owned.child, 'message'))[0], 0);
+  } finally { await close(owned.child); }
+});

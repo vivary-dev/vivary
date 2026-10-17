@@ -7737,6 +7737,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-17 Linux preview socket rows that are not visible yet. The ownership
+check in `server/preview-socket-owner.ts` waited only while the server's row in
+`/proc/net/tcp` showed inode 0. A read of that table is not atomic. On a busy
+host a read can skip a row or list it twice, and a check run before the
+handshake ends finds no established row. Each of those refused the connection at
+once, and the never-accepted test failed after 453 ms inside a full suite. A
+loopback churn check on the server listed a stable row twice in 1 of 127 reads.
+The check now also waits while no established row is visible, and it treats
+repeated rows that name one socket as one row. Rows that name different sockets
+are refused at once. Inode 0 and a missing row never count as owned, and the
+existing three second deadline still refuses a connection that never qualifies.
+Ownership rules and owners are unchanged, so the remote preview description
+holds. Evidence: two tests in `tests/preview-socket-owner.test.ts` feed the
+check a missing row, a handshake row, a repeated row, a row that never appears
+and conflicting rows.
+
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
 to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
