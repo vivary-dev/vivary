@@ -166,13 +166,22 @@ test('ownership stops waiting when the preview closes the connection before its 
     const identity = await capturePreviewProcess(owned.child);
     assert.ok(identity);
     const reads = { count: 0 };
-    // The first read happens after the preview has closed the accepted connection, so no established row remains.
+    const serverEndpoint = `0100007F:${owned.port.toString(16).toUpperCase().padStart(4, '0')}`;
+    // The first read returns only after the preview has closed the accepted connection and the client
+    // side has left ESTABLISHED, so its close is pending on this event loop when the check next waits.
     const read = async () => {
-      if (++reads.count === 1) { owned.child.send('unbind'); await once(owned.child, 'message'); }
+      if (++reads.count === 1) {
+        owned.child.send('unbind'); await once(owned.child, 'message');
+        for (;;) {
+          const rows = (await readFile('/proc/net/tcp', 'utf8')).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
+          if (!rows.some(row => row[2] === serverEndpoint && row[3] === '01')) break;
+          await new Promise(resolve => setImmediate(resolve));
+        }
+      }
       return readFile('/proc/net/tcp', 'utf8');
     };
-    const started = Date.now();
     await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: read }), /ownership/);
-    assert.ok(Date.now() - started < 2000, 'a closed connection is refused well before the three second deadline');
+    // Waiting for the deadline would keep rereading the table until it fired. The close stops it at once.
+    assert.ok(reads.count <= 2, `the check stopped when the connection closed, after ${reads.count} reads`);
   } finally { await close(owned.child); }
 });
