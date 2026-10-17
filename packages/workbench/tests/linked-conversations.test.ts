@@ -243,6 +243,8 @@ process.send({type:"vivary:code-worker:ready"});
     const linked = await create({ engine: "native" });
     const thread = await getThread(linked.target.id);
     assert.equal(thread!.ownerEmail, owner); assert.equal(thread!.messageCount, 0);
+    // A durable marker that rename cannot change identifies the empty target in project history.
+    assert.deepEqual(thread!.source, { appId: "vivary", url: "vivary:linked-conversation" });
     assert.match(linked.route, /runtime=native/);
     assert.equal(thread!.orgId, orgId);
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });

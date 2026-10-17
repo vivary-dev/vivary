@@ -180,8 +180,10 @@ test("a new Native conversation becomes a link source when its first request sav
   assert.equal(reads, settled);
 });
 
+// The service marks every Native link target with this durable thread source. Rename changes only the title.
+const linkedSource = { appId: "vivary", url: "vivary:linked-conversation" };
 test("an empty linked Native target with an unsent draft is listed once, under one row key", () => {
-  const threads = [{ id: "linked-target", title: "Linked: Source", messageCount: 0, archivedAt: null },
+  const threads = [{ id: "linked-target", title: "Linked: Source", messageCount: 0, archivedAt: null, source: linkedSource },
     { id: "empty-plain", title: "", messageCount: 0, archivedAt: null }, { id: "saved", title: "Saved", messageCount: 2, archivedAt: null }];
   const drafts = [{ threadId: "linked-target", preview: "Typed in the target" }, { threadId: "empty-plain", preview: "Optimistic draft" },
     { threadId: "saved", preview: "Follow-up" }];
@@ -241,4 +243,13 @@ test("a refetched first history page replaces every page read before it", async 
   await act(async () => window.dispatchEvent(new window.Event("agent-chat:threads-updated")));
   await settle(); await notify();
   assert.equal(host.querySelector("pre")?.textContent.includes("OLD-UNREDACTED-TOKEN") ?? false, false, "no page read before the refetch stays shown");
+});
+
+test("an empty linked Native target stays listed after a rename, and a title alone does not make a thread linked", () => {
+  const threads = [{ id: "renamed-target", title: "Renamed by the owner", messageCount: 0, archivedAt: null, source: linkedSource },
+    { id: "lookalike", title: "Linked: typed by the owner", messageCount: 0, archivedAt: null, source: { appId: "vivary" } }];
+  const drafts = [{ threadId: "renamed-target", preview: "Unsent" }, { threadId: "lookalike", preview: "Optimistic draft" }];
+  const rows = module.exports.nativeHistoryRows(threads, drafts);
+  assert.deepEqual(rows.threads.map(thread => thread.id), ["renamed-target"]);
+  assert.deepEqual(rows.drafts.map(draft => draft.threadId), ["lookalike"]);
 });

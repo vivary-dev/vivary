@@ -21,7 +21,8 @@ import { claudeCodeModelChoices } from "../shared/claude-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
 import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
   isCompletedNativeMessage, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
-import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage, PreparedLinkedContext } from "../shared/linked-conversation";
+import { LINKED_TARGET_SOURCE_URL, type ConversationReference, type LinkedConversationResult, type LinkedHistoryPage,
+  type PreparedLinkedContext } from "../shared/linked-conversation";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 export const conversationReferenceSchema = z.object({ kind: z.enum(["code", "native"]), id: identifier }).strict();
@@ -278,7 +279,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (input.target.engine === "native") {
       const chat = createVivaryChatIdentity(identity.owner, identity.orgId,
         { kind: "project", projectId: input.projectId, label: identity.history?.label ?? "Personal workspace" });
-      const thread = await createThread(identity.owner, { id: targetId, scope: chat.scope, orgId: identity.orgId, source: { appId: "vivary" } });
+      const thread = await createThread(identity.owner, { id: targetId, scope: chat.scope, orgId: identity.orgId,
+        source: { appId: "vivary", url: LINKED_TARGET_SOURCE_URL } });
       target = { kind: "native", id: thread.id }; targetCreatedAt = thread.createdAt;
       clearDraft = () => changeChatDraft(chat, thread.id, null, { status: "cleared", text: "", submitId: null });
       removeTarget = () => deleteThread(thread.id);

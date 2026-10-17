@@ -156,8 +156,10 @@ rechecks eligibility when Native reports a finished request or a thread list
 update, and stops rechecking once the conversation is a source. Selection saves
 the source draft through its current owner, then creates a paused Code record or
 an empty Native thread and its cleared draft. Project history lists that empty
-thread by its "Linked:" title, and `native-history-rows.ts` keeps one row per
-thread, so an unsent draft in the target never adds a second row. It submits no prompt, requests no
+thread by a durable thread source URL, `vivary:linked-conversation`, set when the
+target is created. Core never overwrites a thread's source and rename changes
+only the title, so a renamed empty target stays listed. `native-history-rows.ts`
+keeps one row per thread, so an unsent draft in the target never adds a second row. It submits no prompt, requests no
 worker, consumes no approval and transfers no provider session. The target's
 cleared draft is written last, after the link metadata row and the target's
 finalization, so no later step can fail once the draft exists. If any creation

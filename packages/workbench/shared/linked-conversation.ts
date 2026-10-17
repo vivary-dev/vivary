@@ -1,3 +1,5 @@
+/** Thread source URL that marks a Native link target. Core never overwrites a thread's source, and rename changes only the title. */
+export const LINKED_TARGET_SOURCE_URL = "vivary:linked-conversation";
 export type ConversationReference = { kind: "code" | "native"; id: string };
 export type LinkedHistoryPortion = { entries: number; characters: number; truncated: boolean };
 /** A null block means the source is unavailable and the send proceeds without linked context. */
