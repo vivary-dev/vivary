@@ -169,7 +169,9 @@ finalization. The row is inserted with `creationPending` and loses it only as th
 last step, so a link is finished only when its row says so, and pages and sends
 refuse an unfinished one. The target becomes visible (a Code run loses
 `linkedCreationPending` and a Native thread gets its marker) only after that, so a
-crash before then leaves it hidden, and a Retry of the operation publishes it. If a creation step fails, the service removes the new
+crash before then leaves it hidden, and a Retry of the operation publishes it.
+Every Code owner listing (history, the host's recent run, draft runs and submit
+lookups) excludes an unfinished target through one predicate. If a creation step fails, the service removes the new
 Code record or Native thread, the row and the cleared draft, whichever were written.
 Creation is idempotent per choice. The chooser sends one operation ID for a choice
 and reuses it on Retry. The target ID derives from the owner, organization and that

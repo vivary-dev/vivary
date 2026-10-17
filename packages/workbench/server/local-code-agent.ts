@@ -809,7 +809,7 @@ export async function getVivaryCodeHostState(
 
 function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
-  const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
+  const owned = runs.filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
   const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
   const recent = owned.find(run => !activeRuns.has(run.id));
@@ -837,6 +837,7 @@ export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: Vi
   if (wanted.size === 0) return linked;
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   for (const run of runs) {
+    if (!isListedRun(run)) continue;
     if (scope ? !isOwnedRun(run, ownerEmail, orgId, scope)
       : !isOwnedIdentity(run, ownerEmail, orgId) || metadataString(run, "projectId") !== null) continue;
     const draftThreadId = runDraftThreadId(run);
@@ -852,9 +853,9 @@ export function hasOwnedVivaryCodeSubmit(
   ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope | undefined,
   draftThreadId: string, submitId: string,
 ): boolean {
-  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run =>
+  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && (
     scope ? isOwnedRun(run, ownerEmail, orgId, scope)
-      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null);
+      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null));
   return runs.some(run => listCodeAgentTranscriptEvents(run.id).some(event =>
     event.kind === "user" && event.metadata?.draftThreadId === draftThreadId
       && event.metadata?.draftSubmitId === submitId));
@@ -1412,9 +1413,17 @@ export async function getVivaryCodeFiles(
   };
 }
 
+/**
+ * A linked target still being created, or left unfinished by a crash, is not an owner's conversation yet. Every
+ * owner listing (history, the host's recent run, draft runs and submit lookups) uses this one predicate.
+ */
+function isListedRun(run: CodeAgentRunRecord): boolean {
+  return !run.metadata?.linkedCreationPending;
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
-    (run) => !run.metadata?.linkedCreationPending && isOwnedRun(run, ownerEmail, orgId, scope),
+    (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
   );
 }
 

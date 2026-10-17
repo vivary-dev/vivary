@@ -115,6 +115,17 @@ test("linked conversations use Native records and immutable authorized completed
     // An unverified caller is still refused even for an unlinked conversation.
     await assert.rejects(service.load({ ...orgless, appId: "foreign-app" }, project.projectId, { kind: "native", id: "never-linked" }));
   });
+  await t.test("an unfinished Code target is excluded from every owner listing, including the host's recent run", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const { getVivaryCodeHostState: hostState, linkedCodeDraftRuns } = await import("../server/local-code-agent.ts");
+    const draftThreadId = "vivary-code:project:project-a:unfinished-target";
+    const unfinished = createCodeAgentRunRecord({ id: "unfinished-target", goalId: "vivary-local-code", title: "Linked: Source",
+      status: "paused", phase: "linked-inactive", needsApproval: false, permissionMode: "auto-edit", cwd: root,
+      metadata: { app: "vivary-workbench-local-code", ownerEmail: owner, orgId, engine: "codex-cli", model: "fixture-model",
+        workspaceRoot: root, ...project, draftThreadId, linkedHistoryId: randomUUID(), linkedCreationPending: true } });
+    assert.notEqual((await hostState(owner, orgId)).recentRun?.id, unfinished.id, "an abandoned unfinished target never becomes the recent run");
+    assert.equal(linkedCodeDraftRuns(owner, orgId, project, [draftThreadId]).has(draftThreadId), false);
+  });
   await t.test("an unlinked conversation shows no linked-history notice while its project folder is unavailable", async () => {
     // The history dependency refuses, as resolveVivaryCodeProjectHistory does for a project with no connected folder.
     revoked = true;
