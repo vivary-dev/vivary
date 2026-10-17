@@ -111,7 +111,7 @@ test("handoffs are written through the file owner and go stale without a model c
   appendCodeAgentTranscriptEvent({ runId: run.id, id: "check-output", kind: "status", message: "Finished bash.",
     metadata: { type: "tool_done", tool: "bash", result: "12 passed" } });
   appendCodeAgentTranscriptEvent({ runId: run.id, id: "work-answer", kind: "system", message: "Edited dirty.txt. Tests pass.", metadata: { role: "assistant" } });
-  appendCodeAgentTranscriptEvent({ runId: run.id, id: "work-done", kind: "status", message: "Completed", metadata: { status: "completed" } });
+  appendCodeAgentTranscriptEvent({ runId: run.id, id: "work-done", kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
   const conversation = { kind: "code" as const, id: run.id };
   const input = { projectId: "project-a", conversation };
 
@@ -126,7 +126,7 @@ test("handoffs are written through the file owner and go stale without a model c
     appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message });
     if (reply === null) return;
     appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: reply, metadata: { role: "assistant" } });
-    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
   };
   const prepared = async () => {
     const result = await handoff.prepare(actor, input);
@@ -186,6 +186,17 @@ test("handoffs are written through the file owner and go stale without a model c
       assert.deepEqual(await readFile(statePath), bytes, name);
       assert.deepEqual(await row(), pending, name);
     }
+    // A subagent status mid-turn is not a turn completion, for Save as for linking.
+    const midTurn = await prepared();
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: midTurn.message });
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: fenced(proposal(midTurn.requestId)), metadata: { role: "assistant" } });
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Subagent finished",
+      metadata: { status: "completed", type: "subagent" } });
+    const early = await handoff.save(actor, { ...input, requestId: midTurn.requestId });
+    assert.equal(early.code, "refused");
+    assert.match(JSON.stringify(early), /not finished/);
+    assert.deepEqual(await readFile(statePath), bytes);
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
     const unanswered = await prepared();
     deliver(unanswered.message, null);
     const result = await handoff.save(actor, { ...input, requestId: unanswered.requestId });
@@ -237,7 +248,7 @@ test("handoffs are written through the file owner and go stale without a model c
 
     await saveHandoff();
     appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: "Later work", metadata: { role: "assistant" } });
-    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed" } });
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
     assert.deepEqual(await freshness(), { status: "out-of-date", reasons: ["events-appended"] });
 
     await saveHandoff();
