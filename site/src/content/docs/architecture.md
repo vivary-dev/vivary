@@ -271,11 +271,15 @@ at the boundary, because a send continues the most recent work. When it omits
 earlier entries it says so, and a boundary entry longer than the whole block keeps
 its latest text behind an omission notice. The limit counts the block as it is
 encoded, JSON escaping included, so the prompt block and the reported characters
-agree. Every rendered entry, its label included, stays within the block, and a transcript event or Native message ID
-longer than 256 characters makes the source unavailable as malformed history,
-as does a Native content part or attachment that is not an object, or a
-transcript line that is valid JSON but not an event object, or a
-transcript that repeats an event ID, so the boundary byte length and the prefix
+agree. Every rendered entry, its label included, stays within the block. A
+transcript event or Native message ID must be a short generated identifier
+(letters, digits, `.`, `_`, `:` and `-`, at most 256 characters). Any other ID,
+such as one with a line break that could escape the quoted framing, makes the
+source unavailable as malformed history. The block also JSON-encodes every ID it
+renders, so the framing holds even if that rule changes. The source is also
+unavailable when a Native content part or attachment is not an object, when a
+transcript line is valid JSON but not an event object, or when a transcript
+repeats an event ID, so the boundary byte length and the prefix
 can never describe different events.
 Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references

@@ -5,8 +5,13 @@ export const LINK_HISTORY_BYTES = 8 * 1024 * 1024;
 /** Parse bound for a retained Native read. The source may grow after linking, the frozen prefix may not. */
 export const LINK_RETAINED_PARSE_BYTES = 64 * 1024 * 1024;
 export const LINK_EXCERPT_CHARS = 12_000;
-/** Recorded Code event and Native message IDs are short generated identifiers. Longer ones are malformed history. */
-const HISTORY_ID_CHARS = 256;
+/**
+ * Recorded Code event and Native message IDs are short generated identifiers (for example evt-..., server-user-...,
+ * code-assistant-...). Anything else, such as an ID with whitespace or a newline that could break the quoted
+ * framing of the send block, is malformed history.
+ */
+const HISTORY_ID = /^[A-Za-z0-9._:-]{1,256}$/;
+const isHistoryId = (value: unknown): value is string => typeof value === "string" && HISTORY_ID.test(value);
 const ENTRY_SHORTENED = " [Entry shortened. The original conversation has the full text.]";
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {
@@ -34,7 +39,7 @@ export function codeHistoryRecords(text: string, runId: string): CodeAgentTransc
       throw new LinkedSourceChanged("The recorded source history is malformed.");
     if (value.runId !== runId || typeof value.id !== "string" || typeof value.message !== "string")
       throw new LinkedSourceChanged("The recorded source history binding changed.");
-    if (value.id.length > HISTORY_ID_CHARS) throw new LinkedSourceChanged("The recorded source history has an invalid event ID.");
+    if (!isHistoryId(value.id)) throw new LinkedSourceChanged("The recorded source history has an invalid event ID.");
     if (seen.has(value.id)) throw new LinkedSourceChanged("The recorded source history repeats an event ID.");
     seen.add(value.id);
     return value;
@@ -81,7 +86,7 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   const entries = new Map<string, NativeEntry>();
   for (const entry of repo.messages) {
     const message = entry?.message;
-    if (!message || typeof message.id !== "string" || message.id.length > HISTORY_ID_CHARS || !Array.isArray(message.content)
+    if (!message || !isHistoryId(message.id) || !Array.isArray(message.content)
       || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id)
       // Every content part and attachment must be an object, so projection never meets null or a bare value.
       || !message.content.every(isRecord)
@@ -259,7 +264,8 @@ export function historyLatest(items: HistoryItem[]) {
 export function quotedLinkedHistory(source: { kind: string; id: string }, boundaryId: string | null,
   page: { excerpt: string; suppliedEntries: number; availableEntries: number; truncated: boolean }): string {
   return ["# Linked conversation history (quoted data)",
-    `Source: ${source.kind}:${source.id}. Completed boundary: ${boundaryId ?? "none"}.`,
+    // IDs are encoded, so the quoted framing holds even if an ID ever carried a line break.
+    `Source: ${JSON.stringify(`${source.kind}:${source.id}`)}. Completed boundary: ${boundaryId === null ? "none" : JSON.stringify(boundaryId)}.`,
     page.truncated
       ? `Prepared the latest ${page.suppliedEntries} of ${page.availableEntries} quoted conversation entries, ending at the completed boundary. Earlier entries or text are omitted.`
       : `Prepared ${page.suppliedEntries} of ${page.availableEntries} quoted conversation entries. This excerpt covers the available conversation text, tool results and artifact references. Runtime bookkeeping and private reasoning are excluded.`,
