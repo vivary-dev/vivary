@@ -23,7 +23,7 @@ const { assertChatDraftThread, changeChatDraft, changeIndexedChatDraft, chatDraf
   reconcileChatDraft, savedThreadHasSubmit } = await import("../server/chat-draft.ts");
 const { draftObservation, applyReconciledDraft, drainDraftChanges, draftNeedsCloseAttention, acceptLoadedDraft,
   flushChatDraftsForClose, registerSelectionCloseFlush, trackSelectionWrite,
-  needsUnmountedDraftRecovery } = await import("../app/lib/chat-draft.ts");
+  needsUnmountedDraftRecovery, settleDraftForLink } = await import("../app/lib/chat-draft.ts");
 const owner = "owner@example.test";
 const orgId = "org1";
 const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "p1", label: "P" });
@@ -268,4 +268,28 @@ test('preview refresh waits for the existing close flush and does not revoke or 
     assert.equal(await refreshPreviewDocument(async () => { steps.push('revoke'); }, () => steps.push('reload')), true);
     assert.deepEqual(steps, ['flush','flush','revoke','reload']);
   } finally { failing = false; dirty = false; unregister(); }
+});
+
+test("linking waits for the source draft to settle and refuses a draft that failed to load, conflicted or failed to discard", async () => {
+  const entry = overrides => ({ loaded: true, record: { revision: "r0", text: "Draft", status: "draft", submitId: null },
+    text: "Draft", generation: 0, saving: null, timer: null, error: null, conflict: false, discarding: false,
+    discardPromise: null, discardFailed: false, ...overrides });
+  const drainFor = current => () => drainDraftChanges(current, async () => undefined, () => undefined);
+  // The initial read is still in flight and then fails, recording the error, as ensureThread does.
+  const loading = entry({ loaded: false, record: null, text: "" });
+  loading.saving = (async () => { await Promise.resolve(); loading.error = "The saved draft could not be loaded."; })()
+    .finally(() => { loading.saving = null; });
+  await assert.rejects(settleDraftForLink(loading, drainFor(loading)), /needs attention/);
+  // A discard in flight that fails.
+  const discarding = entry({ discarding: true });
+  discarding.discardPromise = (async () => { await Promise.resolve(); discarding.discardFailed = true; discarding.discarding = false; })()
+    .finally(() => { discarding.discardPromise = null; });
+  await assert.rejects(settleDraftForLink(discarding, drainFor(discarding)), /needs attention/);
+  const conflicted = entry({ conflict: true, error: "The draft changed in another window." });
+  await assert.rejects(settleDraftForLink(conflicted, drainFor(conflicted)));
+  // A send waiting for review stays in the source and does not block linking. A settled ordinary draft links.
+  const pending = entry({ record: { revision: "r1", text: "Review", status: "pending", submitId: "s1" }, text: "Review" });
+  await settleDraftForLink(pending, drainFor(pending));
+  const settled = entry({});
+  await settleDraftForLink(settled, drainFor(settled));
 });

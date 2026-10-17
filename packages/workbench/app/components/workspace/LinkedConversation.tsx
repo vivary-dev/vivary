@@ -11,9 +11,8 @@ import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage
  * ignores edits while it is pending), and the pending draft stays in the source unchanged, so there is nothing to
  * flush and linking proceeds. Any other draft fault still stops the link.
  */
-export function sourceDraftSaver(draft: { flushForThread: (threadId: string) => Promise<void>;
-  hasPendingForThread: (threadId: string) => boolean }, threadId: string): () => Promise<void> {
-  return () => draft.hasPendingForThread(threadId) ? Promise.resolve() : draft.flushForThread(threadId);
+export function sourceDraftSaver(draft: { settleForLink: (threadId: string) => Promise<void> }, threadId: string): () => Promise<void> {
+  return () => draft.settleForLink(threadId);
 }
 
 /** A version 4 UUID. randomUUID needs a secure context, which remote browser access over plain HTTP lacks. */

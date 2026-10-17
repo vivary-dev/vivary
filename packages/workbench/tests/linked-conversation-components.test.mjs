@@ -322,15 +322,11 @@ test("an archived empty linked target with an unsent draft stays archived, with 
   assert.deepEqual([rows.threads.length, rows.drafts.length], [0, 0]);
 });
 
-test("a source whose send waits for review links without flushing its pending draft, and other drafts still save first", async () => {
-  const flushed = [];
-  // The draft owner refuses to flush a pending record, as drainDraftChanges does.
-  const draft = pending => ({ hasPendingForThread: () => pending,
-    flushForThread: async threadId => { flushed.push(threadId); if (pending) throw new Error("The saved draft needs attention."); } });
-  await module.exports.sourceDraftSaver(draft(true), "review-source")();
-  assert.deepEqual(flushed, [], "the pending draft and its review stay in the source unchanged");
-  await module.exports.sourceDraftSaver(draft(false), "ordinary-source")();
-  assert.deepEqual(flushed, ["ordinary-source"]);
+test("linking settles the source draft through its owner before creating the link", async () => {
+  // settleDraftForLink (chat-draft.test.mjs) owns the pending, load, discard and save rules. The chooser delegates to it.
+  const settled = [];
+  await module.exports.sourceDraftSaver({ settleForLink: async threadId => { settled.push(threadId); } }, "source-thread")();
+  assert.deepEqual(settled, ["source-thread"]);
 });
 
 test("the Code chooser appears only after the same source eligibility check Native uses", async () => {

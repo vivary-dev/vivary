@@ -154,6 +154,22 @@ export function drainDraftChanges(current: Entry,
   return saving;
 }
 
+/**
+ * Settles a source draft before a link is created. It waits for the initial read or reconciliation, a save and a
+ * discard, because flushing while one is in flight returns that promise even when it ends in failure. A send waiting
+ * for review has no unsaved text and stays in the source, so it does not block linking. Any other unverified state,
+ * such as a failed load, conflict, failed discard or failed save, rejects.
+ */
+export async function settleDraftForLink(current: Entry, drain: () => Promise<void>): Promise<void> {
+  while (current.saving || current.discardPromise) {
+    try { await (current.saving ?? current.discardPromise); } catch { /* The state below records the failure. */ }
+  }
+  const unverified = () => !current.loaded || Boolean(current.error) || current.conflict || current.discardFailed || current.discarding;
+  if (!unverified() && current.record?.status === "pending") return;
+  await drain();
+  if (unverified()) throw new Error("The saved draft needs attention.");
+}
+
 export function draftNeedsCloseAttention(current: Entry): boolean {
   return current.timer !== null || current.saving !== null || current.discardPromise !== null
     || current.discardFailed || (!current.loaded && current.text.length > 0)
@@ -479,6 +495,7 @@ export function useNativeChatDraft(scope: Scope, ownerKey: string) {
   return {
     hostComposerDraft,
     flushForThread: flush,
+    settleForLink: (threadId: string) => settleDraftForLink(entry(threadId), () => flush(threadId)),
     rejectKnownSubmission: onRejected,
     statusForThread: (threadId: string) => entry(threadId).error,
     hasConflictForThread: (threadId: string) => entry(threadId).conflict,
