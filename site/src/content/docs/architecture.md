@@ -271,8 +271,11 @@ receipt on the link. Code acceptance binds that portion to the actual user event
 appended after final project and host admission. Refused sends leave the previous
 accepted receipt unchanged. Native preparation preserves separate visible user
 text and records its preparation stage. Neither stage proves provider ingestion.
-A notice read verifies the owner, then looks for a link row, and resolves project
-history only when a row exists. An unlinked conversation in a project whose
+A notice read verifies the caller, then looks for a link row, and resolves project
+history and organization membership only when a row exists. Code conversations
+support an owner with no organization, so an ordinary run's follow-up send and
+notice need none. Linking does need one: such an owner is not offered the chooser,
+and creation refuses with a clear reason. An unlinked conversation in a project whose
 folder is not connected therefore shows no notice and no false verification error.
 The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. A Code send refused after linked preparation emits

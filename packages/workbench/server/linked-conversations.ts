@@ -138,6 +138,15 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       fail("The conversation owner could not be verified.", { statusCode: 403 });
     return { owner, orgId };
   }
+  /**
+   * The caller check for a conversation that may have no link. Code conversations support an owner with no
+   * organization, so organization membership is verified only when one is present. Links always need one.
+   */
+  async function verifiedCaller(ctx: ActionRunContext | undefined) {
+    if (ctx?.orgId) return verifiedOwner(ctx);
+    if (!ctx?.userEmail?.trim() || !["vivary", "workbench"].includes(ctx?.appId ?? "") || !["http", "frontend"].includes(ctx?.caller ?? ""))
+      fail("The conversation owner could not be verified.", { statusCode: 403 });
+  }
   async function scope(ctx: ActionRunContext | undefined, projectId: string | null): Promise<Scope> {
     const { owner, orgId } = await verifiedOwner(ctx);
     let personal: Promise<VivaryCodeWorkspace | undefined> | undefined;
@@ -242,9 +251,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   /** The inspection page from the cursor, plus the send block's latest-entries excerpt. */
   async function loadWithLatest(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference,
     cursor?: string): Promise<{ page: LinkedHistoryPage; latestExcerpt: string } | null> {
-    // An unlinked conversation needs only a verified owner. Project history, which an unavailable folder refuses,
-    // is resolved only for a conversation that has a link row.
-    await verifiedOwner(ctx);
+    // An unlinked conversation needs only a verified caller, with or without an organization. Project history, which
+    // an unavailable folder refuses, and organization membership are required only for a conversation with a link row.
+    await verifiedCaller(ctx);
     const rows = await linkRows(target.kind, target.id);
     if (!rows.length) {
       // A durably marked target with no row (or no table yet) is an invalid link, never an ordinary conversation.
@@ -300,6 +309,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
 
   async function create(ctx: ActionRunContext | undefined, input: { projectId: string | null; source: ConversationReference;
     target: TargetChoice; operationId?: string }): Promise<LinkedConversationResult> {
+    if (!ctx?.orgId) unavailable("Linking conversations needs an organization. Select one, then retry.");
     const identity = await scope(ctx, input.projectId);
     await requireLinkTable();
     // The target ID derives from the owner and the client's operation ID, so a retry after a lost response finds the
@@ -462,6 +472,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     await load(ctx, projectId, source);
   }
   async function sourceAvailable(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
+    // Linking needs an organization, so an owner without one is not offered the chooser.
+    await verifiedCaller(ctx);
+    if (!ctx?.orgId) return { available: false };
     // A project with no connected folder has no project history to link from. That is a state, not a failure,
     // so the chooser stays hidden without an alert. Refused access and other faults still fail and keep Retry.
     let identity: Scope;

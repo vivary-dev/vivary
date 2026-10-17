@@ -99,6 +99,22 @@ test("linked conversations use Native records and immutable authorized completed
       await assert.rejects(service.sourceAvailable(actor, project.projectId, { kind: "native", id: thread.id }), { statusCode: 403 });
     } finally { folderMissing = false; revoked = false; }
   });
+  await t.test("an owner with no organization keeps ordinary Code and Native sends, and is simply not offered linking", async () => {
+    const orgless: ActionRunContext = { ...actor, orgId: undefined };
+    // A follow-up Code send probes link metadata. An ordinary run with no row and no marker supplies nothing, as before.
+    assert.equal(await service.codeSendLinkedContext(orgless, project.projectId, "paged-source")!(), null);
+    assert.equal(await service.load(orgless, project.projectId, { kind: "native", id: "never-linked" }), null);
+    // Linking needs an organization, so the chooser is not offered and creation refuses with a clear reason.
+    assert.deepEqual(await service.sourceAvailable(orgless, project.projectId, { kind: "code", id: "paged-source" }), { available: false });
+    await assert.rejects(service.create(orgless, { projectId: project.projectId, source: { kind: "code", id: "paged-source" },
+      target: { engine: "native" } }), { errorCode: "vivary_linked_history_unavailable", message: /organization/ });
+    // A linked target still refuses without a verified owner and organization.
+    const linkedCode = await create({ engine: "codex-cli", model: "fixture-model" });
+    await assert.rejects(service.load(orgless, project.projectId, linkedCode.target));
+    await assert.rejects(service.codeSendLinkedContext(orgless, project.projectId, linkedCode.target.id)!());
+    // An unverified caller is still refused even for an unlinked conversation.
+    await assert.rejects(service.load({ ...orgless, appId: "foreign-app" }, project.projectId, { kind: "native", id: "never-linked" }));
+  });
   await t.test("an unlinked conversation shows no linked-history notice while its project folder is unavailable", async () => {
     // The history dependency refuses, as resolveVivaryCodeProjectHistory does for a project with no connected folder.
     revoked = true;
