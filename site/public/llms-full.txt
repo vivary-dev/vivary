@@ -7467,20 +7467,28 @@ has no unsaved text and stays pending in the source, so linking skips that flush
 instead of failing on it. Selection then creates a paused Code record or
 an empty Native thread and its cleared draft. Project history lists that empty
 thread by a durable thread source URL, `vivary:linked-conversation`, set when the
-target is created. Core never overwrites a thread's source and rename changes
+link is finalized, so an unfinished thread is never listed. The service sets it
+with the same fill-only update as Core's unexported `setThreadSourceIfMissing`.
+Core never overwrites a thread's source and rename changes
 only the title, so a renamed empty target stays listed. `native-history-rows.ts`
 keeps one row per thread, so an unsent draft in the target never adds a second row,
 and an archived thread's draft never returns as an active draft row. It submits no prompt, requests no
 worker, consumes no approval and transfers no provider session. The target's
-cleared draft is written last, after the link metadata row and the target's
-finalization, so no later step can fail once the draft exists. If any creation
-step fails, the service removes the new Code record or Native
-thread (and the row, when written), so Retry leaves no hidden target behind.
+cleared draft is written after the link metadata row and the target's
+finalization. The row is inserted with `creationPending` and loses it only as the
+last step, so a link is finished only when its row says so, and pages and sends
+refuse an unfinished one. If a creation step fails, the service removes the new
+Code record or Native thread (and the row, when written).
 Creation is idempotent per choice. The chooser sends one operation ID for a choice
 and reuses it on Retry. The target ID derives from the owner, organization and that
-ID, and the link stores it, so a retry after a lost response returns the target
-already made. Reusing an ID for another project, source or harness refuses with
-`vivary_link_operation_mismatch`.
+ID, and the link stores it, so a retry after a lost response returns the finished
+target. A retry while the first request is still running gets "still being
+created". The server tracks in-flight operations in memory, which holds because
+production runs one supervised server process. A retry that finds an unfinished
+row or target with no request in flight treats it as left by a failed rollback or a
+process exit: it removes that row and target and creates the link again. A
+finished-looking target with no row is damage and refuses. Reusing an ID for
+another project, source or harness refuses with `vivary_link_operation_mismatch`.
 Core has no Code run removal, so the service deletes the record file in
 `codeAgentRunsDir`. A failed link
 keeps the source selected and offers Retry. The host execution guard is unchanged.

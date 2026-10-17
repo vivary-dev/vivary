@@ -758,6 +758,61 @@ process.send({type:"vivary:code-worker:ready"});
         { errorCode: "vivary_link_operation_mismatch" });
     }
   });
+  await t.test("a retry during creation is told the link is still being created, then replays the finished link", async () => {
+    const { randomUUID } = await import("node:crypto");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const slow = createLinkedConversationService({ ...dependencies!, targetModel: async choice => { await gate; return choice.model; } });
+    const operationId = randomUUID(), target = { engine: "codex-cli" as const, model: "fixture-model" };
+    const first = slow.create(actor, { projectId: project.projectId, source: ref, target, operationId });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const retry = slow.create(actor, { projectId: project.projectId, source: ref, target, operationId });
+    release();
+    await assert.rejects(retry, { errorCode: "vivary_linked_history_unavailable", message: /still being created/ });
+    const finished = await first;
+    assert.deepEqual(await slow.create(actor, { projectId: project.projectId, source: ref, target, operationId }), finished);
+  });
+  await t.test("a target left by a failed rollback never blocks Retry or shows as a broken conversation", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");
+    const threadCount = async () => Number((await db.execute("SELECT COUNT(*) AS n FROM chat_threads")).rows[0].n);
+    const trigger = (name: string, when: string) =>
+      db.execute(`CREATE TRIGGER ${name} ${when} BEGIN SELECT RAISE(ABORT, 'selected ${name} fault'); END`);
+    const drop = (...names: string[]) => Promise.all(names.map(name => db.execute(`DROP TRIGGER IF EXISTS ${name}`)));
+    const native = (operationId: string) => service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "native" }, operationId });
+    // 1. Finalization fails and the rollback cannot delete the pending row or the thread.
+    let operationId = randomUUID(), before = await threadCount();
+    await trigger("finalize", "BEFORE UPDATE ON chat_threads"); await trigger("keep_link", "BEFORE DELETE ON vivary_conversation_links");
+    await trigger("keep_thread", "BEFORE DELETE ON chat_threads");
+    try { await assert.rejects(native(operationId), /selected finalize fault/); }
+    finally { await drop("finalize", "keep_link", "keep_thread"); }
+    const pending = (await db.execute({ sql: "SELECT target_id FROM vivary_conversation_links WHERE json_extract(record_json, '$.operationId') = ?", args: [operationId] })).rows[0];
+    const leftover = { kind: "native" as const, id: String(pending.target_id) };
+    assert.equal((await getThread(leftover.id))!.source?.url, undefined, "the unfinished thread carries no linked marker, so history hides it");
+    await assert.rejects(service.load(actor, project.projectId, leftover), { errorCode: "vivary_linked_history_unavailable" });
+    const retried = await native(operationId);
+    assert.deepEqual(retried.target, leftover); assert.equal(await threadCount(), before + 1);
+    assert.match((await service.context(actor, project.projectId, retried.target))!.block!, /Completed answer/);
+    // 2. Finalization fails and only the thread survives the rollback.
+    operationId = randomUUID(); before = await threadCount();
+    await trigger("finalize", "BEFORE UPDATE ON chat_threads"); await trigger("keep_thread", "BEFORE DELETE ON chat_threads");
+    try { await assert.rejects(native(operationId), /selected finalize fault/); }
+    finally { await drop("finalize", "keep_thread"); }
+    assert.equal(await threadCount(), before + 1, "the rollback left the thread");
+    await native(operationId);
+    assert.equal(await threadCount(), before + 1, "Retry replaced the leftover instead of failing or adding another");
+    // 3. The process exited after creating the Code record and before the link insert.
+    operationId = randomUUID();
+    const { operationTargetId } = await import("../server/linked-conversations.ts");
+    createCodeAgentRunRecord({ id: operationTargetId(owner, orgId, operationId), goalId: "vivary-local-code", title: "Linked: Source",
+      status: "paused", phase: "linked-inactive", needsApproval: false, permissionMode: "auto-edit", cwd: root,
+      metadata: { app: "vivary-workbench-local-code", ownerEmail: owner, orgId, engine: "codex-cli", model: "fixture-model",
+        workspaceRoot: root, ...project, linkedHistoryId: randomUUID(), linkedCreationPending: true } });
+    const runs = listCodeAgentRunRecords("vivary-local-code").length;
+    const code = await service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "codex-cli", model: "fixture-model" }, operationId });
+    assert.equal(listCodeAgentRunRecords("vivary-local-code").length, runs, "Retry replaced the leftover record");
+    assert.equal(getCodeAgentRunRecord(code.target.id)!.metadata?.linkedCreationPending, false);
+  });
   await t.test("a linked target whose own link metadata is missing or malformed cannot link onward as a source", async () => {
     const nativeTarget = await create({ engine: "native" });
     const codeTarget2 = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });

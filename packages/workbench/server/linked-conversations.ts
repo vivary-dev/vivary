@@ -45,6 +45,8 @@ const linkSchema = z.object({
   lastSupplied: portionSchema.nullable().optional(),
   /** The client's operation ID. A retry of the same choice returns this link instead of creating another target. */
   operationId: z.string().uuid().optional(),
+  /** Set from the link insert until the target and draft are finalized. Absent on finished and earlier links. */
+  creationPending: z.literal(true).optional(),
 }).strict();
 type Link = z.infer<typeof linkSchema>;
 type Scope = { owner: string; orgId: string; projectId: string | null; history: VivaryCodeProjectHistory | undefined;
@@ -105,10 +107,17 @@ async function requireLinkTable() {
     throw error;
   }
 }
+/**
+ * Link operations being created in this process. Production runs one supervised server process, so this set is
+ * the authority on whether an unfinished operation is still in flight or was left behind by a failed rollback.
+ */
+const creatingTargets = new Set<string>();
+const stillCreating = (): never =>
+  fail("This link is still being created. Retry in a moment.", { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });
 const targetRoute = (target: ConversationReference) => target.kind === "code" ? `/?run=${encodeURIComponent(target.id)}`
   : `/?runtime=native&history=project&thread=${encodeURIComponent(target.id)}`;
 /** A target ID no other owner's operation can produce, in the UUID shape other targets use. */
-function operationTargetId(owner: string, orgId: string, operationId: string): string {
+export function operationTargetId(owner: string, orgId: string, operationId: string): string {
   const hash = createHash("sha256").update(JSON.stringify(["vivary-linked-target", owner, orgId, operationId])).digest("hex");
   return [hash.slice(0, 8), hash.slice(8, 12), hash.slice(12, 16), hash.slice(16, 20), hash.slice(20, 32)].join("-");
 }
@@ -247,6 +256,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const parsed = linkSchema.safeParse(JSON.parse(String(rows[0].record_json)));
     if (!parsed.success) unavailable();
     const link = parsed.data;
+    // An unfinished link has no caller with its route yet. It is either still being created or left to clean up.
+    if (link.creationPending) unavailable();
     if (link.owner !== identity.owner || link.orgId !== identity.orgId || link.projectId !== projectId
       || link.bindingId !== (identity.history?.bindingId ?? null)
       || historyDigest(link.target) !== historyDigest(target) || link.targetCreatedAt !== currentTarget.createdAt
@@ -295,12 +306,25 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     // link it already made instead of creating a second target. Another owner's operation can never reach this ID.
     const operationId = input.operationId ?? randomUUID();
     const targetId = operationTargetId(identity.owner, identity.orgId, operationId);
+    // A retry that arrives while the first request is still working waits for it rather than racing it.
+    if (creatingTargets.has(targetId)) stillCreating();
+    creatingTargets.add(targetId);
+    try { return await createOperation(ctx, input, identity, operationId, targetId); }
+    finally { creatingTargets.delete(targetId); }
+  }
+  async function createOperation(ctx: ActionRunContext | undefined, input: { projectId: string | null;
+    source: ConversationReference; target: TargetChoice }, identity: Scope, operationId: string, targetId: string): Promise<LinkedConversationResult> {
+    // Only a finalized link replays. Anything unfinalized for this operation was left by a failed rollback or a
+    // process exit, because no request is creating it now, so it is removed and the link is created again.
     for (const kind of ["code", "native"] as const) {
       const existing = await linkRows(kind, targetId);
-      if (existing.length) return replayOperation(existing[0].record_json, identity, input, operationId);
+      if (!existing.length) continue;
+      const parsed = linkSchema.safeParse(JSON.parse(String(existing[0].record_json)));
+      if (!parsed.success || !parsed.data.creationPending) return replayOperation(existing[0].record_json, identity, input, operationId);
+      await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?", args: [kind, targetId] });
+      await removeUnfinishedTarget({ kind, id: targetId }, identity, true);
     }
-    if (getCodeAgentRunRecord(targetId) || await getThread(targetId))
-      fail("This link is still being created. Retry in a moment.", { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });
+    for (const kind of ["code", "native"] as const) await removeUnfinishedTarget({ kind, id: targetId }, identity, false);
     const source = await record(input.source, identity);
     // A linked target used as a source must still be a valid link itself, so its frozen history is not bypassed.
     await validateMarkedSource(ctx, input.projectId, input.source);
@@ -329,8 +353,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (input.target.engine === "native") {
       const chat = createVivaryChatIdentity(identity.owner, identity.orgId,
         { kind: "project", projectId: input.projectId, label: identity.history?.label ?? "Personal workspace" });
+      // The linked marker is added at finalization, so an unfinished thread is never listed as a linked target.
       const thread = await createThread(identity.owner, { id: targetId, scope: chat.scope, orgId: identity.orgId,
-        source: { appId: "vivary", url: LINKED_TARGET_SOURCE_URL } });
+        source: { appId: "vivary" } });
       target = { kind: "native", id: thread.id }; targetCreatedAt = thread.createdAt;
       clearDraft = () => changeChatDraft(chat, thread.id, null, { status: "cleared", text: "", submitId: null });
       removeTarget = () => deleteThread(thread.id);
@@ -351,16 +376,27 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const link: Link = { version: 1, app: "vivary", id: linkId, owner: identity.owner, orgId: identity.orgId,
       projectId: input.projectId, bindingId: identity.history?.bindingId ?? null, rootId: identity.history?.rootId ?? null,
       source: input.source, sourceCreatedAt: source.createdAt, sourceTitle: source.title, target, targetCreatedAt,
-      boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, boundaryDigest: prefix.digest, lastPrepared: null, operationId };
+      boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, boundaryDigest: prefix.digest, lastPrepared: null, operationId,
+      creationPending: true };
+    const pendingJson = JSON.stringify(link);
     let linked = false;
     try {
       await getDbExec().execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
-        args: [link.id, target.kind, target.id, JSON.stringify(link)] });
+        args: [link.id, target.kind, target.id, pendingJson] });
       linked = true;
       if (target.kind === "code") updateCodeAgentRunRecord(target.id, { metadata: { linkedCreationPending: false } });
-      else await updateThreadData(target.id, "{}", title, "", 0);
-      // Last, so no later step can fail after the draft exists. A failed clear writes nothing (compare-and-set).
+      else {
+        await updateThreadData(target.id, "{}", title, "", 0);
+        // Core's setThreadSourceIfMissing is not exported. This is the same fill-only update, so no source is overwritten.
+        await getDbExec().execute({ sql: "UPDATE chat_threads SET source_url = COALESCE(source_url, ?) WHERE id = ?",
+          args: [LINKED_TARGET_SOURCE_URL, target.id] });
+      }
+      // A failed clear writes nothing (compare-and-set).
       await clearDraft();
+      const { creationPending: _pending, ...finished } = link;
+      const result = await getDbExec().execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE link_id = ? AND record_json = ?",
+        args: [JSON.stringify(finished), link.id, pendingJson] });
+      if (!result.rowsAffected) throw new Error("The link changed while it was being created.");
     } catch (error) {
       // A failed link leaves no hidden target behind, so each Retry starts clean.
       if (linked) await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE link_id = ?", args: [link.id] }).catch(() => undefined);
@@ -368,6 +404,25 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       throw error;
     }
     return { target, route: targetRoute(target) };
+  }
+  /**
+   * Removes a target this operation left unfinished. With its pending row, any target for the operation is unfinished.
+   * Without a row, only a Code record still marked linkedCreationPending, or an empty unmarked Native thread of this
+   * owner, qualifies. A finished-looking target with no row is damage, so creation refuses rather than delete it.
+   */
+  async function removeUnfinishedTarget(target: ConversationReference, identity: Scope, pendingRow: boolean) {
+    if (target.kind === "code") {
+      const run = getCodeAgentRunRecord(target.id);
+      if (!run) return;
+      if (!pendingRow && (run.metadata?.linkedCreationPending !== true || run.metadata?.ownerEmail !== identity.owner)) unavailable();
+      await rm(join(codeAgentRunsDir(), `${target.id}.json`), { force: true });
+      return;
+    }
+    const thread = await getThread(target.id);
+    if (!thread) return;
+    if (!pendingRow && (thread.messageCount !== 0 || thread.ownerEmail.toLowerCase() !== identity.owner
+      || thread.source?.url === LINKED_TARGET_SOURCE_URL)) unavailable();
+    await deleteThread(target.id);
   }
   /** A repeated operation returns its own link. Any other owner, project, source or harness is a mismatched reuse. */
   function replayOperation(recordJson: unknown, identity: Scope, input: { projectId: string | null; source: ConversationReference;
