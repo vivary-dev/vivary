@@ -33,7 +33,7 @@ test("linked conversations use Native records and immutable authorized completed
     args: ["linked-member", orgId, owner, "owner", Date.now()] });
   const actor: ActionRunContext = { userEmail: owner, orgId, appId: "workbench", caller: "http" };
   const project = { projectId: "project-a", label: "Alpha", bindingId: "binding-a", rootId: "root-a", bindingRevision: 1 };
-  let revoked = false, discoveryFailure = false;
+  let revoked = false, discoveryFailure = false, folderMissing = false;
   // The configured personal workspace, as resolveWorkspace returns it. Tests move it to another root.
   const personalRoots = [path.join(root, "personal-a"), path.join(root, "personal-b")];
   for (const folder of personalRoots) await mkdir(folder);
@@ -42,6 +42,9 @@ test("linked conversations use Native records and immutable authorized completed
   const dependencies: Parameters<typeof createLinkedConversationService>[0] = { member: isOrgMember,
     history: async (_ctx, projectId) => {
       if (revoked || (projectId && projectId !== project.projectId)) throw Object.assign(new Error("Current project grant refused"), { statusCode: 403 });
+      // resolveVivaryCodeProjectHistory refuses this way when the project has no one connected local folder.
+      if (folderMissing && projectId) throw Object.assign(new Error("This project's conversation history is unavailable."),
+        { statusCode: 409, errorCode: "vivary_code_project_history_unavailable" });
       return projectId ? project : undefined;
     }, workspace: async (_ctx, projectId) => projectId ? { root, ...project } : personal,
     targetModel: async choice => { if (discoveryFailure) throw new Error("Discovery unavailable"); return choice.model; } };
@@ -84,6 +87,17 @@ test("linked conversations use Native records and immutable authorized completed
     assert.equal(await linkedTargetModel({ engine: "claude-cli", model: "claude-opus-5-5" }, workspace, installed), "claude-opus-5-5");
     await assert.rejects(linkedTargetModel({ engine: "claude-cli", model: "claude-sonnet-5-5" }, workspace, installed),
       { errorCode: "vivary_code_model_unsupported" });
+  });
+  await t.test("a saved Native conversation in a project with no connected folder is not a link source, without an error", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "folderless-source", orgId, scope: identity.scope });
+    folderMissing = true;
+    try {
+      assert.deepEqual(await service.sourceAvailable(actor, project.projectId, { kind: "native", id: thread.id }), { available: false });
+      // A refused grant is not a missing folder, so it still fails and the chooser keeps its Retry.
+      revoked = true;
+      await assert.rejects(service.sourceAvailable(actor, project.projectId, { kind: "native", id: thread.id }), { statusCode: 403 });
+    } finally { folderMissing = false; revoked = false; }
   });
   await t.test("an unlinked conversation shows no linked-history notice while its project folder is unavailable", async () => {
     // The history dependency refuses, as resolveVivaryCodeProjectHistory does for a project with no connected folder.

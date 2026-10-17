@@ -334,7 +334,14 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       portion: { ...link.lastPrepared, linkId: link.id, boundaryDigest: link.boundaryDigest } };
   }
   async function sourceAvailable(ctx: ActionRunContext | undefined, projectId: string | null, source: ConversationReference) {
-    const identity = await scope(ctx, projectId);
+    // A project with no connected folder has no project history to link from. That is a state, not a failure,
+    // so the chooser stays hidden without an alert. Refused access and other faults still fail and keep Retry.
+    let identity: Scope;
+    try { identity = await scope(ctx, projectId); }
+    catch (error) {
+      if ((error as { errorCode?: string } | null)?.errorCode === "vivary_code_project_history_unavailable") return { available: false };
+      throw error;
+    }
     if (source.kind === "native" && !await getThread(source.id)) return { available: false };
     await record(source, identity);
     return { available: true };

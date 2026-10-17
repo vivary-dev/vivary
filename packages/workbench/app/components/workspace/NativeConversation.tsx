@@ -143,7 +143,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       ? savedSelection.threadId : null;
   const { call, ready: draftOwnerReady, sessionStatus, retrySession } = useNativeActionCaller();
   const linkSource = useLinkSourceEligibility({ projectId: identity.projectId, storageKey: identity.storageKey,
-    threadId: selectedThread, enabled: !unassigned && !requestedMessage && draftOwnerReady });
+    threadId: selectedThread, enabled: !unassigned && !requestedMessage && draftOwnerReady && workspaceAvailable });
   const linkEngines = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: identity.projectId ?? undefined },
     { enabled: linkSource.data?.available === true && workspaceAvailable, retry: false });
   const savedThreadCheck = useQuery({
