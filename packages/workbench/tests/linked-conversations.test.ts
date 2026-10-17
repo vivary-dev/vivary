@@ -397,6 +397,26 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(service.create(actor, { projectId: null, source: { kind: "code", id: source.id }, target: { engine: "native" } }),
       { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("a personal workspace change during target discovery creates no Code run at the stale root", async () => {
+    const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" });
+    const thread = await createThread(owner, { id: "personal-native-source", orgId, scope: identity.scope });
+    const messages = [{ parentId: null, message: { id: "personal-ask", role: "user", content: [{ type: "text", text: "Personal request" }] } },
+      { parentId: "personal-ask", message: { id: "personal-reply", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Personal reply" }] } }];
+    await updateThreadData(thread.id, JSON.stringify({ headId: "personal-reply", messages }), "Personal native", "", 2);
+    // Discovery takes time, and the personal workspace setting moves to another folder meanwhile.
+    const moving = createLinkedConversationService({ ...dependencies!, targetModel: async choice => {
+      personal = { root: personalRoots[1], label: "personal-b" }; return choice.model; } });
+    const runs = listCodeAgentRunRecords("vivary-local-code").length;
+    try {
+      await assert.rejects(moving.create(actor, { projectId: null, source: { kind: "native", id: thread.id }, target: { engine: "claude-cli", model: "sonnet" } }),
+        { errorCode: "vivary_linked_history_unavailable" });
+    } finally { personal = { root: personalRoots[0], label: "personal-a" }; }
+    assert.equal(listCodeAgentRunRecords("vivary-local-code").length, runs);
+    // Without a change, the same link creates its run at the current personal root.
+    const linked = await service.create(actor, { projectId: null, source: { kind: "native", id: thread.id }, target: { engine: "claude-cli", model: "sonnet" } });
+    assert.equal(getCodeAgentRunRecord(linked.target.id)!.cwd, personalRoots[0]);
+  });
   await t.test("a Native source that grows past 8 MiB after linking keeps its frozen prefix, while new linking refuses", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
     const thread = await createThread(owner, { id: "growing-source", orgId, scope: identity.scope });

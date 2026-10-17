@@ -7484,7 +7484,10 @@ Record ownership matches the project and binding, as `isOwnedRun` does, so a
 project folder reconnect, which changes only the root epoch, keeps the link and
 its older sources usable. A personal workspace Code record must match the
 currently configured personal workspace root, the same scope `isOwnedRun`
-applies, so a changed personal workspace setting withholds the old root's history. A replaced binding or an invalid target link record
+applies, so a changed personal workspace setting withholds the old root's history.
+Linking to Code resolves the folder again after target-model discovery and
+compares it with `sameWorkspace`, as Code send admission does, so a project or
+personal workspace change during discovery creates no run at a stale root. A replaced binding or an invalid target link record
 fails closed. A source that is deleted, revoked or no longer matches its frozen
 prefix is reported as unavailable instead. The service opens a retained Code
 transcript without following links where the platform has `O_NOFOLLOW`, and on

@@ -13,7 +13,7 @@ import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-id
 import { PROJECT_CHAT_SCOPE_PREFIX } from "./chat-project-scope.mjs";
 import { changeChatDraft, createCodeDraftIdentity } from "./chat-draft";
 import { resolveVivaryCodeProject, resolveVivaryCodeProjectHistory } from "./code-project";
-import { isOwnedRun, resolveWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
+import { isOwnedRun, resolveWorkspace, sameWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
   type VivaryCodeWorkspace } from "./local-code-agent";
 import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
@@ -251,6 +251,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const model = input.target.engine !== "native" ? await dependencies.targetModel(input.target, workspace!) : null;
     const again = await scope(ctx, input.projectId);
     if (historyDigest(again.history) !== historyDigest(identity.history)) unavailable("The project changed. Retry the link.");
+    // As Code send admission does, the folder is resolved again after discovery. A personal workspace has no project
+    // history to compare, so only this check catches a move during discovery.
+    if (workspace) {
+      const current = await dependencies.workspace(ctx, input.projectId ?? undefined);
+      if (!current || !sameWorkspace(current, workspace)) unavailable("The workspace folder changed. Retry the link.");
+    }
     const currentSource = await record(input.source, again);
     if (currentSource.createdAt !== source.createdAt || (await sourcePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
     const linkId = randomUUID(), targetId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);

@@ -1516,7 +1516,7 @@ function assertCodeHostAvailable(): void {
   }
 }
 
-function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
+export function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
   const fields = ["root", "projectId", "bindingId", "rootId", "bindingRevision", "policyRevision"] as const;
   return fields.every(field => left[field] === right[field]);
 }
