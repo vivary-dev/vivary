@@ -318,6 +318,17 @@ test("opening the original conversation routes inside the app, with no document 
   assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=original");
 });
 
+test("an archived original is not linked as an editable conversation, and the notice points to restoring it", async () => {
+  for (const page of [{ ...noticePage(), sourceArchived: true },
+    { ...noticePage(), sourceArchived: true, sourceStatus: "unavailable", sourceReachable: true, availableEntries: 0 }]) {
+    await act(async () => root.render(null)); linkFixture.client?.clear();
+    linkFixture.call = async () => page;
+    await render("notice"); await settle(); await notify();
+    assert.equal(host.querySelector("a") === null, true, "no link opens the archived thread for editing");
+    assert.match(host.textContent, /Original history, which is archived\. Restore it from Archived conversations to open it\./);
+  }
+});
+
 test("a notice for a resumed Code session says later sends do not repeat the supplied history", async () => {
   linkFixture.call = async () => ({ ...noticePage(), nextSendSupplies: false,
     lastAccepted: { entries: 100, characters: 12_000, truncated: true, userEventId: "accepted-user" } });

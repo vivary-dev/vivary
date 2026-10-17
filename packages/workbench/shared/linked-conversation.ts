@@ -17,6 +17,11 @@ export type LinkedHistoryPage = {
    * frozen prefix that no longer verifies. One that is not was deleted, replaced or is no longer authorized.
    */
   sourceReachable: boolean;
+  /**
+   * Whether the original is a Native conversation archived after linking. Its frozen history still supplies, but the
+   * notice does not open it, because an archived conversation is restored from Archived conversations before editing.
+   */
+  sourceArchived: boolean;
   /** False when the source is unavailable or the target's resumed provider session already holds the block. */
   nextSendSupplies: boolean;
   /** What the next send's block holds: the latest entries that fit, ending at the boundary. */

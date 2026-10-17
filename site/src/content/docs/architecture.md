@@ -234,7 +234,11 @@ fails closed. A source that is deleted, revoked or no longer matches its frozen
 prefix is reported as unavailable instead. The page also reports whether the
 original still exists. If it does, the notice keeps its link and says its
 completed history no longer matches. If it was deleted, replaced or is no longer
-authorized, the notice names it without a link. The service opens a retained Code
+authorized, the notice names it without a link. A Native original archived after
+linking still supplies its frozen history, and the page reports it as archived. The
+notice then names it without a link and says to restore it from Archived
+conversations, because the link would open the archived thread with an editable
+composer. The service opens a retained Code
 transcript without following links where the platform has `O_NOFOLLOW`, and on
 every platform it compares the opened file with an `lstat` of the path, as
 `original-runtime.ts` does for Windows, which has no such flag. A transcript

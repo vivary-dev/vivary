@@ -302,11 +302,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     // The target link is valid from here. A deleted, revoked or changed source leaves the target usable without linked context.
     let items: Awaited<ReturnType<typeof sourcePrefix>>["items"] | null = null;
     // Whether the original conversation itself still exists for this owner, even when its frozen prefix does not verify.
-    let sourceReachable = false;
+    let sourceReachable = false, sourceArchived = false;
     try {
       const source = await record(link.source, identity);
       if (source.createdAt !== link.sourceCreatedAt) unavailable("The source conversation was replaced.");
       sourceReachable = true;
+      sourceArchived = link.source.kind === "native" && (source as ChatThread).archivedAt != null;
       // A source that is itself a linked target must still be a valid link on every read, not only when it was linked.
       await validatedLink(projectId, link.source, identity);
       const prefix = await sourcePrefix(link.source, source, link.boundaryId, link.boundaryBytes);
@@ -331,7 +332,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const engine = run?.metadata?.engine;
     const sessionHasBlock = Boolean(run && acceptedPortion && (engine === "claude-cli" || engine === "codex-cli")
       && providerSessionId(run, engine) !== null);
-    return { latestExcerpt: latest.excerpt, page: { ...page, sourceStatus: items ? "available" : "unavailable", sourceReachable,
+    return { latestExcerpt: latest.excerpt, page: { ...page, sourceStatus: items ? "available" : "unavailable", sourceReachable, sourceArchived,
       nextSendSupplies: Boolean(items) && !sessionHasBlock,
       nextSend: { entries: latest.suppliedEntries, characters: latest.characters, truncated: latest.truncated },
       source: link.source, sourceTitle: link.sourceTitle,

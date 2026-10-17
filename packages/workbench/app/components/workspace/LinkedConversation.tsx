@@ -196,10 +196,14 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
   if (!page) return null;
   const route = page.source.kind === "code" ? `/?run=${encodeURIComponent(page.source.id)}`
     : `/?runtime=native&history=project&thread=${encodeURIComponent(page.source.id)}`;
+  // An archived original opens only after a restore from Archived conversations, as everywhere else, so it gets no link.
+  const original = page.sourceArchived
+    ? <>{page.sourceTitle || "Original conversation"}, which is archived. Restore it from Archived conversations to open it.</>
+    : <><Link to={route} className="underline">{page.sourceTitle || "Original conversation"}</Link>.</>;
   if (page.sourceStatus === "unavailable") return <div className="local-agent-notice text-sm" role="status">
     {/* A reachable original keeps its link: only its frozen history no longer verifies. A missing one is plain text. */}
     {page.sourceReachable
-      ? <p>Linked to <Link to={route} className="underline">{page.sourceTitle || "Original conversation"}</Link>. Its completed
+      ? <p>Linked to {original} Its completed
         history no longer matches what was linked, so sends continue without it.</p>
       : <p>Linked to {page.sourceTitle || "Original conversation"}, which is unavailable. Sends continue without its history.</p>}
     {page.lastAccepted ? <p>Earlier, the last accepted Code send included {page.lastAccepted.entries} linked entries.</p>
@@ -218,7 +222,7 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
   }
   return <div className="local-agent-notice text-sm">
     {/* Router navigation keeps the mounted draft owner alive, so a pending target draft still saves. */}
-    <p>Linked to <Link to={route} className="underline">{page.sourceTitle || "Original conversation"}</Link>.</p>
+    <p>Linked to {original}</p>
     <p>{page.availableEntries} completed-history entries available. {page.nextSendSupplies
       ? page.nextSend.truncated ? `Next send can prepare the latest ${page.nextSend.entries} (truncated).`
         : `Next send can prepare ${page.nextSend.entries}.`

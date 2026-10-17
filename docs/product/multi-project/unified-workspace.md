@@ -154,7 +154,8 @@ Pending approvals stay in the source. Nothing is sent by selection. If saving or
 creation fails, the source remains selected and **Retry link** is available.
 
 The linked-history notice names the original conversation and gives its available
-completed-history count. It distinguishes prepared context from an accepted Code
+completed-history count. An archived Native original has no link. The notice says
+to restore it from Archived conversations, and its history is still supplied. It distinguishes prepared context from an accepted Code
 send. Preparation can precede a refused request. Code acceptance is bound to the
 actual user event after final project and host checks. A Code target that resumes
 its own provider session gets the linked history once, and later sends in that

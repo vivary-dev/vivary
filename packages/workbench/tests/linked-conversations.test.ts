@@ -967,6 +967,19 @@ process.send({type:"vivary:code-worker:ready"});
     const gonePage = (await service.load(actor, project.projectId, fromGone.target))!;
     assert.equal(gonePage.sourceStatus, "unavailable"); assert.equal(gonePage.sourceReachable, false);
   });
+  await t.test("a Native source archived after linking still supplies its history and is reported archived", async () => {
+    const { setThreadArchived } = await import("@agent-native/core/server");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const archived = await createThread(owner, { id: "archived-source", orgId, scope: identity.scope });
+    const messages = [{ parentId: null, message: { id: "archived-answer", role: "assistant", status: { type: "complete" }, content: [{ type: "text", text: "Archived answer" }] } }];
+    await updateThreadData(archived.id, JSON.stringify({ headId: "archived-answer", messages }), "Archived", "", 1);
+    const linked = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: archived.id }, target: { engine: "claude-cli", model: "sonnet" } });
+    assert.equal((await service.load(actor, project.projectId, linked.target))!.sourceArchived, false);
+    assert.equal(await setThreadArchived(archived.id, true, { ownerEmail: owner }), true);
+    const page = (await service.load(actor, project.projectId, linked.target))!;
+    assert.equal(page.sourceStatus, "available"); assert.equal(page.sourceArchived, true);
+    assert.match((await service.context(actor, project.projectId, linked.target))!.block, /Archived answer/);
+  });
   await t.test("a downstream link withholds history once its linked source loses its own link row", async () => {
     const middle = await create({ engine: "native" });
     const downstream = await service.create(actor, { projectId: project.projectId, source: middle.target, target: { engine: "claude-cli", model: "sonnet" } });
