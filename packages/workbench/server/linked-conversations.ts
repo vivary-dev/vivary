@@ -82,12 +82,23 @@ function unavailable(message = "The linked conversation is no longer available i
  * Registry migration 5 creates the link table, and project services skip that migration while unconfigured
  * or before bootstrap finishes. A missing table holds no links, so ordinary conversations never depend on it.
  */
+const isMissingLinkTable = (error: unknown) =>
+  /no such table: vivary_conversation_links\b|relation "vivary_conversation_links" does not exist/.test(String((error as Error)?.message));
 async function linkRows(targetKind: ConversationReference["kind"], targetId: string) {
   try {
     return (await getDbExec().execute({ sql: "SELECT record_json FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?",
       args: [targetKind, targetId] })).rows;
   } catch (error) {
-    if (/no such table: vivary_conversation_links\b|relation "vivary_conversation_links" does not exist/.test(String((error as Error)?.message))) return [];
+    if (isMissingLinkTable(error)) return [];
+    throw error;
+  }
+}
+/** Linking needs the table, so create() refuses before it makes any target when the migration has not run. */
+async function requireLinkTable() {
+  try { await getDbExec().execute("SELECT link_id FROM vivary_conversation_links WHERE 1 = 0"); }
+  catch (error) {
+    if (isMissingLinkTable(error))
+      unavailable("Linking conversations is not available yet. Finish setting up Vivary projects, then retry.");
     throw error;
   }
 }
@@ -240,6 +251,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
 
   async function create(ctx: ActionRunContext | undefined, input: { projectId: string | null; source: ConversationReference; target: TargetChoice }): Promise<LinkedConversationResult> {
     const identity = await scope(ctx, input.projectId);
+    await requireLinkTable();
     const source = await record(input.source, identity);
     if (input.source.kind === "code" && input.target.engine === (source as CodeAgentRunRecord).metadata?.engine)
       fail("Choose a different harness for a linked conversation.", { statusCode: 400 });

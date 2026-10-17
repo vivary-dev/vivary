@@ -280,6 +280,15 @@ process.send({type:"vivary:code-worker:ready"});
         assert.equal(await runWithRequestContext({ userEmail: owner, orgId, run: { chatScope } }, () =>
           service.prepareNativeMessage({ threadId: "unlinked-thread", ownerEmail: owner, message: "Ordinary request" })), undefined);
       assert.equal(await service.load(actor, project.projectId, { kind: "native", id: "unlinked-thread" }), null);
+      // Linking refuses clearly before creating any target, run, thread or draft.
+      const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");
+      const count = async () => [listCodeAgentRunRecords("vivary-local-code").length,
+        Number((await db.execute("SELECT COUNT(*) AS n FROM chat_threads")).rows[0].n),
+        Number((await db.execute("SELECT COUNT(*) AS n FROM application_state WHERE key LIKE 'vivary-chat-draft-v1:%'")).rows[0].n)];
+      const before = await count();
+      for (const target of [{ engine: "native" }, { engine: "codex-cli", model: "fixture-model" }] as const)
+        await assert.rejects(create(target), { errorCode: "vivary_linked_history_unavailable", message: /not available yet/ });
+      assert.deepEqual(await count(), before);
     } finally { await db.execute("ALTER TABLE vivary_conversation_links_withheld RENAME TO vivary_conversation_links"); }
   });
   await t.test("Codex also links to Claude Code and Native without copying either provider session", async () => {
