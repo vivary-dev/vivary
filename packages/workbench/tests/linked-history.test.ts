@@ -224,3 +224,17 @@ test("an ID that could break the quoted framing is malformed history, and the bl
   const block = quotedLinkedHistory({ kind: "code", id: "source" }, crafted, { excerpt: "Answer", suppliedEntries: 1, availableEntries: 1, truncated: false });
   assert.deepEqual(block.split(newline).filter(line => line === "# End quoted history" || line === "# Current request"), ["# End quoted history"]);
 });
+
+test("only the walked Native prefix is validated, so a malformed sibling or newer message leaves a frozen prefix intact", () => {
+  const messages = [
+    { parentId: null, message: { id: "ask", role: "user", content: [{ type: "text", text: "Request" }] } },
+    { parentId: "ask", message: { id: "answer", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Answer" }] } },
+    { parentId: "ask", message: { id: "sibling", role: "assistant", status: { type: "complete" }, content: [null] } },
+    { parentId: "answer", message: { id: "newer", role: "tool", content: "not an array" } },
+  ];
+  const data = JSON.stringify({ headId: "newer", messages });
+  assert.deepEqual(nativeHistoryItems(nativeHistoryPath(data, "answer")).map(item => item.text), ["Request", "Answer"]);
+  // A walk that reaches the malformed message still refuses.
+  assert.throws(() => nativeHistoryPath(data), LinkedSourceChanged);
+  assert.throws(() => nativeHistoryPath(data, "sibling"), LinkedSourceChanged);
+});

@@ -83,14 +83,12 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   try { repo = JSON.parse(threadData); } catch { throw new LinkedSourceChanged("The source conversation is malformed."); }
   if (repo && !Array.isArray(repo) && typeof repo === "object" && Object.keys(repo).length === 0) return [];
   if (!repo || !Array.isArray(repo.messages)) throw new LinkedSourceChanged("The source conversation is unavailable.");
+  // The ID and parent map needs only what the walk uses. Content is checked on the walked path alone, so a malformed
+  // sibling or newer message cannot make an intact frozen prefix unavailable.
   const entries = new Map<string, NativeEntry>();
   for (const entry of repo.messages) {
     const message = entry?.message;
-    if (!message || !isHistoryId(message.id) || !Array.isArray(message.content)
-      || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id)
-      // Every content part and attachment must be an object, so projection never meets null or a bare value.
-      || !message.content.every(isRecord)
-      || (message.attachments !== undefined && (!Array.isArray(message.attachments) || !message.attachments.every(isRecord))))
+    if (!isRecord(message) || !isHistoryId(message.id) || entries.has(message.id))
       throw new LinkedSourceChanged("The source conversation is malformed.");
     entries.set(message.id, entry);
   }
@@ -100,7 +98,12 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
     if (typeof id !== "string" || visited.has(id) || !entries.has(id))
       throw new LinkedSourceChanged("The source conversation path changed.");
     visited.add(id);
-    const entry = entries.get(id)!;
+    const entry = entries.get(id)!, message = entry.message as unknown as Record<string, unknown>;
+    if (!Array.isArray(message.content) || !["user", "assistant", "system"].includes(String(message.role))
+      // Every content part and attachment must be an object, so projection never meets null or a bare value.
+      || !message.content.every(isRecord)
+      || (message.attachments !== undefined && (!Array.isArray(message.attachments) || !message.attachments.every(isRecord))))
+      throw new LinkedSourceChanged("The source conversation is malformed.");
     path.push(entry);
     id = entry.parentId ?? null;
   }
