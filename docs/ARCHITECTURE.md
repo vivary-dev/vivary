@@ -433,6 +433,43 @@ built statically, so the parser runs only at build time. The new version has no
 dependencies and the same Node engine range, and both dependents accept it.
 Nothing the app ships changes, so the design description holds.
 
+2026-10-17 Linux preview socket rows that are not visible yet. The ownership
+check in `server/preview-socket-owner.ts` waited only while the server's row in
+`/proc/net/tcp` showed inode 0. A read of that table is not atomic. On a busy
+host a read can skip a row or list it twice, and a check run before the
+handshake ends finds no established row. Each of those refused the connection at
+once, and the never-accepted test failed after 453 ms inside a full suite. A
+loopback churn check on the server listed a stable row twice in 1 of 127 reads.
+The check now waits while a handshake row or an inode 0 row is visible, and a
+row missing from both tables is refused after five consecutive reads. It treats
+repeated rows that name one socket as one row. Rows that name different sockets
+are refused at once. Inode 0 and a missing row never count as owned, and the
+existing three second deadline still refuses a connection that stays pending.
+Ownership rules and owners are unchanged, so the remote preview description
+holds. Evidence: two tests in `tests/preview-socket-owner.test.ts` feed the
+check a missing row, a handshake row, a repeated row, a row that never appears
+and conflicting rows. PR #233 review found that a torn read crossing the accept
+can list one connection with inode 0 and with its real inode. Inode 0 now means
+not yet accepted, never a second socket, so only two different nonzero inodes
+refuse at once. A further test lists both forms of the row, and the tests no
+longer assume how many reads happen before the server accepts. A later review
+found that a preview that accepts and then closes or resets the connection left
+the check waiting for the full deadline, so every asset request stalled for
+three seconds before its 502. The socket's close now ends verification, and a
+test closes the connection before its row is visible and expects an early
+refusal. A further review found that the check read only `/proc/net/tcp`. Many
+dev servers ignore `HOST` and listen on `::`, so the 127.0.0.1 connection is
+accepted on an IPv6 socket listed only in `/proc/net/tcp6` as
+`::ffff:127.0.0.1`. Those previews now verify through the same inode and
+process group check, because the check reads both tables and matches the
+IPv4-mapped address. Only a handshake row or an inode 0 row, which prove the
+connection exists, keep the check waiting until the deadline. A row missing
+from both tables gets five consecutive reads of grace for a torn read, then
+refuses, and a pending row restarts that grace. Different nonzero inodes across
+the two tables refuse at once. Tests cover a real dual-stack listener, skipped
+on a host without IPv6, a row missing from both tables, misses split by a
+pending row and a conflict across the tables.
+
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
 to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
