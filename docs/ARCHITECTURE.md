@@ -317,6 +317,9 @@ app credentials and upstream cookies, blocks workers and upgrades, and forwards
 only to the established socket verified as belonging to the selected registered
 project launch. Existing process identities, launch ownership and shutdown remain
 the owners. Unknown ownership fails closed, including on unsupported platforms.
+Opening a remote preview checks that the dedicated listener is bound at that
+moment, not only that settings name a port. While it is not, Open issues no ticket
+and returns a readable refusal that the paired browser shows in place of the frame.
 
 One app document is locked to one project, launch and host generation because
 removing an iframe does not reset its credentialless storage partition. Opening a
@@ -430,6 +433,63 @@ to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
 UTC) and on a pull request (2026-10-17 00:18 UTC) with no failing test. The
 limit is now 20 minutes. Only the time limit changes. The job's steps, its
 gate role and every other job stay the same, so the design description holds.
+
+2026-10-16 Linux preview socket ownership before accept. The Linux ownership
+check in `server/preview-socket-owner.ts` finds the preview server's side of the
+established connection in `/proc/net/tcp` and follows its socket inode to a
+process in the launch group. Linux lists a connection that the server has not
+accepted yet with inode 0, so a slow accept made the check refuse a socket the
+launch owned. The gateway then answered 502, and the gateway test failed about
+once in ten runs on `dev` and on this branch. The check now rereads the table
+with a backoff from 10 ms up to 200 ms until the inode appears. Inode 0 never
+counts as owned, and the existing three second connection deadline still
+refuses a connection that is never accepted. Ownership rules and owners are
+unchanged, so the remote preview description holds. Evidence: two tests in
+`tests/preview-socket-owner.test.ts` feed the check unaccepted reads, and the
+gateway test passed in repeated runs.
+
+2026-10-16 Isolated preview refusal text. The remaining Open refusals in
+`server/preview-ingress.mjs` (no gateway installed, a caller that is not the
+paired browser, the preview origin turned off, too many preview documents, a
+different launch in the same app document, and a device grant that ended) were
+plain errors. The action route turned each into "Internal server error" on the
+paired browser. They now use `fail()` with status 403 or 409 and keep their
+existing wording, which names no credential or path. Gateway rules, ticket
+issue and proxying are unchanged, so the remote preview description holds.
+Evidence: a new test in `tests/browser-access.test.mjs` runs each refusal
+through the `vivary-remote-preview` action and checks the error type, status
+and text. PR #231 review found that Open could still end with a plain error when
+the listener dropped, settings changed or the launch ended while the target
+lookup or grant admission was pending. Those late Open checks now use `fail()`
+with status 409, giving the listener message when the listener is the cause and
+"Preview access ended. Open the preview again." otherwise. Request liveness on
+the gateway keeps its plain errors, because those requests answer with the
+gateway's own refusal text. A further test drops the listener or the settings
+during each pending step and checks the readable error and the released grant.
+A later PR #231 review found the same gap inside the launch check itself: the
+production check awaits the workspace lookup, and `live()` rechecked only the
+aborted controller afterward. It now repeats the full listener, settings,
+expiry and controller conditions after that await, so Open issues its ticket
+only after a final gate that follows its last await. A further test changes
+the listener or the settings while the check is pending and checks that no
+ticket is issued and the grant is released.
+
+2026-10-16 Isolated preview listener state. If the preview origin's loopback
+listener failed to bind, the failure was kept only as a desktop settings message.
+Open still checked only the saved configuration, issued a ticket and sent the
+paired browser to a bootstrap URL that nothing answered, which showed as an empty
+white frame. `createBrowserListener` in `server/browser-ingress.mjs` now reports
+whether its own server is listening and forgets a server that later errors or
+closes. `createPreviewGateway` in `server/preview-ingress.mjs` refuses Open
+through `fail()` before resolving the target or admitting a grant while that
+listener is down, and also ends open preview access then. A bare error would
+reach the browser only as "Internal server error", because the action route
+echoes contract errors alone. `RemoteProjectPreview` already shows an Open
+error as an alert and renders no frame. The remote preview paragraph in Data and
+trust boundaries now states this check. Evidence: four new tests in
+`tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
+closed listener, a later server error or close, the action error type, and the
+rendered refusal.
 
 2026-10-16 Workbench build gate. The production build runs `agent-native
 doctor`, which refuses environment reads outside its deploy allowlist. The

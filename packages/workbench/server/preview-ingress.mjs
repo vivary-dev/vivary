@@ -4,6 +4,7 @@ import { Agent, request as httpRequest } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
+import { fail } from '@agent-native/core/action';
 import { currentBrowserIdentity } from './browser-request-context.mjs';
 import { ownedProjectPreview } from './project-preview.ts';
 
@@ -13,13 +14,16 @@ const secret = () => randomBytes(32).toString('base64url');
 const hash = value => createHash('sha256').update(value).digest('hex');
 let installed;
 export function installPreviewGateway(gateway) { installed = gateway; }
+// Refusals use fail() because the action route shows a phone only contract errors below 500.
 export function remotePreviewCommand(input, context) {
-  if (!installed) throw new Error('Remote previews are not configured on this host.');
+  if (!installed) fail('Remote previews are not configured on this host.', { statusCode: 409 });
   const identity = currentBrowserIdentity();
-  if (identity?.kind !== 'remote') throw new Error('Use the paired browser to open an isolated preview.');
+  if (identity?.kind !== 'remote') fail('Use the paired browser to open an isolated preview.', { statusCode: 403 });
   return installed.command(remotePreviewInput.parse(input), context, identity.deviceId);
 }
-export function createPreviewGateway({ access, resolveTarget = ownedProjectPreview, now = Date.now }) {
+// `listening` reports whether the preview origin's loopback listener is bound right now.
+// Saved settings alone cannot tell, because a port conflict leaves them unchanged.
+export function createPreviewGateway({ access, resolveTarget = ownedProjectPreview, now = Date.now, listening = () => true }) {
   const documents = new Map(), tickets = new Map(), leases = new Map();
   let closed = false;
   let queue = Promise.resolve();
@@ -37,39 +41,49 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
     for (const [key, value] of tickets) if (value === record) tickets.delete(key);
     for (const [key, value] of leases) if (value === record) leases.delete(key);
   }
-  async function live(record) {
-    if (closed || record.controller.signal.aborted || !config().enabled || config().preview?.origin !== record.origin
-      || now() >= record.expiresAt) throw new Error('Preview access ended.');
+  const ended = () => { throw new Error('Preview access ended.'); };
+  // Open runs through the action route, which shows a phone only contract errors below 500.
+  const listenerDown = () => fail('Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.',
+    { statusCode: 409, errorCode: 'vivary_preview_listener_unavailable' });
+  const openEnded = () => listening() ? fail('Preview access ended. Open the preview again.', { statusCode: 409 }) : listenerDown();
+  const active = record => !closed && !record.controller.signal.aborted && config().enabled
+    && config().preview?.origin === record.origin && now() < record.expiresAt && listening();
+  // Check again after the launch check, because the listener or settings can change while it awaits.
+  // Open issues its ticket only after this gate, so it is the final check before the ticket.
+  async function live(record, end = ended) {
+    if (!active(record)) end();
     await record.target.check();
-    if (record.controller.signal.aborted) throw new Error('Preview access ended.');
+    if (!active(record)) end();
   }
   async function command(input, context, deviceId) {
     const key = `${deviceId}:${input.documentId}`;
     const previous = documents.get(key);
     if (input.operation === 'close') { if (previous) retire(previous); return { closed: true }; }
-    if (closed || !config().enabled || !config().preview) throw new Error('Enable the separate preview origin in desktop Browser access settings.');
-    if (documents.size >= 128 && !previous) throw new Error('Too many preview documents. Restart browser access from the desktop.');
+    if (closed || !config().enabled || !config().preview) fail('Enable the separate preview origin in desktop Browser access settings.', { statusCode: 409 });
+    // Refuse before any ticket. Otherwise the remote frame loads a bootstrap URL that nothing answers.
+    if (!listening()) listenerDown();
+    if (documents.size >= 128 && !previous) fail('Too many preview documents. Restart browser access from the desktop.', { statusCode: 409 });
     const target = await resolveTarget(context, input.projectId, input.launchId);
     const binding = `${input.projectId}:${input.launchId}:${target.generation}`;
-    if (previous && previous.binding !== binding) throw new Error('Save your work and refresh Vivary before opening a different preview.');
+    if (previous && previous.binding !== binding) fail('Save your work and refresh Vivary before opening a different preview.', { statusCode: 409 });
     // Keep the identity lock after close. Only a new app document may select another identity.
     if (previous) retire(previous);
     const controller = new AbortController();
     const grant = await access.admitPreviewGrant(deviceId, controller);
-    if (!grant) throw new Error('Browser access ended.');
+    if (!grant) fail('Browser access ended.', { statusCode: 409 });
     let record;
     try {
       const settings = config();
-      if (closed || controller.signal.aborted || !settings.enabled || !settings.preview) throw new Error('Preview access ended.');
+      if (closed || controller.signal.aborted || !settings.enabled || !settings.preview) openEnded();
       record = { binding, origin: settings.preview.origin, target, controller, release: grant.release, expiresAt: now() + 5 * 60_000 };
       record.abort = () => retire(record);
       documents.set(key, record);
       target.signal.addEventListener('abort', record.abort, { once: true });
       controller.signal.addEventListener('abort', record.abort, { once: true });
-      if (target.signal.aborted) throw new Error('Preview access ended.');
+      if (target.signal.aborted) openEnded();
       record.timer = setTimeout(record.abort, 5 * 60_000); record.timer.unref();
       record.watch = setInterval(() => { void live(record).catch(record.abort); }, 1000); record.watch.unref();
-      await live(record);
+      await live(record, openEnded);
       const ticket = secret(); tickets.set(hash(ticket), record);
       record.ticketExpires = now() + 30_000;
       return { ticket, origin: record.origin, generation: target.generation };

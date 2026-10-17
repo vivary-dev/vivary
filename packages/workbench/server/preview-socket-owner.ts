@@ -1,10 +1,12 @@
 import type { ChildProcess } from 'node:child_process';
 import { readFile, readdir, readlink } from 'node:fs/promises';
 import { createConnection, type Socket } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readLinuxProcStat, scanLinuxWorkerGroup, scanWindowsProcesses, windowsTcpOwner } from './code-execution-host';
 
 type ProcessIdentity = { pid: number; start: number; platform: 'linux' | 'win32' };
 const refused = () => new Error('Preview socket ownership could not be established.');
+const readLinuxTcpTable = () => readFile('/proc/net/tcp', 'utf8');
 export async function capturePreviewProcess(child: ChildProcess): Promise<ProcessIdentity | null> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return null;
   try {
@@ -20,17 +22,24 @@ export async function capturePreviewProcess(child: ChildProcess): Promise<Proces
   } catch { /* Unknown ownership remains unavailable to remote previews. */ }
   return null;
 }
-async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: AbortSignal) {
+async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: AbortSignal, readTcpTable: () => Promise<string>) {
   signal.throwIfAborted();
   const root = readLinuxProcStat(await readFile(`/proc/${identity.pid}/stat`, 'utf8'));
   if (root.start !== identity.start || root.processGroup !== identity.pid) throw refused();
   const endpoint = (port: number) => `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`;
   const localPort = socket.localPort, remotePort = socket.remotePort;
   if (!localPort || !remotePort) throw refused();
-  const rows = (await readFile('/proc/net/tcp', 'utf8')).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
-  const matches = rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort) && row[3] === '01');
-  const inode = matches.length === 1 ? matches[0]?.[9] : undefined;
-  if (!inode || inode === '0' || !/^\d+$/.test(inode)) throw refused();
+  let inode: string | undefined;
+  // A connection still in the server's accept queue is listed with inode 0, which proves no owner.
+  // Wait with a bounded backoff until the server accepts it. The caller's deadline aborts `signal`.
+  for (let wait = 10; ; wait = Math.min(wait * 2, 200)) {
+    const rows = (await readTcpTable()).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
+    const matches = rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort) && row[3] === '01');
+    inode = matches.length === 1 ? matches[0]?.[9] : undefined;
+    if (inode !== '0') break;
+    await delay(wait, undefined, { signal });
+  }
+  if (!inode || !/^\d+$/.test(inode)) throw refused();
   signal.throwIfAborted();
   const group = await scanLinuxWorkerGroup(identity.pid, undefined, signal);
   if (group.hidden) throw refused();
@@ -79,8 +88,8 @@ export async function verifyWindowsPreviewPeer(socket: Pick<Socket, 'localPort' 
 }
 
 // No HTTP bytes leave this socket until its established peer belongs to this live launch.
-export async function connectOwnedPreview({ port, identity, signal }: {
-  port: number; identity: ProcessIdentity; signal: AbortSignal;
+export async function connectOwnedPreview({ port, identity, signal, readTcpTable = readLinuxTcpTable }: {
+  port: number; identity: ProcessIdentity; signal: AbortSignal; readTcpTable?: () => Promise<string>;
 }): Promise<Socket> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || signal.aborted) throw refused();
   const deadline = new AbortController();
@@ -95,7 +104,7 @@ export async function connectOwnedPreview({ port, identity, signal }: {
       socket.once('connect', resolve); socket.once('error', reject);
       socket.once('close', () => reject(refused()));
     });
-    if (identity.platform === 'linux') await readWhileActive(verificationSignal, () => verifyLinux(socket, identity, verificationSignal));
+    if (identity.platform === 'linux') await readWhileActive(verificationSignal, () => verifyLinux(socket, identity, verificationSignal, readTcpTable));
     else await verifyWindowsPreviewPeer(socket, identity, verificationSignal);
     if (signal.aborted || socket.destroyed) throw refused();
     return socket;
