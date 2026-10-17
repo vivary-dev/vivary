@@ -39,12 +39,13 @@ test("linked conversations use Native records and immutable authorized completed
   for (const folder of personalRoots) await mkdir(folder);
   let personal = { root: personalRoots[0], label: "personal-a" };
   const { createLinkedConversationService } = await import("../server/linked-conversations.ts");
-  const service = createLinkedConversationService({ member: isOrgMember,
+  const dependencies: Parameters<typeof createLinkedConversationService>[0] = { member: isOrgMember,
     history: async (_ctx, projectId) => {
       if (revoked || (projectId && projectId !== project.projectId)) throw Object.assign(new Error("Current project grant refused"), { statusCode: 403 });
       return projectId ? project : undefined;
     }, workspace: async (_ctx, projectId) => projectId ? { root, ...project } : personal,
-    targetModel: async choice => { if (discoveryFailure) throw new Error("Discovery unavailable"); return choice.model; } });
+    targetModel: async choice => { if (discoveryFailure) throw new Error("Discovery unavailable"); return choice.model; } };
+  const service = createLinkedConversationService(dependencies);
   const { createCodeAgentRunRecord, appendCodeAgentTranscriptEvent, getCodeAgentRunRecord, listCodeAgentTranscriptEvents,
     codeAgentRunTranscriptPath, updateCodeAgentRunRecord } = await import("@agent-native/core/code-agents");
   const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
@@ -492,9 +493,12 @@ process.send({type:"vivary:code-worker:ready"});
     await writeFile(copy, await readFile(transcript)); await rename(transcript, transcript + ".kept");
     try {
       await symlink(copy, transcript);
-      const page = (await service.load(actor, project.projectId, codeTarget.target))!;
-      assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.excerpt, "");
-      assert.deepEqual(await service.context(actor, project.projectId, codeTarget.target), { block: null, portion: null });
+      // Windows has no O_NOFOLLOW, so the open follows the link there. The same service with no such flag must still refuse it.
+      for (const reader of [service, createLinkedConversationService({ ...dependencies!, noFollowFlag: 0 })]) {
+        const page = (await reader.load(actor, project.projectId, codeTarget.target))!;
+        assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.excerpt, "");
+        assert.deepEqual(await reader.context(actor, project.projectId, codeTarget.target), { block: null, portion: null });
+      }
     } finally { await rm(transcript, { force: true }); await rename(transcript + ".kept", transcript); await rm(copy); }
     assert.equal((await service.load(actor, project.projectId, codeTarget.target))!.sourceStatus, "available");
   });

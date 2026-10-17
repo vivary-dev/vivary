@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { open, rm } from "node:fs/promises";
+import { lstat, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { constants } from "node:fs";
 import { fail, type ActionRunContext } from "@agent-native/core/action";
@@ -53,6 +53,8 @@ type Dependencies = {
   workspace: (ctx: ActionRunContext | undefined, projectId: string | undefined) => Promise<VivaryCodeWorkspace | undefined>;
   /** Discovery only. Selection must never start a worker or send a message. */
   targetModel: (choice: Exclude<TargetChoice, { engine: "native" }>, workspace: VivaryCodeWorkspace) => Promise<string>;
+  /** The no-follow open flag. Windows has none, which tests simulate with 0. */
+  noFollowFlag?: number;
 };
 /** The default target model discovery. Runtime and Codex catalog readers are injectable for tests. */
 export async function linkedTargetModel(choice: Exclude<TargetChoice, { engine: "native" }>, workspace: VivaryCodeWorkspace,
@@ -132,8 +134,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       let text = "";
       let file;
       try {
-        file = await open(codeAgentRunTranscriptPath(ref.id), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-        const stat = await file.stat();
+        const transcript = codeAgentRunTranscriptPath(ref.id);
+        file = await open(transcript, constants.O_RDONLY | (dependencies.noFollowFlag ?? constants.O_NOFOLLOW ?? 0));
+        // Windows has no O_NOFOLLOW, so the opened file must be the path's own regular file, as in original-runtime.ts.
+        const [stat, named] = await Promise.all([file.stat(), lstat(transcript)]);
+        if (!named.isFile() || stat.ino !== named.ino || stat.dev !== named.dev)
+          unavailable("The source transcript is not a safe regular file.");
         const bytes = boundaryBytes ?? stat.size;
         if (!stat.isFile() || stat.nlink !== 1 || bytes > LINK_HISTORY_BYTES || stat.size < bytes)
           unavailable("The source history exceeds the safe 8 MiB linking limit or is unavailable.");

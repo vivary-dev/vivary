@@ -7487,8 +7487,11 @@ currently configured personal workspace root, the same scope `isOwnedRun`
 applies, so a changed personal workspace setting withholds the old root's history. A replaced binding or an invalid target link record
 fails closed. A source that is deleted, revoked or no longer matches its frozen
 prefix is reported as unavailable instead. The service opens a retained Code
-transcript without following links, so a transcript replaced by a symbolic link
-or otherwise no longer a safe regular file also counts as unavailable. The target stays usable, its sends
+transcript without following links where the platform has `O_NOFOLLOW`, and on
+every platform it compares the opened file with an `lstat` of the path, as
+`original-runtime.ts` does for Windows, which has no such flag. A transcript
+replaced by a symbolic link or otherwise no longer a safe regular file
+therefore counts as unavailable. The target stays usable, its sends
 proceed without linked history, and nothing records a prepared or accepted
 portion for them. A Code boundary is the executor's turn completion event
 (status completed, phase complete). Codex subagent and agent-operation status
