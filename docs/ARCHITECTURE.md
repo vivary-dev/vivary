@@ -196,7 +196,10 @@ transcript without following links where the platform has `O_NOFOLLOW`, and on
 every platform it compares the opened file with an `lstat` of the path, as
 `original-runtime.ts` does for Windows, which has no such flag. A transcript
 replaced by a symbolic link or otherwise no longer a safe regular file
-therefore counts as unavailable. The target stays usable, its sends
+therefore counts as unavailable. Only a linked Code target that has never sent
+(phase `linked-inactive`) has no transcript by design. Any other missing Code
+transcript was deleted, so new linking refuses it rather than linking an empty
+history. The target stays usable, its sends
 proceed without linked history, and nothing records a prepared or accepted
 portion for them. A Code boundary is the executor's turn completion event
 (status completed, phase complete). Codex subagent and agent-operation status

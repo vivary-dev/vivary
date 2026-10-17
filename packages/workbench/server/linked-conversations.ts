@@ -175,7 +175,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
         if (code === "ELOOP" || code === "ENOTDIR" || code === "EACCES" || code === "EPERM")
           unavailable("The source transcript is not a safe regular file.");
         if (code !== "ENOENT") throw error;
-        if (boundaryId) unavailable("The source transcript is missing.");
+        // Only a linked Code target that has never sent has no transcript by design. Any other missing transcript
+        // was deleted, so neither a new link nor a retained read may treat it as empty history.
+        if (boundaryId || (source as CodeAgentRunRecord).phase !== "linked-inactive")
+          unavailable("The source transcript is missing.");
       } finally { await file?.close(); }
       const events = codeHistoryRecords(text, ref.id);
       const end = boundaryId === undefined ? codeCompletedPrefix(events)

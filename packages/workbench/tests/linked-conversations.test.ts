@@ -690,6 +690,17 @@ process.send({type:"vivary:code-worker:ready"});
     const page = await service.load(actor, project.projectId, linked.target);
     assert.equal(page!.boundaryId, null); assert.equal(page!.availableEntries, 0); assert.equal(page!.excerpt, "");
   });
+  await t.test("new linking refuses a Code source whose transcript was deleted, but not an inactive target that never sent", async () => {
+    const deleted = code("transcript-deleted");
+    appendCodeAgentTranscriptEvent({ runId: deleted.id, kind: "system", message: "Gone answer", metadata: { role: "assistant" } });
+    appendCodeAgentTranscriptEvent({ runId: deleted.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
+    await rm(codeAgentRunTranscriptPath(deleted.id));
+    await assert.rejects(create({ engine: "native" }, { kind: "code", id: deleted.id }), { errorCode: "vivary_linked_history_unavailable" });
+    // A linked Code target that has not sent yet has no transcript by design, so linking onward links an empty prefix.
+    const inactive = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });
+    const onward = await create({ engine: "native" }, inactive.target);
+    assert.equal((await service.load(actor, project.projectId, onward.target))!.boundaryId, null);
+  });
   await t.test("a live Native persistence chunk is excluded despite a complete-looking assistant snapshot", async () => {
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
     await createThread(owner, { id: "saving-source", orgId, scope: identity.scope });
