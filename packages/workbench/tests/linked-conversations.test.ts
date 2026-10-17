@@ -193,7 +193,8 @@ process.send({type:"vivary:code-worker:ready"});
       const receipt = (await service.load(actor, project.projectId, linked.target))!.lastAccepted;
       const users = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
       assert.equal(users.length, 1); assert.equal(receipt!.userEventId, users[0].id);
-      assert.equal(receipt!.entries, 3); assert.equal(receipt!.characters, expectedPage.excerpt.length); assert.equal(users[0].message, "Explicit request");
+      assert.equal(receipt!.entries, 3); // The receipt records the send block as encoded. It is the latest entries, not the first inspection page.
+      assert.equal(receipt!.characters, expectedPage.nextSend.characters); assert.equal(users[0].message, "Explicit request");
       await rm(path.join(root, "linked-started.json"));
       // The final project check must refuse after linked history was prepared, not the first check before it.
       // The first revalidation passes and the second, after preparation, sees the changed binding revision.

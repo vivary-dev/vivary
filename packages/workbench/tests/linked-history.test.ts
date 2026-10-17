@@ -165,7 +165,7 @@ test("the send block keeps the latest entries, and keeps the end of a boundary e
   assert.equal(huge.excerpt.endsWith("THE LATEST WORDS"), true);
   assert.equal(huge.excerpt.includes("[Earlier text of this entry is omitted."), true);
   assert.deepEqual(historyLatest(items.slice(0, 3)), { excerpt: "User [entry-0]: text 0" + String.fromCharCode(10, 10) + "User [entry-1]: text 1"
-    + String.fromCharCode(10, 10) + "User [entry-2]: text 2", suppliedEntries: 3, truncated: false });
+    + String.fromCharCode(10, 10) + "User [entry-2]: text 2", characters: 74, suppliedEntries: 3, truncated: false });
 });
 
 test("an oversized event ID cannot push an entry past the block budget", () => {
@@ -177,4 +177,18 @@ test("an oversized event ID cannot push an entry past the block budget", () => {
   // Transcript parsing refuses such an ID, so it never reaches a block.
   const record = JSON.stringify(event("x".repeat(300), "user", "Request"));
   assert.throws(() => codeHistoryRecords(record + String.fromCharCode(10), "source"), /event ID/);
+});
+
+test("the send block's limit counts JSON escaping, so the encoded block and its reported size stay within 12,000", () => {
+  const control = String.fromCharCode(1), quote = String.fromCharCode(34);
+  // Each control character encodes as six characters and each quote as two, inside the block's JSON string.
+  for (const items of [[{ id: "escaped", role: "Assistant", text: control.repeat(5_000) }],
+    Array.from({ length: 50 }, (_, index) => ({ id: "quoted-" + index, role: "User", text: quote.repeat(200) }))]) {
+    const latest = historyLatest(items);
+    const encoded = JSON.stringify(latest.excerpt).length - 2;
+    assert.equal(encoded <= 12_000, true, `encoded block is ${encoded} characters`);
+    assert.equal(latest.characters, encoded);
+    const block = quotedLinkedHistory({ kind: "code", id: "source" }, "boundary", { ...latest, availableEntries: items.length });
+    assert.equal(block.split(String.fromCharCode(10)).some(line => line.length > 12_002), false);
+  }
 });

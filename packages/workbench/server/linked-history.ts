@@ -202,29 +202,45 @@ export function historyExcerpt(items: HistoryItem[], binding: string, cursor?: s
 
 const EARLIER_TEXT_OMITTED = "[Earlier text of this entry is omitted. The original conversation has the full text.] ";
 
+/** Length of text as it appears inside the block's JSON string, where quotes and control characters expand. */
+const encodedLength = (text: string) => JSON.stringify(text).length - 2;
+/** The longest piece of whole (from the start or the end, by from) whose encoded length fits within limit. */
+function fitEncoded(whole: string, limit: number, from: "start" | "end"): string {
+  let low = 0, high = whole.length;
+  const piece = (count: number) => from === "start" ? whole.slice(0, count) : whole.slice(whole.length - count);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (encodedLength(piece(middle)) <= limit) low = middle; else high = middle - 1;
+  }
+  return piece(low);
+}
+
 /**
  * The send block: the latest entries that fit, ending at the boundary, in conversation order. A send continues
  * the most recent work, so earlier entries are the ones left out. Inspection pages still start from the oldest entry.
+ * The budget counts each entry as the block encodes it (JSON escaping included), so the block and characters agree.
  */
 export function historyLatest(items: HistoryItem[]) {
   const parts: string[] = [];
+  // The entry separator "\n\n" encodes to four characters.
   let used = 0, start = items.length, omittedText = false;
   while (start > 0 && items.length - start < 100 && used < LINK_EXCERPT_CHARS) {
     const item = items[start - 1], remaining = LINK_EXCERPT_CHARS - used, label = `${item.role} [${item.id}]: `;
     let rendered = label + item.text;
-    if (rendered.length > remaining) {
+    if (encodedLength(rendered) > remaining) {
       if (parts.length) break;
       // Only the boundary entry itself can exceed a whole block. Its latest text is kept, and it says so.
       omittedText = true;
-      const room = remaining - label.length - EARLIER_TEXT_OMITTED.length;
+      const prefix = label + EARLIER_TEXT_OMITTED, room = remaining - encodedLength(prefix);
       // The whole rendered entry, label included, stays within the block.
-      rendered = room > 0 ? label + EARLIER_TEXT_OMITTED + item.text.slice(item.text.length - room) : rendered.slice(0, remaining);
+      rendered = room > 0 ? prefix + fitEncoded(item.text, room, "end") : fitEncoded(rendered, remaining, "start");
     }
     parts.unshift(rendered);
-    used += rendered.length + 2;
+    used += encodedLength(rendered) + 4;
     start--;
   }
-  return { excerpt: parts.join("\n\n"), suppliedEntries: items.length - start, truncated: omittedText || start > 0 };
+  const excerpt = parts.join("\n\n");
+  return { excerpt, characters: encodedLength(excerpt), suppliedEntries: items.length - start, truncated: omittedText || start > 0 };
 }
 
 export function quotedLinkedHistory(source: { kind: string; id: string }, boundaryId: string | null,

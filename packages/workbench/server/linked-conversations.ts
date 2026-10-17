@@ -289,7 +289,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const redacted = (items ?? []).map(item => ({ ...item, text: redactCredentialsInValue(item.text) }));
     const page = items ? historyExcerpt(redacted, historyDigest([link.id, link.source, link.boundaryId, link.boundaryDigest]), cursor)
       : { excerpt: "", suppliedEntries: 0, truncated: false, nextCursor: null };
-    const latest = items ? historyLatest(redacted) : { excerpt: "", suppliedEntries: 0, truncated: false };
+    const latest = items ? historyLatest(redacted) : { excerpt: "", characters: 0, suppliedEntries: 0, truncated: false };
     const accepted = target.kind === "code" ? listCodeAgentTranscriptEvents(target.id).findLast(event => {
       const parsed = acceptedPortionSchema.safeParse(event.metadata?.linkedHistory);
       return event.kind === "user" && parsed.success && parsed.data.linkId === link.id && parsed.data.boundaryDigest === link.boundaryDigest;
@@ -304,7 +304,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       && providerSessionId(run, engine) !== null);
     return { latestExcerpt: latest.excerpt, page: { ...page, sourceStatus: items ? "available" : "unavailable",
       nextSendSupplies: Boolean(items) && !sessionHasBlock,
-      nextSend: { entries: latest.suppliedEntries, characters: latest.excerpt.length, truncated: latest.truncated },
+      nextSend: { entries: latest.suppliedEntries, characters: latest.characters, truncated: latest.truncated },
       source: link.source, sourceTitle: link.sourceTitle,
       boundaryId: link.boundaryId, availableEntries: redacted.length, nativeContinuity: false, lastPrepared: link.lastPrepared,
       lastAccepted: acceptedPortion && accepted ? { entries: acceptedPortion.entries, characters: acceptedPortion.characters,

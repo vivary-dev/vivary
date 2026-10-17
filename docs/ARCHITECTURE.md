@@ -252,8 +252,9 @@ An explicit send receives at most 12,000 characters from 100 recorded entries as
 quoted historical data. The send block holds the latest entries that fit, ending
 at the boundary, because a send continues the most recent work. When it omits
 earlier entries it says so, and a boundary entry longer than the whole block keeps
-its latest text behind an omission notice. Every rendered entry, its label
-included, stays within the block, and a transcript event or Native message ID
+its latest text behind an omission notice. The limit counts the block as it is
+encoded, JSON escaping included, so the prompt block and the reported characters
+agree. Every rendered entry, its label included, stays within the block, and a transcript event or Native message ID
 longer than 256 characters makes the source unavailable as malformed history.
 Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
