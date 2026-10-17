@@ -102,7 +102,9 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
     if (!Array.isArray(message.content) || !["user", "assistant", "system"].includes(String(message.role))
       // Every content part and attachment must be an object, so projection never meets null or a bare value.
       || !message.content.every(isRecord)
-      || (message.attachments !== undefined && (!Array.isArray(message.attachments) || !message.attachments.every(isRecord))))
+      || (message.attachments !== undefined && (!Array.isArray(message.attachments) || !message.attachments.every(isRecord)))
+      // A present status or metadata is read as an object, so it must be one.
+      || (message.status !== undefined && !isRecord(message.status)) || (message.metadata !== undefined && !isRecord(message.metadata)))
       throw new LinkedSourceChanged("The source conversation is malformed.");
     path.push(entry);
     id = entry.parentId ?? null;

@@ -277,7 +277,8 @@ transcript event or Native message ID must be a short generated identifier
 such as one with a line break that could escape the quoted framing, makes the
 source unavailable as malformed history. The block also JSON-encodes every ID it
 renders, so the framing holds even if that rule changes. The source is also
-unavailable when a Native content part or attachment on the walked prefix is not
+unavailable when a Native status or metadata on the walked prefix is present but
+not an object, when a Native content part or attachment on the walked prefix is not
 an object (a malformed sibling or newer message cannot break a frozen link), when a
 transcript line is valid JSON but not an event object, or when a transcript
 repeats an event ID, so the boundary byte length and the prefix

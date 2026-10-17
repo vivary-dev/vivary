@@ -238,3 +238,11 @@ test("only the walked Native prefix is validated, so a malformed sibling or newe
   assert.throws(() => nativeHistoryPath(data), LinkedSourceChanged);
   assert.throws(() => nativeHistoryPath(data, "sibling"), LinkedSourceChanged);
 });
+
+test("a Native message whose status is present but not an object is malformed history, never a TypeError", () => {
+  for (const status of [null, "complete", ["complete"]]) {
+    const data = JSON.stringify({ headId: "answer", messages: [{ parentId: null,
+      message: { id: "answer", role: "assistant", status, content: [{ type: "text", text: "Answer" }] } }] });
+    assert.throws(() => nativeHistoryItems(nativeHistoryPath(data)), LinkedSourceChanged, JSON.stringify(status));
+  }
+});
