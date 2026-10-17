@@ -106,13 +106,15 @@ test("a draft save failure prevents creation and keeps the original selected", a
 
 const noticePage = () => ({ source: { kind: "native", id: "original" }, sourceTitle: "Original history", sourceStatus: "available", nextSendSupplies: true,
   boundaryId: "opaque-completed-message", availableEntries: 211, suppliedEntries: 100, excerpt: "Quoted history",
-  truncated: true, nextCursor: null, nativeContinuity: false,
+  truncated: true, nextCursor: null, nativeContinuity: false, nextSend: { entries: 100, characters: 11_900, truncated: true },
   lastPrepared: { entries: 100, characters: 12_000, truncated: true }, lastAccepted: null });
 const notify = () => act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 test("collapsed history is readable and expanded inspection distinguishes preparation, acceptance and continuity", async () => {
   linkFixture.call = async () => noticePage();
   await render("notice"); await settle(); await notify();
   assert.match(host.textContent, /211 completed-history entries available/);
+  // The send block is the latest entries, so the notice says which part a send supplies.
+  assert.match(host.textContent, /Next send can prepare the latest 100 \(truncated\)/);
   assert.match(host.textContent, /Last request prepared: 100 entries/);
   assert.match(host.textContent, /No accepted Code send recorded|Separate harness session/);
   assert.match(host.textContent, /truncated/);

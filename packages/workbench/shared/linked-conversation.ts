@@ -14,6 +14,8 @@ export type LinkedHistoryPage = {
   sourceStatus: "available" | "unavailable";
   /** False when the source is unavailable or the target's resumed provider session already holds the block. */
   nextSendSupplies: boolean;
+  /** What the next send's block holds: the latest entries that fit, ending at the boundary. */
+  nextSend: LinkedHistoryPortion;
   boundaryId: string | null;
   availableEntries: number;
   suppliedEntries: number;

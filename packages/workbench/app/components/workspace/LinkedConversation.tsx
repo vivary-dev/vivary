@@ -165,7 +165,8 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
     {/* Router navigation keeps the mounted draft owner alive, so a pending target draft still saves. */}
     <p>Linked to <Link to={route} className="underline">{page.sourceTitle || "Original conversation"}</Link>.</p>
     <p>{page.availableEntries} completed-history entries available. {page.nextSendSupplies
-      ? `Next send can prepare ${page.suppliedEntries}${page.truncated ? " (truncated)" : ""}.`
+      ? page.nextSend.truncated ? `Next send can prepare the latest ${page.nextSend.entries} (truncated).`
+        : `Next send can prepare ${page.nextSend.entries}.`
       : "An accepted send already supplied it to this session, so later sends do not repeat it."}</p>
     <p>{page.lastAccepted ? `Last accepted Code send: ${page.lastAccepted.entries} entries.`
       : page.lastPrepared ? `Last request prepared: ${page.lastPrepared.entries} entries.${target.kind === "code" ? " No accepted Code send recorded." : " Delivery not observed."}`
@@ -173,13 +174,15 @@ export function LinkedHistoryNotice({ projectId, target }: { projectId: string |
     <Button size="sm" variant="ghost" onClick={() => setExpanded(value => !value)}>{expanded ? "Hide history excerpt" : "Inspect linked history"}</Button>
     {expanded && <>
       <p>Completed boundary: {page.boundaryId ?? "no completed portion"}. Later source messages are excluded.</p>
-      <p>Next excerpt: {page.excerpt.length} characters. Runtime bookkeeping and private reasoning are excluded.
+      <p>Next send: {page.nextSend.characters} characters from the latest {page.nextSend.entries} entries, ending at the boundary.
+        Runtime bookkeeping and private reasoning are excluded.
         {page.lastPrepared ? ` Last prepared: ${page.lastPrepared.entries} entries, ${page.lastPrepared.characters} characters${page.lastPrepared.truncated ? ", truncated" : ""}.` : ""}
         {page.lastAccepted ? ` Accepted user event: ${page.lastAccepted.userEventId}, ${page.lastAccepted.characters} characters${page.lastAccepted.truncated ? ", truncated" : ""}.` : ""}
         Preparation and Code acceptance do not confirm provider ingestion.</p>
       <p>Source-to-target native session continuity: none. This conversation uses its own harness session. The source provider session is not transferred.</p>
       <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-xs">{shown.map(part => part.excerpt).join("\n\n") || "No completed source portion is available."}</pre>
-      {page.truncated && <p>Only the stated excerpt is prepared for a send. Inspect the original for omitted or oversized text.</p>}
+      {page.nextSend.truncated && <p>A send supplies only the latest entries that fit. The pages below start from the oldest
+        entry. Inspect the original for omitted or oversized text.</p>}
       {cursor && <Button size="sm" variant="outline" disabled={paging} onClick={() => void more()}>{paging ? "Loading…" : pagingError ? "Retry page" : "More recorded history"}</Button>}
       {pagingError && <p role="alert">The next source page could not be verified. Previously read pages are retained.</p>}</>}
   </div>;

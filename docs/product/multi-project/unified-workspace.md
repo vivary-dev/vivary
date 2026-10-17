@@ -162,8 +162,8 @@ lifecycle. Expanded inspection shows the exact completed boundary, excerpt size
 and detailed session identity explanation.
 Source-to-target native session continuity is absent. Each target retains its own
 normal harness session. Code session Details continues to report that target's
-recorded continuity. The initial excerpt is at most 100 entries and 12,000
-characters. **Inspect linked history** and **More recorded history** page through
+recorded continuity. A send's excerpt is at most 100 entries and 12,000
+characters, taken from the latest entries that end at the boundary. **Inspect linked history** and **More recorded history** page through
 the same frozen source boundary, rechecking current authority on every read.
 Later source work is excluded. Actual recorded tool results and artifact labels
 and references are quoted as history, never replayed as tool calls. Runtime

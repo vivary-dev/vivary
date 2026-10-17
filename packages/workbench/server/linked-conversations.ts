@@ -19,7 +19,7 @@ import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
 import { claudeCodeModelChoices } from "../shared/claude-models";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction";
-import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
+import { codeBoundaryBytes, codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt, historyLatest,
   isCompletedNativeMessage, LINK_HISTORY_BYTES, LINK_RETAINED_PARSE_BYTES, LinkedSourceChanged, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "./linked-history";
 import { LINKED_TARGET_SOURCE_URL, type ConversationReference, type LinkedConversationResult, type LinkedHistoryPage,
   type PreparedLinkedContext } from "../shared/linked-conversation";
@@ -216,6 +216,11 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   }
 
   async function load(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference, cursor?: string): Promise<LinkedHistoryPage | null> {
+    return (await loadWithLatest(ctx, projectId, target, cursor))?.page ?? null;
+  }
+  /** The inspection page from the cursor, plus the send block's latest-entries excerpt. */
+  async function loadWithLatest(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference,
+    cursor?: string): Promise<{ page: LinkedHistoryPage; latestExcerpt: string } | null> {
     // An unlinked conversation needs only a verified owner. Project history, which an unavailable folder refuses,
     // is resolved only for a conversation that has a link row.
     await verifiedOwner(ctx);
@@ -248,6 +253,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const redacted = (items ?? []).map(item => ({ ...item, text: redactCredentialsInValue(item.text) }));
     const page = items ? historyExcerpt(redacted, historyDigest([link.id, link.source, link.boundaryId, link.boundaryDigest]), cursor)
       : { excerpt: "", suppliedEntries: 0, truncated: false, nextCursor: null };
+    const latest = items ? historyLatest(redacted) : { excerpt: "", suppliedEntries: 0, truncated: false };
     const accepted = target.kind === "code" ? listCodeAgentTranscriptEvents(target.id).findLast(event => {
       const parsed = acceptedPortionSchema.safeParse(event.metadata?.linkedHistory);
       return event.kind === "user" && parsed.success && parsed.data.linkId === link.id && parsed.data.boundaryDigest === link.boundaryDigest;
@@ -260,11 +266,13 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const engine = run?.metadata?.engine;
     const sessionHasBlock = Boolean(run && acceptedPortion && (engine === "claude-cli" || engine === "codex-cli")
       && providerSessionId(run, engine) !== null);
-    return { ...page, sourceStatus: items ? "available" : "unavailable", nextSendSupplies: Boolean(items) && !sessionHasBlock,
+    return { latestExcerpt: latest.excerpt, page: { ...page, sourceStatus: items ? "available" : "unavailable",
+      nextSendSupplies: Boolean(items) && !sessionHasBlock,
+      nextSend: { entries: latest.suppliedEntries, characters: latest.excerpt.length, truncated: latest.truncated },
       source: link.source, sourceTitle: link.sourceTitle,
       boundaryId: link.boundaryId, availableEntries: redacted.length, nativeContinuity: false, lastPrepared: link.lastPrepared,
       lastAccepted: acceptedPortion && accepted ? { entries: acceptedPortion.entries, characters: acceptedPortion.characters,
-        truncated: acceptedPortion.truncated, userEventId: accepted.id } : null };
+        truncated: acceptedPortion.truncated, userEventId: accepted.id } : null } };
   }
 
   async function create(ctx: ActionRunContext | undefined, input: { projectId: string | null; source: ConversationReference; target: TargetChoice }): Promise<LinkedConversationResult> {
@@ -341,17 +349,20 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   }
 
   async function context(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference): Promise<PreparedLinkedContext | null> {
-    const page = await load(ctx, projectId, target);
-    if (!page) return null;
+    const loaded = await loadWithLatest(ctx, projectId, target);
+    if (!loaded) return null;
+    const { page, latestExcerpt } = loaded;
     // An unavailable source, or a session that already holds the block, supplies nothing, so nothing is recorded as prepared.
     if (!page.nextSendSupplies) return { block: null, portion: null };
     // Preparation is not acceptance or observed provider delivery. The Code send records acceptance on its actual user event after final admission.
     const rows = await linkRows(target.kind, target.id);
     const link = linkSchema.parse(JSON.parse(String(rows[0]?.record_json)));
-    link.lastPrepared = { entries: page.suppliedEntries, characters: page.excerpt.length, truncated: page.truncated };
+    // The send block is the latest entries ending at the boundary, not the first inspection page.
+    link.lastPrepared = page.nextSend;
     await getDbExec().execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE link_id = ? AND record_json = ?",
       args: [JSON.stringify(link), link.id, String(rows[0].record_json)] });
-    return { block: quotedLinkedHistory(page.source, page.boundaryId, page),
+    return { block: quotedLinkedHistory(page.source, page.boundaryId, { excerpt: latestExcerpt,
+      suppliedEntries: page.nextSend.entries, availableEntries: page.availableEntries, truncated: page.nextSend.truncated }),
       portion: { ...link.lastPrepared, linkId: link.id, boundaryDigest: link.boundaryDigest } };
   }
   /** A durably marked target is a source only while its own link metadata passes load()'s validation. */

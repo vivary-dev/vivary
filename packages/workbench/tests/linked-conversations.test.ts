@@ -693,6 +693,13 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(service.load(actor, project.projectId, linked.target, first.nextCursor!.replace(/:\d+$/, ":999999")));
     appendCodeAgentTranscriptEvent({ runId: paged.id, kind: "user", message: "New unlinked work" });
     assert.doesNotMatch((await service.load(actor, project.projectId, linked.target, second.nextCursor!))!.excerpt, /New unlinked work/);
+    // A send needs the work that ends at the boundary, so its block is the latest entries, not the oldest page.
+    const prepared = (await service.context(actor, project.projectId, linked.target))!;
+    assert.match(prepared.block!, /Historical entry 210\b/);
+    assert.doesNotMatch(prepared.block!, /Historical entry 0\b|Historical entry 110\b|New unlinked work/);
+    assert.match(prepared.block!, /latest 100 of 211/);
+    assert.deepEqual(prepared.portion, { entries: 100, characters: prepared.portion!.characters, truncated: true,
+      linkId: prepared.portion!.linkId, boundaryDigest: prepared.portion!.boundaryDigest });
   });
   await t.test("a source without completed work links truthfully to an empty excerpt", async () => {
     const noCompletion = code("no-completed-work");

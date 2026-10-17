@@ -228,7 +228,11 @@ Code rebuilds context from its transcript, which keeps only the raw request, and
 Native persists only the visible message (`displayMessage`), so both receive the
 block on every send.
 An explicit send receives at most 12,000 characters from 100 recorded entries as
-quoted historical data. Actual retained tool results and labeled artifact references
+quoted historical data. The send block holds the latest entries that fit, ending
+at the boundary, because a send continues the most recent work. When it omits
+earlier entries it says so, and a boundary entry longer than the whole block keeps
+its latest text behind an omission notice. Inspection pages still start from the
+oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
 bookkeeping and private reasoning are excluded. A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder

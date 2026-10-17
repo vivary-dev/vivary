@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt,
+import { codeCompletedPrefix, codeHistoryItems, codeHistoryRecords, historyDigest, historyExcerpt, historyLatest,
   isCompletedNativeMessage, nativeHistoryItems, nativeHistoryPath, quotedLinkedHistory } from "../server/linked-history.ts";
 
 const event = (id: string, kind: "user" | "system" | "status", message: string, metadata = {}) => ({
@@ -153,4 +153,17 @@ test("only canonical empty Native repositories receive the no-completed-history 
   assert.deepEqual(nativeHistoryPath("{}"), []);
   for (const malformed of ["null", "[]", '{"unexpected":true}', '{"messages":null}', "not json"])
     assert.throws(() => nativeHistoryPath(malformed), malformed);
+});
+
+test("the send block keeps the latest entries, and keeps the end of a boundary entry larger than the block", () => {
+  const items = Array.from({ length: 150 }, (_, index) => ({ id: "entry-" + index, role: "User", text: "text " + index }));
+  const latest = historyLatest(items);
+  assert.equal(latest.suppliedEntries, 100); assert.equal(latest.truncated, true);
+  assert.equal(latest.excerpt.startsWith("User [entry-50]: "), true); assert.equal(latest.excerpt.endsWith("text 149"), true);
+  const huge = historyLatest([{ id: "boundary", role: "Assistant", text: "early ".repeat(4_000) + "THE LATEST WORDS" }]);
+  assert.equal(huge.excerpt.length <= 12_000, true); assert.equal(huge.truncated, true);
+  assert.equal(huge.excerpt.endsWith("THE LATEST WORDS"), true);
+  assert.equal(huge.excerpt.includes("[Earlier text of this entry is omitted."), true);
+  assert.deepEqual(historyLatest(items.slice(0, 3)), { excerpt: "User [entry-0]: text 0" + String.fromCharCode(10, 10) + "User [entry-1]: text 1"
+    + String.fromCharCode(10, 10) + "User [entry-2]: text 2", suppliedEntries: 3, truncated: false });
 });
