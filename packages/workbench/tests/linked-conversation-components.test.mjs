@@ -25,7 +25,7 @@ const bundle = await build({ stdin: { contents: `
   import { createElement } from "react";
   import { MemoryRouter, useLocation } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-  import { LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
+  import { CodeLinkOptions, LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
   export { nativeHistoryRows } from "./app/lib/native-history-rows";
   export { sourceDraftSaver } from "./app/components/workspace/LinkedConversation";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
@@ -41,6 +41,8 @@ const bundle = await build({ stdin: { contents: `
     const client = globalThis.linkFixture.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
       kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
+        : kind === "code-options" ? createElement(CodeLinkOptions, { projectId: "alpha", runId: "code-source", sourceEngine: "claude-cli",
+          engines: props.engines, storageKey: "owner", saveDraft: globalThis.linkFixture.saveDraft })
         : kind === "native-options" ? createElement(NativeLinkOptions, { projectId: "alpha", threadId: "native-source",
           saveDraft: globalThis.linkFixture.saveDraft, ...globalThis.linkFixture.options })
         : kind === "chooser-from-codex" ? createElement(LinkedConversationChooser, { ...props, sourceEngine: "codex-cli",
@@ -329,4 +331,25 @@ test("a source whose send waits for review links without flushing its pending dr
   assert.deepEqual(flushed, [], "the pending draft and its review stay in the source unchanged");
   await module.exports.sourceDraftSaver(draft(false), "ordinary-source")();
   assert.deepEqual(flushed, ["ordinary-source"]);
+});
+
+test("the Code chooser appears only after the same source eligibility check Native uses", async () => {
+  const chooser = () => Boolean(host.querySelector('select[aria-label="Open linked conversation in another harness"]'));
+  // Not a source, for example an owner with no organization or a target whose link no longer validates.
+  linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); return { available: false }; };
+  await render("code-options"); await settle(); await notify();
+  assert.equal(chooser(), false, "no choices that cannot work");
+  assert.deepEqual(linkFixture.calls.at(-1), { name: "vivary-linked-history",
+    input: { operation: "source", projectId: "alpha", target: { kind: "code", id: "code-source" } } });
+  // A failed check shows Retry instead of a chooser.
+  linkFixture.client.clear();
+  linkFixture.call = async () => { throw new Error("Eligibility check failed"); };
+  await render("code-options"); await settle(); await notify();
+  assert.equal(chooser(), false);
+  assert.match(host.querySelector('[role="alert"]')?.textContent ?? "", /Linked conversation options could not load/);
+  // An eligible source shows the chooser.
+  linkFixture.client.clear();
+  linkFixture.call = async () => ({ available: true });
+  await render("code-options"); await settle(); await notify();
+  assert.equal(chooser(), true);
 });

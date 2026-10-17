@@ -25,7 +25,7 @@ import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
-import { LinkedConversationChooser, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
+import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -653,8 +653,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       {props.notices}
       {!props.viewingMatch && props.run && <>
         <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
-        <LinkedConversationChooser key={"link:" + props.run.id} projectId={props.projectId}
-          source={{ kind: "code", id: props.run.id }} sourceEngine={props.run.engine} engines={props.state.engines}
+        <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
+          sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
           saveDraft={sourceDraftSaver(draft, draftThreadId)} />
       </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">

@@ -7586,7 +7586,9 @@ A notice read verifies the caller, then looks for a link row, and resolves proje
 history and organization membership only when a row exists. Code conversations
 support an owner with no organization, so an ordinary run's follow-up send and
 notice need none. Linking does need one: such an owner is not offered the chooser,
-and creation refuses with a clear reason. An unlinked conversation in a project whose
+and creation refuses with a clear reason. The Code and Native choosers both appear
+only after the same source eligibility check, so an owner without an organization,
+or a target whose link no longer validates, is not offered choices that cannot work. An unlinked conversation in a project whose
 folder is not connected therefore shows no notice and no false verification error.
 The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. A Code send refused after linked preparation emits

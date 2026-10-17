@@ -95,6 +95,23 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
 
 type Probe<T> = { data?: T; isError: boolean; refetch: () => unknown };
 
+/**
+ * The Code chooser, shown only after the same sourceAvailable check Native uses. An owner with no organization,
+ * or a target whose link no longer validates, is not offered choices that cannot work. A failed check offers Retry.
+ */
+export function CodeLinkOptions({ projectId, runId, sourceEngine, engines, storageKey, saveDraft }: {
+  projectId: string | null; runId: string; sourceEngine: string; engines: VivaryCodeState["engines"];
+  storageKey: string; saveDraft: () => Promise<void>;
+}) {
+  const source = useLinkSourceEligibility({ projectId, storageKey, threadId: runId, enabled: true, kind: "code" });
+  if (source.isError) return <div className="local-agent-notice" role="alert">
+    Linked conversation options could not load.
+    <Button size="sm" variant="outline" onClick={() => { void source.refetch(); }}>Retry linked conversation</Button></div>;
+  if (source.data?.available !== true) return null;
+  return <LinkedConversationChooser projectId={projectId} source={{ kind: "code", id: runId }} sourceEngine={sourceEngine}
+    engines={engines} saveDraft={saveDraft} />;
+}
+
 /** The Native chooser once its source eligibility and runtime state have loaded. A failed prerequisite offers Retry. */
 export function NativeLinkOptions({ projectId, threadId, source, engines, saveDraft }: {
   projectId: string | null; threadId: string; source: Probe<{ available: boolean }>; engines: Probe<VivaryCodeState>;
@@ -111,16 +128,20 @@ export function NativeLinkOptions({ projectId, threadId, source, engines, saveDr
     engines={engines.data.engines} saveDraft={saveDraft} />;
 }
 
-/** Whether a Native conversation is saved, so it can be a link source. An optimistic thread is not saved yet. */
-export function useLinkSourceEligibility({ projectId, storageKey, threadId, enabled }: {
-  projectId: string | null; storageKey: string; threadId: string | null; enabled: boolean;
+/**
+ * Whether a conversation can be a link source, from the server's sourceAvailable check. An optimistic Native thread is
+ * not saved yet, an owner with no organization cannot link, and an invalid linked target is not a source.
+ */
+export function useLinkSourceEligibility({ projectId, storageKey, threadId, enabled, kind = "native" }: {
+  projectId: string | null; storageKey: string; threadId: string | null; enabled: boolean; kind?: ConversationReference["kind"];
 }) {
   const { call, ready } = useNativeActionCaller();
-  const query = useQuery({ queryKey: ["vivary-link-source", storageKey, threadId],
+  const query = useQuery({ queryKey: ["vivary-link-source", storageKey, kind, threadId],
     enabled: enabled && !!threadId && ready, retry: false,
     queryFn: () => call<{ available: boolean }>("vivary-linked-history", { operation: "source",
-      projectId, target: { kind: "native", id: threadId! } }) });
-  const saved = query.data?.available === true, active = enabled && !!threadId && ready;
+      projectId, target: { kind, id: threadId! } }) });
+  // Only a Native thread becomes saved later. A Code run is saved when it exists.
+  const saved = query.data?.available === true, active = enabled && !!threadId && ready && kind === "native";
   useEffect(() => {
     if (saved || !active) return;
     // The first request saves the thread. Native reports request completion with its UI tab key, not the thread ID.
