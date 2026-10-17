@@ -778,6 +778,32 @@ process.send({type:"vivary:code-worker:ready"});
     const page = await service.load(actor, project.projectId, linked.target);
     assert.equal(page!.boundaryId, null); assert.equal(page!.availableEntries, 0); assert.equal(page!.excerpt, "");
   });
+  await t.test("a replayed link operation refuses clearly after a rebind or personal workspace move", async () => {
+    const { randomUUID } = await import("node:crypto");
+    // Project binding replaced after a committed link whose response was lost.
+    let operationId = randomUUID();
+    await service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "native" }, operationId });
+    try {
+      project.bindingId = "binding-replaced";
+      await assert.rejects(service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "native" }, operationId }),
+        { errorCode: "vivary_link_operation_stale" });
+    } finally { project.bindingId = "binding-a"; }
+    // Personal workspace moved after a committed Code link.
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" });
+    const personalSource = await createThread(owner, { id: "replay-personal-source", orgId, scope: identity.scope });
+    const messages = [{ parentId: null, message: { id: "replay-ask", role: "user", content: [{ type: "text", text: "Personal request" }] } },
+      { parentId: "replay-ask", message: { id: "replay-reply", role: "assistant", status: { type: "complete", reason: "stop" }, content: [{ type: "text", text: "Personal reply" }] } }];
+    await updateThreadData(personalSource.id, JSON.stringify({ headId: "replay-reply", messages }), "Personal", "", 2);
+    operationId = randomUUID();
+    const choice = { projectId: null, source: { kind: "native" as const, id: personalSource.id }, target: { engine: "claude-cli" as const, model: "sonnet" }, operationId };
+    const first = await service.create(actor, choice);
+    try {
+      personal = { root: personalRoots[1], label: "personal-b" };
+      await assert.rejects(service.create(actor, choice), { errorCode: "vivary_link_operation_stale" });
+    } finally { personal = { root: personalRoots[0], label: "personal-a" }; }
+    // Unchanged custody still replays the same target.
+    assert.deepEqual(await service.create(actor, choice), first);
+  });
   await t.test("a retried link with the same operation ID returns its first target, and a mismatched reuse refuses", async () => {
     const { randomUUID } = await import("node:crypto");
     const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");

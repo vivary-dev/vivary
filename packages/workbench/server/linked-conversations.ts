@@ -334,7 +334,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       const existing = await linkRows(kind, targetId);
       if (!existing.length) continue;
       const parsed = linkSchema.safeParse(JSON.parse(String(existing[0].record_json)));
-      if (!parsed.success || !parsed.data.creationPending) return replayOperation(existing[0].record_json, identity, input, operationId);
+      if (!parsed.success || !parsed.data.creationPending) return replayOperation(ctx, existing[0].record_json, identity, input, operationId);
       await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_kind = ? AND target_id = ?", args: [kind, targetId] });
       await removeUnfinishedTarget({ kind, id: targetId }, identity, true);
     }
@@ -440,8 +440,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     await deleteThread(target.id);
   }
   /** A repeated operation returns its own link. Any other owner, project, source or harness is a mismatched reuse. */
-  function replayOperation(recordJson: unknown, identity: Scope, input: { projectId: string | null; source: ConversationReference;
-    target: TargetChoice }, operationId: string): LinkedConversationResult {
+  async function replayOperation(ctx: ActionRunContext | undefined, recordJson: unknown, identity: Scope,
+    input: { projectId: string | null; source: ConversationReference; target: TargetChoice }, operationId: string): Promise<LinkedConversationResult> {
     const parsed = linkSchema.safeParse(JSON.parse(String(recordJson)));
     if (!parsed.success) unavailable();
     const link = parsed.data;
@@ -450,6 +450,14 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       || link.projectId !== input.projectId || historyDigest(link.source) !== historyDigest(input.source) || engine !== input.target.engine)
       fail("This link request was already used for a different choice. Choose the harness again.",
         { errorCode: "vivary_link_operation_mismatch", statusCode: 409 });
+    // The route must still open: the current project binding or personal workspace and the target's own link are
+    // checked as a page read checks them. A rebind or workspace move since creation refuses instead.
+    try { await load(ctx, input.projectId, link.target); }
+    catch (error) {
+      if ((error as { errorCode?: string } | null)?.errorCode !== "vivary_linked_history_unavailable") throw error;
+      fail("The project folder or workspace changed after this link was made, so it no longer opens here. Choose the harness again.",
+        { errorCode: "vivary_link_operation_stale", statusCode: 409 });
+    }
     return { target: link.target, route: targetRoute(link.target) };
   }
 

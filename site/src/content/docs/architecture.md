@@ -176,8 +176,10 @@ Code record or Native thread, the row and the cleared draft, whichever were writ
 Creation is idempotent per choice. The chooser sends one operation ID for a choice
 and reuses it on Retry. The target ID derives from the owner, organization and that
 ID, and the link stores it, so a retry after a lost response returns the finished
-target. A retry while the first request is still running gets "still being
-created". The server tracks in-flight operations in memory, which holds because
+target. A replay first rechecks the current project binding or personal workspace
+and the target's own link, so after a rebind or workspace move it refuses clearly
+instead of returning a route that would not open. A retry while the first request
+is still running gets "still being created". The server tracks in-flight operations in memory, which holds because
 production runs one supervised server process. A retry that finds an unfinished
 row or target with no request in flight treats it as left by a failed rollback or a
 process exit: it removes that row and target and creates the link again. A
