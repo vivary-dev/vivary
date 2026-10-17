@@ -143,7 +143,9 @@ target gets the first model the installed Claude Code supports, and the service
 refuses an unsupported Claude model with the same check a send makes, so a
 target is never pinned to a model it cannot use. If the Native eligibility check
 or the runtime state fails to load, the conversation shows that failure with
-Retry instead of hiding the chooser. A project with no connected folder is a
+Retry instead of hiding the chooser. A Native source can link only to Code, so it
+shows no chooser when no configured Code harness has a usable model. The
+chooser and this check share `linkTargetChoices`. A project with no connected folder is a
 state, not a failure: the eligibility check runs only while the workspace is
 available, and the server reports such a project's conversations as not a link
 source, so no alert appears there. A new Native

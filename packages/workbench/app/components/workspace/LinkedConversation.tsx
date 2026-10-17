@@ -6,6 +6,16 @@ import { useNativeActionCaller } from "@/lib/native-actions";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage } from "../../../shared/linked-conversation";
 
+/** The Code harnesses a source can link to: configured, not the source's own, and with a model that can send. */
+export function linkTargetChoices(engines: VivaryCodeState["engines"], sourceEngine: string) {
+  return engines.filter(engine => engine.configured && engine.engine !== sourceEngine).map(engine => ({
+    engine: engine.engine, label: engine.label,
+    // Claude models carry install support, as in the Code composer. Only a supported model can ever send.
+    model: engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
+      : engine.models.find(model => (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"),
+  })).filter(choice => choice.model);
+}
+
 export function LinkedConversationChooser({ projectId, source, sourceEngine, engines, saveDraft }: {
   projectId: string | null; source: ConversationReference; sourceEngine: string;
   engines: VivaryCodeState["engines"]; saveDraft: () => Promise<void>;
@@ -15,12 +25,7 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
   const [failure, setFailure] = useState("");
   const visit = useRef(0), inFlight = useRef(false);
   useEffect(() => () => { visit.current++; }, [projectId, source.kind, source.id]);
-  const choices = engines.filter(engine => engine.configured && engine.engine !== sourceEngine).map(engine => ({
-    engine: engine.engine, label: engine.label,
-    // Claude models carry install support, as in the Code composer. Only a supported model can ever send.
-    model: engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
-      : engine.models.find(model => (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"),
-  })).filter(choice => choice.model);
+  const choices = linkTargetChoices(engines, sourceEngine);
   async function open(engine: string) {
     if (inFlight.current || !ready) return;
     inFlight.current = true;
@@ -75,7 +80,8 @@ export function NativeLinkOptions({ projectId, threadId, source, engines, saveDr
     Linked conversation options could not load.
     <Button size="sm" variant="outline" onClick={() => { void source.refetch(); if (eligible) void engines.refetch(); }}>
       Retry linked conversation</Button></div>;
-  if (!eligible || !engines.data) return null;
+  // A Native source can link only to Code, so with no usable harness there is nothing to choose.
+  if (!eligible || !engines.data || !linkTargetChoices(engines.data.engines, "native").length) return null;
   return <LinkedConversationChooser projectId={projectId} source={{ kind: "native", id: threadId }} sourceEngine="native"
     engines={engines.data.engines} saveDraft={saveDraft} />;
 }

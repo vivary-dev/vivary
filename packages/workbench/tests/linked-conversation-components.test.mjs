@@ -253,3 +253,21 @@ test("an empty linked Native target stays listed after a rename, and a title alo
   assert.deepEqual(rows.threads.map(thread => thread.id), ["renamed-target"]);
   assert.deepEqual(rows.drafts.map(draft => draft.threadId), ["lookalike"]);
 });
+
+test("a Native source shows no chooser when no Code harness has a usable model, and shows it for one supported harness", async () => {
+  const loaded = data => ({ isError: false, data, refetch: async () => undefined });
+  const claude = (support, configured = true) => ({ engine: "claude-cli", label: "Claude Code", configured, models: ["claude-sonnet-5-5"],
+    claudeModels: [{ id: "claude-sonnet-5-5", support }] });
+  const codexUnconfigured = { engine: "codex-cli", label: "Codex", configured: false, models: ["fixture"] };
+  const chooser = () => host.querySelector('select[aria-label="Open linked conversation in another harness"]');
+  for (const engines of [[claude("upgrade-required"), codexUnconfigured], [claude("supported", false), codexUnconfigured]]) {
+    linkFixture.options = { source: loaded({ available: true }), engines: loaded({ engines }) };
+    await render("native-options");
+    // Booleans only: a failing assertion on a DOM node would inspect the whole linkedom tree.
+    assert.equal(Boolean(chooser()), false, "nothing can be chosen, so no chooser renders");
+    assert.doesNotMatch(host.textContent, /Opens an inactive conversation/);
+  }
+  linkFixture.options = { source: loaded({ available: true }), engines: loaded({ engines: [claude("supported"), codexUnconfigured] }) };
+  await render("native-options");
+  assert.equal(Boolean(chooser()), true); assert.equal(Boolean(host.querySelector('option[value="claude-cli"]')), true);
+});
