@@ -152,7 +152,9 @@ source, so no alert appears there. A new Native
 conversation is not a source until its first request saves it. The chooser
 rechecks eligibility when Native reports a finished request or a thread list
 update, and stops rechecking once the conversation is a source. Selection saves
-the source draft through its current owner, then creates a paused Code record or
+the source draft through its current owner. A send waiting for review
+has no unsaved text and stays pending in the source, so linking skips that flush
+instead of failing on it. Selection then creates a paused Code record or
 an empty Native thread and its cleared draft. Project history lists that empty
 thread by a durable thread source URL, `vivary:linked-conversation`, set when the
 target is created. Core never overwrites a thread's source and rename changes

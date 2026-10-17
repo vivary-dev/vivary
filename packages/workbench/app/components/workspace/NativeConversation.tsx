@@ -15,7 +15,7 @@ import { useProjects } from "../projects/ProjectContext";
 import { nativeMatchRepository } from "@/lib/native-match-repository";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { ConversationMatch } from "./ConversationMatch";
-import { LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./LinkedConversation";
+import { LinkedHistoryNotice, NativeLinkOptions, sourceDraftSaver, useLinkSourceEligibility } from "./LinkedConversation";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
 
@@ -234,7 +234,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
     {!unassigned && !requestedMessage && selectedThread && <>
       <LinkedHistoryNotice key={selectedThread} projectId={identity.projectId} target={{ kind: "native", id: selectedThread }} />
       <NativeLinkOptions key={"link:" + selectedThread} projectId={identity.projectId} threadId={selectedThread}
-        source={linkSource} engines={linkEngines} saveDraft={() => draft.flushForThread(selectedThread)} />
+        source={linkSource} engines={linkEngines} saveDraft={sourceDraftSaver(draft, selectedThread)} />
     </>}
     <ConversationMatch key={selectedThread} container={matchContainer} messageId={requestedMessage}
       canReturnToLatest={currentMatch !== null && !matchArchived} archived={matchArchived}

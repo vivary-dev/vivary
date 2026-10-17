@@ -6,6 +6,16 @@ import { useNativeActionCaller } from "@/lib/native-actions";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage } from "../../../shared/linked-conversation";
 
+/**
+ * Saves the source draft before a link is created. A send waiting for review has no unsaved text (the draft owner
+ * ignores edits while it is pending), and the pending draft stays in the source unchanged, so there is nothing to
+ * flush and linking proceeds. Any other draft fault still stops the link.
+ */
+export function sourceDraftSaver(draft: { flushForThread: (threadId: string) => Promise<void>;
+  hasPendingForThread: (threadId: string) => boolean }, threadId: string): () => Promise<void> {
+  return () => draft.hasPendingForThread(threadId) ? Promise.resolve() : draft.flushForThread(threadId);
+}
+
 /** A version 4 UUID. randomUUID needs a secure context, which remote browser access over plain HTTP lacks. */
 function newOperationId(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();

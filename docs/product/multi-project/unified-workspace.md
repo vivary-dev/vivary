@@ -148,6 +148,8 @@ Saved Code conversations now offer **Linked conversation** beside the composer.
 Choose a different configured Code harness or Native chat. A saved project Native
 conversation offers either configured Code harness. The new target opens inactive
 in the same selected project. The original draft is saved in its original owner.
+A source whose send waits for review can still be linked, and its pending send
+stays in the source unchanged.
 Pending approvals stay in the source. Nothing is sent by selection. If saving or
 creation fails, the source remains selected and **Retry link** is available.
 

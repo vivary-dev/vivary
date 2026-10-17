@@ -27,6 +27,7 @@ const bundle = await build({ stdin: { contents: `
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
   export { nativeHistoryRows } from "./app/lib/native-history-rows";
+  export { sourceDraftSaver } from "./app/components/workspace/LinkedConversation";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   function Eligibility() {
     const source = useLinkSourceEligibility({ projectId: "alpha", storageKey: "alpha", threadId: "new-thread", enabled: true });
@@ -306,4 +307,15 @@ test("an archived empty linked target with an unsent draft stays archived, with 
   const threads = [{ id: "archived-target", title: "Linked: Source", messageCount: 0, archivedAt: 1_700_000_000_000, source: linkedSource }];
   const rows = module.exports.nativeHistoryRows(threads, [{ threadId: "archived-target", preview: "Unsent" }]);
   assert.deepEqual([rows.threads.length, rows.drafts.length], [0, 0]);
+});
+
+test("a source whose send waits for review links without flushing its pending draft, and other drafts still save first", async () => {
+  const flushed = [];
+  // The draft owner refuses to flush a pending record, as drainDraftChanges does.
+  const draft = pending => ({ hasPendingForThread: () => pending,
+    flushForThread: async threadId => { flushed.push(threadId); if (pending) throw new Error("The saved draft needs attention."); } });
+  await module.exports.sourceDraftSaver(draft(true), "review-source")();
+  assert.deepEqual(flushed, [], "the pending draft and its review stay in the source unchanged");
+  await module.exports.sourceDraftSaver(draft(false), "ordinary-source")();
+  assert.deepEqual(flushed, ["ordinary-source"]);
 });
