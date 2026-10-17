@@ -6,7 +6,11 @@ import { readLinuxProcStat, scanLinuxWorkerGroup, scanWindowsProcesses, windowsT
 
 type ProcessIdentity = { pid: number; start: number; platform: 'linux' | 'win32' };
 const refused = () => new Error('Preview socket ownership could not be established.');
-const readLinuxTcpTable = () => readFile('/proc/net/tcp', 'utf8');
+// Dual-stack listeners accept a 127.0.0.1 connection on an IPv6 socket listed only in tcp6.
+const readLinuxTcpTable = async () => (await Promise.all(['/proc/net/tcp', '/proc/net/tcp6']
+  .map(file => readFile(file, 'utf8').catch(() => '')))).join('\n');
+// A row in neither table proves no connection. These reads only cover a torn read of the tables.
+const MISSING_ROW_READS = 5;
 export async function capturePreviewProcess(child: ChildProcess): Promise<ProcessIdentity | null> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return null;
   try {
@@ -26,17 +30,33 @@ async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: Ab
   signal.throwIfAborted();
   const root = readLinuxProcStat(await readFile(`/proc/${identity.pid}/stat`, 'utf8'));
   if (root.start !== identity.start || root.processGroup !== identity.pid) throw refused();
-  const endpoint = (port: number) => `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`;
+  // 127.0.0.1 in tcp, and ::ffff:127.0.0.1 in tcp6, where each 32-bit word prints in host byte order.
+  const endpoints = (port: number) => ['0100007F', '0000000000000000FFFF00000100007F']
+    .map(address => `${address}:${port.toString(16).toUpperCase().padStart(4, '0')}`);
   const localPort = socket.localPort, remotePort = socket.remotePort;
   if (!localPort || !remotePort) throw refused();
   let inode: string | undefined;
-  // A connection still in the server's accept queue is listed with inode 0, which proves no owner.
-  // Wait with a bounded backoff until the server accepts it. The caller's deadline aborts `signal`.
+  const serverEndpoints = endpoints(remotePort), clientEndpoints = endpoints(localPort);
+  // The server's row proves nothing yet while it is still in the handshake or listed with inode 0
+  // because the server has not accepted the connection. Those rows show the connection exists, so the
+  // check waits with a bounded backoff until the caller's deadline aborts `signal`. A read of these
+  // tables is not atomic, so a busy host can skip a row or list it twice. A row missing from both
+  // tables therefore gets a few consecutive reads of grace, then refuses. A pending row restarts the grace.
+  let missingReads = 0;
   for (let wait = 10; ; wait = Math.min(wait * 2, 200)) {
-    const rows = (await readTcpTable()).trim().split('\n').slice(1).map(line => line.trim().split(/\s+/));
-    const matches = rows.filter(row => row[1] === endpoint(remotePort) && row[2] === endpoint(localPort) && row[3] === '01');
-    inode = matches.length === 1 ? matches[0]?.[9] : undefined;
-    if (inode !== '0') break;
+    const rows = (await readTcpTable()).trim().split('\n').map(line => line.trim().split(/\s+/));
+    const connection = rows.filter(row => serverEndpoints.includes(row[1]) && clientEndpoints.includes(row[2]));
+    const established = connection.filter(row => row[3] === '01');
+    const inodes = new Set(established.map(row => row[9]));
+    // Inode 0 means not yet accepted, not another socket. A torn read can list both states of one row.
+    inodes.delete('0');
+    // Two rows naming different sockets for one connection are conflicting evidence, never a timing gap.
+    if (inodes.size > 1) throw refused();
+    inode = [...inodes][0];
+    if (inode !== undefined) break;
+    const pending = established.length > 0 || connection.some(row => row[3] === '03');
+    if (pending) missingReads = 0;
+    else if (++missingReads >= MISSING_ROW_READS) throw refused();
     await delay(wait, undefined, { signal });
   }
   if (!inode || !/^\d+$/.test(inode)) throw refused();
@@ -93,11 +113,13 @@ export async function connectOwnedPreview({ port, identity, signal, readTcpTable
 }): Promise<Socket> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || signal.aborted) throw refused();
   const deadline = new AbortController();
-  const verificationSignal = AbortSignal.any([signal, deadline.signal]);
+  // A connection the preview closes or resets can never prove ownership, so its close ends verification.
+  const lost = new AbortController();
+  const verificationSignal = AbortSignal.any([signal, deadline.signal, lost.signal]);
   const socket = createConnection({ host: '127.0.0.1', port });
   const abort = () => socket.destroy();
   signal.addEventListener('abort', abort, { once: true });
-  socket.once('close', () => signal.removeEventListener('abort', abort));
+  socket.once('close', () => { signal.removeEventListener('abort', abort); lost.abort(); });
   const timer = setTimeout(() => { deadline.abort(); abort(); }, 3000);
   try {
     await new Promise<void>((resolve, reject) => {
