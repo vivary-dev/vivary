@@ -14,6 +14,8 @@ export type NativeEntry = { parentId?: string | null; message: {
   status?: { type?: string; reason?: string };
   metadata?: { runId?: string; custom?: Record<string, unknown> };
 } };
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 /** The retained source can no longer reproduce its frozen prefix. This is a source availability fault, not a link fault. */
 export class LinkedSourceChanged extends Error {}
 // Personal workspace scopes have no project history, so undefined digests as null instead of throwing.
@@ -80,7 +82,10 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   for (const entry of repo.messages) {
     const message = entry?.message;
     if (!message || typeof message.id !== "string" || message.id.length > HISTORY_ID_CHARS || !Array.isArray(message.content)
-      || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id))
+      || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id)
+      // Every content part and attachment must be an object, so projection never meets null or a bare value.
+      || !message.content.every(isRecord)
+      || (message.attachments !== undefined && (!Array.isArray(message.attachments) || !message.attachments.every(isRecord))))
       throw new LinkedSourceChanged("The source conversation is malformed.");
     entries.set(message.id, entry);
   }

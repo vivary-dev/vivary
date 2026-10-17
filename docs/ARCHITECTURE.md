@@ -266,7 +266,8 @@ its latest text behind an omission notice. The limit counts the block as it is
 encoded, JSON escaping included, so the prompt block and the reported characters
 agree. Every rendered entry, its label included, stays within the block, and a transcript event or Native message ID
 longer than 256 characters makes the source unavailable as malformed history,
-as does a transcript line that is valid JSON but not an event object, or a
+as does a Native content part or attachment that is not an object, or a
+transcript line that is valid JSON but not an event object, or a
 transcript that repeats an event ID, so the boundary byte length and the prefix
 can never describe different events.
 Inspection pages still start from the

@@ -204,3 +204,11 @@ test("a transcript that repeats an event ID is malformed history, so the boundar
   const text = records.map(record => JSON.stringify(record)).join(String.fromCharCode(10)) + String.fromCharCode(10);
   assert.throws(() => codeHistoryRecords(text, "source"), LinkedSourceChanged);
 });
+
+test("a Native content part or attachment that is not an object is malformed history, never a TypeError", () => {
+  const thread = (message: Record<string, unknown>) => JSON.stringify({ headId: "m", messages: [{ parentId: null,
+    message: { id: "m", role: "user", content: [{ type: "text", text: "Request" }], ...message } }] });
+  for (const malformed of [thread({ content: [null] }), thread({ content: ["text"] }), thread({ content: [[1]] }),
+    thread({ attachments: [null] }), thread({ attachments: "report.pdf" })])
+    assert.throws(() => nativeHistoryItems(nativeHistoryPath(malformed)), LinkedSourceChanged, malformed);
+});
