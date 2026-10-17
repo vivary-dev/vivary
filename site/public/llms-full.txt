@@ -7465,7 +7465,8 @@ rechecks eligibility when Native reports a finished request or a thread list
 update, and stops rechecking once the conversation is a source. Selection saves
 the source draft through its current owner. A send waiting for review
 has no unsaved text and stays pending in the source, so linking skips that flush
-instead of failing on it. Saving first waits for any draft read, reconciliation,
+instead of failing on it. The record status decides this, because a loaded pending
+draft always carries its review notice as an error. Saving first waits for any draft read, reconciliation,
 save or discard still in flight, and refuses if the draft failed to load, conflicts,
 or failed to save or discard. Selection then creates a paused Code record or
 an empty Native thread and its cleared draft. Project history lists that empty

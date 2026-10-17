@@ -287,9 +287,32 @@ test("linking waits for the source draft to settle and refuses a draft that fail
   await assert.rejects(settleDraftForLink(discarding, drainFor(discarding)), /needs attention/);
   const conflicted = entry({ conflict: true, error: "The draft changed in another window." });
   await assert.rejects(settleDraftForLink(conflicted, drainFor(conflicted)));
-  // A send waiting for review stays in the source and does not block linking. A settled ordinary draft links.
-  const pending = entry({ record: { revision: "r1", text: "Review", status: "pending", submitId: "s1" }, text: "Review" });
-  await settleDraftForLink(pending, drainFor(pending));
+  // A send waiting for review stays in the source and does not block linking, with its review notice and pending
+  // record left unchanged. The entry comes from the real owner paths: a reload of a pending draft, and a reconcile
+  // that leaves the record pending.
+  const review = { revision: "r1", text: "Review", status: "pending", submitId: "s1" };
+  const reloaded = entry({ loaded: false, record: null, text: "" });
+  acceptLoadedDraft(reloaded, review);
+  assert.ok(reloaded.error);
+  await settleDraftForLink(reloaded, drainFor(reloaded));
+  assert.deepEqual(reloaded.record, review);
+  const reconciled = entry({ record: review, text: "" });
+  assert.equal(applyReconciledDraft(reconciled, draftObservation(reconciled), { record: review }), true);
+  assert.ok(reconciled.error);
+  await settleDraftForLink(reconciled, drainFor(reconciled));
+  assert.deepEqual(reconciled.record, review);
+  // A pending record that also conflicted or failed a discard still needs attention.
+  const pendingConflict = entry({ record: review, text: "" });
+  acceptLoadedDraft(pendingConflict, review);
+  pendingConflict.conflict = true;
+  await assert.rejects(settleDraftForLink(pendingConflict, drainFor(pendingConflict)), /needs attention/);
+  const pendingDiscard = entry({ record: review, text: "" });
+  acceptLoadedDraft(pendingDiscard, review);
+  pendingDiscard.discardFailed = true;
+  await assert.rejects(settleDraftForLink(pendingDiscard, drainFor(pendingDiscard)), /needs attention/);
+  // A draft whose save failed is refused.
+  const failedSave = entry({ text: "Unsaved edit", error: "Your draft could not be saved." });
+  await assert.rejects(settleDraftForLink(failedSave, drainFor(failedSave)), /needs attention/);
   const settled = entry({});
   await settleDraftForLink(settled, drainFor(settled));
 });

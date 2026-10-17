@@ -156,16 +156,18 @@ export function drainDraftChanges(current: Entry,
 
 /**
  * Settles a source draft before a link is created. It waits for the initial read or reconciliation, a save and a
- * discard, because flushing while one is in flight returns that promise even when it ends in failure. A send waiting
- * for review has no unsaved text and stays in the source, so it does not block linking. Any other unverified state,
- * such as a failed load, conflict, failed discard or failed save, rejects.
+ * discard, because flushing while one is in flight returns that promise even when it ends in failure. A loaded send
+ * waiting for review has no unsaved text and stays in the source, so it does not block linking. Its error is the
+ * review notice, so the record status decides, not the error. Any other unverified state, such as a failed load,
+ * conflict, failed discard or failed save, rejects.
  */
 export async function settleDraftForLink(current: Entry, drain: () => Promise<void>): Promise<void> {
   while (current.saving || current.discardPromise) {
     try { await (current.saving ?? current.discardPromise); } catch { /* The state below records the failure. */ }
   }
+  if (current.loaded && current.record?.status === "pending" && !current.conflict && !current.discardFailed
+    && !current.discarding) return;
   const unverified = () => !current.loaded || Boolean(current.error) || current.conflict || current.discardFailed || current.discarding;
-  if (!unverified() && current.record?.status === "pending") return;
   await drain();
   if (unverified()) throw new Error("The saved draft needs attention.");
 }
