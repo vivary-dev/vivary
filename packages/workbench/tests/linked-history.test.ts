@@ -197,3 +197,10 @@ test("a transcript line that is valid JSON but not an event object is malformed 
   for (const line of ["null", "[]", "1", JSON.stringify("text"), "true"])
     assert.throws(() => codeHistoryRecords(line + String.fromCharCode(10), "source"), LinkedSourceChanged, line);
 });
+
+test("a transcript that repeats an event ID is malformed history, so the boundary byte length and prefix cannot disagree", () => {
+  const records = [event("dup", "user", "First"), event("answer", "system", "Answer", { role: "assistant" }),
+    event("dup", "status", "Completed", { status: "completed", phase: "complete", engine: "claude-cli" })];
+  const text = records.map(record => JSON.stringify(record)).join(String.fromCharCode(10)) + String.fromCharCode(10);
+  assert.throws(() => codeHistoryRecords(text, "source"), LinkedSourceChanged);
+});

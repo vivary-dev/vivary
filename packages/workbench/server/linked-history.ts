@@ -21,6 +21,9 @@ export const historyDigest = (value: unknown) => createHash("sha256").update(JSO
 
 /** Only complete JSONL records count. An in-progress final line is never history. */
 export function codeHistoryRecords(text: string, runId: string): CodeAgentTranscriptEvent[] {
+  // Event IDs are unique, as Native message IDs are. A duplicate would let the boundary byte length and the completed
+  // prefix disagree about which event the boundary is.
+  const seen = new Set<string>();
   return text.split("\n").slice(0, -1).filter(line => line.trim()).map(line => {
     let value: CodeAgentTranscriptEvent;
     try { value = JSON.parse(line); } catch { throw new LinkedSourceChanged("The recorded source history is malformed."); }
@@ -30,6 +33,8 @@ export function codeHistoryRecords(text: string, runId: string): CodeAgentTransc
     if (value.runId !== runId || typeof value.id !== "string" || typeof value.message !== "string")
       throw new LinkedSourceChanged("The recorded source history binding changed.");
     if (value.id.length > HISTORY_ID_CHARS) throw new LinkedSourceChanged("The recorded source history has an invalid event ID.");
+    if (seen.has(value.id)) throw new LinkedSourceChanged("The recorded source history repeats an event ID.");
+    seen.add(value.id);
     return value;
   });
 }
