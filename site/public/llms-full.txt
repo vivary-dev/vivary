@@ -7737,6 +7737,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-17 Site TOML parser update. The documentation site's lockfile moves
+`smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is
+built statically, so the parser runs only at build time. The new version has no
+dependencies and the same Node engine range, and both dependents accept it.
+Nothing the app ships changes, so the design description holds.
+
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
 to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
