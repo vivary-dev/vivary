@@ -159,7 +159,10 @@ export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryIte
       const references = [event.metadata?.artifactPath ?? event.metadata?.path, event.metadata?.artifactUrl].filter(value => typeof value === "string");
       return [{ id: event.id, role: "Recorded artifact", text: [event.message, ...references].join("\n") }];
     }
-    if (event.metadata?.tool) {
+    // Only a completed tool result is history: a tool_done event, or an older event that carries a result. A tool
+    // start and a Codex agent-operation status (type subagent) are runtime bookkeeping, like other statuses.
+    if (event.metadata?.tool && (event.metadata.type === "tool_done"
+      || (event.metadata.type === undefined && event.metadata.result !== undefined))) {
       const result = event.metadata.result;
       return [{ id: event.id, role: "Recorded tool output", text: [event.message,
         ...(result === undefined ? [] : [typeof result === "string" ? result : JSON.stringify(result)])].join("\n") }];

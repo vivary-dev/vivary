@@ -261,3 +261,18 @@ test("unrelated Native messages with invalid or duplicate IDs leave the walked p
   const ambiguousAncestor = JSON.stringify({ headId: "answer", messages: [ask, { ...ask }, answer] });
   assert.throws(() => nativeHistoryPath(ambiguousAncestor, "answer"), LinkedSourceChanged);
 });
+
+// Shapes from Core's code-agent-executor (Claude tool_start and tool_done) and the core patch's Codex emitter.
+test("only completed tool results are quoted, not tool starts or Codex agent-operation statuses", () => {
+  const app = { source: "codex-app-server", cliEventType: "item/completed" };
+  const items = codeHistoryItems([
+    event("ask", "user", "Request"),
+    event("start", "status", "Running bash.", { type: "tool_start", tool: "bash", input: { command: "ls" }, source: "claude-cli" }),
+    event("done", "status", "Finished bash.", { type: "tool_done", tool: "bash", result: "file.txt", source: "claude-cli" }),
+    event("operation", "status", "Codex agent operation: wait.", { ...app, itemId: "op", type: "subagent", tool: "wait", status: "completed" }),
+    event("answer", "system", "Answer", { role: "assistant" }),
+    event("turn-done", "status", "Completed", { status: "completed", phase: "complete", engine: "claude-cli" }),
+  ]);
+  assert.deepEqual(items.map(item => item.id), ["ask", "done", "answer"]);
+  assert.match(items[1].text, /file\.txt/);
+});

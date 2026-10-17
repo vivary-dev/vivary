@@ -292,7 +292,8 @@ can never describe different events.
 Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
-bookkeeping and private reasoning are excluded. A Native attachment, or any other
+bookkeeping and private reasoning are excluded. For Code, only a completed tool
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder
 that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
