@@ -190,6 +190,28 @@ export async function readWorkspaceContext(workspace, candidates = [], dependenc
     : { status: "plain", memory: answer.memory, protected: answer.protected, privacy };
 }
 
+// Paths are relative to the project folder. An unknown dirty state stays unknown.
+const projectObservation = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("plain") }),
+  z.strictObject({ kind: z.literal("unknown") }),
+  z.strictObject({ kind: z.literal("git"), head: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+    ref: z.string().min(1).max(1_024).nullable(),
+    entries: z.array(z.strictObject({ path: z.string().min(1).max(4_096), state: z.string().min(1).max(2) }))
+      .max(10_000).nullable() }),
+]);
+
+/**
+ * The project's Git version from the engine's hardened read-only checkout
+ * observer, for handoff freshness. Like readWorkspaceContext, it does not
+ * authorize, and it throws when the bridge is unavailable.
+ */
+export async function observeProjectVersion(workspace, dependencies = {}) {
+  const result = await (dependencies.runCreator ?? runCreator)(
+    { operation: "observe", projectId: workspace.projectId, target: workspace.root }, dependencies);
+  if (result?.code !== "observe") throw new Error("The project version reader is unavailable.");
+  return projectObservation.parse(result.observation);
+}
+
 export async function previewManagedProject(context, input, dependencies = {}) {
   const { target } = await managedTarget(context, input.name, false, dependencies);
   return runCreator({ operation: "plan", target,

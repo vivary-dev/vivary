@@ -80,7 +80,8 @@ export type CreatorCall =
   | { operation: "plan"; target: string; patternChoices: WorkspacePatternChoice[]; preset: WorkspacePreset }
   | { operation: "apply"; target: string; acceptedPlanSha256: string;
       patternChoices: WorkspacePatternChoice[]; preset: WorkspacePreset }
-  | { operation: "context"; projectId: string; target: string; candidates?: readonly string[] };
+  | { operation: "context"; projectId: string; target: string; candidates?: readonly string[] }
+  | { operation: "observe"; projectId: string; target: string };
 /**
  * The bundle's interpreter and staged bridge, or a development or standalone
  * Python and the source bridge. Only a bundle has a bytecode cache.
@@ -171,6 +172,7 @@ const commandPolicy: Record<Verb, CommandPolicy> = {
   impact: { access: "read", receipt: "app", required: false },
   "creator-catalog": { access: "read", receipt: "none" },
   "creator-context": { access: "read", receipt: "none" },
+  "creator-observe": { access: "read", receipt: "none" },
   "creator-plan": { access: "read", receipt: "app", required: false },
   "creator-apply": { access: "write", receipt: "app", required: true },
 };
@@ -526,7 +528,7 @@ const CATALOG_GATE = "creator:catalog" as GateKey;
 export function creatorGate(call: CreatorCall): GateKey {
   switch (call.operation) {
     case "catalog": return CATALOG_GATE;
-    case "context": return projectGate(call.projectId);
+    case "context": case "observe": return projectGate(call.projectId);
     case "plan": case "apply": return targetGate(call.target);
   }
 }
@@ -800,8 +802,9 @@ async function runGated(run: GatedRun, dependencies: Pick<Dependencies, "execute
   }
 }
 
-/** The bridge refuses keys it does not know, so a context read's project id stays with its gate. */
+/** The bridge refuses keys it does not know, so a project read's id stays with its gate. */
 function bridgeRequest(call: CreatorCall) {
+  if (call.operation === "observe") return { operation: call.operation, target: call.target };
   if (call.operation !== "context") return call;
   const { operation, target, candidates } = call;
   return { operation, target, ...(candidates ? { candidates } : {}) };

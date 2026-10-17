@@ -1,5 +1,6 @@
 """Bounded server bridge to create-vivary's exact thin workspace operations."""
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -7,7 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[3]
 source = ROOT / "packages" / "create-vivary"
 if (source / "create_vivary.py").is_file():
-    sys.path.insert(0, str(source))
+    sys.path[:0] = [str(source), str(ROOT / "packages" / "core")]
 else:
     ROOT = None
 import create_vivary
@@ -18,6 +19,9 @@ def managed_request(payload):
     if operation == "catalog":
         return {"code": "catalog", "patterns": create_vivary.builtin_pattern_catalog()}
     target = Path(payload["target"])
+    if operation == "observe":
+        # Read-only, like context. The Workbench admitted this root before calling.
+        return {"code": "observe", "observation": observe_project(target)}
     if operation == "context":
         # Read-only. The Workbench admitted this root before calling. An
         # invalid config comes back as data so the owner can see the reason.
@@ -40,6 +44,48 @@ def managed_request(payload):
     return {"code": result["code"], "target": result["target"],
             "planSha256": result["plan_sha256"]}
 
+
+def observe_project(target):
+    """The project's Git version through the hardened checkout observer.
+
+    Dirty entries outside the project folder are dropped and the rest are
+    reported relative to it. No absolute path leaves the bridge. Anything the
+    observer could not establish is reported as unknown, never as clean.
+    """
+    from vivary_core.workspace_observe import observe_checkouts
+
+    report = observe_checkouts([str(target)], allowlist=[str(target)])
+    if len(report["checkouts"]) != 1:
+        return {"kind": "unknown"}
+    facts = report["checkouts"][0]["facts"]
+    repository = facts.get("is_git_repository", {})
+    if repository.get("status") != "known":
+        if repository.get("reason") == "not_a_git_repository_or_git_failed":
+            return {"kind": "plain"}
+        return {"kind": "unknown"}
+    worktree = facts.get("worktree_root", {})
+    if worktree.get("status") != "known":
+        return {"kind": "unknown"}
+    try:
+        relative = os.path.relpath(os.path.realpath(target), os.path.realpath(worktree["value"]))
+    except ValueError:  # Another Windows drive.
+        return {"kind": "unknown"}
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep) or os.path.isabs(relative):
+        return {"kind": "unknown"}
+    prefix = "" if relative == os.curdir else relative.replace(os.sep, "/") + "/"
+    head = facts.get("head_revision", {})
+    ref = facts.get("head_ref", {})
+    dirty = facts.get("dirty_entries", {})
+    entries = None
+    if dirty.get("status") == "known":
+        entries = [{"path": entry["path"][len(prefix):] or ".", "state": entry["state"]}
+                   for entry in dirty["value"] if entry["path"].startswith(prefix)]
+    return {
+        "kind": "git",
+        "head": head["value"] if head.get("status") == "known" else None,
+        "ref": ref["value"]["name"] if ref.get("status") == "known" and ref["value"].get("kind") == "branch" else None,
+        "entries": entries,
+    }
 
 
 if __name__ == "__main__":

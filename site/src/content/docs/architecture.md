@@ -337,9 +337,48 @@ work after the boundary cannot break an existing link. An entry that does not fi
 the rest of a page starts the next page, so paging never skips text. Only an
 entry longer than a whole page is shortened, and its text ends with an omission
 notice that points to the original. The original remains the complete history owner. This is the
-first linked-history slice of issue #38. Prepare handoff and controlled concurrent
-execution remain separate work. Independent review and built UI acceptance of
+first linked-history slice of issue #38. Controlled concurrent execution remains
+separate work under issue #228. Independent review and built UI acceptance of
 this slice remain required.
+
+### Prepare handoff
+
+A saved project conversation shows a handoff control beside the linked-history
+notice. **Prepare handoff** records the project facts in one pending row and
+submits a request message to that conversation. A Code conversation sends it
+through its own chat handle and adapter. Native sends it with Core's same-window
+submit, which only Native chats receive. Neither path changes the composer draft.
+The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+is a second owner click. `handoff.ts` reads the reply from the conversation's
+completed history, never from the client. It reads a conversation only through
+the linked conversation service: a linked target's own link is checked as every
+linked read checks it, and retained history the linked reader cannot parse is
+refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
+block, another request ID, an unknown key, or a passed or failed check without a
+completed evidence event. It fills every fact itself, redacts held credentials,
+and writes one marked block at the end of the workspace's designated state
+document through `projectFileService.save` with the prepared version and
+binding. A plain workspace or a missing, private or protected state file refuses
+Prepare. A conflict or failed write keeps the previous file and saved record,
+marks the request Failed and offers Retry. Nothing is cleaned, stashed or
+committed. A dirty tree is reported as a count. A new Native conversation
+shows no control until its thread is saved, because nothing in it can be
+handed off yet. Prepare is disabled while a run is active, including a run
+already active when the control opens. Native reads the same `runs/active`
+endpoint its composer reads on mount, then follows run events. Code uses the
+run state its composer already has.
+
+Freshness is computed on request, with no timer and no model call. It compares
+the state file version, Git HEAD and branch, the dirty entry list and each dirty
+file's size and modified time, or the bounded file listing without Git, and the
+covered completed conversation boundary and prefix digest. The state file is
+excluded from the project facts because its own version is compared. A listing
+at its cap or an unknown Git state is Unverifiable, never Fresh. Git facts come
+from a read-only `observe` creator bridge operation over
+`vivary_core.workspace_observe`, gated like `context` and reported relative to
+the project folder. If the project folder and its checkout root resolve to
+different Windows drives, the version reads as unknown. Migration 6 adds `vivary_handoff_records`, one row per
+project binding and document, holding the pending request and the saved record.
 
 
 ### Original engine
@@ -741,6 +780,26 @@ trust boundaries now states this check. Evidence: four new tests in
 `tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
 closed listener, a later server error or close, the action error type, and the
 rendered refusal.
+
+2026-10-16 Concurrency release scope. Jeff chose to defer controlled
+concurrency for Code conversations from this release to issue #228. The
+desktop release page now states the limitation once: one Code conversation
+runs at a time on a host, and a second request is refused before any write
+with an Open button for the running one. The unified workspace acceptance
+row, the specification README and the acceptance register point to #228.
+No code changed. The host-wide single Code run guard described above is
+unchanged, so the design description holds.
+
+2026-10-16 Prepare handoff and handoff freshness (A083, A084). New
+`server/handoff.ts`, three owner actions with `agentTool: false`, a
+`HandoffControl` in the Code and Native conversation surfaces, migration 6, the
+creator bridge `observe` operation, and `stateDocument` in project memory. The
+linked conversation service now exposes its owner scope, record check and
+completed-prefix reader instead of duplicating them. The Prepare handoff section
+above describes the design. `test:handoff` covers refused replies, conflicts,
+a failed write, a dirty tree, staleness without a model call, and the control.
+The Python bridge case covers `observe`. Built-app and real-agent acceptance
+remain required.
 
 2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
 slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,

@@ -26,6 +26,7 @@ import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
 import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
+import { HandoffControl } from "./HandoffControl";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -657,6 +658,15 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
           sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
           workspaceAvailable={props.workspaceAvailable}
           saveDraft={sourceDraftSaver(draft, draftThreadId)} />
+        {props.projectId && <HandoffControl key={"handoff:" + props.run.id} projectId={props.projectId}
+          conversation={{ kind: "code", id: props.run.id }} disabled={disabled}
+          submit={async message => {
+            // Core's window submit reaches only Native chats. This chat's own handle
+            // sends through the Code adapter and leaves the composer draft alone.
+            if (!chatRef.current) return false;
+            chatRef.current.sendMessage(message);
+            return true;
+          }} />}
       </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">
         <span>{draft.draftSaveStatusForThread(draftThreadId) === "saved"
