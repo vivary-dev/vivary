@@ -948,6 +948,22 @@ process.send({type:"vivary:code-worker:ready"});
     assert.deepEqual(await service.sourceAvailable(actor, project.projectId, linked.target), { available: false });
     await assert.rejects(create({ engine: "native" }, linked.target), { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("a downstream link withholds history once its linked source loses its own link row", async () => {
+    const middle = await create({ engine: "native" });
+    const downstream = await service.create(actor, { projectId: project.projectId, source: middle.target, target: { engine: "claude-cli", model: "sonnet" } });
+    assert.equal((await service.load(actor, project.projectId, downstream.target))!.sourceStatus, "available");
+    const row = (await db.execute({ sql: "SELECT link_id, target_kind, target_id, record_json FROM vivary_conversation_links WHERE target_id = ?", args: [middle.target.id] })).rows[0];
+    await db.execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_id = ?", args: [middle.target.id] });
+    try {
+      const page = (await service.load(actor, project.projectId, downstream.target))!;
+      assert.equal(page.sourceStatus, "unavailable"); assert.equal(page.excerpt, "");
+      assert.deepEqual(await service.context(actor, project.projectId, downstream.target), { block: null, portion: null });
+    } finally {
+      await db.execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
+        args: [row.link_id, row.target_kind, row.target_id, row.record_json] });
+    }
+    assert.equal((await service.load(actor, project.projectId, downstream.target))!.sourceStatus, "available");
+  });
   await t.test("a linked target whose own link metadata is missing or malformed cannot link onward as a source", async () => {
     const nativeTarget = await create({ engine: "native" });
     const codeTarget2 = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });

@@ -261,18 +261,17 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     try { return await sourcePrefix(...args); }
     catch (error) { if (error instanceof LinkedSourceChanged) unavailable(error.message); throw error; }
   }
-  async function loadWithLatest(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference,
-    cursor?: string): Promise<{ page: LinkedHistoryPage; latestExcerpt: string } | null> {
-    // An unlinked conversation needs only a verified caller, with or without an organization. Project history, which
-    // an unavailable folder refuses, and organization membership are required only for a conversation with a link row.
-    await verifiedCaller(ctx);
-    const rows = await linkRows(target.kind, target.id);
+  /**
+   * The target's own link, checked as every read checks it, or null for an ordinary conversation with no row and no
+   * marker. An invalid, foreign, unfinished or mismatched link refuses.
+   */
+  async function validatedLink(projectId: string | null, target: ConversationReference, identity: Scope,
+    preloaded?: Awaited<ReturnType<typeof linkRows>>): Promise<{ link: Link; currentTarget: CodeAgentRunRecord | ChatThread } | null> {
+    const rows = preloaded ?? await linkRows(target.kind, target.id);
     if (!rows.length) {
-      // A durably marked target with no row (or no table yet) is an invalid link, never an ordinary conversation.
       if (await isMarkedLinkTarget(target)) unavailable();
       return null;
     }
-    const identity = await scope(ctx, projectId);
     const currentTarget = await record(target, identity);
     const parsed = linkSchema.safeParse(JSON.parse(String(rows[0].record_json)));
     if (!parsed.success) unavailable();
@@ -285,11 +284,28 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       // Each target keeps its durable marker while its row exists: a Code run its linkedHistoryId, a Native thread its source URL.
       || (target.kind === "code" && (currentTarget as CodeAgentRunRecord).metadata?.linkedHistoryId !== link.id)
       || (target.kind === "native" && (currentTarget as ChatThread).source?.url !== LINKED_TARGET_SOURCE_URL)) unavailable();
+    return { link, currentTarget };
+  }
+  async function loadWithLatest(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference,
+    cursor?: string): Promise<{ page: LinkedHistoryPage; latestExcerpt: string } | null> {
+    // An unlinked conversation needs only a verified caller, with or without an organization. Project history, which
+    // an unavailable folder refuses, and organization membership are required only for a conversation with a link row.
+    await verifiedCaller(ctx);
+    const rows = await linkRows(target.kind, target.id);
+    if (!rows.length) {
+      // A durably marked target with no row (or no table yet) is an invalid link, never an ordinary conversation.
+      if (await isMarkedLinkTarget(target)) unavailable();
+      return null;
+    }
+    const identity = await scope(ctx, projectId);
+    const { link, currentTarget } = (await validatedLink(projectId, target, identity, rows))!;
     // The target link is valid from here. A deleted, revoked or changed source leaves the target usable without linked context.
     let items: Awaited<ReturnType<typeof sourcePrefix>>["items"] | null = null;
     try {
       const source = await record(link.source, identity);
       if (source.createdAt !== link.sourceCreatedAt) unavailable("The source conversation was replaced.");
+      // A source that is itself a linked target must still be a valid link on every read, not only when it was linked.
+      await validatedLink(projectId, link.source, identity);
       const prefix = await sourcePrefix(link.source, source, link.boundaryId, link.boundaryBytes);
       if (prefix.digest !== link.boundaryDigest) unavailable("The completed source history changed.");
       items = prefix.items;

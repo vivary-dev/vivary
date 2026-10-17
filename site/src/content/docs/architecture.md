@@ -214,7 +214,8 @@ its target must keep its marker, so a Native thread whose source URL was removed
 changed also refuses. Every source is
 checked the same way, marked or not, so a target whose link is invalid, or that
 lost its marker but kept its row, is neither offered as a source nor linked
-onward. Creating a link refuses with a clear message before it makes any
+onward. Downstream reads apply the same check to a source that is itself a linked
+target, so a source whose own link later breaks becomes unavailable downstream. Creating a link refuses with a clear message before it makes any
 target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
 project or personal workspace scope, the only scopes a link target can have, so
 an ordinary send never depends on the table. Pages and explicit sends
