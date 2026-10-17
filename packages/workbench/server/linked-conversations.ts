@@ -399,13 +399,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       await getDbExec().execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
         args: [link.id, target.kind, target.id, pendingJson] });
       linked = true;
-      if (target.kind === "code") updateCodeAgentRunRecord(target.id, { metadata: { linkedCreationPending: false } });
-      else {
-        await updateThreadData(target.id, "{}", title, "", 0);
-        // Core's setThreadSourceIfMissing is not exported. This is the same fill-only update, so no source is overwritten.
-        await getDbExec().execute({ sql: "UPDATE chat_threads SET source_url = COALESCE(source_url, ?) WHERE id = ?",
-          args: [LINKED_TARGET_SOURCE_URL, target.id] });
-      }
+      if (target.kind === "native") await updateThreadData(target.id, "{}", title, "", 0);
       // A failed clear writes nothing (compare-and-set). A written one is removed again if a later step fails.
       const cleared = await changeChatDraft(draftOwner.identity, draftOwner.threadId, null, { status: "cleared", text: "", submitId: null });
       if (cleared.changed) clearedDraft = cleared.record;
@@ -413,6 +407,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       const result = await getDbExec().execute({ sql: "UPDATE vivary_conversation_links SET record_json = ? WHERE link_id = ? AND record_json = ?",
         args: [JSON.stringify(finished), link.id, pendingJson] });
       if (!result.rowsAffected) throw new Error("The link changed while it was being created.");
+      // The target becomes visible only after its row is durably finished. A crash before this step leaves it hidden,
+      // and a Retry of the operation publishes it.
+      await publishTarget(target);
     } catch (error) {
       // A failed link leaves no hidden target behind, so each Retry starts clean.
       if (linked) await getDbExec().execute({ sql: "DELETE FROM vivary_conversation_links WHERE link_id = ?", args: [link.id] }).catch(() => undefined);
@@ -421,6 +418,19 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       throw error;
     }
     return { target, route: targetRoute(target) };
+  }
+  /**
+   * Makes a finished link's target visible: a Code run loses linkedCreationPending, and a Native thread gets the linked
+   * marker. Core's setThreadSourceIfMissing is not exported, so the marker uses the same fill-only update. Idempotent.
+   */
+  async function publishTarget(target: ConversationReference) {
+    if (target.kind === "code") {
+      if (getCodeAgentRunRecord(target.id)?.metadata?.linkedCreationPending === true)
+        updateCodeAgentRunRecord(target.id, { metadata: { linkedCreationPending: false } });
+      return;
+    }
+    await getDbExec().execute({ sql: "UPDATE chat_threads SET source_url = COALESCE(source_url, ?) WHERE id = ?",
+      args: [LINKED_TARGET_SOURCE_URL, target.id] });
   }
   /**
    * Removes a target this operation left unfinished. With its pending row, any target for the operation is unfinished.
@@ -452,6 +462,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       || link.projectId !== input.projectId || historyDigest(link.source) !== historyDigest(input.source) || engine !== input.target.engine)
       fail("This link request was already used for a different choice. Choose the harness again.",
         { errorCode: "vivary_link_operation_mismatch", statusCode: 409 });
+    // A finished link whose target was not yet published (a crash after its row was finished) is published now.
+    await publishTarget(link.target);
     // The route must still open: the current project binding or personal workspace and the target's own link are
     // checked as a page read checks them. A rebind or workspace move since creation refuses instead.
     try { await load(ctx, input.projectId, link.target); }

@@ -843,6 +843,34 @@ process.send({type:"vivary:code-worker:ready"});
     const finished = await first;
     assert.deepEqual(await slow.create(actor, { projectId: project.projectId, source: ref, target, operationId }), finished);
   });
+  await t.test("a target stays hidden until its link row is finished, and a Retry publishes a finished one", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const trigger = (name: string, when: string) =>
+      db.execute(`CREATE TRIGGER ${name} ${when} BEGIN SELECT RAISE(ABORT, 'selected ${name} fault'); END`);
+    const drop = (...names: string[]) => Promise.all(names.map(name => db.execute(`DROP TRIGGER IF EXISTS ${name}`)));
+    const native = (operationId: string) => service.create(actor, { projectId: project.projectId, source: ref, target: { engine: "native" }, operationId });
+    const targetOf = async (operationId: string) => String((await db.execute({ sql: "SELECT id FROM chat_threads WHERE id IN (SELECT target_id FROM vivary_conversation_links WHERE json_extract(record_json, '$.operationId') = ?)", args: [operationId] })).rows[0]?.id);
+    // 1. The final row update fails and the rollback cannot remove anything: the target must not be visible.
+    let operationId = randomUUID();
+    await trigger("finish", "BEFORE UPDATE ON vivary_conversation_links");
+    await trigger("keep_link", "BEFORE DELETE ON vivary_conversation_links"); await trigger("keep_thread", "BEFORE DELETE ON chat_threads");
+    try { await assert.rejects(native(operationId), /selected finish fault/); }
+    finally { await drop("finish", "keep_link", "keep_thread"); }
+    assert.equal((await getThread(await targetOf(operationId)))!.source?.url, undefined, "the unfinished target is not published to history");
+    assert.match((await service.context(actor, project.projectId, (await native(operationId)).target))!.block!, /Completed answer/);
+    // 2. The row is finished, then publishing fails and the rollback cannot remove anything: a Retry publishes it.
+    operationId = randomUUID();
+    await trigger("publish", "BEFORE UPDATE OF source_url ON chat_threads");
+    await trigger("keep_link", "BEFORE DELETE ON vivary_conversation_links"); await trigger("keep_thread", "BEFORE DELETE ON chat_threads");
+    try { await assert.rejects(native(operationId), /selected publish fault/); }
+    finally { await drop("publish", "keep_link", "keep_thread"); }
+    const hidden = await targetOf(operationId);
+    assert.equal((await getThread(hidden))!.source?.url, undefined);
+    const retried = await native(operationId);
+    assert.equal(retried.target.id, hidden);
+    assert.equal((await getThread(hidden))!.source?.url, "vivary:linked-conversation");
+    assert.match((await service.context(actor, project.projectId, retried.target))!.block!, /Completed answer/);
+  });
   await t.test("a target left by a failed rollback never blocks Retry or shows as a broken conversation", async () => {
     const { randomUUID } = await import("node:crypto");
     const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");

@@ -171,7 +171,9 @@ worker, consumes no approval and transfers no provider session. The target's
 cleared draft is written after the link metadata row and the target's
 finalization. The row is inserted with `creationPending` and loses it only as the
 last step, so a link is finished only when its row says so, and pages and sends
-refuse an unfinished one. If a creation step fails, the service removes the new
+refuse an unfinished one. The target becomes visible (a Code run loses
+`linkedCreationPending` and a Native thread gets its marker) only after that, so a
+crash before then leaves it hidden, and a Retry of the operation publishes it. If a creation step fails, the service removes the new
 Code record or Native thread, the row and the cleared draft, whichever were written.
 Creation is idempotent per choice. The chooser sends one operation ID for a choice
 and reuses it on Retry. The target ID derives from the owner, organization and that
