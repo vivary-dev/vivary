@@ -8,7 +8,6 @@ import {
   VIVARY_CODE_ENGINES,
 } from "../server/local-code-agent.ts";
 import { projectMemory } from "../server/project-memory.ts";
-import { getCodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { linkedConversations } from "../server/linked-conversations";
 
 export default defineAction({
@@ -28,8 +27,7 @@ export default defineAction({
   toolCallable: false,
   run: async ({ message, model, engine, runId, projectId, draftSubmitId, draftThreadId }, ctx?: ActionRunContext) => {
     const workspace = await resolveVivaryCodeProject(ctx, projectId);
-    const loadLinkedContext = runId && getCodeAgentRunRecord(runId)?.metadata?.linkedHistoryId
-      ? () => linkedConversations.context(ctx, projectId ?? null, { kind: "code", id: runId }) : undefined;
+    const loadLinkedContext = linkedConversations.codeSendLinkedContext(ctx, projectId ?? null, runId);
     return sendVivaryCodeMessage({
       ownerEmail: requireVivaryCodeUser(ctx),
       orgId: ctx?.orgId ?? undefined,

@@ -586,6 +586,17 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(service.load(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
     await assert.rejects(service.context(actor, project.projectId, codeLinked.target), { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("a Code send probes link metadata even when the run lost its linkedHistoryId marker", async () => {
+    const linked = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });
+    updateCodeAgentRunRecord(linked.target.id, { metadata: { linkedHistoryId: null } });
+    const loader = service.codeSendLinkedContext(actor, project.projectId, linked.target.id);
+    assert.equal(typeof loader, "function", "the send still checks the link row");
+    // The row no longer matches its target, so the send refuses instead of running without the frozen history.
+    await assert.rejects(loader!(), { errorCode: "vivary_linked_history_unavailable" });
+    // An ordinary run gets the same probe, which finds no link and supplies nothing.
+    assert.equal(await service.codeSendLinkedContext(actor, project.projectId, "paged-source")?.(), null);
+    assert.equal(service.codeSendLinkedContext(actor, project.projectId, undefined), undefined);
+  });
   await t.test("a retained Code transcript replaced by a FIFO is withheld without blocking", { skip: process.platform === "win32" }, async () => {
     const { execFileSync } = await import("node:child_process");
     const { rename, open: openFile } = await import("node:fs/promises");

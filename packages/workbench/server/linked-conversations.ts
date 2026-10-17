@@ -450,7 +450,16 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       displayMessage: details.displayMessage ?? details.message };
   }
 
-  return { create, load, context, sourceAvailable, prepareNativeMessage };
+  /**
+   * The linked-context loader a Code send uses for an existing run. The run's linkedHistoryId marker is mutable,
+   * so every existing run is probed. context() supplies nothing for an ordinary run and refuses a link row that no
+   * longer matches its target. A missing link table still means no link for an unmarked run.
+   */
+  function codeSendLinkedContext(ctx: ActionRunContext | undefined, projectId: string | null, runId: string | undefined) {
+    return runId ? () => context(ctx, projectId, { kind: "code", id: runId }) : undefined;
+  }
+
+  return { create, load, context, sourceAvailable, prepareNativeMessage, codeSendLinkedContext };
 }
 export const linkedConversations = createLinkedConversationService();
 
