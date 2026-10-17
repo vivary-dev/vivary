@@ -7551,7 +7551,9 @@ quoted text, while the request before it stays. Native's own engine history
 replays such replies, so this rule lives in `linked-history.ts`. Later reads walk parent links
 from the retained boundary message, so editing or regenerating the boundary or an
 earlier message, which moves the head to a sibling branch, leaves the linked
-prefix unchanged. No completed prefix means an
+prefix unchanged. A link frozen with no completed portion keeps that empty
+prefix without reading the source again, so later source data, even malformed,
+cannot change it. No completed prefix means an
 explicit empty-history notice. Source drafts and approval custody stay unchanged.
 
 A Code target that resumes its own provider session receives the block once: after

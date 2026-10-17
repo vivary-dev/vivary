@@ -225,10 +225,12 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const threadBytes = Buffer.byteLength(thread.threadData);
     if (boundaryId === undefined ? threadBytes > LINK_HISTORY_BYTES : threadBytes > LINK_RETAINED_PARSE_BYTES)
       unavailable("The source history exceeds the safe 8 MiB linking limit.");
+    // A link frozen with no completed portion keeps that empty prefix. Only an undefined boundary selects a new one, so
+    // later source data, even malformed, cannot change it.
+    if (boundaryId === null) return { boundaryId: null, boundaryBytes: null, digest: historyDigest([]), items: [] };
     // A retained boundary walks parentId from its own message, not from the current head.
-    const path = nativeHistoryPath(thread.threadData, boundaryId ?? undefined);
-    let index = boundaryId === undefined ? path.findLastIndex(isCompletedNativeMessage)
-      : boundaryId === null ? -1 : path.length - 1;
+    const path = nativeHistoryPath(thread.threadData, boundaryId);
+    let index = boundaryId === undefined ? path.findLastIndex(isCompletedNativeMessage) : path.length - 1;
     // A persisted assistant snapshot is not complete while its Native execution is live or saving.
     while (index >= 0) {
       const entry = path[index], folded = entry.message.metadata?.custom?.foldedRunIds;

@@ -312,6 +312,12 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(page.boundaryId, null); assert.equal(page.availableEntries, 0);
     assert.equal(page.excerpt, ""); assert.deepEqual(listCodeAgentTranscriptEvents(linked.target.id), []);
     assert.equal((await getThread(native.target.id))!.threadData, originalEmptyData);
+    // The link froze no completed portion. Later source data, even malformed, cannot change an empty frozen prefix.
+    // Core normalizes saves, so damaged stored data is written directly.
+    await db.execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?",
+      args: [JSON.stringify({ headId: "missing", messages: [{ parentId: null, message: null }] }), native.target.id] });
+    const after = (await service.load(actor, project.projectId, linked.target))!;
+    assert.equal(after.sourceStatus, "available"); assert.equal(after.boundaryId, null); assert.equal(after.excerpt, "");
   });
   await t.test("Native prepareRequest preserves display text and reports preparation without delivery", async () => {
     const linked = await create({ engine: "native" });
