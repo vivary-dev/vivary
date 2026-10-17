@@ -104,7 +104,7 @@ test("a draft save failure prevents creation and keeps the original selected", a
   assert.match(host.textContent, /Retry link/);
 });
 
-const noticePage = () => ({ source: { kind: "native", id: "original" }, sourceTitle: "Original history", sourceStatus: "available",
+const noticePage = () => ({ source: { kind: "native", id: "original" }, sourceTitle: "Original history", sourceStatus: "available", nextSendSupplies: true,
   boundaryId: "opaque-completed-message", availableEntries: 211, suppliedEntries: 100, excerpt: "Quoted history",
   truncated: true, nextCursor: null, nativeContinuity: false,
   lastPrepared: { entries: 100, characters: 12_000, truncated: true }, lastAccepted: null });
@@ -280,6 +280,14 @@ test("opening the original conversation routes inside the app, with no document 
   await act(async () => host.querySelector("a").dispatchEvent(click)); await settle();
   assert.equal(click.defaultPrevented, true, "the browser does not perform a document navigation");
   assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=original");
+});
+
+test("a notice for a resumed Code session says later sends do not repeat the supplied history", async () => {
+  linkFixture.call = async () => ({ ...noticePage(), nextSendSupplies: false,
+    lastAccepted: { entries: 100, characters: 12_000, truncated: true, userEventId: "accepted-user" } });
+  await render("notice"); await settle(); await notify();
+  assert.match(host.textContent, /An accepted send already supplied it to this session, so later sends do not repeat it\./);
+  assert.doesNotMatch(host.textContent, /Next send can prepare/);
 });
 
 test("an archived empty linked target with an unsent draft stays archived, with no active draft row", () => {

@@ -13,7 +13,7 @@ import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-id
 import { PROJECT_CHAT_SCOPE_PREFIX } from "./chat-project-scope.mjs";
 import { changeChatDraft, createCodeDraftIdentity } from "./chat-draft";
 import { resolveVivaryCodeProject, resolveVivaryCodeProjectHistory } from "./code-project";
-import { isOwnedRun, resolveWorkspace, sameWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
+import { isOwnedRun, providerSessionId, resolveWorkspace, sameWorkspace, resolveVivaryCodeModel, VIVARY_CODE_MODELS, type VivaryCodeProjectHistory,
   type VivaryCodeWorkspace } from "./local-code-agent";
 import { getVivaryRuntimeStatus } from "./local-runtime-setup";
 import { getCodexModels } from "./codex-models";
@@ -250,7 +250,15 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       return event.kind === "user" && parsed.success && parsed.data.linkId === link.id && parsed.data.boundaryDigest === link.boundaryDigest;
     }) : undefined;
     const acceptedPortion = accepted ? acceptedPortionSchema.parse(accepted.metadata?.linkedHistory) : null;
-    return { ...page, sourceStatus: items ? "available" : "unavailable", source: link.source, sourceTitle: link.sourceTitle,
+    // A Code target that resumes its own provider session already holds the block from its accepted send, so a later
+    // send would only add another copy. Without a session, Code rebuilds context from the transcript, which keeps the
+    // raw request only, and Native persists the visible message only, so both need the block on every send.
+    const run = target.kind === "code" ? currentTarget as CodeAgentRunRecord : null;
+    const engine = run?.metadata?.engine;
+    const sessionHasBlock = Boolean(run && acceptedPortion && (engine === "claude-cli" || engine === "codex-cli")
+      && providerSessionId(run, engine) !== null);
+    return { ...page, sourceStatus: items ? "available" : "unavailable", nextSendSupplies: Boolean(items) && !sessionHasBlock,
+      source: link.source, sourceTitle: link.sourceTitle,
       boundaryId: link.boundaryId, availableEntries: redacted.length, nativeContinuity: false, lastPrepared: link.lastPrepared,
       lastAccepted: acceptedPortion && accepted ? { entries: acceptedPortion.entries, characters: acceptedPortion.characters,
         truncated: acceptedPortion.truncated, userEventId: accepted.id } : null };
@@ -330,8 +338,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   async function context(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference): Promise<PreparedLinkedContext | null> {
     const page = await load(ctx, projectId, target);
     if (!page) return null;
-    // An unavailable source supplies nothing, so nothing is recorded as prepared.
-    if (page.sourceStatus === "unavailable") return { block: null, portion: null };
+    // An unavailable source, or a session that already holds the block, supplies nothing, so nothing is recorded as prepared.
+    if (!page.nextSendSupplies) return { block: null, portion: null };
     // Preparation is not acceptance or observed provider delivery. The Code send records acceptance on its actual user event after final admission.
     const rows = await linkRows(target.kind, target.id);
     const link = linkSchema.parse(JSON.parse(String(rows[0]?.record_json)));

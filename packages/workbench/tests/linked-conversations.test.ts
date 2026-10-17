@@ -210,6 +210,27 @@ process.send({type:"vivary:code-worker:ready"});
       const reconnectedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
       assert.equal(reconnectedUsers.length, 2);
       assert.equal(reconnectedUsers[1].metadata?.linkedHistory?.entries, 3);
+      // Without a provider session, each send rebuilds context from the transcript, which stores the raw request,
+      // so the block was supplied again above. Once the target holds a resumable session that already received
+      // the block in an accepted send, later sends do not repeat it.
+      updateCodeAgentRunRecord(runId, { metadata: { claudeSessionId: "8f9b8a0e-4c1d-4e2a-9b3c-5d6e7f809a1b" } });
+      await sendVivaryCodeMessage({ ownerEmail: owner, orgId, runId, workspace: { root, ...project },
+        message: "Resumed follow-up", engine: "claude-cli", model: "sonnet", loadLinkedContext });
+      const resumedExecution = host.activeRuns.get(runId)?.execution;
+      let resumed: { prompt: string } | undefined;
+      for (let attempt = 0; attempt < 100 && !resumed; attempt++) {
+        try { resumed = JSON.parse(await readFile(path.join(root, "linked-started.json"), "utf8")); }
+        catch { await new Promise(resolve => setTimeout(resolve, 20)); }
+      }
+      assert.match(resumed!.prompt, /Resumed follow-up/);
+      assert.doesNotMatch(resumed!.prompt, /Actual retained output|Linked conversation history/);
+      await stopVivaryCodeRun({ ownerEmail: owner, orgId, runId, projectId: project.projectId }); await resumedExecution;
+      await rm(path.join(root, "linked-started.json"));
+      const resumedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
+      assert.equal(resumedUsers.length, 3); assert.equal(resumedUsers[2].metadata?.linkedHistory, undefined);
+      const resumedPage = (await service.load(actor, project.projectId, linked.target))!;
+      assert.equal(resumedPage.nextSendSupplies, false, "the notice says later sends do not repeat it");
+      assert.equal(resumedPage.lastAccepted!.userEventId, reconnectedUsers[1].id, "the receipt stays on the send that supplied it");
       // A deleted source transcript leaves the target usable. The send supplies and records no linked portion.
       await rm(codeAgentRunTranscriptPath(admissionSource.id));
       const withoutSource = await sendVivaryCodeMessage({ ownerEmail: owner, orgId, runId, workspace: { root, ...project },
@@ -226,7 +247,7 @@ process.send({type:"vivary:code-worker:ready"});
       await stopVivaryCodeRun({ ownerEmail: owner, orgId, runId, projectId: project.projectId }); await unlinkedExecution;
       await rm(path.join(root, "linked-started.json"));
       const unlinkedUsers = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user");
-      assert.equal(unlinkedUsers.length, 3); assert.equal(unlinkedUsers[2].metadata?.linkedHistory, undefined);
+      assert.equal(unlinkedUsers.length, 4); assert.equal(unlinkedUsers[3].metadata?.linkedHistory, undefined);
       const unavailablePage = (await service.load(actor, project.projectId, linked.target))!;
       assert.equal(unavailablePage.sourceStatus, "unavailable"); assert.equal(unavailablePage.excerpt, "");
       assert.equal(unavailablePage.lastAccepted!.userEventId, reconnectedUsers[1].id, "the receipt stays on the last send that had context");

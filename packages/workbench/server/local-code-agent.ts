@@ -1172,7 +1172,7 @@ export async function getVivaryCodeSessionDetails(
   return details;
 }
 
-function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
+export function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
   if (metadataString(run, "engine") !== engine) return null;
   const id = metadataString(run, engine === "claude-cli" ? "claudeSessionId" : "codexSessionId");
   return id && (engine === "claude-cli"

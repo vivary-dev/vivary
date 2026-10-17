@@ -7526,6 +7526,12 @@ earlier message, which moves the head to a sibling branch, leaves the linked
 prefix unchanged. No completed prefix means an
 explicit empty-history notice. Source drafts and approval custody stay unchanged.
 
+A Code target that resumes its own provider session receives the block once: after
+an accepted send has supplied it, later sends in that session carry no block and
+record no linked portion, and the notice says so. Without a resumable session,
+Code rebuilds context from its transcript, which keeps only the raw request, and
+Native persists only the visible message (`displayMessage`), so both receive the
+block on every send.
 An explicit send receives at most 12,000 characters from 100 recorded entries as
 quoted historical data. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
