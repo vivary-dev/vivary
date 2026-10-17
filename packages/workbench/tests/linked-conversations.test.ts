@@ -284,6 +284,29 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: other.scope } }, () =>
       service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Forged" })));
   });
+  await t.test("a marked Native target whose link row or link table is missing refuses instead of sending without history", async () => {
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const linked = await create({ engine: "native" });
+    const prepare = () => runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: identity.scope } }, () =>
+      service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Request" }));
+    const row = (await db.execute({ sql: "SELECT link_id, target_kind, target_id, record_json FROM vivary_conversation_links WHERE target_id = ?", args: [linked.target.id] })).rows[0];
+    await db.execute({ sql: "DELETE FROM vivary_conversation_links WHERE target_id = ?", args: [linked.target.id] });
+    try {
+      await assert.rejects(service.load(actor, project.projectId, linked.target), { errorCode: "vivary_linked_history_unavailable" });
+      await assert.rejects(prepare(), { errorCode: "vivary_linked_history_unavailable" });
+      // Before registry migration 5 the table is missing too. The durable thread marker still refuses.
+      await db.execute("ALTER TABLE vivary_conversation_links RENAME TO vivary_conversation_links_withheld");
+      try {
+        await assert.rejects(service.load(actor, project.projectId, linked.target), { errorCode: "vivary_linked_history_unavailable" });
+        await assert.rejects(prepare(), { errorCode: "vivary_linked_history_unavailable" });
+      } finally { await db.execute("ALTER TABLE vivary_conversation_links_withheld RENAME TO vivary_conversation_links"); }
+    } finally {
+      await db.execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
+        args: [row.link_id, row.target_kind, row.target_id, row.record_json] });
+    }
+    assert.match((await prepare())!.message, /Completed answer/);
+  });
   await t.test("an unlinked Native send works before the link table exists, and a personal link still prepares", async () => {
     const { runWithRequestContext } = await import("@agent-native/core/server");
     const { vivaryChatScope } = await import("../app/lib/chat-scope.ts");

@@ -103,6 +103,11 @@ async function requireLinkTable() {
     throw error;
   }
 }
+/** Each target records that it is linked: a Code run in linkedHistoryId, a Native thread in its source URL. */
+async function isMarkedLinkTarget(target: ConversationReference): Promise<boolean> {
+  return target.kind === "code" ? Boolean(getCodeAgentRunRecord(target.id)?.metadata?.linkedHistoryId)
+    : (await getThread(target.id))?.source?.url === LINKED_TARGET_SOURCE_URL;
+}
 const isSourceFault = (error: unknown) => error instanceof LinkedSourceChanged
   || (error as { errorCode?: string } | null)?.errorCode === "vivary_linked_history_unavailable";
 
@@ -213,7 +218,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     await verifiedOwner(ctx);
     const rows = await linkRows(target.kind, target.id);
     if (!rows.length) {
-      if (target.kind === "code" && getCodeAgentRunRecord(target.id)?.metadata?.linkedHistoryId) unavailable();
+      // A durably marked target with no row (or no table yet) is an invalid link, never an ordinary conversation.
+      if (await isMarkedLinkTarget(target)) unavailable();
       return null;
     }
     const identity = await scope(ctx, projectId);
@@ -357,7 +363,10 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const pinned = getRequestRunContext()?.chatScope;
     if (pinned?.type !== "workspace-app" || !pinned.id.startsWith(PROJECT_CHAT_SCOPE_PREFIX)) return;
     const rows = await linkRows("native", details.threadId);
-    if (!rows.length) return;
+    if (!rows.length) {
+      if (await isMarkedLinkTarget({ kind: "native", id: details.threadId })) unavailable();
+      return;
+    }
     const link = linkSchema.parse(JSON.parse(String(rows[0].record_json)));
     const orgId = getRequestOrgId(), owner = details.ownerEmail?.trim().toLowerCase();
     if (!orgId || !owner) unavailable();

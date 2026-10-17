@@ -178,7 +178,10 @@ binding, source and target creation identities, and the completed source
 boundary with a digest. It contains no transcript copy. Registry migration 5
 creates the link table, and project services skip that migration while
 unconfigured or before bootstrap finishes. A missing table therefore counts as no
-link, and creating a link refuses with a clear message before it makes any
+link for an ordinary conversation. A target records that it is linked (a Code
+run in `linkedHistoryId`, a Native thread in its source URL), so a marked target
+whose row or table is missing refuses its pages and sends instead of continuing
+without its history. Creating a link refuses with a clear message before it makes any
 target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
 project or personal workspace scope, the only scopes a link target can have, so
 an ordinary send never depends on the table. Pages and explicit sends
