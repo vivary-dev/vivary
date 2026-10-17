@@ -5,7 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@agent-native/core@0.176.5': 6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b
+  '@agent-native/core@0.176.5':
+    hash: 6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b
+    path: patches/@agent-native__core@0.176.5.patch
 
 importers:
 
@@ -13,7 +15,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(125d8289cbacd0c8283c9f910b927590)
+        version: 0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(14ba03a0448bf5b261ff31be916baf2d)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -5927,7 +5929,7 @@ packages:
 
 snapshots:
 
-  '@agent-native/core@0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(125d8289cbacd0c8283c9f910b927590)':
+  '@agent-native/core@0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(14ba03a0448bf5b261ff31be916baf2d)':
     dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extension-list@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@tiptap/extensions@3.30.1(@tiptap/core@3.30.1(@tiptap/pm@3.30.1))(@tiptap/pm@3.30.1))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -5968,7 +5970,7 @@ snapshots:
       ajv: 8.20.0
       better-auth: 1.6.28(@opentelemetry/api@1.9.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@libsql/client@0.15.15)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(better-sqlite3@12.11.1)(kysely@0.28.17)(postgres@3.4.9))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@25.9.5)(vite@8.1.0(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       better-sqlite3: 12.11.1
-      botframework-connector: 4.23.3(debug@4.4.3)
+      botframework-connector: 4.23.3
       clsx: 2.1.1
       cron-parser: 5.10.0
       diff-match-patch: 1.0.5
@@ -9066,9 +9068,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.20.0(debug@4.4.3):
+  axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
+      follow-redirects: 1.16.0
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -9183,13 +9185,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  botframework-connector@4.23.3(debug@4.4.3):
+  botframework-connector@4.23.3:
     dependencies:
       '@azure/core-rest-pipeline': 1.25.0
       '@azure/identity': 4.13.2
       '@azure/msal-node': 2.16.3
       '@types/jsonwebtoken': 9.0.6
-      axios: 1.20.0(debug@4.4.3)
+      axios: 1.20.0
       base64url: 3.0.1
       botbuilder-stdlib: 4.23.3-internal
       botframework-schema: 4.23.3
@@ -9765,9 +9767,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
+  follow-redirects@1.16.0: {}
 
   form-data@4.0.6:
     dependencies:
