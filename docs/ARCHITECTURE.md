@@ -456,7 +456,17 @@ found that a preview that accepts and then closes or resets the connection left
 the check waiting for the full deadline, so every asset request stalled for
 three seconds before its 502. The socket's close now ends verification, and a
 test closes the connection before its row is visible and expects an early
-refusal.
+refusal. A further review found that the check read only `/proc/net/tcp`. Many
+dev servers ignore `HOST` and listen on `::`, so the 127.0.0.1 connection is
+accepted on an IPv6 socket listed only in `/proc/net/tcp6` as
+`::ffff:127.0.0.1`. Those previews now verify through the same inode and
+process group check, because the check reads both tables and matches the
+IPv4-mapped address. Only a handshake row or an inode 0 row, which prove the
+connection exists, keep the check waiting until the deadline. A row missing
+from both tables gets five reads of grace for a torn read, then refuses, and
+different nonzero inodes across the two tables refuse at once. Tests cover a
+real dual-stack listener, a row missing from both tables and a conflict across
+the tables.
 
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
