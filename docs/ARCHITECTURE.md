@@ -221,7 +221,9 @@ every platform it compares the opened file with an `lstat` of the path, as
 `original-runtime.ts` does for Windows, which has no such flag. A transcript
 replaced by a symbolic link or otherwise no longer a safe regular file
 therefore counts as unavailable. The open also uses `O_NONBLOCK`, so a transcript
-replaced by a FIFO with no writer is rejected instead of blocking the read. Only a linked Code target that has never sent
+replaced by a FIFO with no writer is rejected instead of blocking the read.
+The source eligibility check reads the same prefix a new link would, so a source
+whose retained history cannot be read is not offered for linking. Only a linked Code target that has never sent
 (phase `linked-inactive`) has no transcript by design. Any other missing Code
 transcript was deleted, so new linking refuses it rather than linking an empty
 history. The target stays usable, its sends

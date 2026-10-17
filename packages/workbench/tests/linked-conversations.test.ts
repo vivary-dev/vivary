@@ -910,6 +910,20 @@ process.send({type:"vivary:code-worker:ready"});
       await service.create(actor, { projectId: project.projectId, source: target, target: onward });
     }
   });
+  await t.test("a source whose retained history cannot be read is not offered for linking", async () => {
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const deleted = code("eligibility-deleted");
+    appendCodeAgentTranscriptEvent({ runId: deleted.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
+    await rm(codeAgentRunTranscriptPath(deleted.id));
+    const malformed = await createThread(owner, { id: "eligibility-malformed", orgId, scope: identity.scope });
+    await db.execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?",
+      args: [JSON.stringify({ headId: "missing", messages: [{ parentId: null, message: null }] }), malformed.id] });
+    for (const source of [{ kind: "code" as const, id: deleted.id }, { kind: "native" as const, id: malformed.id }])
+      assert.deepEqual(await service.sourceAvailable(actor, project.projectId, source), { available: false }, source.id);
+    // A linked Code target that has never sent has no transcript by design and is still a source.
+    const inactive = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });
+    assert.deepEqual(await service.sourceAvailable(actor, project.projectId, inactive.target), { available: true });
+  });
   await t.test("new linking refuses a Code source whose transcript was deleted, but not an inactive target that never sent", async () => {
     const deleted = code("transcript-deleted");
     appendCodeAgentTranscriptEvent({ runId: deleted.id, kind: "system", message: "Gone answer", metadata: { role: "assistant" } });

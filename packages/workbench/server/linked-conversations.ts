@@ -499,11 +499,13 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       throw error;
     }
     if (source.kind === "native" && !await getThread(source.id)) return { available: false };
-    await record(source, identity);
-    // An invalid linked target is not offered as a source. create() refuses it too.
-    try { await validateMarkedSource(ctx, projectId, source); }
+    const current = await record(source, identity);
+    // An invalid linked target, or a source whose retained history cannot be read (a deleted, linked or malformed
+    // transcript, or malformed or oversized Native history), is not offered as a source. create() refuses it too.
+    // A linked Code target that has never sent reads as an empty prefix, so it stays a source.
+    try { await validateMarkedSource(ctx, projectId, source); await sourcePrefix(source, current); }
     catch (error) {
-      if ((error as { errorCode?: string } | null)?.errorCode === "vivary_linked_history_unavailable") return { available: false };
+      if (isSourceFault(error)) return { available: false };
       throw error;
     }
     return { available: true };
