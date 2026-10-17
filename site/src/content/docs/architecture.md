@@ -431,6 +431,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-17 Maintained checks time limit. The `maintained workbench checks`
+CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
+to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
+UTC) and on a pull request (2026-10-17 00:18 UTC) with no failing test. The
+limit is now 20 minutes. Only the time limit changes. The job's steps, its
+gate role and every other job stay the same, so the design description holds.
+
 2026-10-16 Linux preview socket ownership before accept. The Linux ownership
 check in `server/preview-socket-owner.ts` finds the preview server's side of the
 established connection in `/proc/net/tcp` and follows its socket inode to a
