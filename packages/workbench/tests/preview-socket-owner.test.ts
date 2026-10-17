@@ -3,6 +3,7 @@ import test from 'node:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { capturePreviewProcess, connectOwnedPreview, verifyWindowsPreviewPeer } from '../server/preview-socket-owner';
 
 const script = `const net=require('node:net');let bytes=0;const sockets=new Set();const server=net.createServer(s=>{sockets.add(s);s.on('data',b=>{bytes+=b.length;s.end('owned response')});s.on('close',()=>sockets.delete(s));});server.listen(Number(process.argv[1]||0),process.argv[2]||'127.0.0.1',()=>process.send(server.address().port));process.on('message',m=>{if(m==='bytes')process.send(bytes);if(m==='unbind'){for(const s of sockets)s.destroy();server.close(()=>process.send('unbound'));}if(m==='close'){for(const s of sockets)s.destroy();server.close(()=>process.exit(0));}});`;
@@ -102,12 +103,16 @@ test('ownership refuses a connection that is never accepted once the deadline en
 
 // Rewrites the server-side row of the preview connection for the first `early` reads.
 function tcpTableRewritingServerRow(port: number, early: number, rewrite: (parts: string[]) => string[][]) {
+  return tcpTableFollowingPlan(port, read => read <= early ? rewrite : undefined);
+}
+// Rewrites the server-side row of the preview connection with the rewrite chosen for each read number.
+function tcpTableFollowingPlan(port: number, rewriteFor: (read: number) => ((parts: string[]) => string[][]) | undefined) {
   const reads = { count: 0 };
   const local = `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`;
   const read = async () => {
-    reads.count++;
+    const rewrite = rewriteFor(++reads.count);
     const table = await readFile('/proc/net/tcp', 'utf8');
-    if (reads.count > early) return table;
+    if (!rewrite) return table;
     const [header, ...rows] = table.trim().split('\n');
     return [header, ...rows.flatMap(row => {
       const parts = row.trim().split(/\s+/);
@@ -185,7 +190,15 @@ test('ownership stops waiting when the preview closes the connection before its 
     assert.ok(reads.count <= 2, `the check stopped when the connection closed, after ${reads.count} reads`);
   } finally { await close(owned.child); }
 });
-test('ownership verifies a dual-stack preview listener through its IPv4-mapped tcp6 row', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+// A Linux host can run without IPv6, and then no dual-stack listener can bind.
+const ipv6Available = await new Promise<boolean>(resolve => {
+  const probe = createServer();
+  probe.once('error', () => resolve(false));
+  probe.listen(0, '::', () => probe.close(() => resolve(true)));
+});
+test('ownership verifies a dual-stack preview listener through its IPv4-mapped tcp6 row', {
+  skip: process.platform !== 'linux' ? true : ipv6Available ? false : 'IPv6 is unavailable on this host, so no dual-stack listener can bind',
+  timeout: 15000 }, async () => {
   // Many dev servers ignore HOST and listen on ::, so the 127.0.0.1 connection is accepted on an IPv6 socket.
   const dual = await launch(0, '::');
   try {
@@ -208,5 +221,18 @@ test('ownership refuses at once when the tcp and tcp6 tables name different sock
       Object.assign([...parts], { 1: mapped(parts[1]), 2: mapped(parts[2]), 9: '900000002' })]);
     await assert.rejects(connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read }), /ownership/);
     assert.equal(table.reads.count, 1);
+  } finally { await close(owned.child); }
+});
+test('ownership grace counts only consecutive reads without a visible connection row', { skip: process.platform !== 'linux', timeout: 15000 }, async () => {
+  const owned = await launch();
+  try {
+    const identity = await capturePreviewProcess(owned.child);
+    assert.ok(identity);
+    // Four misses, a handshake row that proves the connection exists, then four more misses before the real row.
+    const plan = [missingRow, missingRow, missingRow, missingRow, handshakeRow, missingRow, missingRow, missingRow, missingRow];
+    const table = tcpTableFollowingPlan(owned.port, read => plan[read - 1]);
+    const socket = await connectOwnedPreview({ port: owned.port, identity, signal: new AbortController().signal, readTcpTable: table.read });
+    assert.ok(table.reads.count > plan.length, `verified after ${table.reads.count} reads`);
+    socket.destroy();
   } finally { await close(owned.child); }
 });

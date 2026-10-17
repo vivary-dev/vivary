@@ -7750,10 +7750,11 @@ host a read can skip a row or list it twice, and a check run before the
 handshake ends finds no established row. Each of those refused the connection at
 once, and the never-accepted test failed after 453 ms inside a full suite. A
 loopback churn check on the server listed a stable row twice in 1 of 127 reads.
-The check now also waits while no established row is visible, and it treats
+The check now waits while a handshake row or an inode 0 row is visible, and a
+row missing from both tables is refused after five consecutive reads. It treats
 repeated rows that name one socket as one row. Rows that name different sockets
 are refused at once. Inode 0 and a missing row never count as owned, and the
-existing three second deadline still refuses a connection that never qualifies.
+existing three second deadline still refuses a connection that stays pending.
 Ownership rules and owners are unchanged, so the remote preview description
 holds. Evidence: two tests in `tests/preview-socket-owner.test.ts` feed the
 check a missing row, a handshake row, a repeated row, a row that never appears
@@ -7773,10 +7774,11 @@ accepted on an IPv6 socket listed only in `/proc/net/tcp6` as
 process group check, because the check reads both tables and matches the
 IPv4-mapped address. Only a handshake row or an inode 0 row, which prove the
 connection exists, keep the check waiting until the deadline. A row missing
-from both tables gets five reads of grace for a torn read, then refuses, and
-different nonzero inodes across the two tables refuse at once. Tests cover a
-real dual-stack listener, a row missing from both tables and a conflict across
-the tables.
+from both tables gets five consecutive reads of grace for a torn read, then
+refuses, and a pending row restarts that grace. Different nonzero inodes across
+the two tables refuse at once. Tests cover a real dual-stack listener, skipped
+on a host without IPv6, a row missing from both tables, misses split by a
+pending row and a conflict across the tables.
 
 2026-10-17 Maintained checks time limit. The `maintained workbench checks`
 CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6

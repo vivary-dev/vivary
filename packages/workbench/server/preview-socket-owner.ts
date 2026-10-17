@@ -41,7 +41,7 @@ async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: Ab
   // because the server has not accepted the connection. Those rows show the connection exists, so the
   // check waits with a bounded backoff until the caller's deadline aborts `signal`. A read of these
   // tables is not atomic, so a busy host can skip a row or list it twice. A row missing from both
-  // tables therefore gets a few reads of grace, then refuses.
+  // tables therefore gets a few consecutive reads of grace, then refuses. A pending row restarts the grace.
   let missingReads = 0;
   for (let wait = 10; ; wait = Math.min(wait * 2, 200)) {
     const rows = (await readTcpTable()).trim().split('\n').map(line => line.trim().split(/\s+/));
@@ -55,7 +55,8 @@ async function verifyLinux(socket: Socket, identity: ProcessIdentity, signal: Ab
     inode = [...inodes][0];
     if (inode !== undefined) break;
     const pending = established.length > 0 || connection.some(row => row[3] === '03');
-    if (!pending && ++missingReads >= MISSING_ROW_READS) throw refused();
+    if (pending) missingReads = 0;
+    else if (++missingReads >= MISSING_ROW_READS) throw refused();
     await delay(wait, undefined, { signal });
   }
   if (!inode || !/^\d+$/.test(inode)) throw refused();
