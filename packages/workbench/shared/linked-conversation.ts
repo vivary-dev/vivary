@@ -12,6 +12,11 @@ export type LinkedHistoryPage = {
   sourceTitle: string;
   /** Unavailable means the source was deleted, revoked or no longer verifies. Nothing is supplied. */
   sourceStatus: "available" | "unavailable";
+  /**
+   * Whether the original conversation still exists for this owner. An unavailable source that is still reachable has a
+   * frozen prefix that no longer verifies. One that is not was deleted, replaced or is no longer authorized.
+   */
+  sourceReachable: boolean;
   /** False when the source is unavailable or the target's resumed provider session already holds the block. */
   nextSendSupplies: boolean;
   /** What the next send's block holds: the latest entries that fit, ending at the boundary. */

@@ -177,7 +177,7 @@ test("a mounted Native notice refreshes preparation through Native request compl
 });
 
 test("an unavailable source keeps the notice truthful and claims no prepared or supplied context for later sends", async () => {
-  linkFixture.call = async () => ({ ...noticePage(), sourceStatus: "unavailable", availableEntries: 0, suppliedEntries: 0,
+  linkFixture.call = async () => ({ ...noticePage(), sourceStatus: "unavailable", sourceReachable: false, availableEntries: 0, suppliedEntries: 0,
     excerpt: "", truncated: false, lastAccepted: { entries: 3, characters: 120, truncated: false, userEventId: "earlier-user" } });
   await render("notice"); await settle(); await notify();
   assert.match(host.textContent, /Original history, which is unavailable\. Sends continue without its history\./);
@@ -185,6 +185,15 @@ test("an unavailable source keeps the notice truthful and claims no prepared or 
   assert.doesNotMatch(host.textContent, /Next send can prepare|Last request prepared|completed-history entries available|could not be verified/);
   assert.equal(host.querySelector("a"), null, "the unavailable original is not offered as a readable link");
   assert.equal([...host.querySelectorAll("button")].some(button => /Inspect linked history|Retry history/.test(button.textContent)), false);
+});
+
+test("an original that still exists keeps its link when only its frozen history no longer verifies", async () => {
+  linkFixture.call = async () => ({ ...noticePage(), sourceStatus: "unavailable", sourceReachable: true, availableEntries: 0,
+    suppliedEntries: 0, excerpt: "", truncated: false });
+  await render("notice"); await settle(); await notify();
+  assert.equal(host.querySelector("a")?.getAttribute("href"), "/?runtime=native&history=project&thread=original");
+  assert.match(host.textContent, /Its completed history no longer matches what was linked, so sends continue without it\./);
+  assert.doesNotMatch(host.textContent, /which is unavailable/);
 });
 
 test("a new Native conversation becomes a link source when its first request saves it", async () => {

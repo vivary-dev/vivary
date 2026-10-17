@@ -948,6 +948,25 @@ process.send({type:"vivary:code-worker:ready"});
     assert.deepEqual(await service.sourceAvailable(actor, project.projectId, linked.target), { available: false });
     await assert.rejects(create({ engine: "native" }, linked.target), { errorCode: "vivary_linked_history_unavailable" });
   });
+  await t.test("an unavailable source reports whether the original still exists, separating a changed prefix from a deleted source", async () => {
+    const changed = code("reachable-source");
+    appendCodeAgentTranscriptEvent({ runId: changed.id, kind: "system", message: "Original answer", metadata: { role: "assistant" } });
+    appendCodeAgentTranscriptEvent({ runId: changed.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete", engine: "claude-cli" } });
+    const fromChanged = await create({ engine: "native" }, { kind: "code", id: changed.id });
+    const transcript = codeAgentRunTranscriptPath(changed.id);
+    await writeFile(transcript, (await readFile(transcript, "utf8")).replace("Original answer", "Rewritten answer"));
+    const changedPage = (await service.load(actor, project.projectId, fromChanged.target))!;
+    assert.equal(changedPage.sourceStatus, "unavailable"); assert.equal(changedPage.sourceReachable, true, "the original still opens");
+    const { deleteThread } = await import("@agent-native/core/server");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const gone = await createThread(owner, { id: "reachable-deleted", orgId, scope: identity.scope });
+    const messages = [{ parentId: null, message: { id: "gone-answer", role: "assistant", status: { type: "complete" }, content: [{ type: "text", text: "Gone" }] } }];
+    await updateThreadData(gone.id, JSON.stringify({ headId: "gone-answer", messages }), "Gone", "", 1);
+    const fromGone = await service.create(actor, { projectId: project.projectId, source: { kind: "native", id: gone.id }, target: { engine: "claude-cli", model: "sonnet" } });
+    await deleteThread(gone.id);
+    const gonePage = (await service.load(actor, project.projectId, fromGone.target))!;
+    assert.equal(gonePage.sourceStatus, "unavailable"); assert.equal(gonePage.sourceReachable, false);
+  });
   await t.test("a downstream link withholds history once its linked source loses its own link row", async () => {
     const middle = await create({ engine: "native" });
     const downstream = await service.create(actor, { projectId: project.projectId, source: middle.target, target: { engine: "claude-cli", model: "sonnet" } });
