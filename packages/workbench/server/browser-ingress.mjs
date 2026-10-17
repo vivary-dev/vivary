@@ -210,6 +210,8 @@ export function createBrowserListener({ access, fetch, createHttpServer = create
   };
   return {
     error: () => error,
+    // The bound server's own state, not the saved configuration.
+    listening: () => listener?.listening === true && listenerPort !== undefined,
     reconcile() {
       const operation = async () => {
         const config = access.configuration();
@@ -225,6 +227,14 @@ export function createBrowserListener({ access, fetch, createHttpServer = create
           await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve); });
           if (stopped) { await stopListener(); return; }
           listenerPort = config.port; error = null;
+          // A bound server can still fail or close later. Forget it so `listening()` and the next reconcile see that.
+          const lost = () => {
+            if (listener !== server) return;
+            listener = null; listenerPort = undefined;
+            error = 'The browser ingress listener stopped. Save these settings again to restart it.';
+            if (server.listening) void closeServer(server);
+          };
+          server.on('error', lost); server.once('close', lost);
         } catch {
           await stopListener();
           error = 'The saved browser ingress port is unavailable. Repair it here; desktop access remains available.';
@@ -247,7 +257,7 @@ export function installDesktopBrowserAccess(nitroApp, localOrigin) {
   let previewGateway;
   const reconcilePreview = async () => {
     previewGateway?.close(); await previewListener?.close();
-    previewGateway = createPreviewGateway({ access }); installPreviewGateway(previewGateway);
+    previewGateway = createPreviewGateway({ access, listening: () => previewListener?.listening() ?? false }); installPreviewGateway(previewGateway);
     previewListener = createBrowserListener({ access: { configuration: () => { const config = access.configuration(); return { enabled: config.enabled && !!config.preview, port: config.preview?.port }; } }, fetch: request => previewGateway.handle(request) });
     await previewListener.reconcile();
   };
