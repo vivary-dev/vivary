@@ -655,6 +655,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
         <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
           sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
+          workspaceAvailable={props.workspaceAvailable}
           saveDraft={sourceDraftSaver(draft, draftThreadId)} />
       </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">

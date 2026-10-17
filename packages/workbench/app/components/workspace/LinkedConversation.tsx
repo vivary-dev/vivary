@@ -101,17 +101,18 @@ type Probe<T> = { data?: T; isError: boolean; refetch: () => unknown };
  * The Code chooser, shown only after the same sourceAvailable check Native uses. An owner with no organization,
  * or a target whose link no longer validates, is not offered choices that cannot work. A failed check offers Retry.
  */
-export function CodeLinkOptions({ projectId, runId, sourceEngine, engines, storageKey, saveDraft }: {
+export function CodeLinkOptions({ projectId, runId, sourceEngine, engines, storageKey, saveDraft, workspaceAvailable }: {
   projectId: string | null; runId: string; sourceEngine: string; engines: VivaryCodeState["engines"];
-  storageKey: string; saveDraft: () => Promise<void>;
+  storageKey: string; saveDraft: () => Promise<void>; workspaceAvailable: boolean;
 }) {
   const source = useLinkSourceEligibility({ projectId, storageKey, threadId: runId, enabled: true, kind: "code" });
   if (source.isError) return <div className="local-agent-notice" role="alert">
     Linked conversation options could not load.
     <Button size="sm" variant="outline" onClick={() => { void source.refetch(); }}>Retry linked conversation</Button></div>;
   if (source.data?.available !== true) return null;
+  // A Code target needs the project folder. Without it only the Code to Native choice can work.
   return <LinkedConversationChooser projectId={projectId} source={{ kind: "code", id: runId }} sourceEngine={sourceEngine}
-    engines={engines} saveDraft={saveDraft} />;
+    engines={workspaceAvailable ? engines : []} saveDraft={saveDraft} />;
 }
 
 /** The Native chooser once its source eligibility and runtime state have loaded. A failed prerequisite offers Retry. */

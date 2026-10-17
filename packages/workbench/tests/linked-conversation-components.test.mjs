@@ -42,7 +42,8 @@ const bundle = await build({ stdin: { contents: `
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
       kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
         : kind === "code-options" ? createElement(CodeLinkOptions, { projectId: "alpha", runId: "code-source", sourceEngine: "claude-cli",
-          engines: props.engines, storageKey: "owner", saveDraft: globalThis.linkFixture.saveDraft })
+          engines: props.engines, storageKey: "owner", saveDraft: globalThis.linkFixture.saveDraft,
+          workspaceAvailable: globalThis.linkFixture.workspaceAvailable ?? true })
         : kind === "native-options" ? createElement(NativeLinkOptions, { projectId: "alpha", threadId: "native-source",
           saveDraft: globalThis.linkFixture.saveDraft, ...globalThis.linkFixture.options })
         : kind === "chooser-from-codex" ? createElement(LinkedConversationChooser, { ...props, sourceEngine: "codex-cli",
@@ -371,4 +372,12 @@ test("a stale or mismatched link operation shows the server's reason and the nex
     assert.equal(linkFixture.calls.length, 2);
     assert.notEqual(linkFixture.calls[0].input.operationId, linkFixture.calls[1].input.operationId, "Retry does not reuse a refused operation");
   }
+});
+
+test("with the project folder unavailable the Code chooser offers only Native, since Code targets need the folder", async () => {
+  linkFixture.workspaceAvailable = false;
+  linkFixture.call = async () => ({ available: true });
+  await render("code-options"); await settle(); await notify();
+  assert.equal(Boolean(host.querySelector('option[value="codex-cli"]')), false, "no Code target that would always fail");
+  assert.equal(Boolean(host.querySelector('option[value="native"]')), true, "Code to Native still works");
 });
