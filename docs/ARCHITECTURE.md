@@ -164,6 +164,11 @@ cleared draft is written last, after the link metadata row and the target's
 finalization, so no later step can fail once the draft exists. If any creation
 step fails, the service removes the new Code record or Native
 thread (and the row, when written), so Retry leaves no hidden target behind.
+Creation is idempotent per choice. The chooser sends one operation ID for a choice
+and reuses it on Retry. The target ID derives from the owner, organization and that
+ID, and the link stores it, so a retry after a lost response returns the target
+already made. Reusing an ID for another project, source or harness refuses with
+`vivary_link_operation_mismatch`.
 Core has no Code run removal, so the service deletes the record file in
 `codeAgentRunsDir`. A failed link
 keeps the source selected and offers Retry. The host execution guard is unchanged.

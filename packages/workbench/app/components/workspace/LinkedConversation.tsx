@@ -6,6 +6,15 @@ import { useNativeActionCaller } from "@/lib/native-actions";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage } from "../../../shared/linked-conversation";
 
+/** A version 4 UUID. randomUUID needs a secure context, which remote browser access over plain HTTP lacks. */
+function newOperationId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
+}
+
 /** The Code harnesses a source can link to: configured, not the source's own, and with a model that can send. */
 export function linkTargetChoices(engines: VivaryCodeState["engines"], sourceEngine: string) {
   return engines.filter(engine => engine.configured && engine.engine !== sourceEngine).map(engine => ({
@@ -24,6 +33,9 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
   const [busy, setBusy] = useState(false), [failedChoice, setFailedChoice] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const visit = useRef(0), inFlight = useRef(false);
+  // One operation ID per choice, reused by Retry, so a server that committed before its response was lost
+  // returns the same target instead of creating a second one.
+  const operation = useRef<{ engine: string; id: string } | null>(null);
   useEffect(() => () => { visit.current++; }, [projectId, source.kind, source.id]);
   const choices = linkTargetChoices(engines, sourceEngine);
   async function open(engine: string) {
@@ -35,9 +47,12 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
       await saveDraft();
       const choice = choices.find(choice => choice.engine === engine);
       if (engine !== "native" && !choice) throw new Error("This runtime is unavailable.");
+      if (operation.current?.engine !== engine) operation.current = { engine, id: newOperationId() };
       const result = await call<LinkedConversationResult>("vivary-conversation-link", {
         projectId, source, target: engine === "native" ? { engine } : { engine, model: choice!.model },
+        operationId: operation.current.id,
       });
+      operation.current = null;
       if (generation !== visit.current) return;
       window.dispatchEvent(new Event("agent-chat:threads-updated"));
       navigate(result.route);

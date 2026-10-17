@@ -708,6 +708,25 @@ process.send({type:"vivary:code-worker:ready"});
     const page = await service.load(actor, project.projectId, linked.target);
     assert.equal(page!.boundaryId, null); assert.equal(page!.availableEntries, 0); assert.equal(page!.excerpt, "");
   });
+  await t.test("a retried link with the same operation ID returns its first target, and a mismatched reuse refuses", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const { listCodeAgentRunRecords } = await import("@agent-native/core/code-agents");
+    const counts = async () => [listCodeAgentRunRecords("vivary-local-code").length,
+      Number((await db.execute("SELECT COUNT(*) AS n FROM chat_threads")).rows[0].n)];
+    for (const target of [{ engine: "native" }, { engine: "codex-cli", model: "fixture-model" }] as const) {
+      const operationId = randomUUID(), before = await counts();
+      const first = await service.create(actor, { projectId: project.projectId, source: ref, target, operationId });
+      // The response was lost and the owner retried the same choice.
+      assert.deepEqual(await service.create(actor, { projectId: project.projectId, source: ref, target, operationId }), first);
+      const after = await counts();
+      assert.equal(after[0] + after[1] - before[0] - before[1], 1, "exactly one target exists for the operation");
+      const other = target.engine === "native" ? { engine: "claude-cli" as const, model: "sonnet" } : { engine: "native" as const };
+      await assert.rejects(service.create(actor, { projectId: project.projectId, source: ref, target: other, operationId }),
+        { errorCode: "vivary_link_operation_mismatch" });
+      await assert.rejects(service.create(actor, { projectId: project.projectId, source: { kind: "native", id: "native-source" }, target, operationId }),
+        { errorCode: "vivary_link_operation_mismatch" });
+    }
+  });
   await t.test("a linked target whose own link metadata is missing or malformed cannot link onward as a source", async () => {
     const nativeTarget = await create({ engine: "native" });
     const codeTarget2 = await create({ engine: "claude-cli", model: "sonnet" }, { kind: "native", id: "native-source" });

@@ -5,7 +5,9 @@ import { conversationReferenceSchema, linkedConversations, linkedTargetSchema } 
 export default defineAction({
   description: "Open an inactive linked conversation in the same authorized project without sending or executing work.",
   schema: z.object({ projectId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).nullable(),
-    source: conversationReferenceSchema, target: linkedTargetSchema }).strict(),
+    source: conversationReferenceSchema, target: linkedTargetSchema,
+    // Reused across retries of one choice, so a retry after a lost response returns the same target.
+    operationId: z.string().uuid() }).strict(),
   requiresAuth: true, agentTool: false, mcpTool: false, toolCallable: false,
   run: (input, ctx?: ActionRunContext) => linkedConversations.create(ctx, input),
 });

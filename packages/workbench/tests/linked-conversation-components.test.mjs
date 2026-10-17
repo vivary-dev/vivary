@@ -81,8 +81,10 @@ test("a failed link saves the draft first, calls only the link action, keeps the
   assert.equal(host.querySelector("#route").textContent, "?run=source");
   // The draft is saved through its owner before creation, and the failed link causes no other effect.
   assert.deepEqual(linkFixture.effects, [{ effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" }]);
+  const operationId = linkFixture.calls[0]?.input.operationId;
+  assert.match(String(operationId), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   assert.deepEqual(linkFixture.calls, [{ name: "vivary-conversation-link", input: { projectId: "alpha",
-    source: { kind: "code", id: "source" }, target: { engine: "codex-cli", model: "fixture" } } }]);
+    source: { kind: "code", id: "source" }, target: { engine: "codex-cli", model: "fixture" }, operationId } }]);
   assert.match(host.textContent, /Retry link|Nothing is sent/);
   linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); linkFixture.effects.push({ effect: name });
     return { target: { kind: "code", id: "target" }, route: "/?run=target" }; };
@@ -94,6 +96,14 @@ test("a failed link saves the draft first, calls only the link action, keeps the
   assert.deepEqual(linkFixture.effects, [{ effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" },
     { effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" }]);
   assert.equal(linkFixture.calls.some(call => /send|start|approve|draft|discard/.test(call.name)), false);
+  // A Retry of the same choice reuses the operation ID, so a server that already committed returns the same target.
+  assert.equal(linkFixture.calls[1].input.operationId, operationId);
+});
+
+test("a different harness choice after a failed link starts a new link operation", async () => {
+  await render("chooser"); await choose("codex-cli"); await choose("native");
+  assert.equal(linkFixture.calls.length, 2);
+  assert.notEqual(linkFixture.calls[0].input.operationId, linkFixture.calls[1].input.operationId);
 });
 
 test("a draft save failure prevents creation and keeps the original selected", async () => {

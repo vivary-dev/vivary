@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { constants } from "node:fs";
@@ -43,6 +43,8 @@ const linkSchema = z.object({
   lastPrepared: portionSchema.nullable().default(null),
   // Earlier local candidates called preparation supplied. It is never accepted-send evidence.
   lastSupplied: portionSchema.nullable().optional(),
+  /** The client's operation ID. A retry of the same choice returns this link instead of creating another target. */
+  operationId: z.string().uuid().optional(),
 }).strict();
 type Link = z.infer<typeof linkSchema>;
 type Scope = { owner: string; orgId: string; projectId: string | null; history: VivaryCodeProjectHistory | undefined;
@@ -102,6 +104,13 @@ async function requireLinkTable() {
       unavailable("Linking conversations is not available yet. Finish setting up Vivary projects, then retry.");
     throw error;
   }
+}
+const targetRoute = (target: ConversationReference) => target.kind === "code" ? `/?run=${encodeURIComponent(target.id)}`
+  : `/?runtime=native&history=project&thread=${encodeURIComponent(target.id)}`;
+/** A target ID no other owner's operation can produce, in the UUID shape other targets use. */
+function operationTargetId(owner: string, orgId: string, operationId: string): string {
+  const hash = createHash("sha256").update(JSON.stringify(["vivary-linked-target", owner, orgId, operationId])).digest("hex");
+  return [hash.slice(0, 8), hash.slice(8, 12), hash.slice(12, 16), hash.slice(16, 20), hash.slice(20, 32)].join("-");
 }
 /** Each target records that it is linked: a Code run in linkedHistoryId, a Native thread in its source URL. */
 async function isMarkedLinkTarget(target: ConversationReference): Promise<boolean> {
@@ -275,9 +284,20 @@ export function createLinkedConversationService(dependencies: Dependencies = def
         truncated: acceptedPortion.truncated, userEventId: accepted.id } : null } };
   }
 
-  async function create(ctx: ActionRunContext | undefined, input: { projectId: string | null; source: ConversationReference; target: TargetChoice }): Promise<LinkedConversationResult> {
+  async function create(ctx: ActionRunContext | undefined, input: { projectId: string | null; source: ConversationReference;
+    target: TargetChoice; operationId?: string }): Promise<LinkedConversationResult> {
     const identity = await scope(ctx, input.projectId);
     await requireLinkTable();
+    // The target ID derives from the owner and the client's operation ID, so a retry after a lost response finds the
+    // link it already made instead of creating a second target. Another owner's operation can never reach this ID.
+    const operationId = input.operationId ?? randomUUID();
+    const targetId = operationTargetId(identity.owner, identity.orgId, operationId);
+    for (const kind of ["code", "native"] as const) {
+      const existing = await linkRows(kind, targetId);
+      if (existing.length) return replayOperation(existing[0].record_json, identity, input, operationId);
+    }
+    if (getCodeAgentRunRecord(targetId) || await getThread(targetId))
+      fail("This link is still being created. Retry in a moment.", { errorCode: "vivary_linked_history_unavailable", statusCode: 409 });
     const source = await record(input.source, identity);
     // A linked target used as a source must still be a valid link itself, so its frozen history is not bypassed.
     await validateMarkedSource(ctx, input.projectId, input.source);
@@ -299,7 +319,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     }
     const currentSource = await record(input.source, again);
     if (currentSource.createdAt !== source.createdAt || (await sourcePrefix(input.source, currentSource, prefix.boundaryId, prefix.boundaryBytes)).digest !== prefix.digest) unavailable();
-    const linkId = randomUUID(), targetId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);
+    const linkId = randomUUID(), title = `Linked: ${source.title || "Conversation"}`.slice(0, 100);
     let target: ConversationReference, targetCreatedAt: number | string;
     // Each target owner's cleared draft is written as the final step, and removeTarget undoes the creation.
     let clearDraft: () => Promise<unknown>, removeTarget: () => Promise<unknown>;
@@ -328,7 +348,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     const link: Link = { version: 1, app: "vivary", id: linkId, owner: identity.owner, orgId: identity.orgId,
       projectId: input.projectId, bindingId: identity.history?.bindingId ?? null, rootId: identity.history?.rootId ?? null,
       source: input.source, sourceCreatedAt: source.createdAt, sourceTitle: source.title, target, targetCreatedAt,
-      boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, boundaryDigest: prefix.digest, lastPrepared: null };
+      boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, boundaryDigest: prefix.digest, lastPrepared: null, operationId };
     let linked = false;
     try {
       await getDbExec().execute({ sql: "INSERT INTO vivary_conversation_links (link_id, target_kind, target_id, record_json) VALUES (?, ?, ?, ?)",
@@ -344,8 +364,20 @@ export function createLinkedConversationService(dependencies: Dependencies = def
       await removeTarget().catch(() => undefined);
       throw error;
     }
-    return { target, route: target.kind === "code" ? `/?run=${encodeURIComponent(target.id)}`
-      : `/?runtime=native&history=project&thread=${encodeURIComponent(target.id)}` };
+    return { target, route: targetRoute(target) };
+  }
+  /** A repeated operation returns its own link. Any other owner, project, source or harness is a mismatched reuse. */
+  function replayOperation(recordJson: unknown, identity: Scope, input: { projectId: string | null; source: ConversationReference;
+    target: TargetChoice }, operationId: string): LinkedConversationResult {
+    const parsed = linkSchema.safeParse(JSON.parse(String(recordJson)));
+    if (!parsed.success) unavailable();
+    const link = parsed.data;
+    const engine = link.target.kind === "native" ? "native" : getCodeAgentRunRecord(link.target.id)?.metadata?.engine;
+    if (link.operationId !== operationId || link.owner !== identity.owner || link.orgId !== identity.orgId
+      || link.projectId !== input.projectId || historyDigest(link.source) !== historyDigest(input.source) || engine !== input.target.engine)
+      fail("This link request was already used for a different choice. Choose the harness again.",
+        { errorCode: "vivary_link_operation_mismatch", statusCode: 409 });
+    return { target: link.target, route: targetRoute(link.target) };
   }
 
   async function context(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference): Promise<PreparedLinkedContext | null> {
