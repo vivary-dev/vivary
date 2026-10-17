@@ -5,6 +5,8 @@ export const LINK_HISTORY_BYTES = 8 * 1024 * 1024;
 /** Parse bound for a retained Native read. The source may grow after linking, the frozen prefix may not. */
 export const LINK_RETAINED_PARSE_BYTES = 64 * 1024 * 1024;
 export const LINK_EXCERPT_CHARS = 12_000;
+/** Recorded Code event and Native message IDs are short generated identifiers. Longer ones are malformed history. */
+const HISTORY_ID_CHARS = 256;
 const ENTRY_SHORTENED = " [Entry shortened. The original conversation has the full text.]";
 export type HistoryItem = { id: string; role: string; text: string };
 export type NativeEntry = { parentId?: string | null; message: {
@@ -24,6 +26,7 @@ export function codeHistoryRecords(text: string, runId: string): CodeAgentTransc
     try { value = JSON.parse(line); } catch { throw new LinkedSourceChanged("The recorded source history is malformed."); }
     if (value.runId !== runId || typeof value.id !== "string" || typeof value.message !== "string")
       throw new LinkedSourceChanged("The recorded source history binding changed.");
+    if (value.id.length > HISTORY_ID_CHARS) throw new LinkedSourceChanged("The recorded source history has an invalid event ID.");
     return value;
   });
 }
@@ -68,7 +71,7 @@ export function nativeHistoryPath(threadData: string, startId?: string): NativeE
   const entries = new Map<string, NativeEntry>();
   for (const entry of repo.messages) {
     const message = entry?.message;
-    if (!message || typeof message.id !== "string" || !Array.isArray(message.content)
+    if (!message || typeof message.id !== "string" || message.id.length > HISTORY_ID_CHARS || !Array.isArray(message.content)
       || !["user", "assistant", "system"].includes(message.role) || entries.has(message.id))
       throw new LinkedSourceChanged("The source conversation is malformed.");
     entries.set(message.id, entry);
@@ -185,7 +188,8 @@ export function historyExcerpt(items: HistoryItem[], binding: string, cursor?: s
       if (parts.length) break;
       // Only an entry larger than a whole page is cut, and it says so.
       omittedText = true;
-      rendered = rendered.slice(0, remaining - ENTRY_SHORTENED.length) + ENTRY_SHORTENED;
+      rendered = remaining > ENTRY_SHORTENED.length
+        ? rendered.slice(0, remaining - ENTRY_SHORTENED.length) + ENTRY_SHORTENED : rendered.slice(0, remaining);
     }
     parts.push(rendered);
     used += rendered.length + 2;
@@ -212,7 +216,9 @@ export function historyLatest(items: HistoryItem[]) {
       if (parts.length) break;
       // Only the boundary entry itself can exceed a whole block. Its latest text is kept, and it says so.
       omittedText = true;
-      rendered = label + EARLIER_TEXT_OMITTED + item.text.slice(item.text.length - (remaining - label.length - EARLIER_TEXT_OMITTED.length));
+      const room = remaining - label.length - EARLIER_TEXT_OMITTED.length;
+      // The whole rendered entry, label included, stays within the block.
+      rendered = room > 0 ? label + EARLIER_TEXT_OMITTED + item.text.slice(item.text.length - room) : rendered.slice(0, remaining);
     }
     parts.unshift(rendered);
     used += rendered.length + 2;

@@ -167,3 +167,14 @@ test("the send block keeps the latest entries, and keeps the end of a boundary e
   assert.deepEqual(historyLatest(items.slice(0, 3)), { excerpt: "User [entry-0]: text 0" + String.fromCharCode(10, 10) + "User [entry-1]: text 1"
     + String.fromCharCode(10, 10) + "User [entry-2]: text 2", suppliedEntries: 3, truncated: false });
 });
+
+test("an oversized event ID cannot push an entry past the block budget", () => {
+  const huge = "x".repeat(20_000);
+  // The send block and inspection pages both stay within 12,000 characters, label included.
+  for (const page of [historyLatest([{ id: huge, role: "Assistant", text: "answer" }]),
+    historyExcerpt([{ id: huge, role: "Assistant", text: "answer" }], historyDigest("oversized"))])
+    assert.equal(page.excerpt.length <= 12_000, true, `excerpt is ${page.excerpt.length} characters`);
+  // Transcript parsing refuses such an ID, so it never reaches a block.
+  const record = JSON.stringify(event("x".repeat(300), "user", "Request"));
+  assert.throws(() => codeHistoryRecords(record + String.fromCharCode(10), "source"), /event ID/);
+});
