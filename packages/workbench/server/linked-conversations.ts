@@ -272,7 +272,9 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (link.owner !== identity.owner || link.orgId !== identity.orgId || link.projectId !== projectId
       || link.bindingId !== (identity.history?.bindingId ?? null)
       || historyDigest(link.target) !== historyDigest(target) || link.targetCreatedAt !== currentTarget.createdAt
-      || (target.kind === "code" && (currentTarget as CodeAgentRunRecord).metadata?.linkedHistoryId !== link.id)) unavailable();
+      // Each target keeps its durable marker while its row exists: a Code run its linkedHistoryId, a Native thread its source URL.
+      || (target.kind === "code" && (currentTarget as CodeAgentRunRecord).metadata?.linkedHistoryId !== link.id)
+      || (target.kind === "native" && (currentTarget as ChatThread).source?.url !== LINKED_TARGET_SOURCE_URL)) unavailable();
     // The target link is valid from here. A deleted, revoked or changed source leaves the target usable without linked context.
     let items: Awaited<ReturnType<typeof sourcePrefix>>["items"] | null = null;
     try {

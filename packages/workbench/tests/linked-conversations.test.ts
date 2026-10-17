@@ -332,6 +332,20 @@ process.send({type:"vivary:code-worker:ready"});
     await assert.rejects(runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: other.scope } }, () =>
       service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Forged" })));
   });
+  await t.test("a Native target whose link row remains but whose durable marker is gone or changed refuses", async () => {
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
+    const linked = await create({ engine: "native" });
+    const prepare = () => runWithRequestContext({ userEmail: owner, orgId, run: { chatScope: identity.scope } }, () =>
+      service.prepareNativeMessage({ threadId: linked.target.id, ownerEmail: owner, message: "Request" }));
+    for (const marker of [null, "https://fixture.invalid/other-source"]) {
+      await db.execute({ sql: "UPDATE chat_threads SET source_url = ? WHERE id = ?", args: [marker, linked.target.id] });
+      await assert.rejects(service.load(actor, project.projectId, linked.target), { errorCode: "vivary_linked_history_unavailable" }, String(marker));
+      await assert.rejects(prepare(), { errorCode: "vivary_linked_history_unavailable" });
+    }
+    await db.execute({ sql: "UPDATE chat_threads SET source_url = ? WHERE id = ?", args: ["vivary:linked-conversation", linked.target.id] });
+    assert.match((await prepare())!.message, /Completed answer/);
+  });
   await t.test("a marked Native target whose link row or link table is missing refuses instead of sending without history", async () => {
     const { runWithRequestContext } = await import("@agent-native/core/server");
     const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: project.projectId, label: "Alpha" });
