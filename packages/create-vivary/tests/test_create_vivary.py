@@ -4205,7 +4205,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         root: Path,
         *,
         include_mcp: bool = True,
-        sdk_version: str = "2.0.0",
+        sdk_version: str = "2.2.0",
     ) -> None:
         self._write_distribution(
             root, "vivary-core", "0.2.7", "vivary_core", package=True
@@ -4231,7 +4231,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             "vivary-mcp",
             "0.1.3",
             "vivary_mcp",
-            requirements=("vivary-tropo>=0.5.3", "mcp==2.0.0"),
+            requirements=("vivary-tropo>=0.5.3", "mcp==2.2.0"),
             script="vivary-mcp",
             package=True,
         )
@@ -4372,7 +4372,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self.assertNotIn("versioned", interop)
         self.assertTrue(interop["package_present"])
         self.assertTrue(interop["entry_point_present"])
-        self.assertEqual(interop["sdk_version"], "2.0.0")
+        self.assertEqual(interop["sdk_version"], "2.2.0")
         self.assertTrue(interop["sdk_compatible"])
         self.assertEqual(interop["protocol_revision"], "2026-07-28")
         self.assertTrue(interop["transport_stdio"])
@@ -4459,7 +4459,7 @@ class GovernedContextCapabilityTests(unittest.TestCase):
             metadata = next(root.glob("vivary_mcp-*.dist-info/METADATA"))
             metadata.write_text(
                 metadata.read_text(encoding="utf-8").replace(
-                    "Requires-Dist: mcp==2.0.0\n", ""
+                    "Requires-Dist: mcp==2.2.0\n", ""
                 ),
                 encoding="utf-8",
             )

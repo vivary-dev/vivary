@@ -631,6 +631,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
+`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
+`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
+GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
+adapter uses only the stdio transport, so the advisory was not reachable, and
+neither package is in the Windows desktop bundle. Doctor's compatibility check in
+`create_vivary.py` and the CI wheel smokes follow the new pin. The staged
+create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
+boundaries and the optional, off-by-default capability are unchanged, so the
+design description holds.
+
 2026-10-17 Site TOML parser update. The documentation site's lockfile moves
 `smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is
 built statically, so the parser runs only at build time. The new version has no

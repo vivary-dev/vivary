@@ -11357,7 +11357,7 @@ def _annotate_mcp_capability(capability: dict, results: dict[str, dict]) -> None
     )
     capability["sdk_compatible"] = (
         sdk.get("status") == "installed"
-        and sdk.get("version") == (2, 0, 0)
+        and sdk.get("version") == (2, 2, 0)
     )
 
 
