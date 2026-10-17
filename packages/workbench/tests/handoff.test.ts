@@ -100,7 +100,8 @@ test("handoffs are written through the file owner and go stale without a model c
     observe: current => observeProjectVersion(current, { runCreator }) });
   const handoff = service();
 
-  const { createCodeAgentRunRecord, appendCodeAgentTranscriptEvent, listCodeAgentTranscriptEvents } = await import("@agent-native/core/code-agents");
+  const { createCodeAgentRunRecord, appendCodeAgentTranscriptEvent, listCodeAgentTranscriptEvents,
+    codeAgentRunTranscriptPath } = await import("@agent-native/core/code-agents");
   const { getVivaryCodeHostState } = await import("../server/local-code-agent.ts");
   await getVivaryCodeHostState(owner, orgId);
   const run = createCodeAgentRunRecord({ id: "handoff-run", goalId: "vivary-local-code", title: "Relay work", cwd: projectRoot,
@@ -336,6 +337,27 @@ test("handoffs are written through the file owner and go stale without a model c
       const missing = await service(memoryFor(thin)).prepare(actor, input);
       assert.equal("reason" in missing && missing.reason, "state-missing");
     } finally { await rename(statePath + ".away", statePath); }
+    assert.deepEqual(await row(), before);
+  });
+
+  await t.test("a conversation linking refuses is refused here too, as unavailable", async () => {
+    const before = await row();
+    const codeRun = (id: string, metadata: Record<string, unknown> = {}) => createCodeAgentRunRecord({ id, goalId: "vivary-local-code",
+      title: "Other", cwd: projectRoot, status: "completed", phase: "completed", needsApproval: false,
+      metadata: { app: "vivary-workbench-local-code", ...history(), workspaceRoot: projectRoot, ownerEmail: owner, orgId,
+        engine: "claude-cli", model: "sonnet", ...metadata } });
+    // A link target an interrupted link left marked, with no finished link row.
+    const unfinished = codeRun("unfinished-target", { linkedHistoryId: "4d2c8f6e-3b1a-4c5d-9e7f-0a1b2c3d4e5f", linkedCreationPending: true });
+    // Retained history the linked reader cannot parse.
+    const broken = codeRun("broken-history");
+    appendCodeAgentTranscriptEvent({ runId: broken.id, kind: "user", message: "Request" });
+    await writeFile(codeAgentRunTranscriptPath(broken.id), "not a transcript record\n");
+    for (const id of [unfinished.id, broken.id]) {
+      const refused = { projectId: "project-a", conversation: { kind: "code" as const, id } };
+      await assert.rejects(handoff.prepare(actor, refused), { errorCode: "vivary_linked_history_unavailable" }, id);
+    }
+    await assert.rejects(handoff.freshness(actor, { projectId: "project-a", conversation: { kind: "code", id: unfinished.id } }),
+      { errorCode: "vivary_linked_history_unavailable" });
     assert.deepEqual(await row(), before);
   });
 

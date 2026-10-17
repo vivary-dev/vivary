@@ -350,7 +350,10 @@ through its own chat handle and adapter. Native sends it with Core's same-window
 submit, which only Native chats receive. Neither path changes the composer draft.
 The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
 is a second owner click. `handoff.ts` reads the reply from the conversation's
-completed history, never from the client. It refuses a missing field, a second
+completed history, never from the client. It reads a conversation only through
+the linked conversation service: a linked target's own link is checked as every
+linked read checks it, and retained history the linked reader cannot parse is
+refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
 block, another request ID, an unknown key, or a passed or failed check without a
 completed evidence event. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state

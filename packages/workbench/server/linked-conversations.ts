@@ -600,7 +600,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
   }
 
   return { create, load, context, sourceAvailable, prepareNativeMessage, codeSendLinkedContext,
-    scope, record, completedPrefix: sourcePrefix, linkFor };
+    // Prepare handoff reads conversations through linking's own checks, so it accepts nothing linking refuses.
+    scope, record, completedPrefix: linkablePrefix, linkFor };
 }
 export const linkedConversations = createLinkedConversationService();
 

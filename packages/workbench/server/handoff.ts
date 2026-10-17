@@ -31,7 +31,7 @@ type Observation = { kind: "plain" } | { kind: "unknown" }
   | { kind: "git"; head: string | null; ref: string | null; entries: Array<{ path: string; state: string }> | null };
 type Ready = Extract<StateDocument, { status: "ready" }>;
 type Dependencies = {
-  conversations: Pick<typeof linkedConversations, "scope" | "record" | "completedPrefix" | "linkFor">;
+  conversations: Pick<typeof linkedConversations, "scope" | "record" | "load" | "completedPrefix" | "linkFor">;
   state: (context: ActionRunContext | undefined, projectId: string) => Promise<StateDocument>;
   files: Pick<typeof projectFileService, "get" | "save">;
   observe: (workspace: { projectId: string; root: string }) => Promise<Observation>;
@@ -204,6 +204,8 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
   async function open(context: ActionRunContext | undefined, input: HandoffInput) {
     const identity = await conversations.scope(context, input.projectId);
     const record = await conversations.record(input.conversation, identity);
+    // A linked target is checked as every linked read checks it. An unfinished or mismatched link refuses.
+    await conversations.load(context, input.projectId, input.conversation);
     const document = await dependencies.state(context, input.projectId);
     if (document.status === "ready" && (identity.history?.bindingId !== document.project.bindingId
       || identity.history?.rootId !== document.project.rootId)) fail("The project changed. Retry.", { statusCode: 409 });
