@@ -10,6 +10,7 @@ import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ArchivedNativeChat } from "../../../server/native-archive";
 import { codeDraftSelectionKey } from "../../../shared/code-draft";
 import { useChatDraftList } from "@/lib/chat-draft";
+import { nativeHistoryRows } from "@/lib/native-history-rows";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import { focusAfterRemoval } from "@/lib/row-focus";
@@ -72,17 +73,17 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
       window.removeEventListener("focus", refreshThreads);
     };
   }, [refreshThreads]);
+  const nativeRows = nativeHistoryRows(native.threads, draftList.data?.drafts ?? []);
   const sessions = [
     ...(code?.runs ?? []).map(run => ({ id: `code:${run.id}`, title: run.title || "Untitled conversation",
       subtitle: run.engineLabel, timestamp: isCodeAgentRunActive(run) ? "Working" : undefined,
       updatedAt: Date.parse(run.updatedAt), pinned: false })),
-    ...native.threads.filter(thread => thread.messageCount > 0 && !thread.archivedAt).map(thread => ({
+    ...nativeRows.threads.map(thread => ({
       id: `native:${thread.id}`, title: thread.title || thread.preview || "Untitled conversation",
       titleText: thread.title || thread.preview || "Untitled conversation",
       subtitle: "Native chat", timestamp: undefined, updatedAt: thread.updatedAt, pinned: Boolean(thread.pinnedAt),
     })),
-    ...(draftList.data?.drafts ?? []).filter(draft => !native.threads.some(thread =>
-      thread.id === draft.threadId && thread.messageCount > 0)).map(draft => ({
+    ...nativeRows.drafts.map(draft => ({
       id: `native:${draft.threadId}`, title: draft.preview || (draft.status === "pending" ? "Review send" : "Unsent draft"),
       titleText: draft.preview || (draft.status === "pending" ? "Review send" : "Unsent draft"),
       subtitle: "Native chat", timestamp: draft.status === "pending" ? "Review send" : "Draft", updatedAt: draft.createdAt, pinned: false,

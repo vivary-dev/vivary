@@ -134,6 +134,210 @@ prefixes and Windows SystemRoot while retaining credential filtering.
 Offline runtime fixtures cover route selection and error handling. Live provider
 execution and packaged Windows acceptance remain separate checks.
 
+### Linked runtime conversations
+
+The saved Code and Native conversation surfaces can open a linked inactive target
+in the same authorized project. Claude Code and Codex can link to each other or to
+Native chat. Native can link to either configured Code harness. A Claude Code
+target gets the first model the installed Claude Code supports, and the service
+refuses an unsupported Claude model with the same check a send makes, so a
+target is never pinned to a model it cannot use. If the Native eligibility check
+or the runtime state fails to load, the conversation shows that failure with
+Retry instead of hiding the chooser. While the project folder is unavailable, the
+Code chooser offers only the Native target, because a Code target needs the folder. A Native source can link only to Code, so it
+shows no chooser when no configured Code harness has a usable model. The
+chooser and this check share `linkTargetChoices`. A project with no connected folder is a
+state, not a failure: the eligibility check runs only while the workspace is
+available, and the server reports such a project's conversations as not a link
+source, so no alert appears there. A new Native
+conversation is not a source until its first request saves it. The chooser
+rechecks eligibility when Native reports a finished request or a thread list
+update, and stops rechecking once the conversation is a source. Selection saves
+the source draft through its current owner. A send waiting for review
+has no unsaved text and stays pending in the source, so linking skips that flush
+instead of failing on it. The record status decides this, because a loaded pending
+draft always carries its review notice as an error. Saving first waits for any draft read, reconciliation,
+save or discard still in flight, and refuses if the draft failed to load, conflicts,
+or failed to save or discard. Selection then creates a paused Code record or
+an empty Native thread and its cleared draft. Project history lists that empty
+thread by a durable thread source URL, `vivary:linked-conversation`, set when the
+link is finalized, so an unfinished thread is never listed. The service sets it
+with the same fill-only update as Core's unexported `setThreadSourceIfMissing`.
+Core never overwrites a thread's source and rename changes
+only the title, so a renamed empty target stays listed. `native-history-rows.ts`
+keeps one row per thread, so an unsent draft in the target never adds a second row,
+and an archived thread's draft never returns as an active draft row. It submits no prompt, requests no
+worker, consumes no approval and transfers no provider session. The target's
+cleared draft is written after the link metadata row and the target's
+finalization. The row is inserted with `creationPending` and loses it only as the
+last step, so a link is finished only when its row says so, and pages and sends
+refuse an unfinished one. The target becomes visible (a Code run loses
+`linkedCreationPending` and a Native thread gets its marker) only after that, so a
+crash before then leaves it hidden, and a Retry of the operation publishes it.
+Every Code owner listing (history, the host's recent run, draft runs and submit
+lookups) excludes an unfinished target through one predicate. If a creation step fails, the service removes the new
+Code record or Native thread, the row and the cleared draft, whichever were written.
+Creation is idempotent per choice. The chooser sends one operation ID for a choice
+and reuses it on Retry. The target ID derives from the owner, organization and that
+ID, and the link stores it, so a retry after a lost response returns the finished
+target. A replay first rechecks the current project binding or personal workspace
+and the target's own link, so after a rebind or workspace move it refuses clearly
+instead of returning a route that would not open. It checks custody before it
+publishes a target a crash left unpublished, so an unusable target never appears. A retry while the first request
+is still running gets "still being created". The server tracks in-flight operations in memory, which holds because
+production runs one supervised server process. A retry that finds an unfinished
+row or target with no request in flight treats it as left by a failed rollback or a
+process exit: it removes that row and target and creates the link again. A
+finished-looking target with no row is damage and refuses. Reusing an ID for
+another project, source or harness refuses with `vivary_link_operation_mismatch`.
+After a stale or mismatched refusal the chooser shows the server's reason and
+drops that operation ID, so the next attempt, Retry included, starts a new one.
+Core has no Code run removal, so the service deletes the record file in
+`codeAgentRunsDir`. A failed link
+keeps the source selected and offers Retry. The host execution guard is unchanged.
+
+`linked-conversations.ts` uses Native records and the existing Workbench database
+migration owner. Its metadata row binds actor, application, organization, project
+binding, source and target creation identities, and the completed source
+boundary with a digest. It contains no transcript copy. Registry migration 5
+creates the link table, and project services skip that migration while
+unconfigured or before bootstrap finishes. A missing table therefore counts as no
+link for an ordinary conversation. A target records that it is linked (a Code
+run in `linkedHistoryId`, a Native thread in its source URL), so a marked target
+whose row or table is missing refuses its pages and sends instead of continuing
+without its history. The marker alone does not gate a Code send: every send to
+an existing run probes link metadata, so a run that lost its marker but still has
+a link row refuses rather than sending without its history. While a row exists,
+its target must keep its marker, so a Native thread whose source URL was removed or
+changed also refuses. Every source is
+checked the same way, marked or not, so a target whose link is invalid, or that
+lost its marker but kept its row, is neither offered as a source nor linked
+onward. Downstream reads apply the same check to a source that is itself a linked
+target, so a source whose own link later breaks becomes unavailable downstream. Creating a link refuses with a clear message before it makes any
+target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
+project or personal workspace scope, the only scopes a link target can have, so
+an ordinary send never depends on the table. Pages and explicit sends
+recheck current membership, project access, both records and the frozen prefix.
+Record ownership matches the project and binding, as `isOwnedRun` does, so a
+project folder reconnect, which changes only the root epoch, keeps the link and
+its older sources usable. A personal workspace Code record must match the
+currently configured personal workspace root, the same scope `isOwnedRun`
+applies, so a changed personal workspace setting withholds the old root's history.
+Linking to Code resolves the folder again after target-model discovery and
+compares it with `sameWorkspace`, as Code send admission does, so a project or
+personal workspace change during discovery creates no run at a stale root. A replaced binding or an invalid target link record
+fails closed. A source that is deleted, revoked or no longer matches its frozen
+prefix is reported as unavailable instead. The page also reports whether the
+original still exists. If it does, the notice keeps its link and says its
+completed history no longer matches. If it was deleted, replaced or is no longer
+authorized, the notice names it without a link. A Native original archived after
+linking still supplies its frozen history, and the page reports it as archived. The
+notice then names it without a link and says to restore it from Archived
+conversations, because the link would open the archived thread with an editable
+composer. The service opens a retained Code
+transcript without following links where the platform has `O_NOFOLLOW`, and on
+every platform it compares the opened file with an `lstat` of the path, as
+`original-runtime.ts` does for Windows, which has no such flag. A transcript
+replaced by a symbolic link or otherwise no longer a safe regular file
+therefore counts as unavailable. The open also uses `O_NONBLOCK`, so a transcript
+replaced by a FIFO with no writer is rejected instead of blocking the read.
+The source eligibility check reads the same prefix a new link would, so a source
+whose retained history cannot be read is not offered for linking. Only a linked Code target that has never sent
+(phase `linked-inactive`) has no transcript by design. Any other missing Code
+transcript was deleted, so new linking refuses it rather than linking an empty
+history. The target stays usable, its sends
+proceed without linked history, and nothing records a prepared or accepted
+portion for them. A Code boundary is the executor's turn completion event
+(status completed, phase complete). Codex subagent and agent-operation status
+events also report completed inside a running turn, so they never end the
+prefix. Each Vivary send appends one user event, so a Code turn runs from one
+user event to the next. An earlier turn whose last terminal status is a stop
+(paused) or a failure (errored) keeps its request and drops its assistant text,
+tool output and artifacts, as Native does for stopped replies. Code retains the server-captured
+prefix byte length, never a caller byte cursor, so later appends cannot widen a
+page. Native follows the saved branch when linking and excludes pending approvals, stopped
+turns and live or still-saving execution chunks at the boundary. A reply the
+owner stopped or a failed run anywhere earlier in the prefix is left out of the
+quoted text, while the request before it stays. Native's own engine history
+replays such replies, so this rule lives in `linked-history.ts`. Later reads walk parent links
+from the retained boundary message, so editing or regenerating the boundary or an
+earlier message, which moves the head to a sibling branch, leaves the linked
+prefix unchanged. A link frozen with no completed portion keeps that empty
+prefix without reading the source again, so later source data, even malformed,
+cannot change it. No completed prefix means an
+explicit empty-history notice. Source drafts and approval custody stay unchanged.
+
+A Code target that resumes its own provider session receives the block once: after
+an accepted send has supplied it, later sends in that session carry no block and
+record no linked portion, and the notice says so. Without a resumable session,
+Code rebuilds context from its transcript, which keeps only the raw request, and
+Native persists only the visible message (`displayMessage`), so both receive the
+block on every send.
+An explicit send receives at most 12,000 characters from 100 recorded entries as
+quoted historical data. The send block holds the latest entries that fit, ending
+at the boundary, because a send continues the most recent work. When it omits
+earlier entries it says so, and a boundary entry longer than the whole block keeps
+its latest text behind an omission notice. The limit counts the block as it is
+encoded, JSON escaping included, so the prompt block and the reported characters
+agree. Every rendered entry, its label included, stays within the block. A
+transcript event or Native message ID must be a short generated identifier
+(letters, digits, `.`, `_`, `:` and `-`, at most 256 characters). Any other ID,
+such as one with a line break that could escape the quoted framing, makes the
+source unavailable as malformed history. The block also JSON-encodes every ID it
+renders, so the framing holds even if that rule changes. The source is also
+unavailable when a Native status or metadata on the walked prefix is present but
+not an object, when a Native content part or attachment on the walked prefix is not
+an object, when the walked ancestry reaches a missing, invalid or duplicated
+message ID (an unrelated malformed, invalid or duplicated sibling or newer message
+cannot break a frozen link), when a Native run ID is not a generated identifier,
+when a
+transcript line is valid JSON but not an event object, or when a transcript
+repeats an event ID, so the boundary byte length and the prefix
+can never describe different events.
+Inspection pages still start from the
+oldest entry. Actual retained tool results and labeled artifact references
+become text, never executable requests or new instruction authority. Runtime
+bookkeeping and private reasoning are excluded. For Code, only a completed tool
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+content part such as an image or a source reference, becomes a named placeholder
+that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
+repository represents no completed history, so an inactive Native target can
+link onward to Code. The target keeps its normal tools and project guard.
+The UI distinguishes available entries, prepared context and accepted Code sends
+from source-to-target session continuity. Preparation records only a small portion
+receipt on the link. Code acceptance binds that portion to the actual user event
+appended after final project and host admission. Refused sends leave the previous
+accepted receipt unchanged. Native preparation preserves separate visible user
+text and records its preparation stage. Neither stage proves provider ingestion.
+A notice read verifies the caller, then looks for a link row, and resolves project
+history and organization membership only when a row exists. Code conversations
+support an owner with no organization, so an ordinary run's follow-up send and
+notice need none. Linking does need one: such an owner is not offered the chooser,
+and creation refuses with a clear reason. The Code and Native choosers both appear
+only after the same source eligibility check, so an owner without an organization,
+or a target whose link no longer validates, is not offered choices that cannot work. An unlinked conversation in a project whose
+folder is not connected therefore shows no notice and no false verification error.
+The mounted notice refreshes through ordinary Code thread updates and Native
+request lifecycle events. A Code send refused after linked preparation emits
+`vivary:linked-history-updated`, which refreshes only the notice, so it shows the
+recorded preparation without presenting the request as accepted. Its collapsed view gives the source title, counts and
+stage. The source title opens the original through router navigation, never a
+document load, so a pending draft in the target still saves. Boundary identifiers and session details remain in expanded inspection.
+Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
+Each refreshed first page replaces the later pages already shown, so a redaction
+or access change applies to the whole displayed excerpt.
+New linking reads at most 8 MiB of source data, and an oversized source refuses
+new linking rather than claiming full context. A later read of a Native source
+parses at most 64 MiB and checks only the walked prefix against 8 MiB, so source
+work after the boundary cannot break an existing link. An entry that does not fit
+the rest of a page starts the next page, so paging never skips text. Only an
+entry longer than a whole page is shortened, and its text ends with an omission
+notice that points to the original. The original remains the complete history owner. This is the
+first linked-history slice of issue #38. Prepare handoff and controlled concurrent
+execution remain separate work. Independent review and built UI acceptance of
+this slice remain required.
+
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](COMMANDS.md) and [package manifests](../packages).
@@ -533,6 +737,16 @@ trust boundaries now states this check. Evidence: four new tests in
 `tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
 closed listener, a later server error or close, the action error type, and the
 rendered refusal.
+
+2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
+slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,
+with its design text above unchanged. Its Code-admission test now gives the
+fake Claude CLI the version and subscription-route answers that current runtime
+admission requires, as the other send fixtures already do. The 26 linked tests
+and typechecking pass. Linking still submits no prompt, transfers no provider
+session and keeps the host-wide single Code run guard, so the design
+description holds. Built-app and packaged Windows acceptance in each direction
+remain required for issue #38.
 
 2026-10-16 Workbench build gate. The production build runs `agent-native
 doctor`, which refuses environment reads outside its deploy allowlist. The
@@ -1166,6 +1380,28 @@ Native's supported process controls before imports, while explicit HTTP decision
 and recovery stay live. Old-installed controls reproduced refused-queue suppression,
 equal-time ambiguity and the absent fresh-follower wake. Revised runtime gates and
 ordinary concurrent-batch natural exit remain controller checks.
+
+Issue #38 linked review correction. Inspected the final independent findings and
+actual Codex completion emitter, artifact projection, Code final admission and
+Native prepareRequest/displayMessage owners. Quoted history now retains actual
+results and artifact references. Preparation is distinct from the accepted Code
+user event and neither claims provider ingestion. The notice refreshes while
+mounted and keeps opaque identities in expanded inspection. Canonical empty
+Native sources can link onward without creating a prompt. New projection,
+request, admission and notice controls cover these boundaries. Source-sandbox
+checks and controller runtime/UI acceptance remain separate gates.
+
+Issue #38 linked conversations. The saved chooser now creates inactive targets
+through Native Code/thread and draft owners. Workbench stores only an immutable
+source boundary and scoped link metadata. Reads and explicit sends revalidate
+membership, project/root binding and retained identities. Runtime tools,
+approvals, provider resume state and the host-wide Code execution guard retain
+their existing owners. The linked-conversation design above describes bounded
+quoted context and the difference between available history, supplied excerpt
+and source session continuity. Focused production storage and component tests
+cover inactive creation, all supported directions, completed-prefix exclusion,
+source-bound paging, revocation, draft custody and failed creation with Retry.
+Source checks do not establish built-app acceptance or completion of issue #38.
 
 Issue #108 progressive approval answer persistence. The retained real continuation journal included the final model text, but saving its tool result first made the later fold compare that chunk with the longer accumulated waiting turn. Automation persistence now supplies the Native event sequence to the existing fold owner. Its retained per-chunk snapshots replace the current chunk when a later authoritative save arrives, including a shorter correction, while preserving earlier chunks and the waiting sentence. Equivalent or stale saves do not append content again. A consumed ask is removed from recorded snapshots as well as visible content so its unexecuted card cannot return during a rebuild. Chat and team callers retain the existing default fold policy. Pure source checks exercise progressive persistence, idempotence, earlier content, shorter corrections and new-turn isolation. Maintained approval and normal owner HTTP assertions require the final answer in a fresh durable thread read. Historical owner-scope, typecheck, build and UI custody results preceded these bytes. Affected installed suites, configured typecheck, independent review and the built UI final-answer journey remain required. No live profile, tool effect or provider call was changed, and publication remains held.
 

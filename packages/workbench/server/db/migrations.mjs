@@ -96,4 +96,15 @@ export const migrateRegistry = runMigrations([{
   version: 4,
   name: "vivary-local-folder-verification-v1",
   sql: `ALTER TABLE vivary_registry_bindings ADD COLUMN verification_kind TEXT NOT NULL DEFAULT 'held-custody-v1';`,
+}, {
+  version: 5,
+  name: "vivary-linked-conversation-metadata-v1",
+  sql: `CREATE TABLE IF NOT EXISTS vivary_conversation_links (
+    link_id TEXT PRIMARY KEY,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('code', 'native')),
+    target_id TEXT NOT NULL,
+    record_json TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS vivary_conversation_link_target
+    ON vivary_conversation_links(target_kind, target_id);`,
 }], { table: "vivary_workbench_registry_migrations" });

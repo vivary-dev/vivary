@@ -36,6 +36,7 @@ import {
   type CleanupCheck, type CleanupFailure, type CleanupTarget, type EndAttempt, type EndOutcome, type LeftoverProcess,
 } from "./code-execution-host";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
+import type { PreparedLinkedContext } from "../shared/linked-conversation";
 import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
 import { getVivaryRuntimeStatus, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
 
@@ -808,7 +809,7 @@ export async function getVivaryCodeHostState(
 
 function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
-  const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
+  const owned = runs.filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
   const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
   const recent = owned.find(run => !activeRuns.has(run.id));
@@ -836,6 +837,7 @@ export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: Vi
   if (wanted.size === 0) return linked;
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   for (const run of runs) {
+    if (!isListedRun(run)) continue;
     if (scope ? !isOwnedRun(run, ownerEmail, orgId, scope)
       : !isOwnedIdentity(run, ownerEmail, orgId) || metadataString(run, "projectId") !== null) continue;
     const draftThreadId = runDraftThreadId(run);
@@ -851,9 +853,9 @@ export function hasOwnedVivaryCodeSubmit(
   ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope | undefined,
   draftThreadId: string, submitId: string,
 ): boolean {
-  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run =>
+  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && (
     scope ? isOwnedRun(run, ownerEmail, orgId, scope)
-      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null);
+      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null));
   return runs.some(run => listCodeAgentTranscriptEvents(run.id).some(event =>
     event.kind === "user" && event.metadata?.draftThreadId === draftThreadId
       && event.metadata?.draftSubmitId === submitId));
@@ -962,6 +964,8 @@ export async function sendVivaryCodeMessage(input: {
   projectContext?: ProjectContextLoad;
   /** Called once the send has passed its refusals and claimed the host slot, so the panel's last load is true. */
   recordProjectContext?: (load: ProjectContextLoad) => void;
+  /** Revalidate the frozen link after runtime discovery, before claiming the host. */
+  loadLinkedContext?: () => Promise<PreparedLinkedContext | null>;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
@@ -970,6 +974,11 @@ export async function sendVivaryCodeMessage(input: {
   assertCodeHostAvailable();
 
   const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
+  if (existing?.metadata?.linkedCreationPending || (existing?.metadata?.linkedHistoryId && !input.loadLinkedContext)) {
+    fail("The linked history could not be verified. Retry from the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
+  }
   const selectedEngine = existing ? engineFromRun(existing) : input.engine ?? VIVARY_CODE_DEFAULT_ENGINE;
   if (input.engine && input.engine !== selectedEngine) {
     fail("Start a new conversation to change coding runtimes.", { errorCode: "vivary_code_engine_changed", statusCode: 409 });
@@ -1009,6 +1018,16 @@ export async function sendVivaryCodeMessage(input: {
   const permissionMode = await getCodePermissionMode(input.ownerEmail, input.orgId);
   // The worker's fingerprints and the transcript's user event use the credentials held now.
   await refreshHeldCredentials();
+  let linkedContext: PreparedLinkedContext | null = null;
+  if (input.loadLinkedContext) {
+    try { linkedContext = await input.loadLinkedContext(); }
+    catch { fail("The linked source history could not be verified. Open the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    }); }
+    if (existing?.metadata?.linkedHistoryId && !linkedContext) fail("The retained history link is missing.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
+  }
   if (input.revalidateWorkspace) {
     const current = await input.revalidateWorkspace();
     if (!current || !sameWorkspace(current, workspace)) {
@@ -1046,10 +1065,14 @@ export async function sendVivaryCodeMessage(input: {
     },
   });
 
-  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine, input.message,
+  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine,
+    linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
     input.projectContext?.block);
   appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
     metadata: { source: "vivary-workbench", permissionMode,
+      // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
+      // An unavailable source supplies no block and no portion, so nothing claims linked context.
+      ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
       ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
         draftThreadId: input.draftThreadId } : {}) } });
   if (input.projectContext) {
@@ -1150,7 +1173,7 @@ export async function getVivaryCodeSessionDetails(
   return details;
 }
 
-function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
+export function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
   if (metadataString(run, "engine") !== engine) return null;
   const id = metadataString(run, engine === "claude-cli" ? "claudeSessionId" : "codexSessionId");
   return id && (engine === "claude-cli"
@@ -1390,9 +1413,17 @@ export async function getVivaryCodeFiles(
   };
 }
 
+/**
+ * A linked target still being created, or left unfinished by a crash, is not an owner's conversation yet. Every
+ * owner listing (history, the host's recent run, draft runs and submit lookups) uses this one predicate.
+ */
+function isListedRun(run: CodeAgentRunRecord): boolean {
+  return !run.metadata?.linkedCreationPending;
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
-    (run) => isOwnedRun(run, ownerEmail, orgId, scope),
+    (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
   );
 }
 
@@ -1494,7 +1525,7 @@ function assertCodeHostAvailable(): void {
   }
 }
 
-function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
+export function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
   const fields = ["root", "projectId", "bindingId", "rootId", "bindingRevision", "policyRevision"] as const;
   return fields.every(field => left[field] === right[field]);
 }
