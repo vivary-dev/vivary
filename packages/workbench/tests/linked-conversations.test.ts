@@ -179,8 +179,19 @@ process.send({type:"vivary:code-worker:ready"});
       assert.equal(users.length, 1); assert.equal(receipt!.userEventId, users[0].id);
       assert.equal(receipt!.entries, 3); assert.equal(receipt!.characters, expectedPage.excerpt.length); assert.equal(users[0].message, "Explicit request");
       await rm(path.join(root, "linked-started.json"));
-      await assert.rejects(send({ revalidateWorkspace: async () => ({ ...workspace, bindingRevision: 2 }) }),
-        { errorCode: "vivary_code_project_changed" });
+      // The final project check must refuse after linked history was prepared, not the first check before it.
+      // The first revalidation passes and the second, after preparation, sees the changed binding revision.
+      let prepared = 0, revalidations = 0;
+      await db.execute({ sql: "UPDATE vivary_conversation_links SET record_json = json_set(record_json, '$.lastPrepared', json('null')) WHERE target_id = ?", args: [runId] });
+      const usersBefore = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.id);
+      await assert.rejects(send({ revalidateWorkspace: async () => ++revalidations === 1 ? workspace : { ...workspace, bindingRevision: 2 },
+        loadLinkedContext: async () => { prepared++; return loadLinkedContext(); } }),
+        { errorCode: "vivary_code_project_changed", message: /changed while its runtime was checked/ });
+      assert.equal(prepared, 1, "the late refusal path ran after preparation");
+      const afterRefusal = (await service.load(actor, project.projectId, linked.target))!;
+      assert.equal(afterRefusal.lastPrepared!.entries, 3, "preparation is recorded even though the send was refused");
+      assert.deepEqual(afterRefusal.lastAccepted, receipt, "the accepted receipt is unchanged");
+      assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.id), usersBefore);
       const slotId = "selected-host-refusal";
       try {
         await assert.rejects(send({ loadLinkedContext: async () => {
