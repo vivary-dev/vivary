@@ -86,7 +86,7 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     // A conflict or failed write comes back as the Failed status on the refetch.
     // A correction sent in this conversation is a new turn, which Save refuses, so recovery is a new Prepare.
     if ("problems" in result) setNotice({ text: "The reply was not saved. Prepare the handoff again to ask for a new reply.", problems: result.problems });
-    else if ("status" in result) setNotice({ text: result.message });
+    else if ("message" in result) setNotice({ text: result.message });
   });
 
   const status = query.data;
@@ -97,7 +97,8 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   if (query.isError) return <div className="local-agent-notice" role="alert">Handoff freshness could not be checked.
     <Button size="sm" variant="outline" onClick={() => void query.refetch()}>Retry check</Button></div>;
   if (!status) return null;
-  if (status.status === "unavailable") return <div className="local-agent-notice text-sm" role="status">{status.message}</div>;
+  if (status.status === "unavailable") return <div className="local-agent-notice text-sm" role="status">{status.message}
+    <Button size="sm" variant="outline" disabled={query.isFetching || !ready} onClick={() => void query.refetch()}>Check again</Button></div>;
   const here = (other: ConversationReference) => other.kind === conversation.kind && other.id === conversation.id;
   const covered: HandoffRecord | null = "covered" in status ? status.covered : null;
   const file = covered?.facts.path ?? ("path" in status ? status.path : "STATE.md");

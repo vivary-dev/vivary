@@ -582,7 +582,8 @@ function warn(message: string): void {
  */
 export type StateDocument =
   | { status: "ready"; workspace: LocalProjectWorkspace; project: ProjectFileIdentity; path: string; file: ProjectFile }
-  | { status: "unavailable"; reason: "no-state-role" | "state-missing" | "state-private" | "settings-unavailable"; path: string | null };
+  | { status: "unavailable"; reason: "no-state-role" | "state-missing" | "state-private" | "settings-unavailable"; path: string | null }
+  | { status: "unavailable"; reason: "state-uneditable"; path: string; blockedReason: "too-large" | "binary" | "linked" | "unsupported" | "unreadable" };
 
 type Dependencies = {
   resolveWorkspace: (context: ActionRunContext | undefined, projectId: string) => Promise<LocalProjectWorkspace>;
@@ -976,9 +977,14 @@ export function createProjectMemory(overrides: Partial<Dependencies> = {}) {
         return { status: "unavailable", reason: "state-private", path: statePath };
       }
       const project = projectIdentity(workspace);
-      const file = await readEditableFile(workspace.root, statePath, project).catch(() => null);
-      return file ? { status: "ready", workspace, project, path: statePath, file }
-        : { status: "unavailable", reason: "state-missing", path: statePath };
+      try {
+        const inspected = await inspectEditableFile(workspace.root, statePath, project);
+        if (!inspected) return { status: "unavailable", reason: "state-missing", path: statePath };
+        return inspected.file ? { status: "ready", workspace, project, path: statePath, file: inspected.file }
+          : { status: "unavailable", reason: "state-uneditable", path: statePath, blockedReason: inspected.reason };
+      } catch {
+        return { status: "unavailable", reason: "state-uneditable", path: statePath, blockedReason: "unreadable" };
+      }
     },
 
     /** Remember, for the panel, that a sent message used this load. Kept in memory only, per binding. */

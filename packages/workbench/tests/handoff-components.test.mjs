@@ -224,3 +224,29 @@ test("Prepare is disabled while a run is active", async () => {
   await act(async () => window.dispatchEvent(running)); await settle();
   assert.equal(button("Prepare handoff").disabled, true);
 });
+
+for (const reason of ["state-missing", "state-private", "settings-unavailable"]) {
+  test(`Check again recovers ${reason} without a model call or remount`, async () => {
+    handoffFixture.status = { status: "unavailable", reason, message: "The state document is unavailable." };
+    await render(); await settle();
+    assert.ok(button("Check again"));
+    handoffFixture.status = { status: "none", path: "STATE.md" };
+    await click("Check again");
+    assert.ok(button("Prepare handoff"));
+    assert.deepEqual(handoffFixture.submitted, []);
+    assert.deepEqual([...new Set(handoffFixture.calls.map(call => call.name))], ["vivary-handoff-freshness"]);
+  });
+}
+
+test("an uncertain Save response remains visible when record finalization still reads pending", async () => {
+  handoffFixture.status = { status: "pending", requestId: "req-1", conversation: { kind: "code", id: "run-a" }, covered };
+  handoffFixture.call = async (name, input) => {
+    handoffFixture.calls.push({ name, input });
+    return name === "vivary-handoff-save" ? { code: "failed", message: "STATE.md may have changed. Inspect it, then prepare the handoff again." } : handoffFixture.status;
+  };
+  await render(); await settle();
+  await click("Save handoff");
+  assert.match(host.textContent, /STATE.md may have changed/);
+  assert.doesNotMatch(host.textContent, /is fresh|previous version.*kept/);
+  assert.equal(button("Retry"), undefined);
+});

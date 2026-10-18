@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { appendFile, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -26,7 +26,7 @@ test("handoffs are written through the file owner and go stale without a model c
   const { withMigrationRuntime, getDbExec, runMigrations } = await import("@agent-native/core/db");
   const { ORG_MIGRATIONS, isOrgMember } = await import("@agent-native/core/org");
   const { ensureChatThreadTables } = await import(new URL("../../chat-threads/store.js", import.meta.resolve("@agent-native/core/client/agent-chat")).href);
-  const { ensureRunTables } = await import(new URL("../../agent/run-store.js", import.meta.resolve("@agent-native/core/client/agent-chat")).href);
+  const { ensureRunTables, insertRun } = await import(new URL("../../agent/run-store.js", import.meta.resolve("@agent-native/core/client/agent-chat")).href);
   const { migrateRegistry } = await import("../server/db/migrations.mjs");
   await withMigrationRuntime(async () => {
     await runMigrations(ORG_MIGRATIONS, { table: "_org_migrations" })({});
@@ -75,11 +75,12 @@ test("handoffs are written through the file owner and go stale without a model c
   const { createProjectMemory } = await import("../server/project-memory.ts");
   const { createProjectFileService } = await import("../server/project-files.ts");
   const { observeProjectVersion } = await import("../server/managed-projects.mjs");
-  let failRename = false;
+  let failRename = false, failAfterRename = false;
   const files = createProjectFileService(async () => workspace, { unlink,
     rename: async (from, to) => {
       if (failRename) throw Object.assign(new Error("Selected disk fault"), { code: "EIO" });
-      return rename(from, to);
+      await rename(from, to);
+      if (failAfterRename) throw new Error("Selected post-rename verification fault");
     } });
   const memoryFor = (answer: unknown) => createProjectMemory({ resolveWorkspace: async () => workspace,
     readWorkspaceContext: async () => answer as never, files });
@@ -356,6 +357,218 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.equal((await handoff.freshness(actor, input)).status, "pending");
   });
 
+  await t.test("stopped, failed and active Code follow-ups refuse stale Save and stale Fresh", async () => {
+    for (const status of ["paused", "errored", "active"] as const) {
+      await saveHandoff();
+      const request = await prepared();
+      deliver(request.message, fenced(proposal(request.requestId)));
+      const before = await readFile(statePath);
+      const record = await conversations.record(conversation, await conversations.scope(actor, input.projectId));
+      const completed = await conversations.completedPrefix(conversation, record);
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: "Also revise the operator guide" });
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: "PARTIAL OUTPUT", metadata: { role: "assistant" } });
+      if (status !== "active") appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: status,
+        metadata: { status, phase: status } });
+      assert.deepEqual(await conversations.completedPrefix(conversation, record), completed, "linked prefix still stops at completion");
+      const result = await handoff.save(actor, { ...input, requestId: request.requestId });
+      assert.equal(result.code, "refused", status);
+      assert.match(JSON.stringify(result), /continued after the handoff reply/);
+      assert.deepEqual(await readFile(statePath), before);
+
+      await saveHandoff();
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: "A new request after Save" });
+      if (status !== "active") appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: status, metadata: { status } });
+      assert.deepEqual(await freshness(), { status: "out-of-date", reasons: ["events-appended"] }, status);
+    }
+  });
+
+  await t.test("Native progression follows selected ancestry including stopped, failed and active tails", async () => {
+    const { createThread, updateThreadData, getThread } = await import("@agent-native/core/server");
+    const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: workspace.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "handoff-native", orgId, scope: identity.scope });
+    const native = { projectId: input.projectId, conversation: { kind: "native" as const, id: thread.id } };
+    const ask = (id: string, parentId: string | null, text: string) => ({ parentId, message: { id, role: "user", content: [{ type: "text", text }] } });
+    const answer = (id: string, parentId: string, text: string, status = { type: "complete", reason: "stop" }, custom = {}) =>
+      ({ parentId, message: { id, role: "assistant", content: [{ type: "text", text }], status, metadata: { custom } } });
+    await insertRun("native-live-run", thread.id);
+    let messages: unknown[] = [];
+    const store = (headId: string) => updateThreadData(thread.id, JSON.stringify({ headId, messages }), "Handoff Native", "", messages.length);
+    for (const tail of ["stopped", "runError", "active", "live-run"] as const) {
+      messages = [ask("native-ask", null, "Initial request"), answer("native-evidence", "native-ask", "12 passed")];
+      await store("native-evidence");
+      const request = await handoff.prepare(actor, native);
+      assert.equal(request.code, "prepared");
+      if (!("requestId" in request)) throw new Error("Prepare refused");
+      messages.push(ask("handoff-ask", "native-evidence", request.message), answer("handoff-answer", "handoff-ask",
+        fenced(proposal(request.requestId, { checks: [{ name: "tests", outcome: "passed", evidenceEventId: "native-evidence" }] }))));
+      await store("handoff-answer");
+      const source = (await getThread(thread.id))!;
+      const completed = await conversations.completedPrefix(native.conversation, source);
+      const appendTail = async () => {
+        const partial = answer("tail-answer", "tail-ask", "PARTIAL OUTPUT",
+          tail === "live-run" ? { type: "complete", reason: "stop" } : { type: "incomplete", reason: tail === "runError" ? "error" : "cancelled" },
+          tail === "stopped" ? { userStopped: true } : tail === "runError" ? { runError: true } : {});
+        if (tail === "live-run") Object.assign(partial.message.metadata, { runId: "native-live-run" });
+        messages.push(ask("tail-ask", "handoff-answer", "Follow up"), partial);
+        await store("tail-answer");
+      };
+      const before = await readFile(statePath);
+      await appendTail();
+      assert.deepEqual(await conversations.completedPrefix(native.conversation, (await getThread(thread.id))!), completed);
+      const refused = await handoff.save(actor, { ...native, requestId: request.requestId });
+      assert.equal(refused.code, "refused", tail);
+      assert.match(JSON.stringify(refused), /continued after the handoff reply/);
+      assert.deepEqual(await readFile(statePath), before);
+
+      // The unrelated stored branch cannot invalidate selected history or make a failed reply evidence.
+      messages.push(null); // An unrelated malformed stored sibling cannot change selected ancestry.
+      await store("handoff-answer");
+      assert.equal((await handoff.save(actor, { ...native, requestId: request.requestId })).code, "saved");
+      assert.equal((await handoff.freshness(actor, native)).status, "fresh");
+      await store("tail-answer");
+      const stale = await handoff.freshness(actor, native);
+      assert.equal(stale.status, "out-of-date", tail);
+      assert.deepEqual("reasons" in stale && stale.reasons, ["events-appended"]);
+    }
+  });
+
+  await t.test("malformed or oversized Native progression refuses Save and cannot remain Fresh", async () => {
+    const { createThread, getThread } = await import("@agent-native/core/server");
+    const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: workspace.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "bounded-handoff-native", orgId, scope: identity.scope });
+    const native = { projectId: input.projectId, conversation: { kind: "native" as const, id: thread.id } };
+    // Inject exact stored corruption without Native's client-save merge retaining old sibling messages or keys.
+    const store = (data: string) => db.execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?", args: [data, thread.id] });
+    for (const oversized of [false, true]) {
+      await store("{}");
+      const request = await handoff.prepare(actor, native);
+      if (!("requestId" in request)) throw new Error("Prepare refused");
+      const messages = [
+        { parentId: null, message: { id: "bounded-ask", role: "user", content: [{ type: "text", text: request.message }] } },
+        { parentId: "bounded-ask", message: { id: "bounded-answer", role: "assistant", status: { type: "complete", reason: "stop" },
+          content: [{ type: "text", text: fenced(proposal(request.requestId, { checks: [{ name: "tests", outcome: "not-run", evidenceEventId: null }] })) }] } },
+      ];
+      const original = JSON.stringify({ headId: "bounded-answer", messages });
+      await store(original);
+      const later = oversized ? JSON.stringify({ headId: "bounded-answer", messages, padding: "x".repeat(8 * 1024 * 1024) })
+        : JSON.stringify({ headId: "broken-tail", messages: [...messages, { parentId: "bounded-answer", message: { id: "broken-tail", role: "user", content: [null] } }] });
+      const bytes = await readFile(statePath);
+      await store(later);
+      await assert.rejects(handoff.save(actor, { ...native, requestId: request.requestId }), { errorCode: "vivary_linked_history_unavailable" });
+      assert.deepEqual(await readFile(statePath), bytes);
+      await store(original);
+      assert.equal((await handoff.save(actor, { ...native, requestId: request.requestId })).code, "saved");
+      await store(later);
+      const stale = await handoff.freshness(actor, native);
+      assert.equal(stale.status, "out-of-date");
+      assert.deepEqual("reasons" in stale && stale.reasons, ["history-changed"]);
+      // The frozen completed prefix remains readable even though the selected progression cannot be verified.
+      assert.equal((await conversations.completedPrefix(native.conversation, (await getThread(thread.id))!, "bounded-answer")).boundaryId, "bounded-answer");
+    }
+  });
+
+  await t.test("older saved handoffs without progression facts require an update before Fresh", async () => {
+    await saveHandoff();
+    const stored = JSON.parse((await row())[0]);
+    delete stored.saved.facts.conversation.progressionDigest;
+    await db.execute({ sql: "UPDATE vivary_handoff_records SET record_json = ?", args: [JSON.stringify(stored)] });
+    assert.deepEqual(await freshness(), { status: "out-of-date", reasons: ["history-changed"] });
+  });
+
+  await t.test("post-rename failure never promises preservation or offers the same request Retry", async () => {
+    await saveHandoff();
+    const request = await prepared();
+    deliver(request.message, fenced(proposal(request.requestId, { goal: "New content already written" })));
+    failAfterRename = true;
+    let result;
+    try { result = await handoff.save(actor, { ...input, requestId: request.requestId }); }
+    finally { failAfterRename = false; }
+    assert.equal(result.code, "failed");
+    assert.match(await readFile(statePath, "utf8"), /New content already written/);
+    assert.doesNotMatch(JSON.stringify(result), /previous version.*kept/i);
+    assert.match(JSON.stringify(result), /may have changed|could not confirm/i);
+    const status = await handoff.freshness(actor, input);
+    assert.equal(status.status, "failed");
+    assert.equal("retryable" in status && status.retryable, false);
+    assert.equal((await handoff.save(actor, { ...input, requestId: request.requestId })).code, "refused");
+  });
+
+  await t.test("failed record finalization reports uncertain outcome after a successful file write", async () => {
+    for (const failStatusWrite of [false, true]) {
+      await saveHandoff();
+      const request = await prepared();
+      deliver(request.message, fenced(proposal(request.requestId, { goal: "Written before record failure" })));
+      const execute = db.execute.bind(db);
+      db.execute = async command => {
+        if (typeof command !== "string" && command.sql.startsWith("INSERT INTO vivary_handoff_records")
+          && (failStatusWrite || JSON.parse(String(command.args?.[3])).request === null)) throw new Error("Record finalization unavailable");
+        return execute(command);
+      };
+      let result;
+      try { result = await handoff.save(actor, { ...input, requestId: request.requestId }); }
+      finally { db.execute = execute; }
+      assert.equal(result.code, "failed");
+      assert.match(await readFile(statePath, "utf8"), /Written before record failure/);
+      assert.doesNotMatch(JSON.stringify(result), /previous version.*kept/i);
+      const status = await handoff.freshness(actor, input);
+      assert.equal(status.status, failStatusWrite ? "pending" : "failed");
+      assert.equal("retryable" in status && status.retryable, false);
+      assert.match(JSON.stringify(result), /may have changed/);
+    }
+  });
+
+  await t.test("an uncertain write with a foreign edit or unavailable reread never infers success from its marker", async () => {
+    for (const unreadable of [false, true]) {
+      await saveHandoff();
+      const previousSaved = JSON.parse((await row())[0]).saved;
+      const request = await prepared();
+      deliver(request.message, fenced(proposal(request.requestId, { goal: "A matching request marker is insufficient" })));
+      let wrote = false;
+      const faulted = createHandoffService({ conversations, files: { ...files, save: async (ctx, args) => {
+        await files.save(ctx, args);
+        await appendFile(statePath, "Foreign edit after handoff replacement\n");
+        wrote = true;
+        throw new Error("Post-write fault");
+      } }, state: async (ctx, projectId) => {
+        if (wrote && unreadable) throw new Error("Reread unavailable");
+        return memory.stateDocument(ctx, projectId);
+      }, observe: current => observeProjectVersion(current, { runCreator }) });
+      const result = await faulted.save(actor, { ...input, requestId: request.requestId });
+      assert.equal(result.code, "failed");
+      assert.doesNotMatch(JSON.stringify(result), /previous version.*kept/i);
+      assert.match(await readFile(statePath, "utf8"), /Foreign edit after handoff replacement/);
+      const status = await handoff.freshness(actor, input);
+      assert.equal(status.status, "failed");
+      assert.equal("retryable" in status && status.retryable, false);
+      assert.deepEqual(JSON.parse((await row())[0]).saved, previousSaved);
+    }
+  });
+
+  await t.test("malformed or oversized later history cannot stay Fresh or write a stale reply", async () => {
+    for (const tail of ["null\n", "x".repeat(8 * 1024 * 1024) + "\n"]) {
+      await saveHandoff();
+      const transcript = codeAgentRunTranscriptPath(run.id);
+      const original = await readFile(transcript);
+      try {
+        await appendFile(transcript, tail);
+        const status = await handoff.freshness(actor, input);
+        assert.equal(status.status, "out-of-date");
+        assert.deepEqual("reasons" in status && status.reasons, ["history-changed"]);
+      } finally { await writeFile(transcript, original); }
+      const request = await prepared();
+      deliver(request.message, fenced(proposal(request.requestId)));
+      const complete = await readFile(transcript), bytes = await readFile(statePath);
+      try {
+        await appendFile(transcript, tail);
+        await assert.rejects(handoff.save(actor, { ...input, requestId: request.requestId }),
+          { errorCode: "vivary_linked_history_unavailable" });
+        assert.deepEqual(await readFile(statePath), bytes);
+      } finally { await writeFile(transcript, complete); }
+    }
+  });
+
   await t.test("a project change between Prepare and Save is saved as the Prepare version, so it reads Out of date", async () => {
     await saveHandoff();
     const request = await prepared();
@@ -406,6 +619,38 @@ test("handoffs are written through the file owner and go stale without a model c
       assert.equal("reason" in missing && missing.reason, "state-missing");
     } finally { await rename(statePath + ".away", statePath); }
     assert.deepEqual(await row(), before);
+  });
+
+  await t.test("existing noneditable state is never described as missing and no refusal changes bytes", async t => {
+    const original = await readFile(statePath);
+    t.after(() => writeFile(statePath, original));
+    const before = await row();
+    for (const [reason, bytes] of [["too-large", Buffer.alloc(262_145, 97)], ["binary", Buffer.from([0, 1, 2])]] as const) {
+      await writeFile(statePath, bytes);
+      const result = await service(memoryFor(thin)).prepare(actor, input);
+      assert.equal("reason" in result && result.reason, "state-uneditable", reason);
+      assert.match(JSON.stringify(result), reason === "too-large" ? /too large/ : /text/);
+      assert.doesNotMatch(JSON.stringify(result), /does not exist|Create it/);
+      assert.deepEqual(await readFile(statePath), bytes);
+    }
+    await writeFile(statePath, original);
+    await link(statePath, statePath + ".link");
+    try {
+      const result = await service(memoryFor(thin)).prepare(actor, input);
+      assert.equal("reason" in result && result.reason, "state-uneditable");
+      assert.match(JSON.stringify(result), /linked/);
+    } finally { await unlink(statePath + ".link"); }
+    await rename(statePath, statePath + ".original");
+    await symlink(statePath + ".original", statePath);
+    try {
+      const result = await service(memoryFor(thin)).prepare(actor, input);
+      assert.equal("reason" in result && result.reason, "state-uneditable");
+      assert.doesNotMatch(JSON.stringify(result), /does not exist|Create it/);
+    } finally { await unlink(statePath); await rename(statePath + ".original", statePath); }
+    const privateState = await service(memoryFor({ ...thin, privacy: { ...thin.privacy, privateFiles: ["STATE.md"] } })).prepare(actor, input);
+    assert.equal("reason" in privateState && privateState.reason, "state-private");
+    assert.deepEqual(await row(), before);
+    assert.deepEqual(await readFile(statePath), original);
   });
 
   await t.test("a conversation linking refuses is refused here too, as unavailable", async () => {

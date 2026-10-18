@@ -174,44 +174,51 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     return thread;
   }
 
+  /** A bounded, no-follow snapshot. A frozen link may read only its server-captured byte prefix. */
+  async function codeSourceText(ref: ConversationReference, source: CodeAgentRunRecord, boundaryId?: string | null,
+    boundaryBytes?: number | null): Promise<string> {
+    let text = "";
+    let file;
+    try {
+      const transcript = codeAgentRunTranscriptPath(ref.id);
+      // O_NONBLOCK keeps a FIFO with no writer from blocking the open. The checks below then reject it as not a
+      // regular file. Reads of a regular file are unaffected.
+      file = await open(transcript, constants.O_RDONLY | (dependencies.noFollowFlag ?? constants.O_NOFOLLOW ?? 0)
+        | (constants.O_NONBLOCK ?? 0));
+      // Windows has no O_NOFOLLOW, so the opened file must be the path's own regular file, as in original-runtime.ts.
+      const [stat, named] = await Promise.all([file.stat(), lstat(transcript)]);
+      if (!named.isFile() || stat.ino !== named.ino || stat.dev !== named.dev)
+        unavailable("The source transcript is not a safe regular file.");
+      const bytes = boundaryBytes ?? stat.size;
+      if (!stat.isFile() || stat.nlink !== 1 || bytes > LINK_HISTORY_BYTES || stat.size < bytes)
+        unavailable("The source history exceeds the safe 8 MiB linking limit or is unavailable.");
+      const buffer = Buffer.alloc(bytes);
+      let read = 0;
+      while (read < bytes) {
+        const result = await file.read(buffer, read, bytes - read, read);
+        if (!result.bytesRead) unavailable("The source transcript was replaced or truncated.");
+        read += result.bytesRead;
+      }
+      text = buffer.toString("utf8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      // O_NOFOLLOW refuses a symbolic link with ELOOP. A link, a non-directory parent or a refused open
+      // is a transcript that no longer verifies, so the source is unavailable. The link is never followed.
+      if (code === "ELOOP" || code === "ENOTDIR" || code === "EACCES" || code === "EPERM")
+        unavailable("The source transcript is not a safe regular file.");
+      if (code !== "ENOENT") throw error;
+      // Only a linked Code target that has never sent has no transcript by design. Any other missing transcript
+      // was deleted, so neither a new link nor a retained read may treat it as empty history.
+      if (boundaryId || source.phase !== "linked-inactive")
+        unavailable("The source transcript is missing.");
+    } finally { await file?.close(); }
+    return text;
+  }
+
   async function sourcePrefix(ref: ConversationReference, source: CodeAgentRunRecord | ChatThread, boundaryId?: string | null,
     boundaryBytes?: number | null) {
     if (ref.kind === "code") {
-      let text = "";
-      let file;
-      try {
-        const transcript = codeAgentRunTranscriptPath(ref.id);
-        // O_NONBLOCK keeps a FIFO with no writer from blocking the open. The checks below then reject it as not a
-        // regular file. Reads of a regular file are unaffected.
-        file = await open(transcript, constants.O_RDONLY | (dependencies.noFollowFlag ?? constants.O_NOFOLLOW ?? 0)
-          | (constants.O_NONBLOCK ?? 0));
-        // Windows has no O_NOFOLLOW, so the opened file must be the path's own regular file, as in original-runtime.ts.
-        const [stat, named] = await Promise.all([file.stat(), lstat(transcript)]);
-        if (!named.isFile() || stat.ino !== named.ino || stat.dev !== named.dev)
-          unavailable("The source transcript is not a safe regular file.");
-        const bytes = boundaryBytes ?? stat.size;
-        if (!stat.isFile() || stat.nlink !== 1 || bytes > LINK_HISTORY_BYTES || stat.size < bytes)
-          unavailable("The source history exceeds the safe 8 MiB linking limit or is unavailable.");
-        const buffer = Buffer.alloc(bytes);
-        let read = 0;
-        while (read < bytes) {
-          const result = await file.read(buffer, read, bytes - read, read);
-          if (!result.bytesRead) unavailable("The source transcript was replaced or truncated.");
-          read += result.bytesRead;
-        }
-        text = buffer.toString("utf8");
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        // O_NOFOLLOW refuses a symbolic link with ELOOP. A link, a non-directory parent or a refused open
-        // is a transcript that no longer verifies, so the source is unavailable. The link is never followed.
-        if (code === "ELOOP" || code === "ENOTDIR" || code === "EACCES" || code === "EPERM")
-          unavailable("The source transcript is not a safe regular file.");
-        if (code !== "ENOENT") throw error;
-        // Only a linked Code target that has never sent has no transcript by design. Any other missing transcript
-        // was deleted, so neither a new link nor a retained read may treat it as empty history.
-        if (boundaryId || (source as CodeAgentRunRecord).phase !== "linked-inactive")
-          unavailable("The source transcript is missing.");
-      } finally { await file?.close(); }
+      const text = await codeSourceText(ref, source as CodeAgentRunRecord, boundaryId, boundaryBytes);
       const events = codeHistoryRecords(text, ref.id);
       const end = boundaryId === undefined ? codeCompletedPrefix(events)
         : boundaryId === null ? [] : events.slice(0, events.findIndex(event => event.id === boundaryId) + 1);
@@ -250,6 +257,31 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     if (boundaryId !== undefined && Buffer.byteLength(JSON.stringify(prefix)) > LINK_HISTORY_BYTES)
       unavailable("The source history exceeds the safe 8 MiB linking limit.");
     return { boundaryId: prefix.at(-1)?.message.id ?? null, boundaryBytes: null, digest: historyDigest(prefix), items: nativeHistoryItems(prefix) };
+  }
+
+  /**
+   * Handoff progression is separate from completed evidence. Observe every recorded event, or only the selected
+   * Native ancestry, including requests whose replies are stopped, failed or still live. No partial output is quoted.
+   */
+  async function progression(ctx: ActionRunContext | undefined, projectId: string, ref: ConversationReference, boundaryId: string | null) {
+    const identity = await scope(ctx, projectId);
+    const source = await record(ref, identity);
+    await load(ctx, projectId, ref);
+    try {
+      if (ref.kind === "code") {
+        const events = codeHistoryRecords(await codeSourceText(ref, source as CodeAgentRunRecord), ref.id);
+        const index = boundaryId === null ? -1 : events.findIndex(event => event.id === boundaryId);
+        if (boundaryId !== null && index < 0) unavailable("The completed handoff boundary is no longer in this conversation.");
+        return { digest: historyDigest(events), continued: events.slice(index + 1).some(event => event.kind === "user") };
+      }
+      const thread = source as ChatThread;
+      if (Buffer.byteLength(thread.threadData) > LINK_HISTORY_BYTES)
+        unavailable("The conversation exceeds the safe 8 MiB handoff progression limit.");
+      const path = nativeHistoryPath(thread.threadData);
+      const index = boundaryId === null ? -1 : path.findIndex(entry => entry.message.id === boundaryId);
+      if (boundaryId !== null && index < 0) unavailable("The completed handoff boundary is no longer on the selected conversation branch.");
+      return { digest: historyDigest(path), continued: path.slice(index + 1).some(entry => entry.message.role === "user") };
+    } catch (error) { if (error instanceof LinkedSourceChanged) unavailable(error.message); throw error; }
   }
 
   async function load(ctx: ActionRunContext | undefined, projectId: string | null, target: ConversationReference, cursor?: string): Promise<LinkedHistoryPage | null> {
@@ -601,7 +633,7 @@ export function createLinkedConversationService(dependencies: Dependencies = def
 
   return { create, load, context, sourceAvailable, prepareNativeMessage, codeSendLinkedContext,
     // Prepare handoff reads conversations through linking's own checks, so it accepts nothing linking refuses.
-    scope, record, completedPrefix: linkablePrefix, linkFor };
+    scope, record, completedPrefix: linkablePrefix, progression, linkFor };
 }
 export const linkedConversations = createLinkedConversationService();
 

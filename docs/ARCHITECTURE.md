@@ -355,12 +355,21 @@ completed evidence event. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state
 document through `projectFileService.save` with the prepared version and
 binding. An update moves the block back to the end when text was added after
-it, and keeps that text. Save refuses a reply the conversation continued past,
-because the recorded boundary is the latest completed event. It records the
-project version observed at Prepare, so a change while the agent replied reads
-Out of date. A plain workspace or a missing, private or protected state file refuses
-Prepare. A conflict or failed write keeps the previous file and saved record and
-marks the request Failed. Only a failed write offers Retry. A conflict needs a
+it, and keeps that text. Save refuses a reply followed by a newer user request,
+including one whose reply stopped, failed or is still active. A separate progression
+observation checks all recorded Code events or the selected Native ancestry, with
+the same owner and link validation and an 8 MiB read limit. Completed history
+still owns reply text and check evidence; failed or partial output never becomes
+completed evidence. It records the project version observed at Prepare, so a change
+while the agent replied reads Out of date. A plain workspace or a missing, private,
+protected or noneditable state file refuses Prepare. Noneditable files retain the
+file owner's reason instead of being reported as missing. A conflict preserves the
+current file and saved record and marks the request Failed. After a write exception,
+a fresh authorized state read must confirm the original version and project binding
+before Vivary promises preservation and offers Retry. A changed or unreadable file,
+or failed record finalization after a successful write, reports that the outcome
+could not be confirmed and the file may have changed. It requires inspection and a
+new Prepare, and the same failed request cannot be retried. A conflict also needs a
 new Prepare, because the same request can never pass its version check again.
 Reply text is stripped of HTML comment openers and closers until none remain,
 so it cannot recreate a block marker. Nothing is cleaned, stashed or
@@ -370,14 +379,19 @@ handed off yet. Prepare is disabled while a run is active, including a run
 already active when the control opens. Native reads the same `runs/active`
 endpoint its composer reads on mount, then follows run events. Code uses the
 run state its composer already has, and the end of a Code run rechecks
-freshness. A Prepare that returns after the owner opened another conversation
-sends nothing, because Native submits to whichever chat is open.
+freshness. Successful Files saves and renames invalidate the mounted handoff query,
+and an unavailable control offers Check again. Neither refresh submits a request.
+A Prepare that returns after the owner opened another conversation sends nothing,
+because Native submits to whichever chat is open.
 
 Freshness is computed on request, with no timer and no model call. It compares
 the state file version, Git HEAD and branch, the dirty entry list and each dirty
 file's size and modified time, or the bounded file listing without Git, and the
-covered completed conversation boundary and prefix digest. The state file is
-excluded from the project facts because its own version is compared. The
+covered completed conversation boundary and prefix digest, plus the independent
+progression digest. A stopped, failed or active follow-up therefore makes a saved
+handoff Out of date. Native's unselected branches do not affect progression.
+Older saved records without a progression digest require an update before they can
+report Fresh. The state file is excluded from the project facts because its own version is compared. The
 observer refuses a directory entry, such as Git's single entry for a new
 untracked directory, so a project holding one reads Unverifiable until that
 directory is committed or removed. A listing at its cap or an unknown Git state
@@ -681,6 +695,17 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-18 Handoff progression and recovery (PR #236). Handoff Save and freshness
+now observe later stopped, failed and active requests independently from linked
+completed evidence, retaining selected Native ancestry and bounded no-follow Code
+reads. Files saves and renames refresh the mounted control, and unavailable state
+can be checked again. A post-write exception or record-finalization failure no
+longer promises the old bytes survived: only a reread of the unchanged original
+version permits Retry. The state-document check preserves existing noneditable
+reasons. The Prepare handoff contract above and the Workbench README describe the
+recovery paths. Focused production-service and mounted-component regressions cover
+these changes; installed-Core, real-agent and packaged acceptance remain separate.
 
 2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
 test records that an untracked directory leaves the Git state unknown, so an

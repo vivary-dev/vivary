@@ -18,7 +18,10 @@ export type ProjectVersion = {
   /** The listing hit its cap, so an unlisted change cannot be seen. */
   truncated: boolean;
 };
-export type CoveredBoundary = { ref: ConversationReference; boundaryId: string | null; boundaryBytes: number | null; prefixDigest: string };
+export type CoveredBoundary = { ref: ConversationReference; boundaryId: string | null; boundaryBytes: number | null; prefixDigest: string;
+  /** Full recorded progression on the selected branch, including stopped, failed and active turns. Absent on older saves. */
+  progressionDigest?: string;
+};
 export type HandoffFacts = {
   requestId: string;
   path: string;
@@ -37,7 +40,7 @@ export type HandoffRecord = HandoffProposal & { facts: HandoffFacts; savedVersio
 export type StaleReason = "document-edited" | "head-moved" | "tree-changed" | "files-changed" | "events-appended" | "history-changed";
 export type HandoffUnavailable = {
   status: "unavailable";
-  reason: "no-state-role" | "state-missing" | "state-private" | "settings-unavailable";
+  reason: "no-state-role" | "state-missing" | "state-uneditable" | "state-private" | "settings-unavailable";
   message: string;
 };
 export type HandoffFreshness =
@@ -62,6 +65,6 @@ export const STALE_REASON_TEXT: Record<StaleReason, string> = {
   "head-moved": "the Git commit or branch changed",
   "tree-changed": "the set of changed files changed",
   "files-changed": "project files changed",
-  "events-appended": "the conversation has newer completed work",
+  "events-appended": "the conversation has newer work or requests",
   "history-changed": "the covered conversation history changed or is unavailable",
 };

@@ -31,7 +31,7 @@ type Observation = { kind: "plain" } | { kind: "unknown" }
   | { kind: "git"; head: string | null; ref: string | null; entries: Array<{ path: string; state: string }> | null };
 type Ready = Extract<StateDocument, { status: "ready" }>;
 type Dependencies = {
-  conversations: Pick<typeof linkedConversations, "scope" | "record" | "load" | "completedPrefix" | "linkFor">;
+  conversations: Pick<typeof linkedConversations, "scope" | "record" | "load" | "completedPrefix" | "progression" | "linkFor">;
   state: (context: ActionRunContext | undefined, projectId: string) => Promise<StateDocument>;
   files: Pick<typeof projectFileService, "get" | "save">;
   observe: (workspace: { projectId: string; root: string }) => Promise<Observation>;
@@ -85,6 +85,10 @@ function unavailable(document: Exclude<StateDocument, { status: "ready" }>): Han
   const message = {
     "no-state-role": "This project has no designated state document. Prepare handoff writes to the state file, such as STATE.md, that a Vivary workspace names in .vivary/workspace.toml.",
     "state-missing": `The designated state document ${file} does not exist. Create it, then prepare the handoff.`,
+    "state-uneditable": `The designated state document ${file} ${document.reason === "state-uneditable" ? {
+      "too-large": "is too large for editing", binary: "is not a text file", linked: "is linked", unsupported: "has an unsupported file type",
+      unreadable: "could not be read as an editable file",
+    }[document.blockedReason] : "cannot be edited"}. Inspect it in Files or your editor, then check again.`,
     "state-private": `The designated state document ${file} is private or protected, so Vivary does not write a handoff there.`,
     "settings-unavailable": "Vivary could not read this project's workspace settings, so it cannot find the state document.",
   }[document.reason];
@@ -262,13 +266,15 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       filesDigest: digest(listing.files.filter(file => file.path !== document.path).map(file => [file.path, file.sizeBytes, file.updatedAt])) };
   }
 
-  async function conversationReasons(identity: Awaited<ReturnType<typeof conversations.scope>>, covered: HandoffFacts["conversation"]): Promise<StaleReason[]> {
+  async function conversationReasons(context: ActionRunContext | undefined, projectId: string, identity: Awaited<ReturnType<typeof conversations.scope>>, covered: HandoffFacts["conversation"]): Promise<StaleReason[]> {
     try {
       const record = await conversations.record(covered.ref, identity);
       const at = await conversations.completedPrefix(covered.ref, record, covered.boundaryId, covered.boundaryBytes);
       if (at.digest !== covered.prefixDigest) return ["history-changed"];
-      const latest = await conversations.completedPrefix(covered.ref, record);
-      return latest.boundaryId !== covered.boundaryId ? ["events-appended"] : [];
+      const current = await conversations.progression(context, projectId, covered.ref, covered.boundaryId);
+      // Older records did not observe stopped, failed or live trailing turns, so they cannot establish Fresh.
+      if (!covered.progressionDigest) return ["history-changed"];
+      return current.digest !== covered.progressionDigest ? ["events-appended"] : [];
     } catch { return ["history-changed"]; }
   }
 
@@ -279,11 +285,12 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       if (document.status !== "ready") return unavailable(document);
       const existing = await readRow(document, identity.owner, identity.orgId);
       const prefix = await conversations.completedPrefix(input.conversation, record);
+      const progression = await conversations.progression(context, input.projectId, input.conversation, prefix.boundaryId);
       const project = await projectVersion(context, document);
       const requestId = randomUUID();
       await refreshHeldCredentials();
       const facts: HandoffFacts = { requestId, path: document.path, documentVersion: document.file.version, project,
-        conversation: { ref: input.conversation, boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, prefixDigest: prefix.digest },
+        conversation: { ref: input.conversation, boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, prefixDigest: prefix.digest, progressionDigest: progression.digest },
         linked: await conversations.linkFor(input.conversation) };
       await writeRow({ version: 1, owner: identity.owner, orgId: identity.orgId, projectId: document.project.projectId,
         bindingId: document.project.bindingId, path: document.path, saved: existing?.saved ?? null,
@@ -295,9 +302,9 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
     /**
      * Validate the agent's completed reply from the conversation itself, then
      * write through the file owner. A refused reply changes nothing. A conflict
-     * or failed write keeps the previous file and record and marks the request
-     * failed. Only a failed write is retryable, so Retry can save the same reply
-     * again. A conflict needs a new Prepare.
+     * marks the request failed. A failed write is retryable only when an authorized
+     * reread confirms the original file version and binding. Unknown write outcomes
+     * and conflicts require inspection and a new Prepare.
      */
     async save(context: ActionRunContext | undefined, input: HandoffSaveInput): Promise<HandoffSaveResult> {
       const { identity, record, document } = await open(context, input);
@@ -306,11 +313,14 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       const request = row?.request;
       if (!row || !request || request.requestId !== input.requestId || !sameReference(request.conversation, input.conversation))
         return { code: "refused", problems: ["This handoff request is not pending in this conversation. Prepare the handoff again."] };
+      if (request.state === "failed" && !request.retryable)
+        return { code: "refused", problems: ["This handoff request cannot be retried safely. Inspect the state document and prepare the handoff again."] };
       const prefix = await conversations.completedPrefix(input.conversation, record);
+      const progression = await conversations.progression(context, input.projectId, input.conversation, prefix.boundaryId);
       const reply = replyTo(prefix.items, request.requestId);
       if (reply === null) return { code: "refused", problems: ["The agent has not finished replying to this handoff request in this conversation. Wait for its reply, then click Save handoff."] };
-      // The recorded boundary is the latest completed event, so it must be the reply's own turn.
-      if (reply.continued) return { code: "refused", problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
+      // Completed history excludes trailing stopped, failed and active turns. Their user requests still count.
+      if (reply.continued || progression.continued) return { code: "refused", problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
       const validated = proposalFrom(reply.text, request.requestId, prefix.items);
       if ("problems" in validated) return { code: "refused", problems: validated.problems };
       const failed = async <T extends HandoffSaveResult & { message: string }>(result: T, retryable = false): Promise<T> => {
@@ -330,22 +340,35 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       await refreshHeldCredentials();
       const proposal = redactCredentialsInValue(validated.proposal) as HandoffProposal;
       const facts: HandoffFacts = { requestId: request.requestId, path: document.path, documentVersion: request.documentVersion, project,
-        conversation: { ref: input.conversation, boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, prefixDigest: prefix.digest },
+        conversation: { ref: input.conversation, boundaryId: prefix.boundaryId, boundaryBytes: prefix.boundaryBytes, prefixDigest: prefix.digest, progressionDigest: progression.digest },
         linked: await conversations.linkFor(input.conversation) };
       const savedAt = dependencies.now().toISOString();
       const content = placeBlock(document.file.content, renderBlock({ ...proposal, facts, savedVersion: "", savedAt }));
       if (content === null) return failed({ code: "failed" as const,
         message: `${document.path} has damaged vivary:handoff markers. Fix or remove them by hand. ${kept}` });
+      const uncertain = async (): Promise<HandoffSaveResult> => {
+        const result = { code: "failed" as const,
+          message: `Vivary could not confirm that the handoff was saved. ${document.path} may have changed. Inspect it in Files or your editor, then prepare the handoff again.` };
+        // If record storage is also unavailable, the pending row/file version still prevent Fresh. Preserve the
+        // truthful response even when the failure status itself cannot be recorded.
+        try { return await failed(result); } catch { return result; }
+      };
       let result;
       try {
         result = await dependencies.files.save(context, { projectId: document.project.projectId, path: document.path,
           expectedVersion: request.documentVersion, content, expectedProject: request.project });
       } catch {
-        return failed({ code: "failed" as const, message: `Vivary could not write ${document.path}. ${kept}` }, true);
+        // The file owner can throw after its rename. Retry is safe only when a fresh authorized read proves that
+        // the same binding still holds the exact original version. Matching handoff text alone never proves success.
+        const current = await dependencies.state(context, input.projectId).catch(() => null);
+        return current?.status === "ready" && sameProject(current.project, request.project) && current.file.version === request.documentVersion
+          ? failed({ code: "failed" as const, message: `Vivary could not write ${document.path}. ${kept}` }, true)
+          : uncertain();
       }
       if (result.code === "conflict") return conflict(result.reason);
       const saved: HandoffRecord = { ...proposal, facts, savedVersion: result.file.version, savedAt };
-      await writeRow({ ...row, request: null, saved });
+      try { await writeRow({ ...row, request: null, saved }); }
+      catch { return uncertain(); }
       return { code: "saved", record: saved };
     },
 
@@ -363,7 +386,7 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       const reasons: StaleReason[] = [];
       if (document.file.version !== covered.savedVersion) reasons.push("document-edited");
       const project = compareProject(covered.facts.project, await projectVersion(context, document));
-      reasons.push(...project.reasons, ...await conversationReasons(identity, covered.facts.conversation));
+      reasons.push(...project.reasons, ...await conversationReasons(context, input.projectId, identity, covered.facts.conversation));
       return { status: reasons.length ? "out-of-date" : project.verifiable ? "fresh" : "unverifiable", covered, reasons };
     },
   };
