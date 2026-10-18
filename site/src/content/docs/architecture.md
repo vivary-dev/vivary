@@ -700,6 +700,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Windows executable copyright. `packages/desktop/package.mjs` now passes
+`appCopyright` to Electron Packager, which writes it to the `LegalCopyright` field of
+`vivary.exe`. Earlier packages showed Electron's default "Copyright (C) 2015 GitHub,
+Inc.". The owner chose the text on 2026-10-18. The desktop packaging description
+still holds, because only executable metadata changes. The packaged executable's
+version resource is the evidence, read with the packager's own `resedit` library.
+
 2026-10-18 Handoff save wording (PR #236 review 5). The Prepare handoff paragraph in
 the unified workspace contract said every failed write keeps the previous version and
 shows Retry. It now matches `save()` in `packages/workbench/server/handoff.ts`: a
