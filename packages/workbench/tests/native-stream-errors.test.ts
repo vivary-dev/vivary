@@ -454,11 +454,13 @@ test("a tool step, then an exhausted in-stream 429, keeps the tool's single run 
 // the run before the plugin saves it. Read from the installed, patched source, as
 // native-chat-project.test.ts reads the plugin.
 test("the chat plugin saves a run with whether a server continuation follows it (#246)", async () => {
-  const plugin = await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8");
-  const production = await readFile(path.join(coreRoot, "dist", "agent", "production-agent.js"), "utf8");
-  assert.match(plugin, /suppressInternalContinuation: true,\s*(?:\/\/[^\n]*\s*)*continuationFollows: run\.serverContinuationFollows === true,/);
+  // Line comments are stripped first, so the patterns need no nested repetition.
+  const withoutLineComments = (source: string) => source.replace(/\/\/[^\n]*/g, "");
+  const plugin = withoutLineComments(await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8"));
+  const production = withoutLineComments(await readFile(path.join(coreRoot, "dist", "agent", "production-agent.js"), "utf8"));
+  assert.match(plugin, /suppressInternalContinuation: true,\s*continuationFollows: run\.serverContinuationFollows === true,/);
   assert.match(production,
-    /run\.serverContinuationFollows =\s*!noProgressRepeat\.tripped && willChainBackgroundContinuation\(run\);\s*(?:\/\/[^\n]*\s*)*await baseHandleRunComplete\?\.\(run\);/);
+    /run\.serverContinuationFollows =\s*!noProgressRepeat\.tripped && willChainBackgroundContinuation\(run\);\s*await baseHandleRunComplete\?\.\(run\);/);
 });
 
 // Issue #246 follow-up. The common rate-limit shape fails before any text streams. The saved turn then holds
