@@ -215,23 +215,29 @@ async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undef
   });
 }
 
-// The environment defaults to process.env. Tests pass another platform and environment to reach
-// the Windows branches on any host. The reads below take their names from that environment.
-export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine,
-  { platform = process.platform, env: source = process.env }: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
-): Promise<CommandLaunch | null> {
+export function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine): Promise<CommandLaunch | null> {
+  return resolveRuntimeCommandIn(engine, process.platform, {
+    // guard:allow-env-credential - OS executable search paths locate the fixed CLI allowlist.
+    executablePath: process.env.PATH ?? process.env.Path,
+    // guard:allow-env-credential - Package-manager installation directory, not a credential.
+    pnpmHome: process.env.PNPM_HOME,
+    // guard:allow-env-credential - Windows user application directory locates installed CLI packages.
+    appData: process.env.APPDATA,
+    // guard:allow-env-credential - Windows local application directory locates installed CLI executables.
+    localAppData: process.env.LOCALAPPDATA,
+  }, process.env);
+}
+
+export type RuntimeSearchLocations = { executablePath?: string; pnpmHome?: string; appData?: string; localAppData?: string };
+
+// Tests call this with another platform and locations to reach the Windows branches on any host.
+export async function resolveRuntimeCommandIn(engine: VivaryCodeEngine, platform: NodeJS.Platform,
+  { executablePath = "", pnpmHome, appData, localAppData }: RuntimeSearchLocations,
+  source: NodeJS.ProcessEnv): Promise<CommandLaunch | null> {
   const spec = commands[engine];
   if (!isAllowedCommand(spec.command)) return null;
   const windows = platform === "win32";
   const home = homedir();
-  // guard:allow-env-credential - The environment's executable search paths locate the fixed CLI allowlist.
-  const executablePath = source.PATH ?? source.Path ?? "";
-  // guard:allow-env-credential - The environment's package-manager installation directory, not a credential.
-  const pnpmHome = source.PNPM_HOME;
-  // guard:allow-env-credential - The environment's Windows user application directory locates installed CLI packages.
-  const appData = source.APPDATA;
-  // guard:allow-env-credential - The environment's Windows local application directory locates installed CLI executables.
-  const localAppData = source.LOCALAPPDATA;
   const directories = [
     ...executablePath.split(path.delimiter),
     pnpmHome,
@@ -259,48 +265,79 @@ export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine,
   delete env.Path;
   env.PATH = searchDirectories.join(path.delimiter);
 
+  if (!windows) {
+    for (const directory of searchDirectories) {
+      const executable = path.join(directory, spec.command);
+      if (await isExecutable(executable)) return { executable, prefix: [], env };
+    }
+    return null;
+  }
+  // A Windows terminal runs the first `<command>.exe` or `<command>.cmd` on PATH, so follow that
+  // order first. npm keeps its global `.cmd` launcher beside `node_modules`, so a directory with a
+  // launcher this lookup cannot read still offers the npm entry beside it.
   for (const directory of searchDirectories) {
-    const executable = path.join(directory, spec.command + (windows ? ".exe" : ""));
+    const executable = path.join(directory, `${spec.command}.exe`);
     if (await isExecutable(executable)) return { executable, prefix: [], env };
-    if (windows) {
-      const npmEntry = path.join(directory, "node_modules", ...spec.npmEntry);
-      if (await isFile(npmEntry)) return { executable: process.execPath, prefix: [npmEntry], env };
-      const shimEntry = await windowsShimEntry(directory, engine);
-      if (shimEntry) return { executable: process.execPath, prefix: [shimEntry], env };
+    const shim = await readWindowsShim(directory, spec.command);
+    if (shim === null) continue;
+    const entry = await windowsShimEntry(directory, shim, engine) ?? await npmEntryIn(directory, engine);
+    if (entry) return { executable: process.execPath, prefix: [entry], env };
+  }
+  // A package with no launcher beside it is one the terminal does not run, such as a copy left in a
+  // Node version manager's directory. Use one only when no launcher matched, as earlier versions did.
+  for (const directory of searchDirectories) {
+    const entry = await npmEntryIn(directory, engine);
+    if (entry) return { executable: process.execPath, prefix: [entry], env };
+  }
+  return null;
+}
+
+async function npmEntryIn(directory: string, engine: VivaryCodeEngine): Promise<string | null> {
+  const entry = path.join(directory, "node_modules", ...commands[engine].npmEntry);
+  return await isFile(entry) ? entry : null;
+}
+
+const SHIM_READ_BYTES = 8 * 1024;
+
+// Read the start of `<command>.cmd`. NTFS matches names regardless of case, so the first name finds
+// `codex.CMD` there. The second name covers a case-sensitive directory.
+async function readWindowsShim(directory: string, command: string): Promise<string | null> {
+  for (const name of [`${command}.cmd`, `${command}.CMD`]) {
+    try {
+      const handle = await open(path.join(directory, name), "r");
+      try {
+        const buffer = Buffer.alloc(SHIM_READ_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, SHIM_READ_BYTES, 0);
+        return buffer.toString("utf8", 0, bytesRead);
+      } finally { await handle.close(); }
+    } catch {
+      // Try the next name.
     }
   }
   return null;
 }
 
-const SHIM_READ_BYTES = 8 * 1024;
-
 // pnpm installs a global CLI on Windows as `<command>.cmd` beside a `..\global\<version>\<hash>`
-// package store, so the npm entry check above misses it. Read the start of the shim and accept
-// only a quoted `%~dp0` argument that ends in the package's own entry and whose package manifest
-// carries the expected name. The shim is never run, and nothing else in it is used.
-async function windowsShimEntry(directory: string, engine: VivaryCodeEngine): Promise<string | null> {
+// package store. Take the first quoted `%~dp0` argument outside a comment line that ends in the
+// entry's file name, such as `codex.js`. A later argument is never tried. Accept it only when
+// nothing in it needs cmd.exe to expand, its last segments are `node_modules` and the entry, the
+// file exists, and the package manifest carries the expected name. `..` before those segments
+// resolves against the shim's directory as cmd.exe resolves it, so it reaches only a package that
+// passes the same checks. The shim is never run.
+async function windowsShimEntry(directory: string, text: string, engine: VivaryCodeEngine): Promise<string | null> {
   const spec = commands[engine];
-  let text: string;
-  try {
-    const handle = await open(path.join(directory, `${spec.command}.cmd`), "r");
-    try {
-      const buffer = Buffer.alloc(SHIM_READ_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, SHIM_READ_BYTES, 0);
-      text = buffer.toString("utf8", 0, bytesRead);
-    } finally { await handle.close(); }
-  } catch {
-    return null;
-  }
-  const tail = path.sep + path.join("node_modules", ...spec.npmEntry);
-  for (const [, relative] of text.matchAll(/"%~dp0([^"\r\n]*)"/gi)) {
-    // A variable, escape, or drive in the path would make cmd.exe read it differently.
-    if (/[%!^:]/.test(relative)) continue;
-    const entry = path.resolve(directory, ...relative.split(/[\\/]+/).filter(Boolean));
-    if (!entry.endsWith(tail) || !await isFile(entry)) continue;
-    const packageRoot = path.resolve(entry, ...spec.npmEntry.slice(2).map(() => ".."));
-    if (await readRuntimeManifest(packageRoot, engine).catch(() => null)) return entry;
-  }
-  return null;
+  const expected = ["node_modules", ...spec.npmEntry];
+  const segments = text.split(/\r?\n/)
+    .filter(line => !/^\s*@?\s*(?:rem(?:\s|$)|::)/i.test(line))
+    .flatMap(line => [...line.matchAll(/"%~dp0([^"]*)"/gi)].map(match => match[1].split(/[\\/]+/).filter(Boolean)))
+    .find(argument => argument.at(-1) === expected.at(-1));
+  // A variable, escape, or drive in the path would make cmd.exe read it differently.
+  if (!segments || segments.some(segment => /[%!^:]/.test(segment))
+    || segments.slice(-expected.length).join("/") !== expected.join("/")) return null;
+  const entry = path.resolve(directory, ...segments);
+  if (!entry.endsWith(path.sep + path.join(...expected)) || !await isFile(entry)) return null;
+  const packageRoot = path.resolve(entry, ...spec.npmEntry.slice(2).map(() => ".."));
+  return await readRuntimeManifest(packageRoot, engine).catch(() => null) ? entry : null;
 }
 
 // Return the manifest in a directory when it names the engine's package, with its version when valid.

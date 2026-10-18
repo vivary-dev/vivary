@@ -6510,7 +6510,8 @@ Clean-profile first-run acceptance remains open, so report missing-runtime error
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
 provider access require their own supported installation and authentication.
 Vivary finds Codex and Claude Code when they are installed as an executable, or
-globally with npm or pnpm, in a directory on `PATH`.
+globally with npm or pnpm, in a directory on `PATH`. On Windows it picks the copy
+a terminal would run first.
 Use your existing runtime subscription, tools, skills, and configured connections.
 Bundling Vivary does not include model-provider credentials or paid service access.
 Later builds offer no Builder.io account or credits. To use Native chat, add your own
@@ -8050,6 +8051,32 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-18 Windows runtime lookup follows the terminal's order (PR #251 review). A
+review against the owner's laptop showed the first fix did not change which Codex
+Vivary picked. Windows builds a process PATH from the machine PATH, then the user
+PATH. Machine PATH entry 13, `C:\nvm4w\nodejs`, holds a leftover
+`node_modules\@openai\codex` 0.159.3 with no `codex.cmd` beside it. The terminal
+never runs it, and it exits 1 for a missing optional dependency. The npm entry check
+accepted it before the loop reached the pnpm shim at user PATH entry 22, `codex.CMD`,
+which names 0.162.1. On Windows `packages/workbench/server/local-runtime-setup.ts` now
+makes two passes over the same directories. The first pass accepts `<command>.exe` or
+a `<command>.cmd` launcher in PATH order, as a terminal does. For a launcher it takes
+the pnpm target when the strict check passes, or else the npm entry beside the
+launcher, which is npm's global layout. The second pass runs only when the first finds
+nothing and accepts a package with no launcher, as before. The shim check now reads
+only the first quoted `%~dp0` argument outside comment lines that ends in the entry's
+file name, and never tries a later one. `..` before `node_modules` resolves against
+the shim's directory, and the result must still pass the name check. The lookup also
+tries `<command>.CMD` for a case-sensitive directory. NTFS finds `codex.CMD` under
+either name. `resolveVivaryRuntimeCommand` again reads `PATH`, `PNPM_HOME`, `APPDATA`,
+and `LOCALAPPDATA` from `process.env` under its `guard:allow-env-credential` reasons,
+and passes them to `resolveRuntimeCommandIn`, which tests call with Windows semantics.
+The launch shapes, the filtered environment, and the lookup on other platforms are
+unchanged, so the descriptions above still hold. Of 24 cases in
+`packages/workbench/tests/local-runtime-setup.test.ts`, three failed on e1c769b: the
+upper-case extension, an earlier package with no launcher before a later shim, and a
+target only on comment lines. All 24 pass with the change.
 
 2026-10-18 Remote access wording. The owner renamed the user-visible Browser access
 feature to Remote access on 2026-10-18. The Settings tab, its heading, intro, status and

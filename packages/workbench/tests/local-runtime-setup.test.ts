@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { codingRuntimeEnvironment, getVivaryRuntimeStatus, resolveVivaryRuntimeCommand, runtimeInstallationVersion, vivaryRuntimeStatusFromProbe } from "../server/local-runtime-setup.ts";
+import { codingRuntimeEnvironment, getVivaryRuntimeStatus, resolveRuntimeCommandIn, resolveVivaryRuntimeCommand, runtimeInstallationVersion, vivaryRuntimeStatusFromProbe } from "../server/local-runtime-setup.ts";
 
 describe("local coding runtime status", () => {
   it("marks exact Claude IDs by installed version and labels API list prices", () => {
@@ -296,10 +296,11 @@ it("review regression: signed-out installations retain known model compatibility
   }).version, undefined);
 });
 
+
 // pnpm on Windows installs a CLI as `<pnpm>\bin\<command>.cmd` with the package under
-// `<pnpm>\global\v11\<hash>\node_modules`. These cases pass Windows semantics through the
-// lookup's platform option, so they exercise the same branch on every host.
-describe("Windows pnpm global installations", () => {
+// `<pnpm>\global\v11\<hash>\node_modules`. npm keeps `<command>.cmd` beside `node_modules`.
+// These cases pass Windows semantics to the lookup, so they exercise the same branches on every host.
+describe("Windows runtime lookup", () => {
   const runtimes = {
     "codex-cli": { command: "codex", scope: "@openai", name: "codex", entry: ["bin", "codex.js"], version: "0.162.1" },
     "claude-cli": { command: "claude", scope: "@anthropic-ai", name: "claude-code", entry: ["cli.js"], version: "2.1.296" },
@@ -310,9 +311,18 @@ describe("Windows pnpm global installations", () => {
   const placeholder = "throw new Error('Must not run');";
 
   // pnpm's generated shim in the owner's layout. Its first quoted argument is node.exe.
-  function pnpmShim(target: string): string {
-    return ["@SETLOCAL", '@IF EXIST "%~dp0\\node.exe" (', `  "%~dp0\\node.exe"  "%~dp0\\${target}" %*`, ") ELSE (",
-      "  @SET PATHEXT=%PATHEXT:;.JS;=;%", `  node  "%~dp0\\${target}" %*`, ")", ""].join("\r\n");
+  function pnpmShim(...targets: string[]): string {
+    const [first, second = first] = targets;
+    return ["@SETLOCAL", '@IF EXIST "%~dp0\\node.exe" (', `  "%~dp0\\node.exe"  "%~dp0\\${first}" %*`, ") ELSE (",
+      "  @SET PATHEXT=%PATHEXT:;.JS;=;%", `  node  "%~dp0\\${second}" %*`, ")", ""].join("\r\n");
+  }
+
+  // npm's generated shim names the entry through its own dp0 variable, which this lookup does not read.
+  function npmShim(engine: Engine): string {
+    const runtime = runtimes[engine];
+    return ["@ECHO off", "GOTO start", ":find_dp0", "SET dp0=%~dp0", "EXIT /b", ":start", "SETLOCAL", "CALL :find_dp0",
+      `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\${runtime.scope}\\${runtime.name}\\${runtime.entry.join("\\")}" %*`,
+      ""].join("\r\n");
   }
 
   async function writePackage(packageRoot: string, engine: Engine, manifestName?: string): Promise<string> {
@@ -334,22 +344,32 @@ describe("Windows pnpm global installations", () => {
     return path.join(root, "pnpm", "global", "v11", hash, "node_modules", runtimes[engine].scope, runtimes[engine].name);
   }
 
-  async function pnpmGlobal(root: string, engine: Engine,
-    { target = pnpmTarget(engine), manifestName, install = true }: { target?: string; manifestName?: string; install?: boolean } = {}) {
+  async function pnpmGlobal(root: string, engine: Engine, { shim = pnpmShim(pnpmTarget(engine)), manifestName,
+    install = true, shimName = `${runtimes[engine].command}.cmd` }: { shim?: string; manifestName?: string; install?: boolean;
+    shimName?: string } = {}) {
     const shimDir = path.join(root, "pnpm", "bin");
     await mkdir(shimDir, { recursive: true });
-    await writeFile(path.join(shimDir, `${runtimes[engine].command}.cmd`), pnpmShim(target));
+    await writeFile(path.join(shimDir, shimName), shim);
     const entry = install ? await writePackage(pnpmPackageRoot(root, engine), engine, manifestName) : undefined;
     return { shimDir, entry };
   }
 
+  // A global npm installation: the launcher beside `node_modules`.
   async function npmGlobal(root: string, engine: Engine) {
     const dir = path.join(root, "npm");
+    const entry = await writePackage(path.join(dir, "node_modules", runtimes[engine].scope, runtimes[engine].name), engine);
+    await writeFile(path.join(dir, `${runtimes[engine].command}.cmd`), npmShim(engine));
+    return { dir, entry };
+  }
+
+  // A package with no launcher beside it, like the copy left in the owner's `C:\nvm4w\nodejs`.
+  async function bareEntry(root: string, engine: Engine) {
+    const dir = path.join(root, "nvm4w", "nodejs");
     return { dir, entry: await writePackage(path.join(dir, "node_modules", runtimes[engine].scope, runtimes[engine].name), engine) };
   }
 
   function resolveOnWindows(engine: Engine, directories: string[]) {
-    return resolveVivaryRuntimeCommand(engine, { platform: "win32", env: { PATH: directories.join(path.delimiter) } });
+    return resolveRuntimeCommandIn(engine, "win32", { executablePath: directories.join(path.delimiter) }, {});
   }
 
   async function withFixture(run: (root: string) => Promise<void>): Promise<void> {
@@ -361,7 +381,7 @@ describe("Windows pnpm global installations", () => {
     for (const engine of engines) {
       for (const separator of ["\\", "/"]) {
         await withFixture(async root => {
-          const { shimDir, entry } = await pnpmGlobal(root, engine, { target: pnpmTarget(engine, separator) });
+          const { shimDir, entry } = await pnpmGlobal(root, engine, { shim: pnpmShim(pnpmTarget(engine, separator)) });
           const launch = await resolveOnWindows(engine, [shimDir]);
           assert.ok(launch, `${engine} resolves from the pnpm shim with ${separator}`);
           assert.equal(launch.executable, process.execPath);
@@ -372,57 +392,44 @@ describe("Windows pnpm global installations", () => {
     }
   });
 
-  it("refuses a shim whose package has another name and keeps searching", async () => {
+  it("reads a shim named with an upper-case extension", async () => {
     for (const engine of engines) {
       await withFixture(async root => {
-        const { shimDir } = await pnpmGlobal(root, engine, { manifestName: "another-package" });
-        const npm = await npmGlobal(root, engine);
-        const launch = await resolveOnWindows(engine, [shimDir, npm.dir]);
-        assert.deepEqual(launch?.prefix, [npm.entry], `${engine} skips the misnamed package`);
+        const { shimDir, entry } = await pnpmGlobal(root, engine, { shimName: `${runtimes[engine].command}.CMD` });
+        assert.deepEqual((await resolveOnWindows(engine, [shimDir]))?.prefix, [entry]);
       });
     }
   });
 
-  it("refuses a shim that names anything but the exact package entry", async () => {
+  it("prefers a later launcher over an earlier package with no launcher", async () => {
     for (const engine of engines) {
-      const runtime = runtimes[engine];
-      const entryPath = runtime.entry.join("\\");
-      const cases = [
-        // A correctly named package outside any node_modules directory.
-        { label: "no node_modules directory", target: `..\\global\\${runtime.scope}\\${runtime.name}\\${entryPath}`,
-          prepare: (root: string) => writePackage(path.join(root, "pnpm", "global", runtime.scope, runtime.name), engine) },
-        { label: "another file in the package", target: `..\\global\\v11\\${hash}\\node_modules\\${runtime.scope}\\${runtime.name}\\other.js`,
-          prepare: async (root: string) => {
-            await writePackage(pnpmPackageRoot(root, engine), engine);
-            await writeFile(path.join(pnpmPackageRoot(root, engine), "other.js"), placeholder);
-          } },
-        // cmd.exe would expand the variable, so a literal directory of that name must not match.
-        { label: "a variable in the path", target: `%PNPM_GLOBAL%\\node_modules\\${runtime.scope}\\${runtime.name}\\${entryPath}`,
-          prepare: (root: string) => writePackage(
-            path.join(root, "pnpm", "bin", "%PNPM_GLOBAL%", "node_modules", runtime.scope, runtime.name), engine) },
-        { label: "a missing entry", target: pnpmTarget(engine), prepare: async () => {} },
-      ];
-      for (const { label, target, prepare } of cases) {
-        await withFixture(async root => {
-          const { shimDir } = await pnpmGlobal(root, engine, { target, install: false });
-          await prepare(root);
-          const npm = await npmGlobal(root, engine);
-          const launch = await resolveOnWindows(engine, [shimDir, npm.dir]);
-          assert.deepEqual(launch?.prefix, [npm.entry], `${engine} refuses ${label}`);
-        });
-      }
+      await withFixture(async root => {
+        const bare = await bareEntry(root, engine);
+        const pnpm = await pnpmGlobal(root, engine);
+        assert.deepEqual((await resolveOnWindows(engine, [bare.dir, pnpm.shimDir]))?.prefix, [pnpm.entry],
+          `${engine} skips the package with no launcher`);
+      });
     }
   });
 
-  it("reads only the start of a shim", async () => {
+  it("still finds a package with no launcher when nothing else matches", async () => {
     for (const engine of engines) {
       await withFixture(async root => {
-        const { shimDir } = await pnpmGlobal(root, engine);
-        const shim = path.join(shimDir, `${runtimes[engine].command}.cmd`);
-        await writeFile(shim, `@REM ${"x".repeat(9000)}\r\n${await readFile(shim, "utf8")}`);
+        const bare = await bareEntry(root, engine);
+        const launch = await resolveOnWindows(engine, [bare.dir]);
+        assert.equal(launch?.executable, process.execPath);
+        assert.deepEqual(launch?.prefix, [bare.entry]);
+      });
+    }
+  });
+
+  it("keeps PATH order between pnpm and npm launchers", async () => {
+    for (const engine of engines) {
+      await withFixture(async root => {
+        const pnpm = await pnpmGlobal(root, engine);
         const npm = await npmGlobal(root, engine);
-        const launch = await resolveOnWindows(engine, [shimDir, npm.dir]);
-        assert.deepEqual(launch?.prefix, [npm.entry], `${engine} ignores a target past the read limit`);
+        assert.deepEqual((await resolveOnWindows(engine, [pnpm.shimDir, npm.dir]))?.prefix, [pnpm.entry]);
+        assert.deepEqual((await resolveOnWindows(engine, [npm.dir, pnpm.shimDir]))?.prefix, [npm.entry]);
       });
     }
   });
@@ -440,13 +447,80 @@ describe("Windows pnpm global installations", () => {
     }
   });
 
-  it("keeps PATH order between a pnpm shim and an npm installation", async () => {
+  it("refuses a shim whose package has another name and keeps searching", async () => {
     for (const engine of engines) {
       await withFixture(async root => {
-        const pnpm = await pnpmGlobal(root, engine);
+        const { shimDir } = await pnpmGlobal(root, engine, { manifestName: "another-package" });
         const npm = await npmGlobal(root, engine);
-        assert.deepEqual((await resolveOnWindows(engine, [pnpm.shimDir, npm.dir]))?.prefix, [pnpm.entry]);
-        assert.deepEqual((await resolveOnWindows(engine, [npm.dir, pnpm.shimDir]))?.prefix, [npm.entry]);
+        assert.deepEqual((await resolveOnWindows(engine, [shimDir, npm.dir]))?.prefix, [npm.entry],
+          `${engine} skips the misnamed package`);
+      });
+    }
+  });
+
+  it("refuses a shim that names anything but the exact package entry", async () => {
+    for (const engine of engines) {
+      const runtime = runtimes[engine];
+      const entryPath = runtime.entry.join("\\");
+      const valid = pnpmTarget(engine);
+      const cases = [
+        // A correctly named package outside any node_modules directory.
+        { label: "no node_modules directory", shim: pnpmShim(`..\\global\\${runtime.scope}\\${runtime.name}\\${entryPath}`),
+          prepare: (root: string) => writePackage(path.join(root, "pnpm", "global", runtime.scope, runtime.name), engine) },
+        { label: "another file in the package",
+          shim: pnpmShim(`..\\global\\v11\\${hash}\\node_modules\\${runtime.scope}\\${runtime.name}\\other.js`),
+          prepare: async (root: string) => {
+            await writePackage(pnpmPackageRoot(root, engine), engine);
+            await writeFile(path.join(pnpmPackageRoot(root, engine), "other.js"), placeholder);
+          } },
+        // cmd.exe would expand the variable, so a literal directory of that name must not match.
+        { label: "a variable in the path", shim: pnpmShim(`%PNPM_GLOBAL%\\node_modules\\${runtime.scope}\\${runtime.name}\\${entryPath}`),
+          prepare: (root: string) => writePackage(
+            path.join(root, "pnpm", "bin", "%PNPM_GLOBAL%", "node_modules", runtime.scope, runtime.name), engine) },
+        { label: "a missing entry", shim: pnpmShim(valid), prepare: async () => {} },
+        { label: "a target only on comment lines",
+          shim: [`@REM "%~dp0\\${valid}"`, `REM "%~dp0\\${valid}"`, `:: "%~dp0\\${valid}"`, "@SETLOCAL", ""].join("\r\n"),
+          prepare: (root: string) => writePackage(pnpmPackageRoot(root, engine), engine) },
+        // The first entry argument is checked alone, so a valid second one is not tried.
+        { label: "an invalid first entry argument", shim: pnpmShim(`..\\missing\\node_modules\\${runtime.scope}\\${runtime.name}\\${entryPath}`, valid),
+          prepare: (root: string) => writePackage(pnpmPackageRoot(root, engine), engine) },
+        { label: "`..` inside the package path",
+          shim: pnpmShim(`..\\global\\v11\\${hash}\\node_modules\\${runtime.scope}\\..\\${runtime.scope}\\${runtime.name}\\${entryPath}`),
+          prepare: (root: string) => writePackage(pnpmPackageRoot(root, engine), engine) },
+        { label: "`..` that reaches a misnamed package",
+          shim: pnpmShim(`..\\..\\elsewhere\\node_modules\\${runtime.scope}\\${runtime.name}\\${entryPath}`),
+          prepare: (root: string) => writePackage(path.join(root, "elsewhere", "node_modules", runtime.scope, runtime.name), engine, "another-package") },
+      ];
+      for (const { label, shim, prepare } of cases) {
+        await withFixture(async root => {
+          const { shimDir } = await pnpmGlobal(root, engine, { shim, install: false });
+          await prepare(root);
+          const npm = await npmGlobal(root, engine);
+          assert.deepEqual((await resolveOnWindows(engine, [shimDir, npm.dir]))?.prefix, [npm.entry], `${engine} refuses ${label}`);
+        });
+      }
+    }
+  });
+
+  it("follows `..` before the package path to a correctly named package", async () => {
+    for (const engine of engines) {
+      const runtime = runtimes[engine];
+      await withFixture(async root => {
+        const { shimDir } = await pnpmGlobal(root, engine, { install: false,
+          shim: pnpmShim(`..\\..\\elsewhere\\node_modules\\${runtime.scope}\\${runtime.name}\\${runtime.entry.join("\\")}`) });
+        const entry = await writePackage(path.join(root, "elsewhere", "node_modules", runtime.scope, runtime.name), engine);
+        assert.deepEqual((await resolveOnWindows(engine, [shimDir]))?.prefix, [entry]);
+      });
+    }
+  });
+
+  it("reads only the start of a shim", async () => {
+    for (const engine of engines) {
+      await withFixture(async root => {
+        const { shimDir } = await pnpmGlobal(root, engine, { shim: `@ECHO off\r\n${" ".repeat(9000)}\r\n${pnpmShim(pnpmTarget(engine))}` });
+        const npm = await npmGlobal(root, engine);
+        assert.deepEqual((await resolveOnWindows(engine, [shimDir, npm.dir]))?.prefix, [npm.entry],
+          `${engine} ignores a target past the read limit`);
       });
     }
   });
