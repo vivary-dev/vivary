@@ -179,6 +179,19 @@ export function retryInlineTwiceThenAgain(info) {
   });
 }
 
+// A saved reply's error after a reload, read from its metadata as the chat reads it, on the error card
+// and by the inline notice's Retry rule for the last message.
+export async function renderSavedRunError(message) {
+  const info = getRunErrorMetadata(message);
+  if (!info) return null;
+  const view = await mount(<RunErrorRecoveryCard info={info} onContinue={() => {}} onRetry={() => {}} onDismiss={() => {}} />);
+  const snapshot = { errorCode: info.errorCode, recoverable: info.recoverable === true,
+    cardRetry: Boolean(view.host.querySelector('button[aria-label="Retry"]')),
+    inlineRetry: messages.shouldOfferInlineRunErrorRetry({ runError: info, isLast: true }) };
+  await view.unmount();
+  return snapshot;
+}
+
 // The inline notice under a failed message, with the Retry that the message's own rule allows.
 export const shouldOfferInlineRunErrorRetry = messages.shouldOfferInlineRunErrorRetry;
 export async function renderInlineNotice(info, isLast) {
@@ -743,6 +756,30 @@ test("Native chat controls", async t => {
     const card = await proof.renderRunError({ type: "error", error: stop.error, errorCode: stop.errorCode });
     assert.deepEqual({ error: stop.error, errorCard: card.text.includes(stop.error), retry: card.retry },
       { error: "Provider returned error (code 502)", errorCard: true, retry: true });
+  });
+
+  // Issue #246. The server saves a partial reply whose in-stream 429 exhausted the engine's retries,
+  // from the run's events as the chat plugin does when no server continuation follows. A client save
+  // of a copy with no error follows, then a reload reads the saved reply.
+  await t.test("a saved reply that ended in an exhausted 429 shows its error with a Retry after a reload", async () => {
+    const runId = "run-246";
+    const turnId = "turn-246";
+    const attempt = [{ type: "text", text: "Partial" }];
+    const events = [...attempt, { type: "clear" }, ...attempt, { type: "clear" }, ...attempt, { type: "clear" }, ...attempt,
+      { type: "error", error: "Rate limit exceeded (code 429)", errorCode: "http_429" }].map((event, seq) => ({ seq, event }));
+    const saved = threads.buildAssistantMessage(events, runId, { suppressInternalContinuation: true, continuationFollows: false, turnId });
+    const question = { id: "user-1", role: "user", content: [{ type: "text", text: "Hello" }] };
+    const serverRepo = threads.foldAssistantTurn({ messages: [{ message: question, parentId: null }], headId: "user-1" }, saved,
+      { runId, turnId, parentId: "user-1" });
+    const clientCopy = { id: "client-reply", role: "assistant", status: { type: "complete", reason: "stop" },
+      content: [{ type: "reasoning", text: "Thinking." }, { type: "text", text: "Partial" }], metadata: { runId, custom: { runId, turnId } } };
+    const merged = threads.mergeThreadDataForClientSave(serverRepo, { messages: [{ message: question, parentId: null },
+      { message: clientCopy, parentId: "user-1" }], headId: "client-reply" });
+    const reply = merged.messages.at(-1)?.message;
+    assert.deepEqual({ status: reply?.status, shown: await proof.renderSavedRunError(reply) }, {
+      status: { type: "incomplete", reason: "error" },
+      shown: { errorCode: "http_429", recoverable: true, cardRetry: true, inlineRetry: true },
+    });
   });
 
   await t.test("an unclassified error still has no Retry", async () => {

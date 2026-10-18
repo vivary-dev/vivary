@@ -642,6 +642,70 @@ added failed except the documented shape, the provider name cases, and the
 status case, which already held. Before the second, the unknown chunk ahead of
 the provider's error, the status-like name, and the inline double click failed.
 
+### A partial reply whose retries ran out
+
+Issue #246. An in-stream code 429, or an error `type` that names a timeout or
+an overload, still classifies as `http_429`, `timeout` or `overloaded_error`.
+The engine retries those three times, about 14 seconds in all, and then the
+agent loop throws. The chat plugin saves the run with
+`suppressInternalContinuation`, which drops an error of that class because a
+continuation is expected to fold the next chunk onto the turn. Vivary chains no
+server continuation, so until 2026-10-18 the partial reply was saved as
+complete with no error, and a reload showed no error and no Retry.
+
+The patch changes these files:
+
+- `agent/production-agent.js` records on the run whether the server chains a
+  continuation, as `run.serverContinuationFollows`, before the plugin saves
+  the run. Only the completion path that can chain one sets it, so it stays
+  unset in Vivary.
+- `server/agent-chat-plugin.js` passes `continuationFollows:
+  run.serverContinuationFollows === true` to `buildAssistantMessage`.
+- `agent/thread-data-builder.js` saves an error that
+  `isInternalContinuationError` accepts as the turn's `runError` when
+  `continuationFollows` is false. The saved error holds the message, code,
+  details, `recoverable: true` and the run id. The status is `incomplete`, the
+  partial reply stays, the turn is not marked `continued`, and the error text
+  is not added to the reply. The live error event is unchanged, so a connected
+  client still continues on its own. Every other caller keeps the default,
+  `true`, and its current behavior.
+- `foldAssistantTurn` in the same file clears a saved `runError` when a new run
+  of the same turn folds onto it with no error of its own, so a continuation
+  that finishes leaves no stale error. A run already folded keeps it.
+- `preserveAssistantRunMetadata` in the same file carries a `runError`, with
+  the `incomplete` status, from one copy of a run to the other, as it carries
+  `userStopped`. A client save of the same run without the error cannot drop
+  it. A copy of a later run in the same turn does not take it.
+- `agent/thread-data-builder.d.ts` declares the option.
+
+After a reload the error card offers Retry, because the saved error is
+recoverable, and the inline notice offers Retry on the last message. Engine
+retries repeat only the model call, so a tool that finished before the failing
+call runs once and keeps its card. Stop during a retry wait still saves a
+stopped reply with no error.
+
+An exhausted error with no streamed text still saves no reply, as before. The
+issue covers partial replies. Soft-timeout `auto_continue` and `loop_limit`
+boundaries are still saved as `continued`.
+
+`tests/native-stream-errors.test.ts` runs an in-stream code 429, a
+`timeout_error` type and an `overloaded_error` type after "Partial" through
+`startRun`. Each makes four provider requests. The saved turn must be
+`incomplete` with "Partial", the classified code and `recoverable: true`, keep
+the error through a client save of the same run, and stay a `continued` turn
+with no error when a server continuation follows. Other cases cover a heavier
+client copy without the error, a later run's copy, a finished continuation that
+clears the error, a second save of the failed run, Stop during the retry wait, a
+clean finish, a final error saved the same either way, a tool step followed by
+an exhausted 429 that runs the tool once, and the plugin and engine lines read
+from the installed source. `tests/native-chat-components.test.mjs` saves an
+exhausted 429 turn from its events, saves a client copy without the error over
+it, and checks that the card and the inline notice offer Retry. On the
+previous patch the three exhausted turns and their client saves, the heavier
+client copy, the finished continuation, the tool step, the source check and the
+card failed. The cases for a continuation that follows, a later run's copy, a
+second save, Stop, a clean finish and a final error already held.
+
 Upstream could take these changes as they are. Remove this part of the patch
 only when an upstream release shows an in-stream provider error with its
 message and a Retry, and passes the same tests.

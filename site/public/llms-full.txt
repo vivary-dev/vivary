@@ -7941,6 +7941,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Exhausted continuation-class errors save as failed (issue #246). A
+partial Native reply whose in-stream 429, timeout or overload used up the
+engine's three retries was saved as complete with no error. The chat plugin's
+save drops an error of that class for a server continuation, and Vivary never
+chains one. The maintained Core patch now records on the run whether the server
+chains a continuation, and the plugin passes that to `buildAssistantMessage`.
+Without one, the error is saved as a recoverable `runError` on an `incomplete`
+turn that keeps the partial reply, so a reload shows the error and a Retry. A
+finished continuation of the same turn clears the saved error, and a client
+save of the same run keeps it. `tests/native-stream-errors.test.ts` and
+`tests/native-chat-components.test.mjs` add the cases. The engine retry loop,
+the live error event, the client's automatic continuation and the saved-turn
+owner keep their roles, so the design description holds.
+
 2026-10-18 In-stream provider errors are not classified by their message. The
 maintained Core patch passed an OpenRouter in-stream error's message to
 `classifyProviderError`, so a message naming a timeout, an overload, 429 or SSL
