@@ -564,10 +564,13 @@ shown text for statuses, and a name such as "401 unauthorized" would swap the
 error card for the provider setup card. A name with a digit is left out, and
 the text keeps the message and code. The rest of `metadata` can hold the
 upstream provider's raw response, so it is never shown and never classified.
-`classifyProviderError` sees the message, the code, and that status. A
+`classifyProviderError` sees the code and that status, never the message. A
 classification it finds, such as `http_429` for an in-stream `"code":429` or
-`http_<status>` for a derived status, still replaces the code. An upstream
-body that says "overloaded" or "timed out" no longer does.
+`http_<status>` for a derived status, still replaces the code. Neither a
+message nor an upstream body that says "overloaded", "timed out", 429 or SSL
+does. Until 2026-10-18 the message reached the classifier, so those words
+turned the error into three silent retries, a continuable error and a saved
+turn with no error.
 
 The code is final in every check that reads an error's message: the engine
 retry (`isRetryableError`), the in-process resume of a main chat turn
@@ -621,10 +624,10 @@ long, an unknown chunk followed by a normal finish, an unknown chunk and the
 provider's error chunk in both orders, and a last chunk that fails its schema
 or is not JSON. No metadata or raw chunk may reach the stream. The
 error chunk then runs through `startRun` with Vivary's redactor and a held
-synthetic value in the provider message. A second table runs six turns through
+synthetic value in the provider message. A second table runs ten turns through
 `startRun`, with and without streamed text, with messages that name a closed
-stream or an unavailable service, and with metadata that names an overload or
-a timeout. Each must keep `provider_stream_error` after one provider request,
+stream, an unavailable service, a timeout, an overload, 429 or SSL, and with
+metadata that names an overload or a timeout. Each must keep `provider_stream_error` after one provider request,
 save a turn that keeps the error, and neither continue nor resume. A last case
 checks that an error with its own HTTP status keeps `http_<status>`.
 `tests/native-chat-components.test.mjs` passes an error event through
@@ -638,6 +641,97 @@ card with its Retry. Before the first review round, every case that round
 added failed except the documented shape, the provider name cases, and the
 status case, which already held. Before the second, the unknown chunk ahead of
 the provider's error, the status-like name, and the inline double click failed.
+
+### A partial reply whose retries ran out
+
+Issue #246. An in-stream code 429, or an error `type` that names a timeout or
+an overload, still classifies as `http_429`, `timeout` or `overloaded_error`.
+The engine retries those three times, about 14 seconds in all, and then the
+agent loop throws. The chat plugin saves the run with
+`suppressInternalContinuation`, which drops an error of that class because a
+continuation is expected to fold the next chunk onto the turn. Vivary chains no
+server continuation, so until 2026-10-18 the partial reply was saved as
+complete with no error, and a reload showed no error and no Retry.
+
+The patch changes these files:
+
+- `agent/production-agent.js` records on the run whether the server chains a
+  continuation, as `run.serverContinuationFollows`, before the plugin saves
+  the run. Only the completion path that can chain one sets it, so it stays
+  unset in Vivary.
+- `server/agent-chat-plugin.js` passes `continuationFollows:
+  run.serverContinuationFollows === true` to `buildAssistantMessage`.
+- `agent/thread-data-builder.js` saves an error that
+  `isInternalContinuationError` accepts as the turn's `runError` when
+  `continuationFollows` is false. The saved error holds the message, code,
+  details, `recoverable: true` and the run id. The status is `incomplete`, the
+  partial reply stays, the turn is not marked `continued`, and the error text
+  is not added to the reply. The live error event is unchanged, so a connected
+  client still continues on its own. Every other caller keeps the default,
+  `true`, and its current behavior. The rule covers every error that
+  `isInternalContinuationError` accepts, not only the three codes above:
+  `http_408`, `http_429`, `http_500`, `http_502`, `http_503`, `http_504`,
+  `timeout`, `timeout_error`, `overloaded_error`, `rate_limited`,
+  `too_many_concurrent_requests`, `stale_run`, `builder_gateway_timeout`,
+  `builder_gateway_stream_ended`, the Builder gateway's internal-error code, an
+  error marked `recoverable: true`, and a message that names a timeout, a
+  closed or ended stream, a temporarily unavailable service, 502, 503, 504 or
+  529. `provider_stream_error`, `builder_gateway_error` and an error marked
+  `recoverable: false` stay final errors.
+- A reply whose error arrives before any text is saved with no content and its
+  `runError`, where the builder used to save nothing. A client save keeps an
+  empty reply that holds a recoverable `runError`, as it keeps an empty reply
+  the owner stopped, and so does the chat's thread import,
+  `dropEmptyAssistantMessages` in `client/chat/repo-helpers.js`. The chat
+  renders no bubble for it. The error card under the conversation offers
+  Retry, and the next request's history leaves the empty reply out.
+- `foldAssistantTurn` in the same file clears a saved `runError` when a new run
+  of the same turn folds onto it with no error of its own, so a continuation
+  that finishes leaves no stale error. A run already folded keeps it.
+- `preserveAssistantRunMetadata` in the same file carries a `runError`, with
+  the `incomplete` status, from one copy of a run to the other, as it carries
+  `userStopped`. A client save of the same run without the error cannot drop
+  it. A copy of a later run in the same turn does not take it.
+- `agent/thread-data-builder.d.ts` declares the option.
+
+After a reload the error card offers Retry, because the saved error is
+recoverable, and the inline notice offers Retry on the last message. Engine
+retries repeat only the model call, so a tool that finished before the failing
+call runs once and keeps its card. Stop during a retry wait still saves a
+stopped reply with no error.
+
+Soft-timeout `auto_continue` and `loop_limit` boundaries are still saved as
+`continued`.
+
+`tests/native-stream-errors.test.ts` runs an in-stream code 429, a
+`timeout_error` type and an `overloaded_error` type after "Partial" through
+`startRun`. Each makes four provider requests. The saved turn must be
+`incomplete` with "Partial", the classified code and `recoverable: true`, keep
+the error through a client save of the same run, and stay a `continued` turn
+with no error when a server continuation follows. Other cases cover a heavier
+client copy without the error, a later run's copy, a finished continuation that
+clears the error, a second save of the failed run, Stop during the retry wait, a
+clean finish, a final error saved the same either way, a tool step followed by
+an exhausted 429 that runs the tool once, and the plugin and engine lines read
+from the installed source. `tests/native-chat-components.test.mjs` saves an
+exhausted 429 turn from its events, saves a client copy without the error over
+it, and checks that the card and the inline notice offer Retry. On the
+previous patch the three exhausted turns and their client saves, the heavier
+client copy, the finished continuation, the tool step, the source check and the
+card failed. The cases for a continuation that follows, a later run's copy, a
+second save, Stop, a clean finish and a final error already held.
+
+A follow-up set runs the same three errors with no streamed text. The saved
+reply must exist with no content, the `incomplete` status and the recoverable
+error, survive a client save of an empty copy of the same run, stay out of the
+next request's history, and become one finished reply when a later run of the
+same turn folds onto it. Stop before any text and a clean run with no text are
+checked too. `tests/native-chat-components.test.mjs` reloads the whole chat
+on a thread whose last reply holds only such an error, and on one whose last
+reply is "Partial" with the error, and checks the error card's Retry. On
+the previous patch the nine cases with no text and the reload with no text
+failed. The cases for a continuation that follows, Stop before any text, a
+clean run with no text and the reload of the partial reply already held.
 
 Upstream could take these changes as they are. Remove this part of the patch
 only when an upstream release shows an in-stream provider error with its

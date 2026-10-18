@@ -269,20 +269,19 @@ index 4e80d7dd9e363aaa7356b55e676a0435c0a3a142..a137c7a53445fd78f1efefae0a359950
              // `streamText` reports a failed provider request as a stream part rather
              // than a throw, so this is the arrival path for most provider HTTP
              // failures. It used to emit the message alone, discarding the
-@@ -251,7 +257,23 @@ export function aiSdkPartToEngineEvents(part, toolNameMap) {
+@@ -251,7 +257,22 @@ export function aiSdkPartToEngineEvents(part, toolNameMap) {
                  type: "stop",
                  reason: "error",
                  error: errMsg,
 -                ...classifyProviderError(part.error),
 +                // A provider's own in-stream error gets a code of its own, so the
-+                // chat shows it with a Retry. A classification of its message and
-+                // code still wins. Its metadata never reaches the classifier, so an
-+                // upstream body cannot turn it into silent retries.
++                // chat shows it with a Retry. A classification of its code or status
++                // still wins. Its message and metadata never reach the classifier, so
++                // provider text cannot turn it into silent retries.
 +                ...(providerError
 +                    ? {
 +                        errorCode: "provider_stream_error",
 +                        ...classifyProviderError({
-+                            message: providerError.message,
 +                            code: providerError.code,
 +                            statusCode: providerError.statusCode,
 +                            isRetryable: providerError.isRetryable,
@@ -17896,3 +17895,157 @@ diff --git a/dist/usage/store.js b/dist/usage/store.js
  /** Total cost (in cents) charged against a user, across all time. */
  export async function getUserUsageCents(ownerEmail) {
      await ensureUsageTable();
+diff --git a/dist/agent/thread-data-builder.js b/dist/agent/thread-data-builder.js
+--- a/dist/agent/thread-data-builder.js
++++ b/dist/agent/thread-data-builder.js
+@@ -219,6 +219,23 @@
+         if (event.type === "error") {
+             if (options.suppressInternalContinuation &&
+                 isInternalContinuationError(event)) {
++                // The error ends this run at a continuation boundary. A server
++                // continuation that follows picks the turn up. Without one, the
++                // error is the turn's final state. Save it as a recoverable
++                // failure that keeps the partial reply, so a reload shows the
++                // error and a Retry. The live event stays as it was sent.
++                if (options.continuationFollows === false) {
++                    const normalized = normalizeChatError(event.error, event.errorCode);
++                    runError = {
++                        message: normalized.message,
++                        ...(event.errorCode ? { errorCode: event.errorCode } : {}),
++                        ...((event.details ?? normalized.details)
++                            ? { details: event.details ?? normalized.details }
++                            : {}),
++                        recoverable: true,
++                    };
++                    continue;
++                }
+                 endedAtInternalContinuationBoundary = true;
+                 continue;
+             }
+@@ -603,10 +620,20 @@
+         !(chosenRunId && otherRunId && chosenRunId !== otherRunId)) {
+         carried.userStopped = true;
+     }
++    // A saved run error belongs to one run too. The client's copy of that run
++    // can lack it, for example after the client continued on its own past the
++    // live error, and a client save must not drop it.
++    if (otherCustom.runError &&
++        typeof otherCustom.runError === "object" &&
++        !chosenCustom.runError &&
++        !(chosenRunId && otherRunId && chosenRunId !== otherRunId)) {
++        carried.runError = otherCustom.runError;
++    }
+     if (Object.keys(carried).length === 0)
+         return chosenEntry;
+     const nextMessage = {
+         ...chosen,
++        ...(carried.runError ? { status: { type: "incomplete", reason: "error" } } : {}),
+         metadata: {
+             ...chosen.metadata,
+             custom: {
+@@ -1807,6 +1834,10 @@
+     // run already folded keeps the stop from either copy.
+     if (!runAlreadyFolded && incomingCustom.userStopped !== true)
+         delete mergedCustom.userStopped;
++    // The same holds for a saved run error. A new run that finished the turn
++    // clears the error an earlier run of the turn saved.
++    if (!runAlreadyFolded && incomingCustom.runError === undefined)
++        delete mergedCustom.runError;
+     const mergedMessage = {
+         ...lastMsg,
+         content: normalizeAssistantToolCallIds({
+diff --git a/dist/agent/thread-data-builder.d.ts b/dist/agent/thread-data-builder.d.ts
+--- a/dist/agent/thread-data-builder.d.ts
++++ b/dist/agent/thread-data-builder.d.ts
+@@ -32,6 +32,12 @@
+ interface BuildAssistantMessageOptions {
+     suppressInternalContinuation?: boolean;
+     /**
++     * Whether a server continuation picks the turn up after this run. Defaults
++     * to true. When false, an error that would end the run at a continuation
++     * boundary is saved as the turn's recoverable error instead.
++     */
++    continuationFollows?: boolean;
++    /**
+      * Logical-turn identity. When set it is stamped onto the message metadata so
+      * continuation runs of the same turn can be folded onto a single durable
+      * assistant message (see foldAssistantTurn) instead of each run dropping or
+diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+--- a/dist/agent/production-agent.js
++++ b/dist/agent/production-agent.js
+@@ -8098,6 +8098,10 @@
+                     // recoverable error persisted and eligible for another retry.
+                     installBackgroundNoProgressTerminalEvent(run, noProgressRepeat);
+                 }
++                // The thread writer saves a continuation-class error as the
++                // turn's error unless the server chains a continuation below.
++                run.serverContinuationFollows =
++                    !noProgressRepeat.tripped && willChainBackgroundContinuation(run);
+                 // Persist the (partial) assistant turn to thread_data FIRST — the
+                 // server-driven continuation below rebuilds from it, so it must be
+                 // committed before we re-fire.
+diff --git a/dist/server/agent-chat-plugin.js b/dist/server/agent-chat-plugin.js
+--- a/dist/server/agent-chat-plugin.js
++++ b/dist/server/agent-chat-plugin.js
+@@ -2245,6 +2245,9 @@
+                     const assistantMsg = buildAssistantMessage(run.events ?? [], run.runId, {
+                         scope: chatScope,
+                         suppressInternalContinuation: true,
++                        // Without a server continuation, a continuation-class
++                        // error is the turn's final state and is saved as such.
++                        continuationFollows: run.serverContinuationFollows === true,
+                         turnId: typeof run.turnId === "string" && run.turnId
+                             ? run.turnId
+                             : undefined,
+diff --git a/dist/agent/thread-data-builder.js b/dist/agent/thread-data-builder.js
+--- a/dist/agent/thread-data-builder.js
++++ b/dist/agent/thread-data-builder.js
+@@ -275,8 +275,9 @@
+     // — persist it as a partial so the continuation run can fold the next chunk
+     // onto it (foldAssistantTurn) instead of the earlier text being dropped.
+     // A turn the owner stopped before any content is saved too, with the stop,
+-    // so the conversation shows the stopped reply after a reload.
+-    if (content.length === 0 && !userStopped)
++    // so the conversation shows the stopped reply after a reload. So is a turn
++    // whose error is saved before any content, so a reload shows the error.
++    if (content.length === 0 && !userStopped && !runError)
+         return null;
+     const continued = endedAtInternalContinuationBoundary;
+     if (!continued) {
+@@ -388,12 +389,15 @@
+ }
+ /**
+  * An assistant message that holds nothing a client save should keep. A reply
+- * the owner stopped before any content holds the stop, so it is kept.
++ * the owner stopped before any content holds the stop, so it is kept. A reply
++ * saved with a recoverable error before any content holds the error and its
++ * Retry, so it is kept too.
+  */
+ function isEmptyAssistantMessage(message) {
+     return (message?.role === "assistant" &&
+         messageContentIsEmpty(message.content) &&
+-        message.metadata?.custom?.userStopped !== true);
++        message.metadata?.custom?.userStopped !== true &&
++        message.metadata?.custom?.runError?.recoverable !== true);
+ }
+ function messageContentIsEmpty(content) {
+     if (typeof content === "string")
+diff --git a/dist/client/chat/repo-helpers.js b/dist/client/chat/repo-helpers.js
+--- a/dist/client/chat/repo-helpers.js
++++ b/dist/client/chat/repo-helpers.js
+@@ -156,10 +156,13 @@
+     const messages = repo.messages.filter((entry) => {
+         const message = getRepoMessage(entry);
+         // A reply the owner stopped before any content holds the stop, so the
+-        // thread keeps it and shows the stopped notice.
++        // thread keeps it and shows the stopped notice. A reply saved with a
++        // recoverable error before any content holds the error, so the thread
++        // keeps it and shows the error card with its Retry.
+         const drop = message?.role === "assistant" &&
+             repoMessageContentIsEmpty(message.content) &&
+-            message.metadata?.custom?.userStopped !== true;
++            message.metadata?.custom?.userStopped !== true &&
++            message.metadata?.custom?.runError?.recoverable !== true;
+         if (drop)
+             changed = true;
+         return !drop;

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 
 // Issue #101. OpenRouter ends a failed stream with an in-stream error chunk. The owner must see the
 // provider's message and code, with no held credential, instead of "Engine stream error". The
@@ -33,8 +34,10 @@ const load = (relative: string) => import(pathToFileURL(path.join(coreRoot, "dis
 const [audit, runs, agent, threads, translate, errorDetail] = await Promise.all([load("audit/redact.js"), load("agent/run-manager.js"),
   load("agent/production-agent.js"), load("agent/thread-data-builder.js"), load("agent/engine/translate-ai-sdk.js"),
   load("agent/engine/error-detail.js")]);
+const { defineAction } = await import("@agent-native/core/action");
 const { createAISDKEngine } = await import("@agent-native/core/agent/engine");
-const { loadActionsFromStaticRegistry, runAgentLoop, runWithRequestContext } = await import("@agent-native/core/server");
+const { actionsToEngineTools, loadActionsFromStaticRegistry, runAgentLoop, runWithRequestContext } =
+  await import("@agent-native/core/server");
 const { heldCredentialHoldback, redactCredentials, refreshHeldCredentials } = await import("../server/credential-redaction.ts");
 
 audit.setTextRedactor?.(redactCredentials, { holdback: () => heldCredentialHoldback?.() ?? 256 });
@@ -74,13 +77,17 @@ const providerError = (error: Record<string, unknown>) => ({ error });
 const openRouterError = (message: string, metadata: Record<string, unknown> = {}) =>
   providerError({ code: 502, message, metadata: { provider_name: "Probe", raw: METADATA_MARKER, ...metadata } });
 
-async function fakeOpenRouter(chunks: Chunk[]) {
+// `chunks` answers every request alike, or each request by its index.
+async function fakeOpenRouter(chunks: Chunk[] | ((index: number) => Chunk[])) {
   const requests: string[] = [];
   const server = createServer((request, response) => {
+    const index = requests.length;
     requests.push(`${request.method} ${request.url}`);
     request.resume();
     response.writeHead(200, { "content-type": "text/event-stream" });
-    for (const chunk of chunks) response.write(`data: ${typeof chunk === "string" ? chunk : JSON.stringify(chunk)}\n\n`);
+    for (const chunk of typeof chunks === "function" ? chunks(index) : chunks) {
+      response.write(`data: ${typeof chunk === "string" ? chunk : JSON.stringify(chunk)}\n\n`);
+    }
     response.end("data: [DONE]\n\n");
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -119,11 +126,27 @@ async function streamToEnd(chunks: Chunk[]) {
   }
 }
 
+type Actions = ReturnType<typeof loadActionsFromStaticRegistry>;
+type Events = Array<Record<string, unknown>>;
+const eventsOf = (runId: string) => (runs.getRun(runId).events as Array<{ event: Record<string, unknown> }>).map(entry => entry.event);
+
+async function waitFor(condition: () => boolean, label: string) {
+  const deadline = performance.now() + 10_000;
+  while (!condition()) {
+    if (performance.now() > deadline) assert.fail(`timed out waiting for ${label}`);
+    await new Promise(resolve => originalSetTimeout(resolve, 5));
+  }
+}
+
 // One turn through startRun and the agent loop, as the chat runs it. `thrown` is what the loop threw,
-// which the main chat's in-process continuation reads.
-async function runTurn(chunks: Chunk[]) {
+// which the main chat's in-process continuation reads. `actions` become the turn's tools. `stopWhen`
+// presses Stop, the run route's own `abortRunDurably(runId, "user")`, once the run's events satisfy it.
+async function runTurn(chunks: Chunk[] | ((index: number) => Chunk[]),
+  options: { actions?: Actions; stopWhen?: (events: Events) => boolean } = {}) {
   const provider = await fakeOpenRouter(chunks);
   const runId = `run-${randomUUID()}`;
+  const turnId = `turn-${randomUUID()}`;
+  const actions = options.actions ?? loadActionsFromStaticRegistry({});
   let thrown: unknown;
   try {
     await withoutErrorLog(async () => {
@@ -131,21 +154,35 @@ async function runTurn(chunks: Chunk[]) {
       runs.startRun(runId, `thread-${randomUUID()}`, async (send: (event: Record<string, unknown>) => void, signal: AbortSignal) => {
         try {
           await runWithRequestContext({ userEmail: "owner@example.test", orgId: "org-a", run: {} }, () => runAgentLoop({
-            engine: provider.engine, model: "probe/model", systemPrompt: "", tools: [], actions: loadActionsFromStaticRegistry({}),
-            messages: userTurn, signal, send }));
+            engine: provider.engine, model: "probe/model", systemPrompt: "", tools: options.actions ? actionsToEngineTools(actions) : [],
+            actions, messages: userTurn, signal, send }));
         } catch (error) {
           thrown = error;
           throw error;
         }
       }, async () => undefined, { waitUntil: (promise: Promise<unknown>) => { finished = promise; } });
+      if (options.stopWhen) {
+        const stopWhen = options.stopWhen;
+        try {
+          await waitFor(() => stopWhen(eventsOf(runId)), "the moment to press Stop");
+        } finally {
+          await runs.abortRunDurably(runId, "user");
+        }
+      }
       await finished?.catch(() => undefined);
     });
     const entries = runs.getRun(runId).events as Array<{ event: Record<string, unknown> }>;
-    return { runId, entries, events: entries.map(entry => entry.event), thrown, requests: provider.requests };
+    return { runId, turnId, entries, events: entries.map(entry => entry.event), thrown, requests: provider.requests };
   } finally {
     await provider.close();
   }
 }
+type Turn = Awaited<ReturnType<typeof runTurn>>;
+
+// The chat plugin's onRunComplete saves a finished run this way. `continuationFollows` is true only
+// when the server chains its own continuation of the turn, which Vivary never does (issue #246).
+const savedTurnOf = (turn: Turn, continuationFollows: boolean) => threads.buildAssistantMessage(turn.entries, turn.runId,
+  { suppressInternalContinuation: true, continuationFollows, turnId: turn.turnId });
 
 const streams: Array<{ name: string; chunks: Chunk[]; stop: Record<string, unknown> }> = [
   { name: "an OpenRouter error chunk names its code and upstream provider",
@@ -236,6 +273,12 @@ const finalTurns: Array<{ name: string; chunks: Chunk[] }> = [
     { raw: `{"error":{"code":503,"message":"The model is overloaded. ${METADATA_MARKER}"}}` })] },
   { name: "metadata naming a timeout (Opus S5)", chunks: [text("Partial"), openRouterError("Provider returned error",
     { raw: `Request timed out ${METADATA_MARKER}` })] },
+  // The provider's message itself must not be classified either. Before 2026-10-18 each of these
+  // was retried three times, classified as continuable, and saved with no error.
+  { name: "a message naming a timeout", chunks: [text("Partial"), openRouterError("Upstream request timed out")] },
+  { name: "a message naming an overload", chunks: [text("Partial"), openRouterError("The model is overloaded. Please try again later.")] },
+  { name: "a message naming 429", chunks: [text("Partial"), openRouterError("Rate limited (429): too many requests")] },
+  { name: "a message naming SSL", chunks: [text("Partial"), openRouterError("Upstream SSL handshake failed")] },
 ];
 
 test("an in-stream provider error is final in every server check", async t => {
@@ -246,19 +289,240 @@ test("an in-stream provider error is final in every server check", async t => {
       assert.ok(thrown instanceof Error, "the agent loop throws the provider's error");
       // The server saves a turn from the run's stored entries, as the chat plugin's onRunComplete does.
       const saved = threads.buildAssistantMessage(entries, runId, { suppressInternalContinuation: true });
+      // Issue #246 changes only continuation-class errors. A final error saves the same turn whether or
+      // not a server continuation follows.
+      const savedWithoutContinuation = threads.buildAssistantMessage(entries, runId,
+        { suppressInternalContinuation: true, continuationFollows: false });
+      const shape = (message: typeof saved) => ({ content: message?.content, status: message?.status, metadata: message?.metadata });
       assert.deepEqual({
         errorCode: error?.errorCode,
         requests: requests.length,
         savedErrorCode: saved?.metadata?.custom?.runError?.errorCode,
         continuesInBackground: agent.isRecoverableContinuationError(error),
         resumesInProcess: agent.isResumableEngineError(thrown),
+        sameWithoutContinuation: JSON.stringify(shape(savedWithoutContinuation)) === JSON.stringify(shape(saved)),
       }, {
         errorCode: "provider_stream_error",
         requests: 1,
         savedErrorCode: "provider_stream_error",
         continuesInBackground: false,
         resumesInProcess: false,
+        sameWithoutContinuation: true,
       });
     });
   }
+});
+
+// Issue #246. A provider's in-stream code 429, or an error type that names a timeout or an overload,
+// classifies as a retryable code. The engine retries it three times, then the agent loop throws. Vivary
+// chains no server continuation, so the saved turn is the turn's final state. It keeps its partial text
+// and saves the error as failed and recoverable, so a reload shows the error with a Retry. Before
+// 2026-10-18 the saved turn read as complete with no error. Each exhausted turn waits through about
+// 14 seconds of retry backoff.
+const exhaustedTurns = [
+  { name: "an in-stream code 429", error: { code: 429, message: "Rate limit exceeded" }, errorCode: "http_429" },
+  { name: "an in-stream timeout type", error: { type: "timeout_error", message: "Provider returned error" }, errorCode: "timeout" },
+  { name: "an in-stream overload type", error: { type: "overloaded_error", message: "Provider returned error" },
+    errorCode: "overloaded_error" },
+];
+type Saved = ReturnType<typeof savedTurnOf>;
+const COMPLETE = { type: "complete", reason: "stop" };
+const FAILED = { type: "incomplete", reason: "error" };
+const PARTIAL = [{ type: "text", text: "Partial" }];
+const savedState = (message: Saved) => {
+  const runError = message?.metadata?.custom?.runError;
+  return { status: message?.status, content: message?.content, continued: message?.metadata?.custom?.continued,
+    runError: runError && { errorCode: runError.errorCode, recoverable: runError.recoverable, runId: runError.runId,
+      hasMessage: typeof runError.message === "string" && runError.message.length > 0 } };
+};
+const failedState = (errorCode: string, runId: string, content: unknown[] = PARTIAL) =>
+  ({ status: FAILED, content, continued: undefined, runError: { errorCode, recoverable: true, runId, hasMessage: true } });
+
+const question = { id: "user-1", role: "user", content: userTurn[0].content };
+const questionRepo = () => ({ messages: [{ message: question, parentId: null }], headId: "user-1" });
+const replyOf = (repo: { messages: Array<{ message: Saved }> }) => repo.messages.at(-1)?.message;
+// The client saves its own copy of the reply. A client that continued on its own after the live error
+// holds a copy with no error.
+const clientCopy = (runId: string, turnId: string, reply: string) => ({ id: "client-reply", role: "assistant", status: COMPLETE,
+  content: [{ type: "reasoning", text: "Thinking." }, { type: "text", text: reply }], metadata: { runId, custom: { runId, turnId } } });
+const clientSave = (repo: unknown, copy: unknown) => threads.mergeThreadDataForClientSave(repo,
+  { messages: [{ message: question, parentId: null }, { message: copy, parentId: "user-1" }], headId: "client-reply" });
+const foldOnto = (repo: unknown, message: unknown, runId: string, turnId: string) =>
+  threads.foldAssistantTurn(repo, message, { runId, turnId, parentId: "user-1" });
+
+test("a partial reply that ends in an exhausted retryable in-stream error saves as failed (#246)", async t => {
+  for (const exhausted of exhaustedTurns) {
+    const turn = await runTurn([text("Partial"), providerError(exhausted.error)]);
+    const error = turn.events.find(event => event.type === "error");
+    const saved = savedTurnOf(turn, false);
+    await t.test(`${exhausted.name}, with no server continuation`, () => {
+      assert.deepEqual({ requests: turn.requests.length, errorCode: error?.errorCode, liveRecoverable: error?.recoverable,
+        saved: savedState(saved) },
+      { requests: 4, errorCode: exhausted.errorCode, liveRecoverable: undefined, saved: failedState(exhausted.errorCode, turn.runId) });
+    });
+    await t.test(`${exhausted.name}, after a client save of the same run`, () => {
+      const serverRepo = foldOnto(questionRepo(), saved, turn.runId, turn.turnId);
+      const reply = replyOf(clientSave(serverRepo, clientCopy(turn.runId, turn.turnId, "Partial")));
+      assert.deepEqual({ status: reply?.status, errorCode: reply?.metadata?.custom?.runError?.errorCode },
+        { status: FAILED, errorCode: exhausted.errorCode });
+    });
+    // A server-chained continuation still picks the turn up, as before.
+    await t.test(`${exhausted.name}, when the server chains a continuation`, () => {
+      assert.deepEqual(savedState(savedTurnOf(turn, true)), { status: COMPLETE, content: PARTIAL, continued: true, runError: undefined });
+    });
+  }
+});
+
+// The server's saved copy of a failed run, as the fix writes it.
+const erroredTurn = (runId: string, turnId: string) => ({ id: `server-${runId}`, role: "assistant", createdAt: new Date(0),
+  status: FAILED, content: PARTIAL, metadata: { runId, custom: { turnId, foldedRunIds: [runId],
+    runError: { message: "Rate limit exceeded", errorCode: "http_429", recoverable: true, runId } } } });
+const finishedRun = (runId: string, turnId: string) => threads.buildAssistantMessage([{ seq: 0, event: { type: "text", text: " and the rest." } },
+  { seq: 1, event: { type: "done" } }], runId, { suppressInternalContinuation: true, continuationFollows: false, turnId });
+
+test("a saved error survives a client save of its run, and a finished continuation clears it (#246)", async t => {
+  const runId = `run-${randomUUID()}`;
+  const turnId = `turn-${randomUUID()}`;
+  const serverRepo = foldOnto(questionRepo(), erroredTurn(runId, turnId), runId, turnId);
+  const state = (reply: Saved) => ({ status: reply?.status, errorCode: reply?.metadata?.custom?.runError?.errorCode });
+
+  await t.test("a heavier client copy of the failed run without the error keeps the error", () => {
+    const reply = replyOf(clientSave(serverRepo, clientCopy(runId, turnId, "Partial")));
+    assert.deepEqual({ ...state(reply), parts: reply?.content?.length }, { status: FAILED, errorCode: "http_429", parts: 2 });
+  });
+
+  await t.test("a client copy of a later run in the same turn does not take the error", () => {
+    const laterRunId = `run-${randomUUID()}`;
+    assert.deepEqual(state(replyOf(clientSave(serverRepo, clientCopy(laterRunId, turnId, "Partial and the rest.")))),
+      { status: COMPLETE, errorCode: undefined });
+  });
+
+  await t.test("a later run that finishes the same turn clears the error", () => {
+    const laterRunId = `run-${randomUUID()}`;
+    const reply = replyOf(foldOnto(serverRepo, finishedRun(laterRunId, turnId), laterRunId, turnId));
+    assert.deepEqual({ ...state(reply), content: reply?.content, foldedRunIds: reply?.metadata?.custom?.foldedRunIds },
+      { status: COMPLETE, errorCode: undefined, content: [{ type: "text", text: "Partial and the rest." }],
+        foldedRunIds: [runId, laterRunId] });
+  });
+
+  await t.test("saving the failed run again keeps the error", () => {
+    assert.deepEqual(state(replyOf(foldOnto(serverRepo, erroredTurn(runId, turnId), runId, turnId))),
+      { status: FAILED, errorCode: "http_429" });
+  });
+});
+
+const TERMINAL_TYPES = new Set(["done", "error", "missing_api_key", "loop_limit", "auto_continue"]);
+
+test("Stop during the retry wait saves a stopped reply with no error (#246)", async () => {
+  // The engine sends `clear` and then waits about two seconds before its first retry.
+  const turn = await runTurn([text("Partial"), providerError({ code: 429, message: "Rate limit exceeded" })],
+    { stopWhen: events => events.some(event => event.type === "clear") });
+  const saved = savedTurnOf(turn, false);
+  assert.deepEqual({ requests: turn.requests.length, terminal: turn.events.filter(event => TERMINAL_TYPES.has(String(event.type))),
+    userStopped: saved?.metadata?.custom?.userStopped, runError: saved?.metadata?.custom?.runError },
+  { requests: 1, terminal: [{ type: "done", reason: "user" }], userStopped: true, runError: undefined });
+});
+
+test("a reply that finishes saves as complete with no error (#246)", async () => {
+  const turn = await runTurn([text("Whole answer"), finish]);
+  assert.deepEqual(savedState(savedTurnOf(turn, false)),
+    { status: COMPLETE, content: [{ type: "text", text: "Whole answer" }], continued: undefined, runError: undefined });
+});
+
+// Engine retries repeat only the model call. A tool that finished before the failing call runs once,
+// and its card stays in the saved turn with the error.
+test("a tool step, then an exhausted in-stream 429, keeps the tool's single run and its card (#246)", async () => {
+  let runsOfTool = 0;
+  const actions = loadActionsFromStaticRegistry({ "probe-count": { default: defineAction({ description: "Count one call.",
+    schema: z.object({}), agentTool: true, http: false, readOnly: true, dedupe: false,
+    run: async () => { runsOfTool += 1; return "counted"; } }) } });
+  const toolStep = [chunkOf({ delta: { role: "assistant", content: null, tool_calls: [{ index: 0, id: "call-count", type: "function",
+    function: { name: "probe-count", arguments: "{}" } }] } }), chunkOf({ delta: {}, finish_reason: "tool_calls" })];
+  const failing = [text("Partial"), providerError({ code: 429, message: "Rate limit exceeded" })];
+  const turn = await runTurn(index => index === 0 ? toolStep : failing, { actions });
+  const saved = savedTurnOf(turn, false);
+  const parts = (saved?.content ?? []).map((part: { type: string; toolName?: string; result?: unknown }) =>
+    part.type === "tool-call"
+      ? { type: part.type, toolName: part.toolName, counted: JSON.stringify(part.result ?? null).includes("counted") }
+      : part);
+  assert.deepEqual({ requests: turn.requests.length, runsOfTool, saved: { ...savedState(saved), content: parts } },
+    { requests: 5, runsOfTool: 1, saved: failedState("http_429", turn.runId,
+      [{ type: "tool-call", toolName: "probe-count", counted: true }, { type: "text", text: "Partial" }]) });
+});
+
+// The chat plugin saves a run with whether the server chains its continuation, and Native records that on
+// the run before the plugin saves it. Read from the installed, patched source, as
+// native-chat-project.test.ts reads the plugin.
+test("the chat plugin saves a run with whether a server continuation follows it (#246)", async () => {
+  // Line comments are stripped first, so the patterns need no nested repetition.
+  const withoutLineComments = (source: string) => source.replace(/\/\/[^\n]*/g, "");
+  const plugin = withoutLineComments(await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8"));
+  const production = withoutLineComments(await readFile(path.join(coreRoot, "dist", "agent", "production-agent.js"), "utf8"));
+  assert.match(plugin, /suppressInternalContinuation: true,\s*continuationFollows: run\.serverContinuationFollows === true,/);
+  assert.match(production,
+    /run\.serverContinuationFollows =\s*!noProgressRepeat\.tripped && willChainBackgroundContinuation\(run\);\s*await baseHandleRunComplete\?\.\(run\);/);
+});
+
+// Issue #246 follow-up. The common rate-limit shape fails before any text streams. The saved turn then holds
+// no content, and it must still be saved with its error, so a reload shows the error and a Retry instead of a
+// question with no reply. A client save of an empty copy of the same run must keep it, and the next request's
+// history leaves the empty reply out.
+const clientEmptyCopy = (runId: string, turnId: string) => ({ id: "client-reply", role: "assistant", content: [],
+  status: { type: "incomplete", reason: "error" }, metadata: { runId, custom: { runId, turnId } } });
+
+test("an exhausted retryable in-stream error before any text saves an empty failed reply (#246)", async t => {
+  for (const exhausted of exhaustedTurns) {
+    const turn = await runTurn([providerError(exhausted.error)]);
+    const saved = savedTurnOf(turn, false);
+    const serverRepo = saved ? foldOnto(questionRepo(), saved, turn.runId, turn.turnId) : questionRepo();
+    await t.test(`${exhausted.name}, with no server continuation`, () => {
+      assert.deepEqual({ requests: turn.requests.length, saved: savedState(saved) },
+        { requests: 4, saved: failedState(exhausted.errorCode, turn.runId, []) });
+    });
+    await t.test(`${exhausted.name}, after a client save of an empty copy of the same run`, () => {
+      const merged = clientSave(serverRepo, clientEmptyCopy(turn.runId, turn.turnId));
+      const reply = replyOf(merged);
+      assert.deepEqual({
+        roles: merged.messages.map((entry: { message: { role: string } }) => entry.message.role),
+        status: reply?.status,
+        errorCode: reply?.metadata?.custom?.runError?.errorCode,
+        recoverable: reply?.metadata?.custom?.runError?.recoverable,
+        nextRequestRoles: threads.threadDataToEngineMessages(merged).map((message: { role: string }) => message.role),
+      }, { roles: ["user", "assistant"], status: FAILED, errorCode: exhausted.errorCode, recoverable: true, nextRequestRoles: ["user"] });
+    });
+    await t.test(`${exhausted.name}, then a later run that finishes the same turn`, () => {
+      const laterRunId = `run-${randomUUID()}`;
+      const folded = foldOnto(serverRepo, finishedRun(laterRunId, turn.turnId), laterRunId, turn.turnId);
+      const reply = replyOf(folded);
+      assert.deepEqual({
+        roles: folded.messages.map((entry: { message: { role: string } }) => entry.message.role),
+        status: reply?.status,
+        errorCode: reply?.metadata?.custom?.runError?.errorCode,
+        content: reply?.content,
+        foldedRunIds: reply?.metadata?.custom?.foldedRunIds,
+      }, { roles: ["user", "assistant"], status: COMPLETE, errorCode: undefined, content: [{ type: "text", text: " and the rest." }],
+        foldedRunIds: [turn.runId, laterRunId] });
+    });
+    // A server-chained continuation still picks the turn up, as before.
+    await t.test(`${exhausted.name}, when the server chains a continuation`, () => {
+      assert.equal(savedTurnOf(turn, true), null);
+    });
+  }
+});
+
+test("Stop during the retry wait before any text saves a stopped reply with no error (#246)", async () => {
+  const turn = await runTurn([providerError({ code: 429, message: "Rate limit exceeded" })],
+    { stopWhen: events => events.some(event => event.type === "clear") });
+  const saved = savedTurnOf(turn, false);
+  assert.deepEqual({ requests: turn.requests.length, terminal: turn.events.filter(event => TERMINAL_TYPES.has(String(event.type))),
+    content: saved?.content, userStopped: saved?.metadata?.custom?.userStopped, runError: saved?.metadata?.custom?.runError },
+  { requests: 1, terminal: [{ type: "done", reason: "user" }], content: [], userStopped: true, runError: undefined });
+});
+
+test("a clean run with no text saves the same whether or not a continuation follows (#246)", async () => {
+  const turn = await runTurn([finish]);
+  const shape = (message: Saved) => JSON.stringify(message && { content: message.content, status: message.status, metadata: message.metadata });
+  const plain = threads.buildAssistantMessage(turn.entries, turn.runId, { suppressInternalContinuation: true, turnId: turn.turnId });
+  assert.deepEqual({ withoutContinuation: shape(savedTurnOf(turn, false)), withContinuation: shape(savedTurnOf(turn, true)) },
+    { withoutContinuation: shape(plain), withContinuation: shape(plain) });
 });

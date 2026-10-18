@@ -179,6 +179,19 @@ export function retryInlineTwiceThenAgain(info) {
   });
 }
 
+// A saved reply's error after a reload, read from its metadata as the chat reads it, on the error card
+// and by the inline notice's Retry rule for the last message.
+export async function renderSavedRunError(message) {
+  const info = getRunErrorMetadata(message);
+  if (!info) return null;
+  const view = await mount(<RunErrorRecoveryCard info={info} onContinue={() => {}} onRetry={() => {}} onDismiss={() => {}} />);
+  const snapshot = { errorCode: info.errorCode, recoverable: info.recoverable === true,
+    cardRetry: Boolean(view.host.querySelector('button[aria-label="Retry"]')),
+    inlineRetry: messages.shouldOfferInlineRunErrorRetry({ runError: info, isLast: true }) };
+  await view.unmount();
+  return snapshot;
+}
+
 // The inline notice under a failed message, with the Retry that the message's own rule allows.
 export const shouldOfferInlineRunErrorRetry = messages.shouldOfferInlineRunErrorRetry;
 export async function renderInlineNotice(info, isLast) {
@@ -327,7 +340,7 @@ async function mountChat(threadId, isNewThread) {
   };
   const send = async text => { await act(async () => { chat.current.sendMessage(text); }); };
   const waitForText = text => until(() => view.host.textContent.includes(text), JSON.stringify(text));
-  return { reading, stop, send, waitForText, async unmount() { await view.unmount(); client.clear(); } };
+  return { reading, stop, send, waitForText, host: view.host, async unmount() { await view.unmount(); client.clear(); } };
 }
 
 // The owner stops a reply that has text, then sends another message.
@@ -356,6 +369,18 @@ export async function stopWhileFollowingRun() {
 }
 
 // A reload of a saved thread with no run in progress. The chat has loaded once the last of the texts shows.
+// A reloaded chat whose last reply may hold only a saved error. The error card's Retry is reported with
+// the texts and notices in page order.
+export async function reloadThreadWithError(threadId, texts) {
+  const chat = await mountChat(threadId, false);
+  await chat.waitForText(texts.at(-1));
+  await until(() => chat.host.querySelector('button[aria-label="Retry"]'), "the error card's Retry").catch(() => undefined);
+  await act(async () => { await sleep(300); });
+  const snapshot = { ...chat.reading(texts), cardRetry: Boolean(chat.host.querySelector('button[aria-label="Retry"]')) };
+  await chat.unmount();
+  return snapshot;
+}
+
 export async function reloadThread(threadId, texts) {
   const chat = await mountChat(threadId, false);
   await chat.waitForText(texts.at(-1));
@@ -743,6 +768,79 @@ test("Native chat controls", async t => {
     const card = await proof.renderRunError({ type: "error", error: stop.error, errorCode: stop.errorCode });
     assert.deepEqual({ error: stop.error, errorCard: card.text.includes(stop.error), retry: card.retry },
       { error: "Provider returned error (code 502)", errorCard: true, retry: true });
+  });
+
+  // Issue #246. The server saves a partial reply whose in-stream 429 exhausted the engine's retries,
+  // from the run's events as the chat plugin does when no server continuation follows. A client save
+  // of a copy with no error follows, then a reload reads the saved reply.
+  await t.test("a saved reply that ended in an exhausted 429 shows its error with a Retry after a reload", async () => {
+    const runId = "run-246";
+    const turnId = "turn-246";
+    const attempt = [{ type: "text", text: "Partial" }];
+    const events = [...attempt, { type: "clear" }, ...attempt, { type: "clear" }, ...attempt, { type: "clear" }, ...attempt,
+      { type: "error", error: "Rate limit exceeded (code 429)", errorCode: "http_429" }].map((event, seq) => ({ seq, event }));
+    const saved = threads.buildAssistantMessage(events, runId, { suppressInternalContinuation: true, continuationFollows: false, turnId });
+    const question = { id: "user-1", role: "user", content: [{ type: "text", text: "Hello" }] };
+    const serverRepo = threads.foldAssistantTurn({ messages: [{ message: question, parentId: null }], headId: "user-1" }, saved,
+      { runId, turnId, parentId: "user-1" });
+    const clientCopy = { id: "client-reply", role: "assistant", status: { type: "complete", reason: "stop" },
+      content: [{ type: "reasoning", text: "Thinking." }, { type: "text", text: "Partial" }], metadata: { runId, custom: { runId, turnId } } };
+    const merged = threads.mergeThreadDataForClientSave(serverRepo, { messages: [{ message: question, parentId: null },
+      { message: clientCopy, parentId: "user-1" }], headId: "client-reply" });
+    const reply = merged.messages.at(-1)?.message;
+    assert.deepEqual({ status: reply?.status, shown: await proof.renderSavedRunError(reply) }, {
+      status: { type: "incomplete", reason: "error" },
+      shown: { errorCode: "http_429", recoverable: true, cardRetry: true, inlineRetry: true },
+    });
+    // The whole chat reloads that thread and shows the partial reply with the error card's Retry.
+    const restoreFetch = installChatServer({ "thread-partial-limited": JSON.stringify(merged) });
+    try {
+      assert.deepEqual(await proof.reloadThreadWithError("thread-partial-limited", ["Hello", "Partial"]),
+        { notices: [], order: ["Hello", "Partial"], cardRetry: true });
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  // Issue #246 follow-up. The 429 arrived before any text, so the saved reply holds only its error. A client
+  // save of the cancelled empty copy follows, then the chat reloads the thread.
+  await t.test("a saved reply with no text that ended in an exhausted 429 shows its error card with a Retry after a reload", async () => {
+    const createdAt = new Date("2026-10-18T00:00:00Z").toISOString();
+    const earlier = [
+      { parentId: null, message: { id: "user-earlier", role: "user", content: [{ type: "text", text: "Earlier question" }], createdAt } },
+      { parentId: "user-earlier", message: { id: "reply-earlier", role: "assistant", createdAt,
+        content: [{ type: "text", text: "Finished earlier answer" }], status: { type: "complete", reason: "stop" },
+        metadata: { runId: "run-earlier", custom: { runId: "run-earlier", turnId: "turn-earlier" } } } },
+      { parentId: "reply-earlier", message: { id: "user-limited", role: "user", content: [{ type: "text", text: "Rate limited question" }],
+        createdAt } },
+    ];
+    const limited = { runId: "run-limited", turnId: "turn-limited" };
+    const events = [{ type: "clear" }, { type: "clear" }, { type: "clear" },
+      { type: "error", error: "Rate limit exceeded (code 429)", errorCode: "http_429" }].map((event, seq) => ({ seq, event }));
+    const serverTurn = threads.buildAssistantMessage(events, limited.runId,
+      { suppressInternalContinuation: true, continuationFollows: false, turnId: limited.turnId });
+    const serverRepo = serverTurn
+      ? threads.foldAssistantTurn({ headId: "user-limited", messages: earlier }, serverTurn, { ...limited, parentId: "user-limited" })
+      : { headId: "user-limited", messages: earlier };
+    const saved = threads.mergeThreadDataForClientSave(serverRepo, { headId: "client-reply", messages: [...earlier,
+      { parentId: "user-limited", message: { id: "client-reply", role: "assistant", content: [], createdAt,
+        status: { type: "incomplete", reason: "error" }, metadata: { runId: limited.runId, custom: { ...limited } } } }] });
+    const reply = saved.messages.at(-1)?.message;
+    const restoreFetch = installChatServer({ "thread-limited": JSON.stringify(saved) });
+    try {
+      const shown = await proof.renderSavedRunError(reply);
+      assert.deepEqual({
+        reply: { role: reply?.role, status: reply?.status },
+        gates: shown && { recoverable: shown.recoverable, cardRetry: shown.cardRetry, inlineRetry: shown.inlineRetry },
+        reloaded: await proof.reloadThreadWithError("thread-limited", ["Earlier question", "Finished earlier answer", "Rate limited question"]),
+      }, {
+        reply: { role: "assistant", status: { type: "incomplete", reason: "error" } },
+        gates: { recoverable: true, cardRetry: true, inlineRetry: true },
+        reloaded: { notices: [], order: ["Earlier question", "Finished earlier answer", "Rate limited question"], cardRetry: true },
+      });
+    } finally {
+      restoreFetch();
+    }
   });
 
   await t.test("an unclassified error still has no Retry", async () => {

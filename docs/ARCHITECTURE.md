@@ -790,6 +790,35 @@ create-vivary 0.4.4 carries the change, so it needs no new version. The adapter'
 boundaries and the optional, off-by-default capability are unchanged, so the
 design description holds.
 
+2026-10-18 Exhausted continuation-class errors save as failed (issue #246). A
+partial Native reply whose in-stream 429, timeout or overload used up the
+engine's three retries was saved as complete with no error. The chat plugin's
+save drops an error of that class for a server continuation, and Vivary never
+chains one. The maintained Core patch now records on the run whether the server
+chains a continuation, and the plugin passes that to `buildAssistantMessage`.
+Without one, the error is saved as a recoverable `runError` on an `incomplete`
+turn that keeps the partial reply, so a reload shows the error and a Retry. A
+finished continuation of the same turn clears the saved error, and a client
+save of the same run keeps it. `tests/native-stream-errors.test.ts` and
+`tests/native-chat-components.test.mjs` add the cases. The engine retry loop,
+the live error event, the client's automatic continuation and the saved-turn
+owner keep their roles, so the design description holds. A follow-up commit
+keeps a reply whose error arrived before any text. The builder saves it with no
+content, and a client save keeps an empty reply that holds a recoverable error,
+so the error card and its Retry show after a reload. The saved-error rule
+covers every error that `isInternalContinuationError` accepts, which the patch
+README lists.
+
+2026-10-18 In-stream provider errors are not classified by their message. The
+maintained Core patch passed an OpenRouter in-stream error's message to
+`classifyProviderError`, so a message naming a timeout, an overload, 429 or SSL
+replaced `provider_stream_error` with a retryable code. The turn was then
+retried three times over about 14 seconds, classified as continuable, and saved
+with no error. The patch now passes only the code, status and retryable flag.
+`tests/native-stream-errors.test.ts` adds one final-turn case per word. The
+engine, run manager and saved-turn owners are unchanged, so the design
+description holds.
+
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
 `vivary.exe`. The icon is a multi-size copy of the site mark. The executable
