@@ -755,10 +755,22 @@ refuses payload paths that Windows would merge or reserve (case-only differences
 trailing dot or space, `CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`),
 refuses an existing checksum or receipt, removes every file it wrote when a step
 after `makensis` starts fails, and compares the output and payload paths
-case-insensitively on Windows. Evidence: 66 of 66 installer tests pass with
-`makensis` 3.10 and 65 pass with one skip without it, and each of 53 single-rule
-changes to the script fails the static tests. The 70957d1 installer passed install,
-reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
+case-insensitively on Windows. After the re-review of 70957d1, a first install that fails before `vivary.exe`
+lands no longer needs manual cleanup. When the folder does not exist or is empty,
+setup writes the marker `vivary-setup.txt` before any payload file. A rerun
+recognizes the marker and copies over a folder that has it but no list, and the
+uninstaller asks for that rerun and removes the marker with the list. Setup never
+writes the marker into a folder that already held files, so a pre-existing folder
+without a marker is still refused. The list check also refuses a path part that
+ends in a dot or space. Payload paths and list lines are capped at 179 characters,
+because Windows paths stop at 259 and the install root for a 40-character profile
+folder name takes 80. The builder records the longest payload path in the receipt,
+refuses a payload path past that cap, and refuses payload files named like setup's
+own.
+Evidence: 72 of 72 installer tests pass with `makensis` 3.10 and 71 pass with one
+skip without it, and each of 64 single-rule changes to the script fails the static
+tests. The 70957d1 installer passed install, reinstall, locked-file upgrade,
+recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

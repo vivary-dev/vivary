@@ -22,8 +22,15 @@ const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 direc
 // Windows reserves these device names in any path part, with or without an extension.
 const reservedNames = new Set(["CON", "PRN", "AUX", "NUL",
   ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`), ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)]);
-// Must match MAX_LIST_LINE in installer/vivary.nsi.
-const maxListLine = 240;
+// Windows paths stop at 259 characters (MAX_PATH 260 with its terminator). The
+// install root for a profile folder name of up to 40 characters takes 80 of them.
+// Windows limits account names to 20 characters, and the profile folder adds at
+// most a domain or machine suffix, so 40 leaves room. The remaining 179 bound
+// every payload path, and MAX_LIST_LINE in installer/vivary.nsi must equal it.
+const longestInstallRoot = "C:\\Users\\".length + 40 + "\\AppData\\Local\\Programs\\Vivary\\".length;
+export const maxPayloadPath = 259 - longestInstallRoot;
+// Setup writes these into the install folder, so the payload must not hold them.
+const setupFiles = new Set(["install-files.txt", "vivary-setup.txt", "uninstall vivary.exe"]);
 
 /** Lists every regular file and folder under the payload. Links are refused, because makensis would follow them. */
 async function listPayload(directory) {
@@ -55,14 +62,29 @@ async function listPayload(directory) {
  * build fails instead of the uninstaller. The list is read as plain ASCII.
  */
 function requireListablePath(relative, isDirectory) {
-  const line = relative.replaceAll("/", "\\") + (isDirectory ? "\\" : "");
   const parts = relative.split("/");
-  if (!/^[\x20-\x7e]+$/.test(relative) || /[:*?"<>|\\]/.test(relative) || line.length > maxListLine
+  if (!/^[\x20-\x7e]+$/.test(relative) || /[:*?"<>|\\]/.test(relative)
+    || (!isDirectory && setupFiles.has(relative.toLowerCase()))
     || parts.some(part => part === "" || part === "." || part === ".."
       // Windows drops a trailing dot or space, so the file would land under another name.
       || /[. ]$/.test(part) || reservedNames.has(part.split(".")[0].trimEnd().toUpperCase()))) {
     throw new Error(`The installer cannot list this payload path: ${relative}`);
   }
+}
+
+/**
+ * Returns the longest list line, a file path or a folder path with its trailing
+ * backslash, and refuses the payload when it exceeds the path budget.
+ */
+export function longestPayloadPath(files, directories) {
+  const lines = files.map(file => file.replaceAll("/", "\\"))
+    .concat(directories.map(folder => `${folder.replaceAll("/", "\\")}\\`));
+  const longest = lines.reduce((best, line) => (line.length > best.length ? line : best), "");
+  if (longest.length > maxPayloadPath) {
+    throw new Error(`The payload path ${longest} has ${longest.length} characters. Under a long profile folder `
+      + `it would pass the Windows path limit, so payload paths may have at most ${maxPayloadPath}.`);
+  }
+  return Object.freeze({ path: longest, length: longest.length, limit: maxPayloadPath });
 }
 
 /** Refuses two payload paths that name the same file on Windows, which ignores case. */
@@ -141,6 +163,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   for (const file of files) requireListablePath(file, false);
   for (const directory of directories) requireListablePath(directory, true);
   requireDistinctOnWindows([...files, ...directories]);
+  const longestPath = longestPayloadPath(files, directories);
   const buildFile = path.join(payloadDir, "resources", "workbench", "build.json");
   const build = JSON.parse(await readFile(buildFile, "utf8").catch(() => {
     throw new Error("The payload has no resources/workbench/build.json.");
@@ -158,7 +181,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   if (build.sourceDirty !== false) throw new Error("The payload was built from a modified checkout.");
   const manifestCheck = await verifyPayloadManifest(payloadDir, files, path.resolve(manifest));
   return Object.freeze({
-    payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck,
+    payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck, longestPath,
     version: build.version, payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
   });
 }
@@ -262,6 +285,7 @@ export async function buildInstaller(inputs, makensis, { installerCommit }) {
       version: inputs.version, displayVersion: `${inputs.version}+${inputs.payloadCommitShort}`,
       payloadCommit: inputs.payloadCommit, installerCommit, makensisVersion: version.stdout.trim(),
       payloadFiles: inputs.fileCount, payloadFolders: inputs.directories.length, payloadBytes: inputs.totalBytes,
+      longestPayloadPath: { ...inputs.longestPath },
       payloadManifest: { verified: true, files: inputs.manifest.files, sha256: inputs.manifest.sha256 },
       filesAdded: added,
     };

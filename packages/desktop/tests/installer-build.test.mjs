@@ -7,8 +7,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, outputFiles,
-  resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
+  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPath,
+  maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
@@ -97,10 +97,14 @@ test("payload paths the installer cannot list or Windows cannot hold are refused
   await refuse("wildcard", file("a*b"));
   await refuse("backslash", file("a\\b"));
   await refuse("non-ASCII", file("caf\u00e9.txt"));
-  await refuse("too long", file(...Array.from({ length: 25 }, () => "abcdefghij"), "x"));
+  await refuse("too long", file(...Array.from({ length: 25 }, () => "abcdefghij"), "x"), /may have at most 179/);
   await refuse("trailing dot", file("notes."));
   await refuse("trailing space", file("notes "));
   await refuse("trailing dot on a folder", file("lib.", "x.js"));
+  await refuse("trailing space on a folder", file("lib ", "x.js"));
+  for (const name of ["install-files.txt", "VIVARY-SETUP.txt", "Uninstall Vivary.exe"]) {
+    await refuse(`setup's own file ${name}`, file(name));
+  }
   for (const name of ["CON", "prn.txt", "Aux.tar.gz", "nul", "COM1.log", "com9", "LPT1", "lpt9.dat", "CON .txt"]) {
     await refuse(`reserved name ${name}`, file(name));
   }
@@ -134,6 +138,18 @@ test("the manifest must match every payload path and SHA-256", async t => {
     await writeFile(manifest, "[]");
     await assert.rejects(verifyPayloadManifest(payload, fixtureFiles, manifest), /must map each relative path/);
   }));
+});
+
+test("the path budget leaves room for a 40-character profile folder", () => {
+  // 259 usable characters minus C:\Users\<40 characters>\AppData\Local\Programs\Vivary\ (80).
+  assert.equal(maxPayloadPath, 179);
+  const atLimit = `${"a".repeat(173)}/b.txt`;
+  assert.deepEqual({ ...longestPayloadPath([atLimit, "x"], ["a"]) },
+    { path: atLimit.replaceAll("/", "\\"), length: 179, limit: 179 });
+  assert.throws(() => longestPayloadPath([`${"a".repeat(179)}x`], []), /has 180 characters/);
+  // A folder line counts its trailing backslash.
+  assert.throws(() => longestPayloadPath([], ["a".repeat(179)]), /has 180 characters/);
+  assert.equal(longestPayloadPath(["vivary.exe"], ["resources/workbench"]).path, "resources\\workbench\\");
 });
 
 test("payload, output and manifest are all required", async () => {
@@ -314,6 +330,7 @@ test("makensis builds an installer and receipt from a fixture payload", { skip: 
       installer: path.basename(output), bytes: built.size, sha256: built.sha256,
       version: "0.0.0", displayVersion: "0.0.0+2aaf04f", payloadCommit: commit, installerCommit,
       makensisVersion: undefined, payloadFiles: 6, payloadFolders: 4, payloadBytes: inputs.totalBytes,
+      longestPayloadPath: { path: "resources\\workbench\\.output\\server\\index.mjs", length: 44, limit: 179 },
       payloadManifest: { verified: true, files: 6, sha256: inputs.manifest.sha256 }, filesAdded: 7,
     });
     assert.match(receipt.makensisVersion, /^v3\./);

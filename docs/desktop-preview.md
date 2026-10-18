@@ -151,8 +151,9 @@ choose **Uninstall**. You can also run `Uninstall Vivary.exe` in
 
 Setup records every file and folder it installs in `install-files.txt` in that
 folder. The uninstaller removes only those files and folders, then the Start menu
-shortcut, the desktop shortcut when setup created it, and last the Installed apps
-entry and the uninstaller itself. Nothing is deleted recursively. Files you added
+shortcut, the desktop shortcut when setup created it, setup's `vivary-setup.txt`
+marker, and last the Installed apps entry and the uninstaller itself. Nothing is
+deleted recursively. Files you added
 to `%LOCALAPPDATA%\Programs\Vivary` stay, and so does the folder when it still
 holds them.
 
@@ -451,7 +452,8 @@ your firewall.
 | Windows protected your PC | The installer is not code signed. Confirm the checksum matches, then choose **More info** and **Run anyway**. |
 | Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** stops before any file is removed. |
 | Setup or the uninstaller says some Vivary files are in use | Another program, such as a terminal open in a Vivary folder, holds a file. Setup removed the files it could and kept its file list, uninstaller, and Installed apps entry. Close that program, then run setup or the uninstaller again. It continues from where it stopped. |
-| Setup or the uninstaller says the folder has no `install-files.txt` | Without that list, neither can tell which files it installed, so both stop and change nothing. Close Vivary, then delete `%LOCALAPPDATA%\Programs\Vivary` by hand. Your projects, conversations, and settings are stored elsewhere and are not affected. Then run setup again. |
+| A first install stopped partway, for example on a full disk | Run setup again. Setup marks a folder it creates with `vivary-setup.txt` before copying any file, so a rerun recognizes the folder and finishes the install. The uninstaller asks for that rerun instead of removing anything. |
+| Setup or the uninstaller says the folder has no `install-files.txt` | The folder holds an earlier Vivary without its file list or setup's marker, so neither can tell which files it installed. Both stop and change nothing. Close Vivary, then delete `%LOCALAPPDATA%\Programs\Vivary` by hand. Your projects, conversations, and settings are stored elsewhere and are not affected. Then run setup again. |
 | Setup says Vivary needs 64-bit Windows | Vivary runs only on 64-bit Windows. Setup installed nothing. |
 | Setup or the uninstaller says it is already running | Another setup or uninstaller is open for your account. Finish or close it, then try again. |
 | Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |

@@ -42,11 +42,18 @@ AllowSkipFiles off
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary"
 !define UNINSTALLER "Uninstall Vivary.exe"
 !define INSTALL_LIST "install-files.txt"
+; Setup writes this marker into a folder it creates, before any payload file.
+; A rerun after a failed first install recognizes the folder by it.
+!define SETUP_MARKER "vivary-setup.txt"
 ; One name for setup and the uninstaller, so they cannot run at the same time.
 !define SETUP_MUTEX "Local\VivarySetup"
 !define NO_LIST_TEXT "has no ${INSTALL_LIST}, so Vivary cannot tell which files it installed and removed nothing. Remove that folder by hand. Your projects, conversations and settings are stored elsewhere and are not affected."
-; build-installer.mjs refuses payload paths longer than this.
-!define MAX_LIST_LINE 240
+!define UNFINISHED_TEXT "holds a Vivary install that did not finish, so nothing was removed. Run Vivary setup again to finish it, then uninstall."
+; The longest relative path a list line may hold. Windows paths stop at 259
+; characters (MAX_PATH 260 with its terminator). The install root for a profile
+; folder name of up to 40 characters, C:\Users\<name>\AppData\Local\Programs\Vivary\,
+; takes 80 of them, which leaves 179. build-installer.mjs uses the same budget.
+!define MAX_LIST_LINE 179
 !define KEPT_DATA_TEXT "Your projects, conversations and settings in %USERPROFILE%\.vivary and %APPDATA%\Vivary were kept. Project folders you opened in Vivary were not changed."
 
 Name "Vivary"
@@ -218,6 +225,9 @@ Function ${PREFIX}CheckListLine
   StrCpy $3 $5 3 $4
   StrCmp $3 "\.\" bad_path
   StrCpy $3 $5 2 $4
+  ; Windows drops a trailing dot or space, so such a part names another file.
+  StrCmp $3 ".\" bad_path
+  StrCmp $3 " \" bad_path
   StrCmp $3 "\\" 0 next_index
   ; A folder line ends in one backslash, which the wrapping doubles.
   IntOp $3 $2 - 2
@@ -336,6 +346,7 @@ Function RequirePreviousVivary
   ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "InstallLocation"
   StrCmp $0 $INSTDIR found
   IfFileExists "$INSTDIR\${INSTALL_LIST}" found
+  IfFileExists "$INSTDIR\${SETUP_MARKER}" found
   IfFileExists "$INSTDIR\vivary.exe" found
   IfFileExists "$INSTDIR\${UNINSTALLER}" found
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR already exists and does not contain Vivary, so setup did not change it." /SD IDOK
@@ -349,18 +360,31 @@ Section "Vivary"
   Call RequireVivaryClosed
   ; Removes only an empty folder. A folder with files is checked first.
   RMDir "$INSTDIR"
-  IfFileExists "$INSTDIR\*.*" 0 copy_files
+  IfFileExists "$INSTDIR\*.*" 0 new_folder
   Call RequirePreviousVivary
   DetailPrint "Removing the previous Vivary application files."
   Call RemoveInstalledFiles
-  ; Without a list setup cannot tell its files from others, so it changes nothing.
-  IntCmp $R8 1 no_list
+  IntCmp $R8 1 0 list_read list_read
+  ; No list. Setup's marker means a first install that did not finish here, so
+  ; setup copies over it. Without the marker setup cannot tell its files from
+  ; others, so it changes nothing.
+  IfFileExists "$INSTDIR\${SETUP_MARKER}" copy_files no_list
+  list_read:
   IntCmp $R7 0 copy_files
   MessageBox MB_OK|MB_ICONSTOP "Some files of the previous Vivary in $INSTDIR are in use. Close Vivary and any program using those files, then run setup again." /SD IDOK
   Abort "Some previous Vivary files are in use. Run setup again after closing them."
   no_list:
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK
   Abort "The installed-file list is missing. Nothing was changed."
+  ; The folder did not exist or was empty, so setup owns it. The marker goes in
+  ; before any payload file, so a failed install can be repaired by a rerun.
+  new_folder:
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  FileOpen $0 "$INSTDIR\${SETUP_MARKER}" a
+  IfErrors write_failed
+  FileWrite $0 "Vivary setup created this folder. The Vivary uninstaller removes this file."
+  FileClose $0
   copy_files:
   ClearErrors
   SetOutPath "$INSTDIR"
@@ -411,13 +435,18 @@ Section "Uninstall"
   Call un.RequireFixedInstallDir
   Call un.RequireVivaryClosed
   Call un.RemoveInstalledFiles
-  IntCmp $R8 1 no_list
+  IntCmp $R8 1 0 list_read list_read
+  IfFileExists "$INSTDIR\${SETUP_MARKER}" unfinished no_list
+  list_read:
   IntCmp $R7 0 remove_entry
   MessageBox MB_OK|MB_ICONSTOP "Some Vivary files in $INSTDIR are in use and were not removed. Close the programs using them, then run the uninstaller again." /SD IDOK
   Abort "Some Vivary files are in use. Run the uninstaller again after closing them."
   no_list:
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK
   Abort "The installed-file list is missing. Nothing was removed."
+  unfinished:
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${UNFINISHED_TEXT}" /SD IDOK
+  Abort "The Vivary install did not finish. Nothing was removed."
   remove_entry:
   Delete "$SMPROGRAMS\Vivary.lnk"
   ReadRegDWORD $0 HKCU "${UNINSTALL_KEY}" "VivaryDesktopShortcut"
@@ -425,6 +454,7 @@ Section "Uninstall"
     Delete "$DESKTOP\Vivary.lnk"
   ${EndIf}
   Delete "$INSTDIR\${INSTALL_LIST}"
+  Delete "$INSTDIR\${SETUP_MARKER}"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
   Delete "$INSTDIR\${UNINSTALLER}"
   ; Removes the folder only when it is empty. Files a user added stay.

@@ -301,8 +301,12 @@ The script reads the version and payload commit from the payload's
 `resources/workbench/build.json`. It refuses a payload built from a modified
 checkout and a payload with links. It refuses a path the installer cannot list or
 Windows cannot hold: non-ASCII, a wildcard or drive character, a part ending in a dot
-or space, a reserved device name such as `CON` or `nul.txt`, or two paths that
-differ only in case. `--manifest` is required. The script checks every payload
+or space, a reserved device name such as `CON` or `nul.txt`, two paths that differ
+only in case, or a file named like setup's own (`install-files.txt`,
+`vivary-setup.txt`, `Uninstall Vivary.exe`). It refuses a path longer than 179
+characters: Windows paths stop at 259, and the install root for a 40-character
+profile folder name takes 80 of them. The receipt records the longest path.
+`--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
 `build-installer.mjs`, `assets/vivary.ico`, and the repository `LICENSE`, so the
@@ -339,19 +343,23 @@ The installer script is `installer/vivary.nsi`. Its rules:
 - Nothing is deleted recursively. Upgrade and uninstall read the previous
   `install-files.txt`, check every line before deleting anything, delete the listed
   files, then remove each listed folder only when it is empty. A line with a drive,
-  a leading backslash, a `.` or `..` part, a wildcard, or more than 240 characters
-  stops the removal, and so does a listed folder that became a link. Files a user
-  added stay.
+  a leading backslash, a `.` or `..` part, a part ending in a dot or space, a
+  wildcard, or more than 179 characters stops the removal, and so does a listed
+  folder that became a link. Files a user added stay.
+- When the folder does not exist or is empty, setup writes its marker
+  `vivary-setup.txt` there before copying any payload file. Setup never writes the
+  marker into a folder that already held files.
 - Both first confirm that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`
   and is not a link. An upgrade changes an existing folder only when its uninstall
-  entry points there or it holds `install-files.txt`, `vivary.exe`, or the
-  uninstaller, so setup can repair a partly removed install. When such a folder has
-  no `install-files.txt`, setup and the uninstaller change nothing and ask the user
-  to remove the folder by hand.
+  entry points there or it holds `install-files.txt`, the marker, `vivary.exe`, or
+  the uninstaller, so setup can repair a partly removed install. A folder with the
+  marker but no list is a first install that did not finish, and setup copies over
+  it. The uninstaller asks for that setup rerun instead. A folder with neither makes
+  setup and the uninstaller change nothing and ask the user to remove it by hand.
 - When listed files remain, setup stops before copying, and the uninstaller keeps
   its entry, list, and itself so it can run again. Otherwise the uninstaller removes
-  the shortcuts (the desktop one only when setup made it), then the list, the
-  uninstall entry, and itself last.
+  the shortcuts (the desktop one only when setup made it), then the list and the
+  marker, then the uninstall entry, and itself last.
 - Neither program reads, writes, or deletes `%USERPROFILE%\.vivary`,
   `%APPDATA%\Vivary`, or any project folder.
 - `/S` runs the installer or the uninstaller silently. A running Vivary then

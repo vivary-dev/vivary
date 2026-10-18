@@ -65,8 +65,9 @@ test("setup and the uninstaller hold one per-user mutex", () => {
 
 test("a previous install without a list is refused, never cleaned up", () => {
   const install = sectionBody("Vivary");
-  const noList = position(install, "IntCmp $R8 1 no_list");
+  const noList = position(install, "IntCmp $R8 1 0 list_read list_read");
   assert.ok(position(install, "Call RemoveInstalledFiles") < noList);
+  assert.ok(noList < position(install, 'IfFileExists "$INSTDIR\\${SETUP_MARKER}" copy_files no_list'));
   assert.ok(noList < position(install, "IntCmp $R7 0 copy_files"));
   const label = position(install, "no_list:");
   assert.deepEqual(install.slice(label + 1, label + 3), [
@@ -79,6 +80,21 @@ test("a previous install without a list is refused, never cleaned up", () => {
   assert.ok(sectionBody("Uninstall").includes('MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK'));
 });
 
+test("a new folder gets setup's marker before any payload file, and a rerun accepts it", () => {
+  assert.ok(lines.includes('!define SETUP_MARKER "vivary-setup.txt"'));
+  const install = sectionBody("Vivary");
+  // Only an absent or emptied folder takes the new-folder path and the marker.
+  assert.ok(position(install, 'RMDir "$INSTDIR"') < position(install, 'IfFileExists "$INSTDIR\\*.*" 0 new_folder'));
+  const created = position(install, "new_folder:");
+  const marker = position(install, 'FileOpen $0 "$INSTDIR\\${SETUP_MARKER}" a');
+  const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
+  assert.ok(created < marker && marker < payload, "the marker precedes payload extraction");
+  assert.ok(install.slice(marker, payload).includes("IfErrors write_failed"), "a marker that cannot be written stops setup");
+  assert.equal(install.filter(line => line.includes("${SETUP_MARKER}") && line.startsWith("FileOpen")).length, 1,
+    "setup writes the marker only into a folder it created");
+  assert.ok(functionBody("RequirePreviousVivary").includes('IfFileExists "$INSTDIR\\${SETUP_MARKER}" found'), "a rerun recognizes the marker");
+});
+
 test("nothing is deleted recursively", () => {
   assert.doesNotMatch(code, /^RMDir\s+(\/\w+\s+)*\/r\b/im);
   assert.doesNotMatch(code, /\/REBOOTOK|\bReboot\b|SetRebootFlag/i);
@@ -88,7 +104,7 @@ test("nothing is deleted recursively", () => {
 test("deletes reach only listed paths, setup's own files and its shortcuts", () => {
   const allowed = new Set([
     '"$INSTDIR\\$R4"', '"$INSTDIR\\$6"', '"$INSTDIR"', '"$INSTDIR\\${INSTALL_LIST}"',
-    '"$INSTDIR\\${UNINSTALLER}"', '"$SMPROGRAMS\\Vivary.lnk"', '"$DESKTOP\\Vivary.lnk"',
+    '"$INSTDIR\\${UNINSTALLER}"', '"$INSTDIR\\${SETUP_MARKER}"', '"$SMPROGRAMS\\Vivary.lnk"', '"$DESKTOP\\Vivary.lnk"',
   ]);
   for (const line of lines.filter(line => /^(Delete|RMDir)\b/i.test(line))) {
     const target = line.replace(/^(Delete|RMDir)\s+/i, "");
@@ -124,7 +140,9 @@ test("removal reads the installed-file list behind the exact-folder guard", () =
 
 test("list lines must be safe relative paths", () => {
   const check = functionBody("${PREFIX}CheckListLine");
-  assert.ok(lines.includes("!define MAX_LIST_LINE 240"));
+  assert.ok(lines.includes("!define MAX_LIST_LINE 179"), "matches maxPayloadPath in build-installer.mjs");
+  assert.ok(check.includes('StrCmp $3 ".\\" bad_path'), "refuses a part ending in a dot");
+  assert.ok(check.includes('StrCmp $3 " \\" bad_path'), "refuses a part ending in a space");
   assert.ok(check.includes("IntCmp $2 ${MAX_LIST_LINE} 0 0 bad_length"), "length bound");
   assert.ok(check.includes('StrCmp $3 "\\" bad_path'), "leading backslash");
   for (const character of [":", "/", "*", "?", "<", ">", "|"]) {
@@ -147,19 +165,21 @@ test("install writes the list last and refuses skipped files", () => {
   }
   assert.ok(install.slice(list).includes("IfErrors write_failed"), "a failed list write aborts");
   assert.ok(position(install, "ClearErrors") < position(install, 'File /r "${PAYLOAD_DIR}/*"'));
-  assert.ok(position(install, "IfErrors write_failed") < list, "errors before the list abort");
+  assert.ok(install.slice(position(install, 'File /r "${PAYLOAD_DIR}/*"'), list).includes("IfErrors write_failed"),
+    "errors from the payload, uninstaller, shortcut or registry abort before the list");
   // An upgrade removes the previous files and stops if any remain.
   assert.ok(position(install, "Call RemoveInstalledFiles") < position(install, "copy_files:"));
   assert.ok(install.includes("IntCmp $R7 0 copy_files"));
   assert.doesNotMatch(code, /^Call\s+(un\.)?RemoveApplicationFolder/m);
 });
 
-test("a previous install is recognized by its entry, list, executable or uninstaller", () => {
+test("a previous install is recognized by its entry, list, marker, executable or uninstaller", () => {
   const previous = functionBody("RequirePreviousVivary");
-  assert.deepEqual(previous.slice(0, 5), [
+  assert.deepEqual(previous.slice(0, 6), [
     'ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "InstallLocation"',
     "StrCmp $0 $INSTDIR found",
     'IfFileExists "$INSTDIR\\${INSTALL_LIST}" found',
+    'IfFileExists "$INSTDIR\\${SETUP_MARKER}" found',
     'IfFileExists "$INSTDIR\\vivary.exe" found',
     'IfFileExists "$INSTDIR\\${UNINSTALLER}" found',
   ]);
@@ -177,7 +197,14 @@ test("the uninstaller removes its entry and itself last, only when the listed fi
   const gate = position(uninstall, "IntCmp $R7 0 remove_entry");
   const removeEntry = position(uninstall, "remove_entry:");
   assert.ok(removeFiles < gate && gate < removeEntry && removeEntry < list && list < entry && entry < self);
-  assert.ok(position(uninstall, "IntCmp $R8 1 no_list") < gate, "a missing list removes nothing");
+  const missing = position(uninstall, "IntCmp $R8 1 0 list_read list_read");
+  assert.ok(missing < gate, "a missing list removes nothing");
+  assert.equal(uninstall[missing + 1], 'IfFileExists "$INSTDIR\\${SETUP_MARKER}" unfinished no_list');
+  const unfinished = position(uninstall, "unfinished:");
+  assert.ok(unfinished < removeEntry && uninstall.slice(unfinished, removeEntry).some(line => line.startsWith("Abort ")),
+    "an unfinished install asks for a setup rerun and removes nothing");
+  const marker = position(uninstall, 'Delete "$INSTDIR\\${SETUP_MARKER}"');
+  assert.ok(removeEntry < marker && marker < entry, "the uninstaller removes the marker with the list, before the entry");
   // Remaining files and a missing list both abort before the entry is touched.
   const noList = position(uninstall, "no_list:");
   assert.ok(uninstall.slice(gate, noList).some(line => line.startsWith("Abort ")));
