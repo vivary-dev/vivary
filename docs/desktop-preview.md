@@ -94,14 +94,20 @@ There is no uninstaller or automatic update mechanism in this artifact.
 ### Existing folders and setup preview
 
 **Open folder** uses the Windows chooser. Cancel returns control to the app.
-If the chooser times out, close it and use **Open folder** again. Browser access
-to the same host does not supply the desktop chooser.
+If the chooser times out, close it and use **Open folder** again. Remote access
+from another device does not supply the desktop chooser.
 
 In a project, open **Details**, then **Preview Vivary setup**. Expand each file
 to inspect its exact proposed contents, unchanged files, and any reported conflicts.
 Existing `AGENTS.md` guidance remains visible when the plan proposes appending
 the managed Vivary block. Previewing does not write the proposed files.
-Applying setup to an existing folder is not available in this GUI yet.
+To apply the plan, select **Confirm and apply**. Vivary writes only the reviewed
+changes. Files that changed after the preview need another preview, and conflicts
+block the apply. If the folder first needs an ignore-file change, **Confirm privacy
+preparation** applies only that change. Then review and confirm the setup itself.
+[PR #80](https://github.com/vivary-dev/vivary/pull/80) and
+[PR #81](https://github.com/vivary-dev/vivary/pull/81) added this flow, and
+[PR #85](https://github.com/vivary-dev/vivary/pull/85) recorded its GUI acceptance.
 
 ### Project-owned page preview
 
@@ -117,7 +123,7 @@ appearing under the wrong owner.
 Some pages and sign-in flows refuse embedding. Choose **Open preview in a new tab**.
 The Windows app shows the full destination in a native **Open in browser** dialog.
 Choose **Open in browser** to launch your default browser, or **Cancel** to stay
-in Vivary. Cancel is the default. Browser access opens the link in a browser tab.
+in Vivary. Cancel is the default. Through remote access, the link opens in a browser tab.
 
 File URLs, custom protocols, embedded credentials, and POST requests are refused.
 Provider setup links retain their direct browser behavior. If the browser cannot
@@ -315,7 +321,7 @@ writes a chat thread whose name starts with `Trigger: <name>`.
 
 Automations run only while Vivary is open. Closing the Vivary window quits the app, and
 nothing runs while it is closed. After you reopen Vivary, a missed automation runs at most
-once, then follows its schedule. When Vivary serves browser access, runs continue with no
+once, then follows its schedule. When Vivary serves remote access, runs continue with no
 browser tab open.
 
 Quitting Vivary during a run ends the run, and **Details** shows it as interrupted.
@@ -347,6 +353,14 @@ Schedules are cron expressions read in each automation's saved time zone. Vivary
 once a minute, so the shortest interval is one minute, and a run can start up to a minute
 after its scheduled time. Vivary computes the next run when a run finishes. A run that
 lasts longer than its interval delays the next one, and runs of one automation never overlap.
+
+## Not in this release
+
+An agent that controls a web browser for you is not part of this release.
+**Remote access** in Settings only opens Vivary itself on another device. It uses
+a protected HTTPS connection that you set up, for example an appropriately
+configured Tailscale connection. Vivary does not create that connection or change
+your firewall.
 
 ## Troubleshooting
 

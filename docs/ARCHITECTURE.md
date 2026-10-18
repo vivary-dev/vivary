@@ -4,7 +4,7 @@ This is the high-level design for the desktop and self-hosted product in `vivary
 
 ## Purpose and owner intent
 
-Jeff's [desktop release decision](product/multi-project/desktop-release.md) calls for one Vivary instance on a user-controlled computer or suitable server. A local desktop window and a responsive browser connect to that host. The host keeps agents, project files, credentials, history, and memory. Local desktop use needs no Vivary account. Remote browser access requires explicit setup and authentication. Zo hosts development and a private preview. It is not a required user service.
+Jeff's [desktop release decision](product/multi-project/desktop-release.md) calls for one Vivary instance on a user-controlled computer or suitable server. A local desktop window and a responsive browser connect to that host. The host keeps agents, project files, credentials, history, and memory. Local desktop use needs no Vivary account. Remote access from another device requires explicit setup and authentication. Zo hosts development and a private preview. It is not a required user service.
 
 The [unified workspace decision](product/multi-project/design.md#unified-workspace-decision-2026-09-14) puts one selected project conversation at the center. A project can have several independent conversations. Files, details, search, and preview open as optional panels. Supported installed coding runtimes retain their own tools, models, permissions, and sessions. Vivary binds their work to the selected project. A cross-runtime link and a maintained handoff remain separate product capabilities, not an implicit transfer of a live run. The [interaction contract](product/multi-project/unified-workspace.md) owns those details.
 
@@ -533,6 +533,9 @@ authority. Existing manager startup and tool-call ownership remain unchanged.
 The local desktop server binds to loopback and opens without a Vivary account. Hosted mode uses Native authentication. The private Zo preview also sits behind its owner-login proxy. Since issue #157, a loopback peer with the expected Host no longer receives owner authority on its own. Vivary creates a new owner session only for a request that carries an owner proof. It checks that proof after every other request check, so a refused request never spends one. A failure while creating the session after a match still costs that address, and the next one is already saved. On the desktop, the proof is the per-launch capability described below. Standalone local mode and the private Zo preview use a one-time sign-in address instead. [`owner-sign-in.ts`](../packages/workbench/server/owner-sign-in.ts) creates a random 32-byte secret at each server start and saves the address `<origin>/sign-in#<secret>` in `owner-sign-in.txt` in the data folder, readable only by its user (mode 0600 on POSIX systems). On Windows the file has the data folder's permissions. The default folder in the user profile is readable only by that account, administrators, and SYSTEM, and a folder elsewhere must not be readable by other accounts. The launcher prints the file's path, never its contents. The sign-in script runs first in the page head, before any script Native adds, and removes the fragment from the address bar and history. It sends the fragment to the session endpoint in the `x-vivary-owner-sign-in` header. The server compares SHA-256 digests in constant time, creates the session, and saves a new address, so a used address fails. Existing owner sessions need no secret. The Zo proxy drops the `Cookie` header, which a probe confirmed on 2026-10-01. In private-proxy mode the sign-in page therefore keeps the session token in browser storage, and the client sends it as `X-Vivary-Session` on same-origin reads, as it already did for owner writes. Native's live-update stream cannot carry that header, so it falls back to polling there. If the browser blocks site storage, the private-proxy page says so and does not spend the address. Native's MCP endpoint and its MCP connect and OAuth routes are off in every Vivary launch: standalone local, private-proxy, desktop, and hosted. Its guard skips MCP paths, and with no `ACCESS_TOKEN` or `A2A_SECRET` its loopback development mode admitted any local caller that named the owner's email in a header. That replaces the reason [receipt 51](product/multi-project/receipts/51-automation-lifecycle.md) gave for keeping keyless loopback MCP. Vivary also refuses Native's public `/.well-known/mcp.json` card, which advertised that endpoint, and turns off Native's MCP App embed routes, whose tickets only MCP tools mint. Native's WebMCP tool routes stay, because they serve the page itself and require a session. Settings shows every user a short note in place of Native's MCP setup guides, and Settings search no longer offers them. The separate `vivary-mcp` adapter remains the way to give an MCP client read-only access to a local workspace. A program running as the same user can read the data folder and stays outside this boundary. Remote access to a user's host remains an explicit, authenticated setup requirement, with real-phone and revocation acceptance still open. [`local-access.ts`](../packages/workbench/server/local-access.ts) owns request checks. The [host decision](product/multi-project/design.md#host-and-browser-access-decision-2026-09-13) owns the product boundary.
 
 Issue #30 adds optional paired-browser access to the same desktop process and Native database.
+Settings and the user docs name it Remote access. It opens Vivary on another device over a
+protected HTTPS connection the owner already set up, for example Tailscale. It is separate
+from any agent control of a browser. Code, routes and IPC keep the `browser-access` name.
 It is off on a new installation. The owner's enabled setting, exact HTTPS origin,
 stable host identity and approved device grants survive normal restarts; pending
 pairing challenges do not. The protected HTTPS path must already be configured.
@@ -703,6 +706,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Remote access wording. The owner renamed the user-visible Browser access
+feature to Remote access on 2026-10-18. The Settings tab, its heading, intro, status and
+error text, the remote browser banner, the phone pairing page, the desktop confirmation
+dialog, and server messages that reach the UI now say Remote access. The intro says the
+feature opens Vivary on another device through a protected HTTPS connection that the
+owner already set up, for example Tailscale, and that it is separate from an agent
+controlling a browser. Routes, storage, IPC message types, file names and identifiers
+keep the `browser-access` name, so the Issue #30 description in Data and trust
+boundaries still holds. Admission, pairing, grants and the loopback-only listener are
+unchanged, and that paragraph now records the user-facing name. `desktop-preview.md` no
+longer claims existing-folder setup cannot be applied, because `ProjectAdoption.tsx`
+offers Confirm and apply since PRs #80 and #81. Evidence: `git grep -i "browser access"`
+over the result and the updated `browser-access.test.mjs` assertions. Two 2026-10-17
+entries that sat above 2026-10-18 entries now follow them, with their text unchanged.
+
 2026-10-18 Windows executable copyright. `packages/desktop/package.mjs` now passes
 `appCopyright` to Electron Packager, which writes it to the `LegalCopyright` field of
 `vivary.exe`. Earlier packages showed Electron's default "Copyright (C) 2015 GitHub,
@@ -729,21 +747,6 @@ version permits Retry. The state-document check preserves existing noneditable
 reasons. The Prepare handoff contract above and the Workbench README describe the
 recovery paths. Focused production-service and mounted-component regressions cover
 these changes; installed-Core, real-agent and packaged acceptance remain separate.
-
-2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
-test records that an untracked directory leaves the Git state unknown, so an
-edit inside it reads Unverifiable, never Fresh. Save records the Prepare-time
-project version and refuses a reply the conversation continued past, so neither
-a change during the reply nor later turns read Fresh. Reply text can no longer
-recreate a block marker, because comment stripping repeats until stable and
-also removes `--!>`. Retry is offered only after a failed write. An update
-moves the block back to the end. The end of a Code run rechecks freshness, and
-a stale Prepare result is not submitted to another conversation. Review 2
-found that guard missed the real path, where each conversation mounts the
-control under its own key, so leaving a conversation now ends the visit on
-unmount. A refused reply now points to a new Prepare, because a correction
-turn would be refused. The Prepare handoff section above records the changed
-behavior.
 
 2026-10-18 MCP package verification wording. The package README scopes its
 August 15 installation verification to published 0.1.3 and links staged 0.1.4's
@@ -779,17 +782,6 @@ The site generator preserves that URL and its existing `release-status` fragment
 avoiding a relative `docs/` path under the generated changelog route. This corrects
 documentation navigation; runtime behavior and the release status are unchanged.
 
-2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
-`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
-`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
-GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
-adapter uses only the stdio transport, so the advisory was not reachable, and
-neither package is in the Windows desktop bundle. The CI wheel smokes follow the
-new pin; Doctor checks the installed adapter's declaration as reviewed above. The staged
-create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
-boundaries and the optional, off-by-default capability are unchanged, so the
-design description holds.
-
 2026-10-18 Exhausted continuation-class errors save as failed (issue #246). A
 partial Native reply whose in-stream 429, timeout or overload used up the
 engine's three retries was saved as complete with no error. The chat plugin's
@@ -818,6 +810,32 @@ with no error. The patch now passes only the code, status and retryable flag.
 `tests/native-stream-errors.test.ts` adds one final-turn case per word. The
 engine, run manager and saved-turn owners are unchanged, so the design
 description holds.
+
+2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
+test records that an untracked directory leaves the Git state unknown, so an
+edit inside it reads Unverifiable, never Fresh. Save records the Prepare-time
+project version and refuses a reply the conversation continued past, so neither
+a change during the reply nor later turns read Fresh. Reply text can no longer
+recreate a block marker, because comment stripping repeats until stable and
+also removes `--!>`. Retry is offered only after a failed write. An update
+moves the block back to the end. The end of a Code run rechecks freshness, and
+a stale Prepare result is not submitted to another conversation. Review 2
+found that guard missed the real path, where each conversation mounts the
+control under its own key, so leaving a conversation now ends the visit on
+unmount. A refused reply now points to a new Prepare, because a correction
+turn would be refused. The Prepare handoff section above records the changed
+behavior.
+
+2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
+`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
+`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
+GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
+adapter uses only the stdio transport, so the advisory was not reachable, and
+neither package is in the Windows desktop bundle. The CI wheel smokes follow the
+new pin; Doctor checks the installed adapter's declaration as reviewed above. The staged
+create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
+boundaries and the optional, off-by-default capability are unchanged, so the
+design description holds.
 
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
@@ -1267,7 +1285,6 @@ checks with only the runtime replaced. This evidence identifies the bundled
 runtime failure without changing application shutdown or masking exit codes.
 It does not establish Electron UI acceptance or a new built package. The
 packager retains hash verification and exact-version license collection.
-
 
 2026-10-11 original creator wizard failure handling. Optional embedded
 backend installation, including interactive selection, now shares the wizard's

@@ -12,7 +12,7 @@ const PAIR_COOKIE = '__Host-vivary-pair';
 const ROOT = '/_vivary/browser';
 const json = (body, status = 200, headers = {}) => Response.json(body, { status,
   headers: { 'cache-control': 'no-store', ...headers } });
-const denied = () => json({ error: 'Browser access is unavailable. Pair or reconnect from the selected host.' }, 401);
+const denied = () => json({ error: 'Remote access is unavailable. Pair or reconnect from the selected host.' }, 401);
 const cookie = (name, value, age) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${age}`;
 function readCookie(request, name) {
   const matches = (request.headers.get('cookie') ?? '').split(';').map(part => part.trim()).filter(part => part.startsWith(`${name}=`));
@@ -25,7 +25,7 @@ function sameSecret(left, right) {
     && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 async function readJson(request) {
-  if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new Error('Use JSON for browser access changes.');
+  if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new Error('Use JSON for remote access changes.');
   const reader = request.body?.getReader();
   if (!reader) throw new Error('Missing request.');
   let bytes = 0; const chunks = [];
@@ -43,7 +43,7 @@ const commandSchema = z.discriminatedUnion('operation', [
 ]);
 
 export function confirmDesktopAccess(detail) {
-  if (!process.connected || !process.send) return Promise.reject(new Error('Open the desktop app to change browser access.'));
+  if (!process.connected || !process.send) return Promise.reject(new Error('Open the desktop app to change remote access.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const finish = (error, approved = false) => {
@@ -74,7 +74,7 @@ export function deviceResponse(response, controller, release) {
   const abort = () => {
     if (finished) return;
     finish(); void reader.cancel().catch(() => undefined);
-    streamController.error(new Error('Browser access ended.'));
+    streamController.error(new Error('Remote access ended.'));
   };
   const body = new ReadableStream({
     start(value) { streamController = value; controller.signal.addEventListener('abort', abort, { once: true }); if (controller.signal.aborted) abort(); },
@@ -152,7 +152,7 @@ export function createBrowserIngress({ dispatch, access, capability, localOrigin
         transferred = true;
         return result;
       } finally { if (!transferred) release(); }
-    } catch { return json({ error: 'Browser access request failed. Check the desktop or start pairing again.' }, 409); }
+    } catch { return json({ error: 'Remote access request failed. Check the desktop or start pairing again.' }, 409); }
   };
   const local = async request => {
     if (!sameSecret(request.headers.get('x-vivary-desktop'), capability)) return denied();
@@ -176,7 +176,7 @@ export function createBrowserIngress({ dispatch, access, capability, localOrigin
             ? `Enable access to ${command.configuration.label} at ${command.configuration.origin} through loopback port ${command.configuration.port}. ${command.configuration.preview ? `Preview: ${command.configuration.preview.origin} through loopback port ${command.configuration.preview.port}. ` : 'Remote previews off. '}Configure protected HTTPS separately. Vivary does not create it.`
             : command.operation === 'approve' ? `Pair ${target.label} with ${status.label}? Compare code ${target.code} on both screens. This browser will have access to this host's projects and tools.`
               : command.operation === 'revoke' ? `Revoke ${target.label}? Its streams and future requests will end. Host runs will continue.`
-                : 'Disable browser access? All browser streams will end. Approved devices remain saved.';
+                : 'Disable remote access? All remote browser streams will end. Approved devices remain saved.';
           if (!await confirm(detail)) return json({ error: 'Desktop confirmation canceled.' }, 409);
           if (command.operation === 'configure') await access.configure(command.configuration);
           else if (command.operation === 'approve') await access.approve(command.id);
@@ -184,7 +184,7 @@ export function createBrowserIngress({ dispatch, access, capability, localOrigin
           else await access.disable();
           await onConfiguration();
           return json({ ok: true });
-        } catch (error) { return json({ error: error instanceof z.ZodError ? 'Invalid browser access request.' : error.message }, 409); }
+        } catch (error) { return json({ error: error instanceof z.ZodError ? 'Invalid remote access request.' : error.message }, 409); }
       };
       const result = controls.then(run); controls = result.catch(() => undefined); return result;
     }

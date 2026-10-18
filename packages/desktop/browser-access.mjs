@@ -35,8 +35,8 @@ export function attachBrowserAccessDialogs(child, getWindow, showMessageBox) {
     if (!pending && window && !window.isDestroyed()) {
       pending = true;
       try {
-        const result = await showMessageBox(window, { type: 'question', title: 'Vivary browser access',
-          message: 'Confirm browser access change', detail: message.detail,
+        const result = await showMessageBox(window, { type: 'question', title: 'Vivary remote access',
+          message: 'Confirm remote access change', detail: message.detail,
           buttons: ['Cancel', 'Confirm'], defaultId: 0, cancelId: 0, noLink: true });
         approved = result.response === 1;
       } catch { /* A closed dialog never grants access. */ }

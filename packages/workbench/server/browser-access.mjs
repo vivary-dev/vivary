@@ -90,10 +90,10 @@ export async function createBrowserAccess({ database = getDbExec(), sessions = {
         }
         await execute('UPDATE vivary_browser_instance SET enabled=1,origin=?,port=?,label=?,preview_origin=?,preview_port=? WHERE slot=1', [config.origin, config.port, config.label, config.preview?.origin ?? null, config.preview?.port ?? null]);
         instance = await load(); fault = false;
-      } catch { failClosed(); throw new Error('Browser access could not be saved. Admission is closed.'); }
+      } catch { failClosed(); throw new Error('Remote access could not be saved. Admission is closed.'); }
     }); },
     requestPairing(label) {
-      if (!enabled()) throw new Error('Browser access is disabled.');
+      if (!enabled()) throw new Error('Remote access is disabled.');
       prune(); recent = recent.filter(time => time > now() - 60_000);
       if (recent.length >= 10 || pending.size >= 20) throw new Error('Too many pairing requests. Wait a minute.');
       recent.push(now());
@@ -105,7 +105,7 @@ export async function createBrowserAccess({ database = getDbExec(), sessions = {
     },
     approve(id) { return serial(async () => {
       prune();
-      if (!enabled()) throw new Error('Browser access is disabled.');
+      if (!enabled()) throw new Error('Remote access is disabled.');
       const challenge = [...pending.values()].find(item => item.id === id);
       if (!challenge) throw new Error('Pairing request expired.');
       challenge.approved = true;
