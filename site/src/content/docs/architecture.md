@@ -792,12 +792,19 @@ and stops with exit code 2 when a file path would pass 259 characters or a folde
 path 247, so a long or relocated profile folder never leaves a removed install that
 cannot be extracted again. The second read of `install-files.txt` now checks for an
 open error and removes nothing on failure, and setup records the desktop shortcut
-only when `CreateShortcut` succeeded. Evidence: 86 of 86 installer tests pass with
-`makensis` 3.10 and 85 pass with one skip without it, each of 74 single-rule changes
+only when `CreateShortcut` succeeded. Two states that no rerun could repair are
+closed. The uninstaller now removes itself, its entry, the marker, and then
+`install-files.txt` last, so an interrupted uninstall leaves either the list, which
+setup recognizes and repairs, or nothing setup made. Setup writes the list as
+`install-files.tmp` and moves it over the old one with `MoveFileExW` (replace and
+write-through), so an interrupted write cannot leave a cut-off list. A damaged list
+with the marker present no longer stops for good: setup copies over it, which
+rewrites the list, and the uninstaller asks for that setup rerun. Without the marker
+both still stop and change nothing. Evidence: 88 of 88 installer tests pass with
+`makensis` 3.10 and 87 pass with one skip without it, each of 84 single-rule changes
 to the script fails the static tests, and the 2aaf04f payload's longest file path has
-103 characters and its longest folder path 90. The 70957d1 installer
-passed install, reinstall, locked-file upgrade, recovery rerun, and uninstall on
-Windows.
+103 characters and its longest folder path 90. The 70957d1 installer passed install,
+reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

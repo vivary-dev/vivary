@@ -103,7 +103,7 @@ test("payload paths the installer cannot list or Windows cannot hold are refused
   await refuse("trailing space", file("notes "));
   await refuse("trailing dot on a folder", file("lib.", "x.js"));
   await refuse("trailing space on a folder", file("lib ", "x.js"));
-  for (const name of ["install-files.txt", "VIVARY-SETUP.txt", "Uninstall Vivary.exe", "INSTALL-FILES.TXT", "uninstall vivary.EXE"]) {
+  for (const name of ["install-files.txt", "Install-Files.TMP", "VIVARY-SETUP.txt", "Uninstall Vivary.exe", "INSTALL-FILES.TXT", "uninstall vivary.EXE"]) {
     await refuse(`setup's own file name ${name}`, file(name));
     await refuse(`setup's own file name ${name} as a folder`, file(name, "x.js"));
   }

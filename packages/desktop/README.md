@@ -312,8 +312,8 @@ checkout and a payload with links. It refuses a path the installer cannot list o
 Windows cannot hold: non-ASCII, a wildcard or drive character, a part ending in a dot
 or space, a reserved device name such as `CON` or `nul.txt`, two paths that differ
 only in case, or a file or folder at the payload root named like a file setup
-writes there (`install-files.txt`, `vivary-setup.txt`, `Uninstall Vivary.exe`, in
-any case). It refuses a file path longer than 179 characters and a folder path
+writes there (`install-files.txt`, `install-files.tmp`, `vivary-setup.txt`,
+`Uninstall Vivary.exe`, in any case). It refuses a file path longer than 179 characters and a folder path
 longer than 167 (168 with the list line's trailing backslash). Windows file paths
 stop at 259 characters and `CreateDirectory` stops at 247, and the install root for
 a 40-character profile folder name takes 80 of them. The receipt records the
@@ -352,7 +352,10 @@ The installer script is `installer/vivary.nsi`. Its rules:
 - When Vivary or its bundled Node or Python is running, it asks the user to close
   Vivary and offers Retry or Cancel. It never stops a process.
 - A file that cannot be written stops setup (`AllowSkipFiles off`), and setup exits
-  with an error. `install-files.txt` is written last, after every other file.
+  with an error. `install-files.txt` is written last, after every other file. Setup
+  writes it as `install-files.tmp` and then moves it over the old list in one step
+  (`MoveFileExW` with replace and write-through), so an interrupted write leaves the
+  old list or the new one, never part of one.
 - Nothing is deleted recursively. Upgrade and uninstall read the previous
   `install-files.txt`, check every line before deleting anything, delete the listed
   files, then remove each listed folder only when it is empty. A line with a drive,
@@ -371,12 +374,17 @@ The installer script is `installer/vivary.nsi`. Its rules:
   entry points there or it holds `install-files.txt`, the marker, `vivary.exe`, or
   the uninstaller, so setup can repair a partly removed install. A folder with the
   marker but no list is a first install that did not finish, and setup copies over
-  it. The uninstaller asks for that setup rerun instead. A folder with neither makes
-  setup and the uninstaller change nothing and ask the user to remove it by hand.
+  it. The uninstaller asks for that setup rerun instead. A damaged list with the
+  marker present is handled the same way: setup copies over it, which rewrites the
+  list, and the uninstaller asks for the rerun. A folder with neither a list nor the
+  marker makes setup and the uninstaller change nothing and ask the user to remove
+  it by hand.
 - When listed files remain, setup stops before copying, and the uninstaller keeps
   its entry, list, and itself so it can run again. Otherwise the uninstaller removes
-  the shortcuts (the desktop one only when setup made it), then the list and the
-  marker, then the uninstall entry, and itself last.
+  the shortcuts (the desktop one only when setup made it), then itself, the
+  uninstall entry, the marker, any leftover `install-files.tmp`, and the list last.
+  Stopped at any point, the folder still holds the list, which setup recognizes and
+  repairs, or nothing setup made.
 - Neither program reads, writes, or deletes `%USERPROFILE%\.vivary`,
   `%APPDATA%\Vivary`, or any project folder.
 - `/S` runs the installer or the uninstaller silently. A running Vivary then

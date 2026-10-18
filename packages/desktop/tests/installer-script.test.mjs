@@ -146,7 +146,7 @@ test("nothing is deleted recursively", () => {
 test("deletes reach only listed paths, setup's own files and its shortcuts", () => {
   const allowed = new Set([
     '"$INSTDIR\\$R4"', '"$INSTDIR\\$6"', '"$INSTDIR"', '"$INSTDIR\\${INSTALL_LIST}"',
-    '"$INSTDIR\\${UNINSTALLER}"', '"$INSTDIR\\${SETUP_MARKER}"', '"$SMPROGRAMS\\Vivary.lnk"', '"$DESKTOP\\Vivary.lnk"',
+    '"$INSTDIR\\${UNINSTALLER}"', '"$INSTDIR\\${SETUP_MARKER}"', '"$INSTDIR\\${INSTALL_LIST_TEMP}"', '"$SMPROGRAMS\\Vivary.lnk"', '"$DESKTOP\\Vivary.lnk"',
   ]);
   for (const line of lines.filter(line => /^(Delete|RMDir)\b/i.test(line))) {
     const target = line.replace(/^(Delete|RMDir)\s+/i, "");
@@ -172,10 +172,19 @@ test("removal reads the installed-file list behind the exact-folder guard", () =
   assert.ok(position(remove, "StrCmp $R9 \"truncated\" bad_line") < checked);
   assert.ok(position(remove, "System::Call 'kernel32::GetFileAttributesW(w \"$INSTDIR\\$6\") i .r3'") < checked);
   assert.ok(checked < firstDelete, "deletes follow the check pass");
-  for (const label of ["bad_line:", "linked:", "unreadable:"]) {
+  for (const label of ["bad_line_stop:", "linked:", "unreadable:"]) {
     const at = position(remove, label);
     assert.ok(remove.slice(at).find(line => /^(Abort|Return)\b/.test(line)).startsWith("Abort "), `${label} aborts`);
   }
+  // A damaged list returns to the caller only when setup's marker is here.
+  const badLine = position(remove, "bad_line:");
+  assert.deepEqual(remove.slice(badLine + 1, badLine + 6), [
+    "FileClose $R3",
+    'IfFileExists "$INSTDIR\\${SETUP_MARKER}" 0 bad_line_stop',
+    'DetailPrint "$INSTDIR\\${INSTALL_LIST} is damaged. Nothing was removed."',
+    "StrCpy $R8 2",
+    "Return",
+  ]);
   assert.ok(lines.includes('!insertmacro VIVARY_SHARED_FUNCTIONS ""'));
   assert.ok(lines.includes('!insertmacro VIVARY_SHARED_FUNCTIONS "un."'));
 });
@@ -200,7 +209,18 @@ test("install writes the list last and refuses skipped files", () => {
   assert.ok(lines.includes("AllowSkipFiles off"));
   assert.doesNotMatch(code, /AllowSkipFiles\s+on/i);
   const install = sectionBody("Vivary");
-  const list = position(install, 'File "/oname=${INSTALL_LIST}" "${INSTALL_LIST_FILE}"');
+  const list = position(install, 'File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"');
+  // The list is written under a temporary name and moved into place in one step.
+  assert.deepEqual(install.slice(list + 1, list + 5), [
+    "IfErrors write_failed",
+    "System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'",
+    "IntCmp $0 0 write_failed",
+    "Return",
+  ]);
+  assert.ok(!lines.some(line => line.includes('/oname=${INSTALL_LIST}"')), "the list is never written in place");
+  // A damaged list with setup's marker is copied over, which rewrites it.
+  assert.ok(position(install, "Call RemoveInstalledFiles") < position(install, "IntCmp $R8 2 copy_files"));
+  assert.ok(position(install, "IntCmp $R8 2 copy_files") < position(install, "IntCmp $R8 1 0 list_read list_read"));
   for (const step of ['File /r "${PAYLOAD_DIR}/*"', 'WriteUninstaller "$INSTDIR\\${UNINSTALLER}"',
     'WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"']) {
     assert.ok(position(install, step) < list, `${step} precedes the list`);
@@ -228,7 +248,7 @@ test("a previous install is recognized by its entry, list, marker, executable or
   assert.ok(previous.some(line => line.startsWith("Abort ")));
 });
 
-test("the uninstaller removes its entry and itself last, only when the listed files are gone", () => {
+test("the uninstaller removes itself, its entry, the marker and then the list, only when the listed files are gone", () => {
   const uninstall = sectionBody("Uninstall");
   assert.equal(uninstall[0], "Call un.RequireFixedInstallDir");
   assert.ok(functionBody("un.onInit").includes("Call un.RequireFixedInstallDir"));
@@ -236,22 +256,28 @@ test("the uninstaller removes its entry and itself last, only when the listed fi
   const entry = position(uninstall, 'DeleteRegKey HKCU "${UNINSTALL_KEY}"');
   const self = position(uninstall, 'Delete "$INSTDIR\\${UNINSTALLER}"');
   const list = position(uninstall, 'Delete "$INSTDIR\\${INSTALL_LIST}"');
+  const marker = position(uninstall, 'Delete "$INSTDIR\\${SETUP_MARKER}"');
+  const temp = position(uninstall, 'Delete "$INSTDIR\\${INSTALL_LIST_TEMP}"');
   const gate = position(uninstall, "IntCmp $R7 0 remove_entry");
   const removeEntry = position(uninstall, "remove_entry:");
-  assert.ok(removeFiles < gate && gate < removeEntry && removeEntry < list && list < entry && entry < self);
+  // Interrupted at any point, the folder still holds the list or nothing setup made,
+  // and a folder that holds only the list is repaired by setup.
+  assert.ok(removeFiles < gate && gate < removeEntry && removeEntry < self && self < entry && entry < marker
+    && marker < temp && temp < list, "uninstaller, entry, marker, temporary list, then the list");
+  assert.equal(uninstall[list + 1].startsWith("Delete "), false, "nothing is deleted after the list");
+  assert.equal(position(uninstall, "IntCmp $R8 2 unfinished") + 1, position(uninstall, "IntCmp $R8 1 0 list_read list_read"),
+    "a damaged list with the marker asks for a setup rerun");
   const missing = position(uninstall, "IntCmp $R8 1 0 list_read list_read");
   assert.ok(missing < gate, "a missing list removes nothing");
   assert.equal(uninstall[missing + 1], 'IfFileExists "$INSTDIR\\${SETUP_MARKER}" unfinished no_list');
   const unfinished = position(uninstall, "unfinished:");
   assert.ok(unfinished < removeEntry && uninstall.slice(unfinished, removeEntry).some(line => line.startsWith("Abort ")),
     "an unfinished install asks for a setup rerun and removes nothing");
-  const marker = position(uninstall, 'Delete "$INSTDIR\\${SETUP_MARKER}"');
-  assert.ok(removeEntry < marker && marker < entry, "the uninstaller removes the marker with the list, before the entry");
   // Remaining files and a missing list both abort before the entry is touched.
   const noList = position(uninstall, "no_list:");
   assert.ok(uninstall.slice(gate, noList).some(line => line.startsWith("Abort ")));
   assert.ok(uninstall.slice(noList, removeEntry).some(line => line.startsWith("Abort ")));
-  assert.ok(position(uninstall, 'RMDir "$INSTDIR"') > self, "the folder goes last, and only when empty");
+  assert.ok(position(uninstall, 'RMDir "$INSTDIR"') > list, "the folder goes last, and only when empty");
 });
 
 test("user data is never referenced except in the kept-data message", () => {

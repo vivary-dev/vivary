@@ -44,13 +44,16 @@ AllowSkipFiles off
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary"
 !define UNINSTALLER "Uninstall Vivary.exe"
 !define INSTALL_LIST "install-files.txt"
+; Setup writes the list here first, then moves it over install-files.txt in one
+; step, so a cut-off write never leaves a partial list.
+!define INSTALL_LIST_TEMP "install-files.tmp"
 ; Setup writes this marker into a folder it creates, before any payload file.
 ; A rerun after a failed first install recognizes the folder by it.
 !define SETUP_MARKER "vivary-setup.txt"
 ; One name for setup and the uninstaller, so they cannot run at the same time.
 !define SETUP_MUTEX "Local\VivarySetup"
 !define NO_LIST_TEXT "has no ${INSTALL_LIST}, so Vivary cannot tell which files it installed and removed nothing. Remove that folder by hand. Your projects, conversations and settings are stored elsewhere and are not affected."
-!define UNFINISHED_TEXT "holds a Vivary install that did not finish, so nothing was removed. Run Vivary setup again to finish it, then uninstall."
+!define UNFINISHED_TEXT "holds a Vivary install that did not finish or whose file list is damaged, so nothing was removed. Run Vivary setup again to repair it, then uninstall."
 ; The longest relative path a list line may hold. Windows file paths stop at
 ; 259 characters (MAX_PATH 260 with its terminator). The install root for a
 ; profile folder name of up to 40 characters,
@@ -254,7 +257,8 @@ FunctionEnd
 ; recursively, so files a user added stay. Every line is checked before
 ; anything is deleted. A listed folder that became a link stops the
 ; removal, so no delete reaches outside $INSTDIR. Sets $R7 to the number of
-; listed files that remain and $R8 to 1 when there is no list.
+; listed files that remain, and $R8 to 1 when there is no list or to 2 when the
+; list is damaged but setup's marker is here, which a setup rerun can repair.
 Function ${PREFIX}RemoveInstalledFiles
   Call ${PREFIX}RequireFixedInstallDir
   StrCpy $R7 0
@@ -309,6 +313,13 @@ Function ${PREFIX}RemoveInstalledFiles
   Abort "Setup could not read the installed-file list. Nothing was removed."
   bad_line:
   FileClose $R3
+  ; Nothing was deleted yet. With setup's marker here, a setup rerun rewrites
+  ; the list, so the caller decides instead of stopping for good.
+  IfFileExists "$INSTDIR\${SETUP_MARKER}" 0 bad_line_stop
+  DetailPrint "$INSTDIR\${INSTALL_LIST} is damaged. Nothing was removed."
+  StrCpy $R8 2
+  Return
+  bad_line_stop:
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\${INSTALL_LIST} names a path outside the Vivary folder, so nothing was removed." /SD IDOK
   Abort "The installed-file list is not valid. Nothing was removed."
   linked:
@@ -391,6 +402,8 @@ Section "Vivary"
   Call RequirePreviousVivary
   DetailPrint "Removing the previous Vivary application files."
   Call RemoveInstalledFiles
+  ; A damaged list with setup's marker: copy over it, which rewrites the list.
+  IntCmp $R8 2 copy_files
   IntCmp $R8 1 0 list_read list_read
   ; No list. Setup's marker means a first install that did not finish here, so
   ; setup copies over it. Without the marker setup cannot tell its files from
@@ -429,9 +442,14 @@ Section "Vivary"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   IfErrors write_failed
-  ; The list goes last, so it exists only after every file was written.
-  File "/oname=${INSTALL_LIST}" "${INSTALL_LIST_FILE}"
+  ; The list goes last, so it exists only after every file was written. It is
+  ; written under a temporary name, then moved over the old list in one step
+  ; (MOVEFILE_REPLACE_EXISTING 1 + MOVEFILE_WRITE_THROUGH 8), so an interrupted
+  ; write leaves the old list or the new one, never part of one.
+  File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"
   IfErrors write_failed
+  System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
+  IntCmp $0 0 write_failed
   Return
   write_failed:
   MessageBox MB_OK|MB_ICONSTOP "Setup could not write every Vivary file to $INSTDIR. Run setup again." /SD IDOK
@@ -459,13 +477,15 @@ Function un.onInit
   Call un.RequireFixedInstallDir
 FunctionEnd
 
-; The uninstall entry, the file list and the uninstaller go last, and only
-; when every listed file is gone. Otherwise they stay, so the uninstaller
-; can run again.
+; The uninstaller, the uninstall entry, the marker and the file list go last,
+; and only when every listed file is gone. Otherwise they stay, so the
+; uninstaller can run again. The list goes very last: a folder that holds only
+; the list is still recognized and repaired by setup.
 Section "Uninstall"
   Call un.RequireFixedInstallDir
   Call un.RequireVivaryClosed
   Call un.RemoveInstalledFiles
+  IntCmp $R8 2 unfinished
   IntCmp $R8 1 0 list_read list_read
   IfFileExists "$INSTDIR\${SETUP_MARKER}" unfinished no_list
   list_read:
@@ -484,10 +504,11 @@ Section "Uninstall"
   ${If} $0 = 1
     Delete "$DESKTOP\Vivary.lnk"
   ${EndIf}
-  Delete "$INSTDIR\${INSTALL_LIST}"
-  Delete "$INSTDIR\${SETUP_MARKER}"
-  DeleteRegKey HKCU "${UNINSTALL_KEY}"
   Delete "$INSTDIR\${UNINSTALLER}"
+  DeleteRegKey HKCU "${UNINSTALL_KEY}"
+  Delete "$INSTDIR\${SETUP_MARKER}"
+  Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
+  Delete "$INSTDIR\${INSTALL_LIST}"
   ; Removes the folder only when it is empty. Files a user added stay.
   RMDir "$INSTDIR"
   IfFileExists "$INSTDIR\*.*" 0 kept_data

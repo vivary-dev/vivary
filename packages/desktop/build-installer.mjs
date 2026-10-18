@@ -37,7 +37,7 @@ export const maxFolderPath = 247 - longestInstallRoot;
 // Setup writes these into the install folder root, so no payload file or folder
 // there may share a name with them, in any case. installer/vivary.nsi writes
 // nothing else into the install folder besides the payload.
-const setupFiles = new Set(["install-files.txt", "vivary-setup.txt", "uninstall vivary.exe"]);
+const setupFiles = new Set(["install-files.txt", "install-files.tmp", "vivary-setup.txt", "uninstall vivary.exe"]);
 
 /** Lists every regular file and folder under the payload. Links are refused, because makensis would follow them. */
 async function listPayload(directory) {
