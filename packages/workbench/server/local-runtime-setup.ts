@@ -2,7 +2,7 @@ import type { CodexModelCatalog } from "./codex-models";
 import { claudeCodeModelChoices } from "../shared/claude-models";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { access, open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -215,18 +215,22 @@ async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undef
   });
 }
 
-export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine): Promise<CommandLaunch | null> {
+// Tests pass another platform and environment to reach the Windows branches on any host.
+export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine,
+  { platform = process.platform, env: source = process.env }: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
+): Promise<CommandLaunch | null> {
   const spec = commands[engine];
   if (!isAllowedCommand(spec.command)) return null;
+  const windows = platform === "win32";
   const home = homedir();
   // guard:allow-env-credential - OS executable search paths locate the fixed CLI allowlist.
-  const executablePath = process.env.PATH ?? process.env.Path ?? "";
+  const executablePath = source.PATH ?? source.Path ?? "";
   // guard:allow-env-credential - Package-manager installation directory, not a credential.
-  const pnpmHome = process.env.PNPM_HOME;
+  const pnpmHome = source.PNPM_HOME;
   // guard:allow-env-credential - Windows user application directory locates installed CLI packages.
-  const appData = process.env.APPDATA;
+  const appData = source.APPDATA;
   // guard:allow-env-credential - Windows local application directory locates installed CLI executables.
-  const localAppData = process.env.LOCALAPPDATA;
+  const localAppData = source.LOCALAPPDATA;
   const directories = [
     ...executablePath.split(path.delimiter),
     pnpmHome,
@@ -234,7 +238,7 @@ export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine): Pro
     path.join(home, ".local", "share", "pnpm"),
     path.join(home, "Library", "pnpm"),
     path.join(home, ".cargo", "bin"),
-    ...(process.platform === "win32"
+    ...(windows
       ? [
           appData && path.join(appData, "npm"),
           localAppData && path.join(localAppData, "Microsoft", "WinGet", "Links"),
@@ -250,19 +254,63 @@ export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine): Pro
   }
   const searchDirectories = [...new Set(directories
     .filter((directory): directory is string => typeof directory === "string" && path.isAbsolute(directory)))];
-  const env = codingRuntimeEnvironment(process.env);
+  const env = codingRuntimeEnvironment(source);
   delete env.Path;
   env.PATH = searchDirectories.join(path.delimiter);
 
   for (const directory of searchDirectories) {
-    const executable = path.join(directory, spec.command + (process.platform === "win32" ? ".exe" : ""));
+    const executable = path.join(directory, spec.command + (windows ? ".exe" : ""));
     if (await isExecutable(executable)) return { executable, prefix: [], env };
-    if (process.platform === "win32") {
+    if (windows) {
       const npmEntry = path.join(directory, "node_modules", ...spec.npmEntry);
       if (await isFile(npmEntry)) return { executable: process.execPath, prefix: [npmEntry], env };
+      const shimEntry = await windowsShimEntry(directory, engine);
+      if (shimEntry) return { executable: process.execPath, prefix: [shimEntry], env };
     }
   }
   return null;
+}
+
+const SHIM_READ_BYTES = 8 * 1024;
+
+// pnpm installs a global CLI on Windows as `<command>.cmd` beside a `..\global\<version>\<hash>`
+// package store, so the npm entry check above misses it. Read the start of the shim and accept
+// only a quoted `%~dp0` argument that ends in the package's own entry and whose package manifest
+// carries the expected name. The shim is never run, and nothing else in it is used.
+async function windowsShimEntry(directory: string, engine: VivaryCodeEngine): Promise<string | null> {
+  const spec = commands[engine];
+  let text: string;
+  try {
+    const handle = await open(path.join(directory, `${spec.command}.cmd`), "r");
+    try {
+      const buffer = Buffer.alloc(SHIM_READ_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, SHIM_READ_BYTES, 0);
+      text = buffer.toString("utf8", 0, bytesRead);
+    } finally { await handle.close(); }
+  } catch {
+    return null;
+  }
+  const tail = path.sep + path.join("node_modules", ...spec.npmEntry);
+  for (const [, relative] of text.matchAll(/"%~dp0([^"\r\n]*)"/gi)) {
+    // A variable, escape, or drive in the path would make cmd.exe read it differently.
+    if (/[%!^:]/.test(relative)) continue;
+    const entry = path.resolve(directory, ...relative.split(/[\\/]+/).filter(Boolean));
+    if (!entry.endsWith(tail) || !await isFile(entry)) continue;
+    const packageRoot = path.resolve(entry, ...spec.npmEntry.slice(2).map(() => ".."));
+    if (await readRuntimeManifest(packageRoot, engine).catch(() => null)) return entry;
+  }
+  return null;
+}
+
+// Return the manifest in a directory when it names the engine's package, with its version when valid.
+async function readRuntimeManifest(directory: string, engine: VivaryCodeEngine): Promise<{ version?: string } | null> {
+  const text = await readFile(path.join(directory, "package.json"), "utf8").catch(() => null);
+  if (!text) return null;
+  const manifest: unknown = JSON.parse(text);
+  if (!manifest || typeof manifest !== "object" || !("name" in manifest)
+    || manifest.name !== commands[engine].npmEntry.slice(0, 2).join("/")) return null;
+  return "version" in manifest && typeof manifest.version === "string" && /^\d+\.\d+\.\d+$/.test(manifest.version)
+    ? { version: manifest.version } : {};
 }
 
 // Read installation metadata without running the CLI or consulting an account.
@@ -270,15 +318,9 @@ export async function runtimeInstallationVersion(launch: Pick<CommandLaunch, "ex
   engine: VivaryCodeEngine): Promise<string | undefined> {
   try {
     const entry = await realpath(launch.prefix[0] ?? launch.executable);
-    const expectedName = engine === "claude-cli" ? "@anthropic-ai/claude-code" : "@openai/codex";
     for (const directory of [path.dirname(entry), path.dirname(path.dirname(entry))]) {
-      const text = await readFile(path.join(directory, "package.json"), "utf8").catch(() => null);
-      if (!text) continue;
-      const manifest: unknown = JSON.parse(text);
-      if (manifest && typeof manifest === "object" && "name" in manifest && manifest.name === expectedName
-        && "version" in manifest && typeof manifest.version === "string" && /^\d+\.\d+\.\d+$/.test(manifest.version)) {
-        return manifest.version;
-      }
+      const version = (await readRuntimeManifest(directory, engine))?.version;
+      if (version) return version;
     }
   } catch {
     // Missing or malformed metadata leaves version discovery to the caller.
