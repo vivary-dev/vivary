@@ -337,9 +337,74 @@ work after the boundary cannot break an existing link. An entry that does not fi
 the rest of a page starts the next page, so paging never skips text. Only an
 entry longer than a whole page is shortened, and its text ends with an omission
 notice that points to the original. The original remains the complete history owner. This is the
-first linked-history slice of issue #38. Prepare handoff and controlled concurrent
-execution remain separate work. Independent review and built UI acceptance of
+first linked-history slice of issue #38. Controlled concurrent execution remains
+separate work under issue #228. Independent review and built UI acceptance of
 this slice remain required.
+
+### Prepare handoff
+
+A saved project conversation shows a handoff control beside the linked-history
+notice. **Prepare handoff** records the project facts in one pending row and
+submits a request message to that conversation. A Code conversation sends it
+through its own chat handle and adapter. Native sends it with Core's same-window
+submit, which only Native chats receive. Neither path changes the composer draft.
+The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+is a second owner click. `handoff.ts` reads the reply from the conversation's
+completed history, never from the client. It reads a conversation only through
+the linked conversation service: a linked target's own link is checked as every
+linked read checks it, and retained history the linked reader cannot parse is
+refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
+block, another request ID, an unknown key, or a passed or failed check without a
+completed evidence event. It fills every fact itself, redacts held credentials,
+and writes one marked block at the end of the workspace's designated state
+document through `projectFileService.save` with the prepared version and
+binding. An update moves the block back to the end when text was added after
+it, and keeps that text. Save refuses a reply followed by a newer user request,
+including one whose reply stopped, failed or is still active. A separate progression
+observation checks all recorded Code events or the selected Native ancestry, with
+the same owner and link validation and an 8 MiB read limit. Completed history
+still owns reply text and check evidence; failed or partial output never becomes
+completed evidence. It records the project version observed at Prepare, so a change
+while the agent replied reads Out of date. A plain workspace or a missing, private,
+protected or noneditable state file refuses Prepare. Noneditable files retain the
+file owner's reason instead of being reported as missing. A conflict preserves the
+current file and saved record and marks the request Failed. After a write exception,
+a fresh authorized state read must confirm the original version and project binding
+before Vivary promises preservation and offers Retry. A changed or unreadable file,
+or failed record finalization after a successful write, reports that the outcome
+could not be confirmed and the file may have changed. It requires inspection and a
+new Prepare, and the same failed request cannot be retried. A conflict also needs a
+new Prepare, because the same request can never pass its version check again.
+Reply text is stripped of HTML comment openers and closers until none remain,
+so it cannot recreate a block marker. Nothing is cleaned, stashed or
+committed. A dirty tree is reported as a count. A new Native conversation
+shows no control until its thread is saved, because nothing in it can be
+handed off yet. Prepare is disabled while a run is active, including a run
+already active when the control opens. Native reads the same `runs/active`
+endpoint its composer reads on mount, then follows run events. Code uses the
+run state its composer already has, and the end of a Code run rechecks
+freshness. Successful Files saves and renames invalidate the mounted handoff query,
+and an unavailable control offers Check again. Neither refresh submits a request.
+A Prepare that returns after the owner opened another conversation sends nothing,
+because Native submits to whichever chat is open.
+
+Freshness is computed on request, with no timer and no model call. It compares
+the state file version, Git HEAD and branch, the dirty entry list and each dirty
+file's size and modified time, or the bounded file listing without Git, and the
+covered completed conversation boundary and prefix digest, plus the independent
+progression digest. A stopped, failed or active follow-up therefore makes a saved
+handoff Out of date. Native's unselected branches do not affect progression.
+Older saved records without a progression digest require an update before they can
+report Fresh. The state file is excluded from the project facts because its own version is compared. The
+observer refuses a directory entry, such as Git's single entry for a new
+untracked directory, so a project holding one reads Unverifiable until that
+directory is committed or removed. A listing at its cap or an unknown Git state
+is Unverifiable, never Fresh. Git facts come
+from a read-only `observe` creator bridge operation over
+`vivary_core.workspace_observe`, gated like `context` and reported relative to
+the project folder. If the project folder and its checkout root resolve to
+different Windows drives, the version reads as unknown. Migration 6 adds `vivary_handoff_records`, one row per
+project binding and document, holding the pending request and the saved record.
 
 
 ### Original engine
@@ -635,6 +700,41 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Handoff save wording (PR #236 review 5). The Prepare handoff paragraph in
+the unified workspace contract said every failed write keeps the previous version and
+shows Retry. It now matches `save()` in `packages/workbench/server/handoff.ts`: a
+changed file or project binding stops the save, a failed write offers Retry only when
+a reread finds the version from Prepare, and an unconfirmed write or an unstored save
+record reports that the file may have changed. The recovery design in the entry below
+still holds, because only the contract text was wrong. A foreign-actor subtest title in
+`handoff.test.ts` no longer claims Save coverage. No source behavior changed.
+
+2026-10-18 Handoff progression and recovery (PR #236). Handoff Save and freshness
+now observe later stopped, failed and active requests independently from linked
+completed evidence, retaining selected Native ancestry and bounded no-follow Code
+reads. Files saves and renames refresh the mounted control, and unavailable state
+can be checked again. A post-write exception or record-finalization failure no
+longer promises the old bytes survived: only a reread of the unchanged original
+version permits Retry. The state-document check preserves existing noneditable
+reasons. The Prepare handoff contract above and the Workbench README describe the
+recovery paths. Focused production-service and mounted-component regressions cover
+these changes; installed-Core, real-agent and packaged acceptance remain separate.
+
+2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
+test records that an untracked directory leaves the Git state unknown, so an
+edit inside it reads Unverifiable, never Fresh. Save records the Prepare-time
+project version and refuses a reply the conversation continued past, so neither
+a change during the reply nor later turns read Fresh. Reply text can no longer
+recreate a block marker, because comment stripping repeats until stable and
+also removes `--!>`. Retry is offered only after a failed write. An update
+moves the block back to the end. The end of a Code run rechecks freshness, and
+a stale Prepare result is not submitted to another conversation. Review 2
+found that guard missed the real path, where each conversation mounts the
+control under its own key, so leaving a conversation now ends the visit on
+unmount. A refused reply now points to a new Prepare, because a correction
+turn would be refused. The Prepare handoff section above records the changed
+behavior.
+
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
 `vivary.exe`. The icon is a multi-size copy of the site mark. The executable
@@ -748,6 +848,26 @@ trust boundaries now states this check. Evidence: four new tests in
 `tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
 closed listener, a later server error or close, the action error type, and the
 rendered refusal.
+
+2026-10-16 Concurrency release scope. Jeff chose to defer controlled
+concurrency for Code conversations from this release to issue #228. The
+desktop release page now states the limitation once: one Code conversation
+runs at a time on a host, and a second request is refused before any write
+with an Open button for the running one. The unified workspace acceptance
+row, the specification README and the acceptance register point to #228.
+No code changed. The host-wide single Code run guard described above is
+unchanged, so the design description holds.
+
+2026-10-16 Prepare handoff and handoff freshness (A083, A084). New
+`server/handoff.ts`, three owner actions with `agentTool: false`, a
+`HandoffControl` in the Code and Native conversation surfaces, migration 6, the
+creator bridge `observe` operation, and `stateDocument` in project memory. The
+linked conversation service now exposes its owner scope, record check and
+completed-prefix reader instead of duplicating them. The Prepare handoff section
+above describes the design. `test:handoff` covers refused replies, conflicts,
+a failed write, a dirty tree, staleness without a model call, and the control.
+The Python bridge case covers `observe`. Built-app and real-agent acceptance
+remain required.
 
 2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
 slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,

@@ -78,6 +78,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey, line }: { proje
       if (result.code === "saved") {
         draft.put(null);
         void cache.invalidateQueries({ queryKey: ["action", "vivary-project-files"] });
+        void cache.invalidateQueries({ queryKey: ["vivary-handoff-freshness"] });
         if (!mounted.current) return;
         setSavedFile(result.file);
         setEditing(false);
@@ -104,6 +105,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey, line }: { proje
       if (result.code === "renamed") {
         draft.put(null);
         void cache.invalidateQueries({ queryKey: ["action", "vivary-project-files"] });
+        void cache.invalidateQueries({ queryKey: ["vivary-handoff-freshness"] });
         const current = currentLocation.current;
         const params = new URLSearchParams(current.search);
         if (mounted.current && current.pathname === "/" && params.get("project") === projectId && params.get("path") === path) {
