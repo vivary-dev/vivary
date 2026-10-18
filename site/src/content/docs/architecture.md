@@ -358,22 +358,34 @@ block, another request ID, an unknown key, or a passed or failed check without a
 completed evidence event. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state
 document through `projectFileService.save` with the prepared version and
-binding. A plain workspace or a missing, private or protected state file refuses
-Prepare. A conflict or failed write keeps the previous file and saved record,
-marks the request Failed and offers Retry. Nothing is cleaned, stashed or
+binding. An update moves the block back to the end when text was added after
+it, and keeps that text. Save refuses a reply the conversation continued past,
+because the recorded boundary is the latest completed event. It records the
+project version observed at Prepare, so a change while the agent replied reads
+Out of date. A plain workspace or a missing, private or protected state file refuses
+Prepare. A conflict or failed write keeps the previous file and saved record and
+marks the request Failed. Only a failed write offers Retry. A conflict needs a
+new Prepare, because the same request can never pass its version check again.
+Reply text is stripped of HTML comment openers and closers until none remain,
+so it cannot recreate a block marker. Nothing is cleaned, stashed or
 committed. A dirty tree is reported as a count. A new Native conversation
 shows no control until its thread is saved, because nothing in it can be
 handed off yet. Prepare is disabled while a run is active, including a run
 already active when the control opens. Native reads the same `runs/active`
 endpoint its composer reads on mount, then follows run events. Code uses the
-run state its composer already has.
+run state its composer already has, and the end of a Code run rechecks
+freshness. A Prepare that returns after the owner opened another conversation
+sends nothing, because Native submits to whichever chat is open.
 
 Freshness is computed on request, with no timer and no model call. It compares
 the state file version, Git HEAD and branch, the dirty entry list and each dirty
 file's size and modified time, or the bounded file listing without Git, and the
 covered completed conversation boundary and prefix digest. The state file is
-excluded from the project facts because its own version is compared. A listing
-at its cap or an unknown Git state is Unverifiable, never Fresh. Git facts come
+excluded from the project facts because its own version is compared. The
+observer refuses a directory entry, such as Git's single entry for a new
+untracked directory, so a project holding one reads Unverifiable until that
+directory is committed or removed. A listing at its cap or an unknown Git state
+is Unverifiable, never Fresh. Git facts come
 from a read-only `observe` creator bridge operation over
 `vivary_core.workspace_observe`, gated like `context` and reported relative to
 the project folder. If the project folder and its checkout root resolve to
@@ -673,6 +685,17 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
+test records that an untracked directory leaves the Git state unknown, so an
+edit inside it reads Unverifiable, never Fresh. Save records the Prepare-time
+project version and refuses a reply the conversation continued past, so neither
+a change during the reply nor later turns read Fresh. Reply text can no longer
+recreate a block marker, because comment stripping repeats until stable and
+also removes `--!>`. Retry is offered only after a failed write. An update
+moves the block back to the end. The end of a Code run rechecks freshness, and
+a stale Prepare result is not submitted to another conversation. The Prepare
+handoff section above records the changed behavior.
 
 2026-10-17 Site TOML parser update. The documentation site's lockfile moves
 `smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is

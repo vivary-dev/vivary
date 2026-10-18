@@ -55,6 +55,13 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     };
   }, [key, query.refetch]);
 
+  // Code reports its run state only through `disabled`. A run that ends is a conversation update.
+  const wasDisabled = useRef(disabled);
+  useEffect(() => {
+    if (wasDisabled.current && !disabled) void query.refetch();
+    wasDisabled.current = disabled;
+  }, [disabled, query.refetch]);
+
   async function act(work: () => Promise<void>) {
     if (busy || !ready) return;
     const generation = visit.current;
@@ -66,7 +73,10 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     }
   }
   const prepare = () => act(async () => {
+    const generation = visit.current;
     const result = await call<HandoffPrepareResult>("vivary-handoff-prepare", { projectId, conversation });
+    // Native submits to whichever chat is open now. Another conversation must not receive this request.
+    if (generation !== visit.current) return;
     if (!("code" in result)) { setNotice({ text: result.message }); return; }
     if (!await submit(result.message)) setNotice({ text: "The handoff request was not delivered to this conversation. Prepare handoff again." });
   });
@@ -105,7 +115,7 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     <div className="flex flex-wrap gap-2">
       {status.status === "pending" && here(status.conversation)
         && <Button size="sm" variant="outline" disabled={busy || !ready} onClick={() => void save(status.requestId)}>Save handoff</Button>}
-      {status.status === "failed" && here(status.conversation)
+      {status.status === "failed" && status.retryable && here(status.conversation)
         && <Button size="sm" variant="outline" disabled={busy || !ready} onClick={() => void save(status.requestId)}>Retry</Button>}
       <Button size="sm" variant="ghost" disabled={blocked} onClick={() => void prepare()}>
         {covered ? "Update handoff" : "Prepare handoff"}</Button>

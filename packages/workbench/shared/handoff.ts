@@ -44,7 +44,8 @@ export type HandoffFreshness =
   | { status: "none"; path: string }
   | HandoffUnavailable
   | { status: "pending"; requestId: string; conversation: ConversationReference; covered: HandoffRecord | null }
-  | { status: "failed"; requestId: string; conversation: ConversationReference; message: string; covered: HandoffRecord | null }
+  /** `retryable` is true only when saving the same request again can succeed, as after a failed write. */
+  | { status: "failed"; requestId: string; conversation: ConversationReference; message: string; retryable: boolean; covered: HandoffRecord | null }
   | { status: "fresh" | "out-of-date" | "unverifiable"; covered: HandoffRecord; reasons: StaleReason[] };
 export type HandoffInput = { projectId: string; conversation: ConversationReference };
 export type HandoffPrepareResult = { code: "prepared"; requestId: string; facts: HandoffFacts; message: string } | HandoffUnavailable;

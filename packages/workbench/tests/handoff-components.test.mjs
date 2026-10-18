@@ -140,12 +140,44 @@ test("Out of date names the reasons", async () => {
 
 test("a failed save keeps the previous version, shows no fresh status, and Retry saves the same request", async () => {
   handoffFixture.status = { status: "failed", requestId: "req-1", conversation: { kind: "code", id: "run-a" },
-    message: "Vivary could not write STATE.md. The previous version of STATE.md is kept.", covered };
+    message: "Vivary could not write STATE.md. The previous version of STATE.md is kept.", retryable: true, covered };
   await render(); await settle();
   assert.match(host.textContent, /Handoff not saved[\s\S]*previous version of STATE\.md is kept/);
   assert.doesNotMatch(host.textContent, /is fresh/);
   await click("Retry");
   assert.equal(handoffFixture.calls.find(call => call.name === "vivary-handoff-save").input.requestId, "req-1");
+});
+
+test("a Code run that ends rechecks freshness", async () => {
+  await render({ disabled: true }); await settle();
+  const checks = () => handoffFixture.calls.filter(call => call.name === "vivary-handoff-freshness").length;
+  const before = checks();
+  await render({ disabled: false }); await settle();
+  assert.ok(checks() > before, "the end of the run is a conversation update");
+  assert.deepEqual(handoffFixture.submitted, []);
+});
+
+test("a Prepare that returns after the owner opened another conversation sends nothing", async () => {
+  handoffFixture.status = { status: "none", path: "STATE.md" };
+  let finish;
+  const answer = handoffFixture.call;
+  handoffFixture.call = (name, input) => name === "vivary-handoff-prepare"
+    ? new Promise(resolve => { finish = () => resolve(answer(name, input)); })
+    : answer(name, input);
+  await render({ conversation: { kind: "native", id: "thread-a" } }); await settle();
+  await act(async () => button("Prepare handoff").click());
+  await render({ conversation: { kind: "native", id: "thread-b" } }); await settle();
+  await act(async () => finish()); await settle();
+  assert.deepEqual(handoffFixture.submitted, [], "the request is not delivered to the newly selected conversation");
+});
+
+test("a conflict that the same request can never save offers Update handoff, not Retry", async () => {
+  handoffFixture.status = { status: "failed", requestId: "req-1", conversation: { kind: "code", id: "run-a" },
+    message: "STATE.md changed after Prepare. Its current text is kept. Prepare the handoff again.", retryable: false, covered };
+  await render(); await settle();
+  assert.match(host.textContent, /Prepare the handoff again/);
+  assert.equal(button("Retry"), undefined);
+  assert.ok(button("Update handoff"));
 });
 
 test("an unavailable state document explains why and offers no Prepare", async () => {

@@ -266,6 +266,22 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.deepEqual(await freshness(), { status: "out-of-date", reasons: ["files-changed", "tree-changed"] });
     await unlink(path.join(projectRoot, "new.txt"));
 
+    // Git lists a new untracked directory as one entry, which the observer refuses. The Git state
+    // is then unknown, so an edit inside that directory can never read Fresh.
+    await mkdir(path.join(projectRoot, "drafts", "deep"), { recursive: true });
+    await writeFile(path.join(projectRoot, "drafts", "deep", "guide.md"), "first draft\n");
+    try {
+      const request = await prepared();
+      assert.equal(request.facts.project.dirty, null);
+      deliver(request.message, fenced(proposal(request.requestId)));
+      assert.equal((await handoff.save(actor, { ...input, requestId: request.requestId })).code, "saved");
+      assert.deepEqual(await freshness(), { status: "unverifiable", reasons: [] });
+      await appendFile(path.join(projectRoot, "drafts", "deep", "guide.md"), "a much longer second draft\n");
+      assert.deepEqual(await freshness(), { status: "unverifiable", reasons: [] });
+    } finally {
+      await rm(path.join(projectRoot, "drafts"), { recursive: true });
+    }
+
     // Without Git, the listed files carry the version.
     await rename(path.join(projectRoot, ".git"), path.join(root, "git-away"));
     try {
@@ -290,6 +306,8 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.equal(await readFile(statePath, "utf8"), external);
     const failed = await handoff.freshness(actor, input);
     assert.equal(failed.status, "failed");
+    // The same request can never pass this check again, so Retry is not offered.
+    assert.equal("retryable" in failed && failed.retryable, false);
 
     const rebound = await prepared();
     deliver(rebound.message, fenced(proposal(rebound.requestId)));
@@ -317,11 +335,61 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.deepEqual(JSON.parse((await row())[0]).saved, covered);
     const status = await handoff.freshness(actor, input);
     assert.equal(status.status, "failed");
+    assert.equal("retryable" in status && status.retryable, true);
     assert.match(JSON.stringify(status), /previous version/i);
     const retried = await handoff.save(actor, { ...input, requestId: request.requestId });
     assert.equal(retried.code, "saved");
     assert.match(await readFile(statePath, "utf8"), /Second version/);
     assert.deepEqual(await freshness(), { status: "fresh", reasons: [] });
+  });
+
+  await t.test("Save refuses a reply the conversation continued past, so the facts end where the narrative ends", async () => {
+    await saveHandoff();
+    const bytes = await readFile(statePath);
+    const request = await prepared();
+    deliver(request.message, fenced(proposal(request.requestId)));
+    deliver("Also rename the queue table", "Renamed it.");
+    const result = await handoff.save(actor, { ...input, requestId: request.requestId });
+    assert.equal(result.code, "refused", JSON.stringify(result));
+    assert.match(JSON.stringify(result), /continued after the handoff reply/);
+    assert.deepEqual(await readFile(statePath), bytes);
+    assert.equal((await handoff.freshness(actor, input)).status, "pending");
+  });
+
+  await t.test("a project change between Prepare and Save is saved as the Prepare version, so it reads Out of date", async () => {
+    await saveHandoff();
+    const request = await prepared();
+    await appendFile(path.join(projectRoot, "dirty.txt"), "changed while the agent replied\n");
+    deliver(request.message, fenced(proposal(request.requestId)));
+    const saved = await handoff.save(actor, { ...input, requestId: request.requestId });
+    assert.equal(saved.code, "saved", JSON.stringify(saved));
+    assert.deepEqual("record" in saved && saved.record.facts.project, request.facts.project);
+    assert.deepEqual(await freshness(), { status: "out-of-date", reasons: ["files-changed"] });
+  });
+
+  await t.test("an update after text was added below the handoff moves the block to the end and keeps that text", async () => {
+    await saveHandoff();
+    await appendFile(statePath, "Manual note below the handoff\n");
+    await saveHandoff();
+    const text = await readFile(statePath, "utf8");
+    assert.equal(text.split("<!-- vivary:handoff -->").length - 1, 1);
+    assert.ok(text.endsWith("<!-- /vivary:handoff -->\n"), "the handoff is last");
+    assert.ok(text.indexOf("Manual note below the handoff") < text.indexOf("<!-- vivary:handoff -->"));
+  });
+
+  await t.test("reply text cannot recreate the handoff markers, so a later Save still works", async () => {
+    await saveHandoff();
+    const request = await prepared();
+    const smuggled = proposal(request.requestId, { goal: "Close <<!--!-- /vivary:handoff ---->> early",
+      decisions: ["Open <<!--!-- vivary:handoff ---->> again", "End a comment --!> here"] });
+    deliver(request.message, fenced(smuggled));
+    const saved = await handoff.save(actor, { ...input, requestId: request.requestId });
+    assert.equal(saved.code, "saved", JSON.stringify(saved));
+    const text = await readFile(statePath, "utf8");
+    assert.equal(text.split("<!--").length - 1, 2, "only the two markers open a comment");
+    assert.equal(text.split("-->").length - 1, 2, "only the two markers close a comment");
+    assert.doesNotMatch(text, /--!>/);
+    await saveHandoff();
   });
 
   await t.test("no designated state document refuses Prepare with a clear message", async () => {

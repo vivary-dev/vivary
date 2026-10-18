@@ -57,6 +57,10 @@ const requestSchema = z.strictObject({
   requestId: z.string().uuid(), conversation: conversationReferenceSchema, documentVersion: z.string(),
   project: z.custom<ProjectFileIdentity>(value => typeof value === "object" && value !== null),
   state: z.enum(["pending", "failed"]), message: z.string().nullable(),
+  /** A failed write can succeed for the same request. A conflict or damaged marker cannot. */
+  retryable: z.boolean().optional(),
+  /** The project version observed at Prepare, which the agent's reply describes. */
+  version: z.custom<ProjectVersion>(value => typeof value === "object" && value !== null).optional(),
 });
 const rowSchema = z.strictObject({
   version: z.literal(1), owner: z.string(), orgId: z.string(), projectId: z.string(), bindingId: z.string(), path: z.string(),
@@ -67,8 +71,14 @@ type Row = z.infer<typeof rowSchema>;
 
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sameReference = (left: ConversationReference, right: ConversationReference) => left.kind === right.kind && left.id === right.id;
-// Model text never closes the marked block or spans lines in a list item.
-const clean = (value: string) => value.replace(/<!--|-->/g, "").replace(/\s+/g, " ").trim();
+// Model text never opens or closes an HTML comment, so it cannot recreate a block
+// marker, and never spans lines in a list item. Stripping repeats because one
+// pass can join the leftover characters into a new marker.
+function clean(value: string): string {
+  let text = value, previous;
+  do { previous = text; text = text.replace(/<!--|--!?>/g, ""); } while (text !== previous);
+  return text.replace(/\s+/g, " ").trim();
+}
 
 function unavailable(document: Exclude<StateDocument, { status: "ready" }>): HandoffUnavailable {
   const file = document.path ?? "STATE.md";
@@ -111,16 +121,21 @@ function requestMessage(requestId: string, file: string, project: ProjectVersion
   ].join("\n");
 }
 
-/** The completed agent text after the request, up to the next user message. */
-function replyTo(history: HistoryItem[], requestId: string): string | null {
+/**
+ * The completed agent text after the request, up to the next user message.
+ * `continued` means a later user message follows, so the completed history
+ * already holds work the reply does not describe.
+ */
+function replyTo(history: HistoryItem[], requestId: string): { text: string; continued: boolean } | null {
   const index = history.findIndex(item => item.role === "User" && item.text.includes(REQUEST_MARKER + requestId));
   if (index < 0) return null;
   const reply: string[] = [];
+  let continued = false;
   for (const item of history.slice(index + 1)) {
-    if (item.role === "User") break;
+    if (item.role === "User") { continued = true; break; }
     if (item.role === "Assistant") reply.push(item.text);
   }
-  return reply.length ? reply.join("\n\n") : null;
+  return reply.length ? { text: reply.join("\n\n"), continued } : null;
 }
 
 function proposalFrom(reply: string, requestId: string, history: HistoryItem[]): { proposal: HandoffProposal } | { problems: string[] } {
@@ -162,13 +177,24 @@ function renderBlock(record: HandoffRecord): string {
     BLOCK_END].join("\n");
 }
 
-/** Replace the one marked block, or append it at the end. Every other byte stays. null means damaged markers. */
+const appendBlock = (content: string, block: string) =>
+  content + (content === "" ? "" : content.endsWith("\n") ? "\n" : "\n\n") + block + "\n";
+
+/**
+ * Keep the one marked block at the end of the document. A block that is
+ * already last is replaced in place. When text was added after it, the old
+ * block and the line break that ended it are removed, that text stays where it
+ * is, and the new block is appended. Every other byte stays. null means
+ * damaged markers.
+ */
 function placeBlock(content: string, block: string): string | null {
   const starts = content.split(BLOCK_START).length - 1, ends = content.split(BLOCK_END).length - 1;
-  if (!starts && !ends) return content + (content === "" ? "" : content.endsWith("\n") ? "\n" : "\n\n") + block + "\n";
+  if (!starts && !ends) return appendBlock(content, block);
   const start = content.indexOf(BLOCK_START), end = content.indexOf(BLOCK_END);
   if (starts !== 1 || ends !== 1 || end < start) return null;
-  return content.slice(0, start) + block + content.slice(end + BLOCK_END.length);
+  const before = content.slice(0, start), after = content.slice(end + BLOCK_END.length);
+  if (after.trim() === "") return before + block + after;
+  return appendBlock(before + after.replace(/^\r?\n/, ""), block);
 }
 
 function compareProject(saved: ProjectVersion, current: ProjectVersion): { reasons: StaleReason[]; verifiable: boolean } {
@@ -221,6 +247,8 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       const entries = observed.entries.filter(entry => entry.path !== document.path)
         .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
       // Metadata only. A changed size or modified time of an already-dirty file is a new version.
+      // The observer refuses a directory entry, such as Git's single entry for a new untracked
+      // directory, so a project holding one has no entries here and reads Unverifiable, never Fresh.
       const files = await Promise.all(entries.map(async entry => {
         const info = await lstat(path.join(document.workspace.root, entry.path)).catch(() => null);
         return [entry.path, info ? [info.size, info.mtimeMs] : null];
@@ -260,7 +288,7 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       await writeRow({ version: 1, owner: identity.owner, orgId: identity.orgId, projectId: document.project.projectId,
         bindingId: document.project.bindingId, path: document.path, saved: existing?.saved ?? null,
         request: { requestId, conversation: input.conversation, documentVersion: document.file.version, project: document.project,
-          state: "pending", message: null } });
+          state: "pending", message: null, version: project } });
       return { code: "prepared", requestId, facts, message: requestMessage(requestId, document.path, project, prefix.items) };
     },
 
@@ -268,7 +296,8 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
      * Validate the agent's completed reply from the conversation itself, then
      * write through the file owner. A refused reply changes nothing. A conflict
      * or failed write keeps the previous file and record and marks the request
-     * failed, so Retry can save the same reply again.
+     * failed. Only a failed write is retryable, so Retry can save the same reply
+     * again. A conflict needs a new Prepare.
      */
     async save(context: ActionRunContext | undefined, input: HandoffSaveInput): Promise<HandoffSaveResult> {
       const { identity, record, document } = await open(context, input);
@@ -280,10 +309,12 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       const prefix = await conversations.completedPrefix(input.conversation, record);
       const reply = replyTo(prefix.items, request.requestId);
       if (reply === null) return { code: "refused", problems: ["The agent has not finished replying to this handoff request in this conversation. Wait for its reply, then click Save handoff."] };
-      const validated = proposalFrom(reply, request.requestId, prefix.items);
+      // The recorded boundary is the latest completed event, so it must be the reply's own turn.
+      if (reply.continued) return { code: "refused", problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
+      const validated = proposalFrom(reply.text, request.requestId, prefix.items);
       if ("problems" in validated) return { code: "refused", problems: validated.problems };
-      const failed = async <T extends HandoffSaveResult & { message: string }>(result: T): Promise<T> => {
-        await writeRow({ ...row, request: { ...request, state: "failed", message: result.message } });
+      const failed = async <T extends HandoffSaveResult & { message: string }>(result: T, retryable = false): Promise<T> => {
+        await writeRow({ ...row, request: { ...request, state: "failed", message: result.message, retryable } });
         return result;
       };
       const kept = `The previous version of ${document.path} is kept.`;
@@ -294,7 +325,8 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       }[reason] });
       if (!sameProject(request.project, document.project)) return conflict("project-changed");
       if (document.file.version !== request.documentVersion) return conflict("changed");
-      const project = await projectVersion(context, document);
+      // A change while the agent replied is not in its narrative, so freshness reports it.
+      const project = request.version ?? await projectVersion(context, document);
       await refreshHeldCredentials();
       const proposal = redactCredentialsInValue(validated.proposal) as HandoffProposal;
       const facts: HandoffFacts = { requestId: request.requestId, path: document.path, documentVersion: request.documentVersion, project,
@@ -309,7 +341,7 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
         result = await dependencies.files.save(context, { projectId: document.project.projectId, path: document.path,
           expectedVersion: request.documentVersion, content, expectedProject: request.project });
       } catch {
-        return failed({ code: "failed" as const, message: `Vivary could not write ${document.path}. ${kept}` });
+        return failed({ code: "failed" as const, message: `Vivary could not write ${document.path}. ${kept}` }, true);
       }
       if (result.code === "conflict") return conflict(result.reason);
       const saved: HandoffRecord = { ...proposal, facts, savedVersion: result.file.version, savedAt };
@@ -323,7 +355,8 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       if (document.status !== "ready") return unavailable(document);
       const row = await readRow(document, identity.owner, identity.orgId);
       if (row?.request?.state === "failed") return { status: "failed", requestId: row.request.requestId,
-        conversation: row.request.conversation, message: row.request.message ?? "The handoff was not saved.", covered: row.saved };
+        conversation: row.request.conversation, message: row.request.message ?? "The handoff was not saved.",
+        retryable: row.request.retryable === true, covered: row.saved };
       if (row?.request) return { status: "pending", requestId: row.request.requestId, conversation: row.request.conversation, covered: row.saved };
       if (!row?.saved) return { status: "none", path: document.path };
       const covered = row.saved;
