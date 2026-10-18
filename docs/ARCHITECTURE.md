@@ -651,6 +651,11 @@ tables intact. The optional adapter and passive probe retain their existing owne
 and read-only boundary. Final integrated CI, wheel smokes, review and owner release
 approval remain separate requirements.
 
+The changelog's CLI release-status reference uses an absolute repository URL.
+The site generator preserves that URL and its existing `release-status` fragment,
+avoiding a relative `docs/` path under the generated changelog route. This corrects
+documentation navigation; runtime behavior and the release status are unchanged.
+
 2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
 `vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
 `mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries

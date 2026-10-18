@@ -40,7 +40,7 @@ On Python 3.12.14, the focused source checks passed:
 These exercise the real metadata probe with installed-distribution fixtures.
 Official-SDK wire tests and Linux/Windows offline wheel smokes remain required
 on the final integrated candidate. No registry installation or desktop acceptance
-is established by these source checks. The [CLI release status](docs/ORIGINAL-CLI.md#release-status)
+is established by these source checks. The [CLI release status](https://github.com/vivary-dev/vivary/blob/dev/docs/ORIGINAL-CLI.md#release-status)
 preserves the dated published-version tables and the latest availability check.
 
 ## [Windows prerelease 9884670] - 2026-09-22
