@@ -71,6 +71,18 @@ The creator requires Tropo 0.5.5, and the meta-package requires the matching
 creator and Tropo versions. Build the local wheel set to exercise this composition.
 Registry installation does not provide these source-only repairs.
 
+Development source also stages optional **vivary-mcp 0.1.4**, unpublished, with
+the exact SDK pin `mcp==2.2.0`. The staged **create-vivary 0.4.4** includes Doctor's
+matching check against the installed adapter's declared exact SDK pin. It recognizes
+both published vivary-mcp 0.1.3 with `mcp==2.0.0` and staged 0.1.4 with
+`mcp==2.2.0`, and reports mismatched or invalid declarations as incompatible.
+This changes no registry artifact or desktop release status.
+
+Registry metadata rechecked on **2026-10-18** still reports vivary-mcp 0.1.3,
+create-vivary 0.4.3 on PyPI, and @vivary/create 0.4.2 on npm. vivary-mcp 0.1.4 and
+both creator 0.4.4 artifacts are absent. These are availability checks, not new
+installation verification; the dated registry tables remain unchanged.
+
 [CHANGELOG.md](../CHANGELOG.md) records the train and the exact smokes that verified it,
 without rewriting earlier independent-version history.
 [Migration status](MIGRATION-STATUS.md) owns maturity classifications.

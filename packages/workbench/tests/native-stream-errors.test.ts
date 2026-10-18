@@ -31,8 +31,9 @@ after(async () => {
 
 const coreRoot = await realpath(new URL("../node_modules/@agent-native/core", import.meta.url));
 const load = (relative: string) => import(pathToFileURL(path.join(coreRoot, "dist", relative)).href);
-const [audit, runs, agent, threads, translate] = await Promise.all([load("audit/redact.js"), load("agent/run-manager.js"),
-  load("agent/production-agent.js"), load("agent/thread-data-builder.js"), load("agent/engine/translate-ai-sdk.js")]);
+const [audit, runs, agent, threads, translate, errorDetail] = await Promise.all([load("audit/redact.js"), load("agent/run-manager.js"),
+  load("agent/production-agent.js"), load("agent/thread-data-builder.js"), load("agent/engine/translate-ai-sdk.js"),
+  load("agent/engine/error-detail.js")]);
 const { defineAction } = await import("@agent-native/core/action");
 const { createAISDKEngine } = await import("@agent-native/core/agent/engine");
 const { actionsToEngineTools, loadActionsFromStaticRegistry, runAgentLoop, runWithRequestContext } =
@@ -41,8 +42,12 @@ const { heldCredentialHoldback, redactCredentials, refreshHeldCredentials } = aw
 
 audit.setTextRedactor?.(redactCredentials, { holdback: () => heldCredentialHoldback?.() ?? 256 });
 const generated: string[] = [];
+// A random value can spell a word the provider error classifier matches, such as "ssl" or "tls1",
+// which turns a stream error into a retried network error. Draw again until it matches nothing.
 const synthetic = (length = 40) => {
-  const value = randomBytes(length * 2).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, length - 2) + "4k";
+  let value;
+  do value = randomBytes(length * 2).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, length - 2) + "4k";
+  while (errorDetail.classifyTerminalErrorCode(value) !== undefined);
   generated.push(value);
   return value;
 };

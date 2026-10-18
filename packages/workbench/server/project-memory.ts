@@ -576,6 +576,15 @@ function warn(message: string): void {
 
 // Service ---------------------------------------------------------------------
 
+/**
+ * The designated state document that Prepare handoff writes to. Only a thin
+ * workspace names one, through its engine `state` role.
+ */
+export type StateDocument =
+  | { status: "ready"; workspace: LocalProjectWorkspace; project: ProjectFileIdentity; path: string; file: ProjectFile }
+  | { status: "unavailable"; reason: "no-state-role" | "state-missing" | "state-private" | "settings-unavailable"; path: string | null }
+  | { status: "unavailable"; reason: "state-uneditable"; path: string; blockedReason: "too-large" | "binary" | "linked" | "unsupported" | "unreadable" };
+
 type Dependencies = {
   resolveWorkspace: (context: ActionRunContext | undefined, projectId: string) => Promise<LocalProjectWorkspace>;
   /** The creator bridge `context` operation for an admitted project, optionally checking files about to be created. */
@@ -950,6 +959,32 @@ export function createProjectMemory(overrides: Partial<Dependencies> = {}) {
       // Native chat and Code runs send this block to a model, so held values and key patterns are redacted.
       const block = redactCredentials(render(surface)) as ProjectContextBlock;
       return { block, revision, summary: summary(revision), factCount };
+    },
+
+    /**
+     * The state document for Prepare handoff, admitted like the context
+     * block's state file: a protected, boundary, or ignored path is refused.
+     */
+    async stateDocument(context: ActionRunContext | undefined, projectId: string): Promise<StateDocument> {
+      const workspace = await dependencies.resolveWorkspace(context, projectId);
+      const { settings } = await loadSettings(workspace);
+      if (settings.status === "unavailable" || settings.status === "invalid") {
+        return { status: "unavailable", reason: "settings-unavailable", path: null };
+      }
+      if (settings.status !== "thin") return { status: "unavailable", reason: "no-state-role", path: null };
+      const statePath = settings.state;
+      if (locationProblem(statePath, refusedPaths(settings)) || includesPath(settings.privacy.privateFiles, statePath)) {
+        return { status: "unavailable", reason: "state-private", path: statePath };
+      }
+      const project = projectIdentity(workspace);
+      try {
+        const inspected = await inspectEditableFile(workspace.root, statePath, project);
+        if (!inspected) return { status: "unavailable", reason: "state-missing", path: statePath };
+        return inspected.file ? { status: "ready", workspace, project, path: statePath, file: inspected.file }
+          : { status: "unavailable", reason: "state-uneditable", path: statePath, blockedReason: inspected.reason };
+      } catch {
+        return { status: "unavailable", reason: "state-uneditable", path: statePath, blockedReason: "unreadable" };
+      }
     },
 
     /** Remember, for the panel, that a sent message used this load. Kept in memory only, per binding. */

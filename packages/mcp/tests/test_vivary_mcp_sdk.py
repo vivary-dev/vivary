@@ -1,4 +1,4 @@
-"""Async wire regressions against the official MCP 2.0.0 SDK."""
+"""Async wire regressions against the official MCP 2.2.0 SDK."""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ try:
     _MCP_DISTRIBUTION = distribution("mcp")
     _MCP_TYPES_DISTRIBUTION = distribution("mcp-types")
 except PackageNotFoundError:
-    pytest.skip("official mcp==2.0.0 and mcp-types==2.0.0 are required", allow_module_level=True)
+    pytest.skip("official mcp==2.2.0 and mcp-types==2.2.0 are required", allow_module_level=True)
 
-if _MCP_DISTRIBUTION.version != "2.0.0" or _MCP_TYPES_DISTRIBUTION.version != "2.0.0":
-    pytest.skip("official mcp==2.0.0 and mcp-types==2.0.0 are required", allow_module_level=True)
+if _MCP_DISTRIBUTION.version != "2.2.0" or _MCP_TYPES_DISTRIBUTION.version != "2.2.0":
+    pytest.skip("official mcp==2.2.0 and mcp-types==2.2.0 are required", allow_module_level=True)
 
-mcp = pytest.importorskip("mcp", reason="official mcp==2.0.0 is required")
-types = pytest.importorskip("mcp.types", reason="official mcp==2.0.0 types are required")
-mcp_types = pytest.importorskip("mcp_types", reason="official mcp-types==2.0.0 is required")
+mcp = pytest.importorskip("mcp", reason="official mcp==2.2.0 is required")
+types = pytest.importorskip("mcp.types", reason="official mcp==2.2.0 types are required")
+mcp_types = pytest.importorskip("mcp_types", reason="official mcp-types==2.2.0 is required")
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
@@ -146,8 +146,8 @@ def anyio_backend() -> str:
 
 
 def test_official_sdk_distributions_are_exactly_pinned() -> None:
-    assert _MCP_DISTRIBUTION.version == "2.0.0"
-    assert _MCP_TYPES_DISTRIBUTION.version == "2.0.0"
+    assert _MCP_DISTRIBUTION.version == "2.2.0"
+    assert _MCP_TYPES_DISTRIBUTION.version == "2.2.0"
 
 
 @pytest.mark.anyio

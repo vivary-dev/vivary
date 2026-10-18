@@ -52,6 +52,12 @@ export function readWorkspaceContext(
   dependencies?: Record<string, unknown>,
 ): Promise<import("../app/lib/project-memory-schema").WorkspaceContextPaths>;
 
+export function observeProjectVersion(
+  workspace: { projectId: string; root: string },
+  dependencies?: Record<string, unknown>,
+): Promise<{ kind: "plain" } | { kind: "unknown" }
+  | { kind: "git"; head: string | null; ref: string | null; entries: Array<{ path: string; state: string }> | null }>;
+
 export function installedPatternCatalog(
   context: ActionRunContext | undefined,
   dependencies?: Record<string, unknown>,

@@ -207,6 +207,32 @@ Proposed handoff fields: goal, current source/file versions, decisions, changes,
 
 Freshness is explicit. A reviewed handoff records the project version and completed-event boundary it covers. Later changes can mark it Out of date deterministically. Jeff accepted **Manual by default** on 2026-09-14 through his submitted review of guide snapshot `e86d06ed592a2d3c`. The agent updates the narrative when the user requests it, and the work follows normal authorization. A failed update retains the previous readable version and shows Retry. It does not report a fresh handoff. A future project may propose named completion checkpoints through a separate explicit opt-in.
 
+Implementation status, 2026-10-18: a first unit is implemented in PR #236.
+Jeff decided three details on 2026-10-16. Save happens only on a second owner click, **Save handoff**. A project with
+no designated state document, such as a plain workspace or one without its
+`STATE.md`, refuses Prepare with a message that says so. The handoff block goes
+at the end of `STATE.md`, so the first 1,200 characters that load into each
+turn stay as they were.
+
+**Prepare handoff** in a saved project conversation sends a request to that
+conversation. The agent replies with one `vivary-handoff` block, and Vivary
+writes nothing until the owner clicks **Save handoff**. Vivary then checks the
+reply, adds the project version and conversation boundary itself, and replaces
+or appends one marked block in the state document. Every other byte stays. A
+dirty working tree is reported as a count. A changed file or a changed project
+binding stops the save and leaves the file as it is. If the write fails, Vivary
+rereads the state document and offers Retry only when it still holds the
+version from Prepare. Otherwise, and when the save record cannot be stored,
+Vivary reports that the file may have changed, and the owner inspects it and
+prepares again. A conflict needs a new Prepare, offered as **Update handoff**. The
+control then reads Fresh, Out of date with its reasons, Unverifiable, Pending
+or Failed. Freshness is checked when the conversation updates, with no timer
+and no model call. Switching harness does not prepare or send anything.
+
+The maintained `test:handoff` target covers these rules with production stores.
+Independent review, the built normal-app journey with a real agent in Code and
+Native, and Windows acceptance remain required.
+
 ## Template distribution
 
 Templates start as an offline baseline. A later optional community collection can use the existing vivary-site to point at source GitHub repositories and downloads. Show a preview before apply. A download remains inert until a separately authorized operation applies it. This is not a marketplace or a separate template site.
@@ -270,7 +296,7 @@ Each implementation unit gets focused checks and affected real hosted verificati
 | Open an existing project | One workspace appears; metadata is compact and no file opens automatically. |
 | Open a previous conversation | Existing history, harness identity and unsent draft remain intact. No duplicate session. |
 | Start another conversation in the same project | The new chat has separate history, bounded context and draft state. The earlier conversation remains available. |
-| Inspect potentially concurrent work | Each thread has visible activity and approvals. Conflicting edits to shared files are controlled. Until concurrency lands, the interface states that only one run can be active. |
+| Inspect potentially concurrent work | Deferred to issue #228. This release accepts the interim row: the interface states that only one run can be active and offers Open. |
 | Open a file, edit, close and reopen | Formatted read view first; explicit edits and recoverable draft survive. Composer and run are unchanged. |
 | Resize and close panels | Pointer and keyboard work; focus returns; minimum chat space and remembered widths remain usable. |
 | Use a 390 px viewport and 200% zoom | Navigation, composer, context, approval and Stop remain reachable without crushed columns. |
