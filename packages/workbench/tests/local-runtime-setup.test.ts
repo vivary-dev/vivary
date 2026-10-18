@@ -302,15 +302,15 @@ it("review regression: signed-out installations retain known model compatibility
 // These cases pass Windows semantics to the lookup, so they exercise the same branches on every host.
 describe("Windows runtime lookup", () => {
   const runtimes = {
-    "codex-cli": { command: "codex", scope: "@openai", name: "codex", entry: ["bin", "codex.js"], version: "0.162.1" },
+    "codex-cli": { command: "codex", scope: "@openai", name: "codex", entry: ["bin", "codex.js"], version: "9.8.7" },
     "claude-cli": { command: "claude", scope: "@anthropic-ai", name: "claude-code", entry: ["cli.js"], version: "2.1.296" },
   } as const;
   type Engine = keyof typeof runtimes;
   const engines = Object.keys(runtimes) as Engine[];
-  const hash = "7f64-1a131ba9f87";
+  const hash = "0000-fixture";
   const placeholder = "throw new Error('Must not run');";
 
-  // pnpm's generated shim in the owner's layout. Its first quoted argument is node.exe.
+  // pnpm's generated Windows shim. Its first quoted argument is node.exe.
   function pnpmShim(...targets: string[]): string {
     const [first, second = first] = targets;
     return ["@SETLOCAL", '@IF EXIST "%~dp0\\node.exe" (', `  "%~dp0\\node.exe"  "%~dp0\\${first}" %*`, ") ELSE (",
@@ -362,9 +362,9 @@ describe("Windows runtime lookup", () => {
     return { dir, entry };
   }
 
-  // A package with no launcher beside it, like the copy left in the owner's `C:\nvm4w\nodejs`.
+  // A package left behind with no launcher beside it.
   async function bareEntry(root: string, engine: Engine) {
-    const dir = path.join(root, "nvm4w", "nodejs");
+    const dir = path.join(root, "leftover", "node");
     return { dir, entry: await writePackage(path.join(dir, "node_modules", runtimes[engine].scope, runtimes[engine].name), engine) };
   }
 
