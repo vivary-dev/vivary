@@ -631,6 +631,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Handoff note on a branch that is not for merging.
+`HANDOFF-CODEX-CLOUD-20261018.md` records release state for the next owner. It
+changes no source, configuration or product behavior, so the design description
+holds.
+
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
 `vivary.exe`. The icon is a multi-size copy of the site mark. The executable
