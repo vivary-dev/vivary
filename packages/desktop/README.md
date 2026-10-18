@@ -284,3 +284,49 @@ normal exit and exit after a failed fetch, including the Windows shutdown failur
 fixed by [Node #61999](https://github.com/nodejs/node/pull/61999). Each child has a
 cleared environment and a bounded timeout. Passing does not establish native
 desktop acceptance.
+
+## Windows installer
+
+`build-installer.mjs` wraps a packaged `Vivary-win32-x64` folder in a per-user
+Windows installer. It uses [NSIS 3](https://nsis.sourceforge.io/Docs/) through
+`makensis`, which it takes from the `MAKENSIS` environment variable or from `PATH`.
+It stops when neither has it. When `makensis` was extracted rather than installed,
+set `NSISDIR` to its data folder (the one holding `Include`, `Plugins`, and `Stubs`).
+
+```console
+npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe
+```
+
+The script reads the version and source commit from the payload's
+`resources/workbench/build.json`. It refuses a payload built from a modified
+checkout, a payload with links, and an existing output file. After `makensis`
+finishes, it counts the files `makensis` reported adding. It deletes the installer
+when that count differs from the payload. It writes `<output>.sha256` beside the
+installer in the same format as the ZIP companion.
+
+The installer script is `installer/vivary.nsi`. Its rules:
+
+- It runs as the current user, with no administrator prompt.
+- It installs to `%LOCALAPPDATA%\Programs\Vivary`. There is no folder choice,
+  and it ignores the `/D=` option, so the uninstaller always knows its folder.
+- It adds a Start menu shortcut, and a desktop shortcut when the finish page
+  checkbox is selected (off by default).
+- It registers Vivary under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary`
+  with version `<version>+<short commit>`, for example `0.0.0+2aaf04f`.
+- When Vivary or its bundled Node or Python is running, it asks the user to close
+  Vivary and offers Retry or Cancel. It never stops a process.
+- An upgrade replaces the previous application folder. It does so only after it
+  confirms that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`, is not a
+  link, and holds `vivary.exe` or the uninstaller.
+- The uninstaller makes the same exact-folder check before it removes that folder.
+  It removes the Start menu shortcut, the desktop shortcut only when setup made it,
+  and the uninstall entry.
+- Neither program reads, writes, or deletes `%USERPROFILE%\.vivary`,
+  `%APPDATA%\Vivary`, or any project folder.
+- `/S` runs the installer or the uninstaller silently. A running Vivary then
+  cancels the change instead of waiting.
+
+`tests/installer-script.test.mjs` checks these rules in the script source.
+`tests/installer-build.test.mjs` checks the argument validation, and builds a small
+fixture installer when `makensis` is available. It skips that build otherwise.
+The installer is not code signed.

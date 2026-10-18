@@ -5,27 +5,40 @@ It includes PR #78's desktop browser-link fix and the preceding application chan
 from the [GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22). The repository and download are public.
 The complete desktop and self-hosted web acceptance journey remains unfinished.
 
+Releases after this prerelease add a Windows installer, `Vivary-Setup-<commit>.exe`,
+as the main download. The 2026-09-22 prerelease has only the portable ZIP. The
+installer has not yet passed acceptance on Windows. See
+[Verification and known limits](#verification-and-known-limits).
+
 ## Download and verify
 
-Download `Vivary-windows-x64-9884670.zip` and its `.zip.sha256` companion from
-the release Assets list. The automatic Source code archives do not contain a
-ready-to-run desktop application.
+A release's Assets list holds the desktop downloads. Choose one:
 
-The ZIP is 236,072,825 bytes. Its SHA-256 must be:
+- `Vivary-Setup-<commit>.exe` is the installer. Use it unless you need a portable copy.
+- `Vivary-windows-x64-<commit>.zip` is the optional portable ZIP.
+
+Each download has a `.sha256` companion. Download both files. The automatic Source
+code archives hold the source only. They do not contain a ready-to-run desktop
+application.
+
+In PowerShell, from the download folder, compare the file with its companion.
+Replace the file name with the one you downloaded:
+
+```powershell
+$file = '.\Vivary-Setup-<commit>.exe'
+$expected = (Get-Content "$file.sha256").Split(' ')[0].Trim()
+$actual = (Get-FileHash $file -Algorithm SHA256).Hash
+if ($actual -ne $expected) { throw 'Vivary download checksum mismatch' }
+```
+
+The 2026-09-22 prerelease's ZIP is `Vivary-windows-x64-9884670.zip`.
+It is 236,072,825 bytes. Its SHA-256 must be:
 
 ```text
 e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0
 ```
 
-In PowerShell, from the download folder:
-
-```powershell
-$expected = (Get-Content .\Vivary-windows-x64-9884670.zip.sha256).Split(' ')[0].Trim()
-$actual = (Get-FileHash .\Vivary-windows-x64-9884670.zip -Algorithm SHA256).Hash
-if ($actual -ne $expected) { throw 'Vivary archive checksum mismatch' }
-```
-
-If you already use GitHub CLI, download the pinned assets with:
+If you already use GitHub CLI, download that prerelease's pinned assets with:
 
 ```console
 gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --pattern Vivary-windows-x64-9884670.zip --pattern Vivary-windows-x64-9884670.zip.sha256
@@ -33,15 +46,38 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
 
 ## Install and launch
 
+### With the installer
+
+1. Run `Vivary-Setup-<commit>.exe` after its checksum matches. The installer is
+   not code signed, so Windows can show **Windows protected your PC** with an
+   unknown publisher. Choose **More info**, then **Run anyway**.
+2. Setup needs no administrator rights. It installs Vivary for your Windows account
+   only, in `%LOCALAPPDATA%\Programs\Vivary`. You cannot choose another folder.
+3. Accept the license and wait for the files to copy.
+4. On the last page, **Launch Vivary** is selected. Select **Create a desktop
+   shortcut** if you want one. Then choose **Finish**.
+5. Open Vivary later from **Vivary** in the Start menu.
+
+To install without any window, run `Vivary-Setup-<commit>.exe /S`. A silent
+install does not start Vivary or create a desktop shortcut.
+
+### With the portable ZIP (optional)
+
 1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\9884670`.
 2. Keep all extracted files together. Do not move `Vivary.exe` out of `Vivary-win32-x64`.
 3. Open `Vivary-win32-x64\Vivary.exe` in File Explorer.
-4. Choose a project, use **Open folder**, or create a disposable project with **New project**.
-5. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
 
-There is no MSI or setup wizard in this release. Extraction is the installation
-step. The application bundles Node, Python, and the original Vivary runtime.
-It does not require a source checkout or a separate global Node or Python install.
+Extraction is the installation step for the ZIP. Use a short folder path, because
+Windows Explorer can reject a deeply nested destination before the application starts.
+
+### First launch
+
+1. Choose a project, use **Open folder**, or create a disposable project with **New project**.
+2. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
+
+Both downloads hold the same application. It bundles Node, Python, and the
+original Vivary runtime. It does not require a source checkout or a separate
+global Node or Python install.
 Clean-profile first-run acceptance remains open, so report missing-runtime errors.
 
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
@@ -49,16 +85,17 @@ provider access require their own supported installation and authentication.
 Vivary finds Codex and Claude Code when they are installed as an executable, or
 globally with npm or pnpm, in a directory on `PATH`. On Windows it prefers a copy
 with a launcher (`codex.exe` or `codex.cmd`) in PATH order, as a terminal does. It does
-not read `.com` or `.bat` wrappers, so a custom wrapper can lead it to a different copy
-than your terminal runs.
+not read `.com` or `.bat` wrappers. It also skips a `codex.cmd` or `claude.cmd` that
+names no recognized package entry and has no npm package beside it. So a custom
+wrapper can lead it to a different copy than your terminal runs.
 Use your existing runtime subscription, tools, skills, and configured connections.
 Bundling Vivary does not include model-provider credentials or paid service access.
 Later builds offer no Builder.io account or credits. To use Native chat, add your own
 provider key when the chat asks you to connect AI, or in Settings > Agent > LLM.
 
-The executable is unsigned. Windows may display an unknown-publisher warning.
-Verify the download before deciding whether to run it. Keep Defender enabled.
-No exclusion or file-association change is part of installation.
+The installer and the executable are not code signed. Windows may display an
+unknown-publisher warning. Verify the download before deciding whether to run it.
+Keep Defender enabled. No exclusion or file-association change is part of installation.
 
 ## Your data
 
@@ -67,6 +104,7 @@ This includes the database, run history, and managed projects. Electron stores
 window and browser state separately under `%APPDATA%\Vivary` on Windows.
 Existing folders registered with **Open folder** remain at their original paths.
 Coding runtimes keep credentials and their own session data in their supported locations.
+The installer and the uninstaller never read, change, or remove these locations.
 
 The desktop does not honor a caller-supplied `VIVARY_DATA_DIR` as a separate test
 profile. Do not use that variable to claim isolation from your existing profile.
@@ -77,9 +115,14 @@ Use disposable projects for preview testing.
 1. Finish or stop active work, then close Vivary normally.
 2. Copy `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary` to a private backup location.
 3. Back up registered external project folders separately if you need a complete recovery copy.
-4. Verify and extract the new ZIP into a separate versioned folder.
-5. Launch the new executable. Confirm your projects and saved conversations remain available.
-6. Keep the previous package until you accept the replacement.
+4. Verify the new download. With the installer, run the new `Vivary-Setup-<commit>.exe`.
+   It replaces the application files in `%LOCALAPPDATA%\Programs\Vivary` and keeps
+   your data. If Vivary is still running, setup asks you to close it and offers
+   **Retry** or **Cancel**. With the ZIP, extract it into a separate versioned folder.
+5. Launch Vivary. Confirm your projects and saved conversations remain available.
+6. With the ZIP, keep the previous package until you accept the replacement. The
+   installer keeps one version. To return to an earlier one, run that version's
+   installer, within the rollback limits below.
 
 Backups can contain credentials, private conversations, and project content.
 Keep them private. Never attach them to a GitHub issue or upload them as release assets.
@@ -90,9 +133,27 @@ the current profile before attempting recovery, and use a matching pre-upgrade
 backup when returning to an older package. Changes since that backup require
 separate preservation. This preview does not provide an automatic migration rollback.
 
-To remove only the portable application, close it and remove its extracted
-version folder. Keep the profile and registered project folders to preserve data.
-There is no uninstaller or automatic update mechanism in this artifact.
+Neither download updates itself. Run a newer installer or extract a newer ZIP to upgrade.
+
+## Uninstall
+
+To remove an installed Vivary, close it. Then open **Settings** > **Apps** >
+**Installed apps** (on Windows 10, **Apps & features**), find **Vivary**, and
+choose **Uninstall**. You can also run `Uninstall Vivary.exe` in
+`%LOCALAPPDATA%\Programs\Vivary`.
+
+The uninstaller removes the application folder, the Start menu shortcut, the
+desktop shortcut when setup created it, and the Installed apps entry. It keeps
+`%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, and every project folder, so your
+projects, conversations, and settings remain. Delete those folders yourself only
+if you also want to remove your data.
+
+To uninstall without any window, run
+`"%LOCALAPPDATA%\Programs\Vivary\Uninstall Vivary.exe" /S`. It starts a copy of
+itself and returns before the removal finishes.
+
+To remove a portable copy, close it and remove its extracted version folder. The
+ZIP has no uninstaller. Keep the profile and registered project folders to preserve data.
 
 ## Try the changed experience
 
@@ -371,7 +432,11 @@ your firewall.
 
 | Symptom | Action |
 | --- | --- |
-| Checksum differs | Do not run that archive. Download both assets again and compare. |
+| Checksum differs | Do not run that download. Download both assets again and compare. |
+| Windows protected your PC | The installer is not code signed. Confirm the checksum matches, then choose **More info** and **Run anyway**. |
+| Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** leaves the installed files unchanged. |
+| Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
+| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files. Move them elsewhere, then run setup again. |
 | No window after launching from a terminal | Try File Explorer. An inherited `ELECTRON_RUN_AS_NODE=1` can make Electron run as Node. Remove that variable only from the launch shell and retry. |
 | Windows asks which app should open a file | Cancel. Recheck that you launched the extracted `.exe`. Do not change file associations. |
 | Folder selection times out | Close the chooser, then choose Open folder again. |
@@ -391,11 +456,18 @@ your firewall.
 | A webhook call gets 429 | The automation has 20 calls waiting. Wait for them to run, then send the call again. |
 | A webhook or event automation with a condition never runs | Conditions need an Anthropic API key. Open **Manage** > **Details** for the reason, then add an Anthropic key or remove the condition. |
 
-Remote access is a separate authenticated self-hosting configuration. This ZIP
-does not publish your laptop to the internet. Consult the
+Remote access is a separate authenticated self-hosting configuration. Neither the
+installer nor the ZIP publishes your laptop to the internet. Consult the
 [Workbench setup](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/README.md) before enabling remote access.
 
 ## Verification and known limits
+
+The installer is newer than this prerelease. Its script has source checks for the
+per-user folder, the exact-folder guard before every removal, the kept user data,
+and the current-user registry entry. Its build checks that every application file
+went into the installer. Installation, launch, upgrade, profile preservation, and
+uninstallation have not yet passed acceptance on Windows. The installer is not code
+signed. The rest of this section describes the 2026-09-22 portable prerelease.
 
 The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.
 This is the merged PR #78 source commit.

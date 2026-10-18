@@ -710,6 +710,34 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Windows installer. The owner asked for a Windows installer as the
+website's main download. `packages/desktop/installer/vivary.nsi` is an NSIS 3 script
+that wraps the packaged `Vivary-win32-x64` folder in a per-user setup program, and
+`packages/desktop/build-installer.mjs` builds it with `makensis`. The script runs at
+the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\Vivary`.
+`.onInit` resets that folder, so the `/D=` option cannot move it. Setup adds a Start
+menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU. Its
+only recursive delete removes that folder after an exact-path and not-a-link check,
+in both the upgrade step and the uninstaller. Neither program reads or changes
+`%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or project folders. Neither stops a
+process. A running Vivary or bundled Node or Python makes setup ask the user to close
+it, with Retry or Cancel. The build script reads the version and commit from the
+payload's `build.json`, refuses a modified-checkout or linked payload, compares the
+files `makensis` reports adding with the payload, and writes a `.sha256` companion.
+The Electron process, the packager, and the user data layout are unchanged. The
+installer is one more distribution step around the same packaged folder, so the
+system description above still holds. `tests/installer-script.test.mjs` checks the
+safety rules in the script source. `tests/installer-build.test.mjs` checks argument
+validation and builds a fixture installer when `makensis` is available. Both join
+the desktop Node test list in CI, where the fixture build skips. The desktop guide
+makes the installer the main install path, keeps the portable ZIP optional, adds an
+Uninstall section, and records that Windows acceptance is still open. From a review
+thread on PR #251, it also says that runtime detection skips a `codex.cmd` or
+`claude.cmd` that names no recognized package entry and has no npm package beside it.
+Evidence: 25 of 25 installer tests pass with `makensis` 3.10 present and 24 pass with
+one skip without it, and a real installer built from the `2aaf04f` package added all
+3,150 payload files.
+
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed
 globally with pnpm. A package directory left behind without a launcher, earlier on
