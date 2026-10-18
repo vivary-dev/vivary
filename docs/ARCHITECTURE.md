@@ -696,6 +696,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Handoff save wording (PR #236 review 5). The Prepare handoff paragraph in
+the unified workspace contract said every failed write keeps the previous version and
+shows Retry. It now matches `save()` in `packages/workbench/server/handoff.ts`: a
+changed file or project binding stops the save, a failed write offers Retry only when
+a reread finds the version from Prepare, and an unconfirmed write or an unstored save
+record reports that the file may have changed. The recovery design in the entry below
+still holds, because only the contract text was wrong. A foreign-actor subtest title in
+`handoff.test.ts` no longer claims Save coverage. No source behavior changed.
+
 2026-10-18 Handoff progression and recovery (PR #236). Handoff Save and freshness
 now observe later stopped, failed and active requests independently from linked
 completed evidence, retaining selected Native ancestry and bounded no-follow Code

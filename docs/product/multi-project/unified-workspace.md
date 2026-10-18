@@ -219,9 +219,12 @@ conversation. The agent replies with one `vivary-handoff` block, and Vivary
 writes nothing until the owner clicks **Save handoff**. Vivary then checks the
 reply, adds the project version and conversation boundary itself, and replaces
 or appends one marked block in the state document. Every other byte stays. A
-dirty working tree is reported as a count. A changed file, a changed project
-binding or a failed write keeps the previous version. Only a failed write
-shows Retry. A conflict needs a new Prepare, offered as **Update handoff**. The
+dirty working tree is reported as a count. A changed file or a changed project
+binding stops the save and leaves the file as it is. If the write fails, Vivary
+rereads the state document and offers Retry only when it still holds the
+version from Prepare. Otherwise, and when the save record cannot be stored,
+Vivary reports that the file may have changed, and the owner inspects it and
+prepares again. A conflict needs a new Prepare, offered as **Update handoff**. The
 control then reads Fresh, Out of date with its reasons, Unverifiable, Pending
 or Failed. Freshness is checked when the conversation updates, with no timer
 and no model call. Switching harness does not prepare or send anything.

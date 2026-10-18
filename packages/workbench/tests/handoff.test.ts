@@ -674,7 +674,7 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.deepEqual(await row(), before);
   });
 
-  await t.test("a foreign actor or project cannot prepare, save or inspect", async () => {
+  await t.test("a foreign actor or project cannot prepare or inspect", async () => {
     await db.execute({ sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
       args: ["foreign-member", orgId, "foreign@example.test", "member", Date.now()] });
     for (const patch of [{ userEmail: "foreign@example.test" }, { orgId: "foreign-org" }, { caller: "tool" as const }]) {
