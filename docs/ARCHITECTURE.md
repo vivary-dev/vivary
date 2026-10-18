@@ -462,6 +462,13 @@ versions. A changed source version is not evidence of a registry release.
 The optional memory and MCP distributions remain outside the default path.
 Coordinated releases publish Core before its dependent role packages.
 
+Doctor passively checks the installed optional MCP adapter's exact SDK dependency
+from distribution metadata. A published adapter and a staged adapter can declare
+different pins; compatibility follows the installed declaration, with missing,
+incompatible, and unreadable evidence kept distinct. This starts no MCP process
+and does not establish external conformance. The [MCP contract](MCP.md#passive-doctor-report)
+owns the report details.
+
 ## Runtime flows
 
 Desktop outgoing OAuth setup and browser reauthorization are unavailable
@@ -730,6 +737,51 @@ control under its own key, so leaving a conversation now ends the visit on
 unmount. A refused reply now points to a new Prepare, because a correction
 turn would be refused. The Prepare handoff section above records the changed
 behavior.
+
+2026-10-18 MCP package verification wording. The package README scopes its
+August 15 installation verification to published 0.1.3 and links staged 0.1.4's
+source-check evidence and final-candidate verification limits to the canonical
+changelog. No new verification or publication is claimed. Package boundaries and
+runtime behavior retain their existing contract.
+
+2026-10-18 Approval ownership fixture isolation. The HTTP ownership test disables
+Native's default integrations plugin through its supported process configuration.
+That plugin's retry timer could otherwise reconcile the deliberately unreconciled
+history between the fixture's snapshot and DELETE, making the expected refusal
+stale. The real auth, resources and action routes and explicit recovery calls stay
+active. The test retains its 409 and unchanged-custody assertions before recovery,
+then requires successful deletion after explicit reconciliation. Its diagnostic
+also reports the history read after DELETE. This changes test isolation only;
+production recovery and deletion ownership keep their existing contract.
+
+2026-10-18 MCP Doctor and canonical release status. The capability probe retains
+the installed adapter's single exact SDK pin for the MCP annotation, so published
+vivary-mcp 0.1.3 with SDK 2.0.0 and staged 0.1.4 with SDK 2.2.0 report compatibility
+consistently. Exact-pin enforcement applies only to the adapter's `mcp` dependency;
+other capability dependency floors keep their existing behavior. The metadata-probe
+regressions cover both releases, mismatched SDKs, invalid or unpinned declarations,
+and missing or failed evidence without importing the adapter. The canonical
+changelog and CLI release status now record unpublished vivary-mcp 0.1.4 and the
+Doctor change in the already-staged create-vivary 0.4.4, keeping the dated registry
+tables intact. The optional adapter and passive probe retain their existing owners
+and read-only boundary. Final integrated CI, wheel smokes, review and owner release
+approval remain separate requirements.
+
+The changelog's CLI release-status reference uses an absolute repository URL.
+The site generator preserves that URL and its existing `release-status` fragment,
+avoiding a relative `docs/` path under the generated changelog route. This corrects
+documentation navigation; runtime behavior and the release status are unchanged.
+
+2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
+`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
+`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
+GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
+adapter uses only the stdio transport, so the advisory was not reachable, and
+neither package is in the Windows desktop bundle. The CI wheel smokes follow the
+new pin; Doctor checks the installed adapter's declaration as reviewed above. The staged
+create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
+boundaries and the optional, off-by-default capability are unchanged, so the
+design description holds.
 
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in

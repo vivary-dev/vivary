@@ -104,7 +104,7 @@ def adapter():
 
 def test_contract_pins_current_protocol_schema_and_unrun_harness(adapter):
     assert adapter.PROTOCOL_VERSION == "2026-07-28"
-    assert adapter.MCP_SCHEMA_REVISION == "mcp-types==2.0.0"
+    assert adapter.MCP_SCHEMA_REVISION == "mcp-types==2.2.0"
     assert (
         adapter.CONFORMANCE_HARNESS_REVISION
         == "@modelcontextprotocol/conformance@0.2.0-alpha.10"
@@ -120,7 +120,7 @@ def test_package_identity_matches_candidate_manifest(adapter):
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
     ]
-    assert adapter.__version__ == manifest["version"] == "0.1.3"
+    assert adapter.__version__ == manifest["version"] == "0.1.4"
     assert "vivary-tropo>=0.5.3" in manifest["dependencies"]
 
 

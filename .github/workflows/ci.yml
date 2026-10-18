@@ -148,7 +148,7 @@ jobs:
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: mcp read-only adapter
         run: |
-          python -m pip install "mcp==2.0.0"
+          python -m pip install "mcp==2.2.0"
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
@@ -381,7 +381,7 @@ jobs:
           mcp_venv="$smoke/mcp-venv"
           python -m venv "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
-          "$mcp_python" -m pip install "mcp==2.0.0"
+          "$mcp_python" -m pip install "mcp==2.2.0"
           "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
           "$mcp_python" -m pip check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
@@ -389,14 +389,14 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.3"
+          assert version("vivary-mcp") == "0.1.4"
           assert version("vivary-tropo") == "0.5.5"
           assert version("vivary-core") == "0.2.7"
-          assert version("mcp") == "2.0.0"
-          assert version("mcp-types") == "2.0.0"
+          assert version("mcp") == "2.2.0"
+          assert version("mcp-types") == "2.2.0"
           mcp_requirements = requires("vivary-mcp") or []
           assert "vivary-tropo>=0.5.3" in mcp_requirements
-          assert "mcp==2.0.0" in mcp_requirements
+          assert "mcp==2.2.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
               for requirement in mcp_requirements
@@ -409,7 +409,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")
@@ -842,7 +842,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
-          & $mcpPython -m pip install "mcp==2.0.0"
+          & $mcpPython -m pip install "mcp==2.2.0"
           if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
           & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
@@ -854,14 +854,14 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.3"
+          assert version("vivary-mcp") == "0.1.4"
           assert version("vivary-tropo") == "0.5.5"
           assert version("vivary-core") == "0.2.7"
-          assert version("mcp") == "2.0.0"
-          assert version("mcp-types") == "2.0.0"
+          assert version("mcp") == "2.2.0"
+          assert version("mcp-types") == "2.2.0"
           mcp_requirements = requires("vivary-mcp") or []
           assert "vivary-tropo>=0.5.3" in mcp_requirements
-          assert "mcp==2.0.0" in mcp_requirements
+          assert "mcp==2.2.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
               for requirement in mcp_requirements
@@ -874,7 +874,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")

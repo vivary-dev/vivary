@@ -517,6 +517,18 @@ The creator requires Tropo 0.5.5, and the meta-package requires the matching
 creator and Tropo versions. Build the local wheel set to exercise this composition.
 Registry installation does not provide these source-only repairs.
 
+Development source also stages optional **vivary-mcp 0.1.4**, unpublished, with
+the exact SDK pin `mcp==2.2.0`. The staged **create-vivary 0.4.4** includes Doctor's
+matching check against the installed adapter's declared exact SDK pin. It recognizes
+both published vivary-mcp 0.1.3 with `mcp==2.0.0` and staged 0.1.4 with
+`mcp==2.2.0`, and reports mismatched or invalid declarations as incompatible.
+This changes no registry artifact or desktop release status.
+
+Registry metadata rechecked on **2026-10-18** still reports vivary-mcp 0.1.3,
+create-vivary 0.4.3 on PyPI, and @vivary/create 0.4.2 on npm. vivary-mcp 0.1.4 and
+both creator 0.4.4 artifacts are absent. These are availability checks, not new
+installation verification; the dated registry tables remain unchanged.
+
 [CHANGELOG.md](https://vivary.vercel.app/changelog/) records the train and the exact smokes that verified it,
 without rewriting earlier independent-version history.
 [Migration status](https://vivary.vercel.app/migration-status/) owns maturity classifications.
@@ -1097,7 +1109,7 @@ Standard output is reserved for MCP JSON-RPC. `--observability` writes bounded,
 sanitized diagnostics to standard error: none in `off`, refusal/cancellation/timeout
 events in `errors`, or all bounded lifecycle events in `json`.
 
-The package pins protocol `2026-07-28` and official SDK `mcp==2.0.0`. External
+Staged source 0.1.4 pins protocol `2026-07-28` and official SDK `mcp==2.2.0`. External
 conformance remains unproven. [MCP.md](https://vivary.vercel.app/mcp/) owns the tool schemas, privacy and
 process boundaries, passive Doctor report, and verification procedure.
 
@@ -2033,10 +2045,12 @@ A bounded read or parse failure reports `capability_probe_failed`. Only `not-ins
 rows include ordered install hints.
 
 The MCP row is optional and `not-installed` by default. A compatible row requires the
-recorded `vivary-mcp` entry point, its exact `mcp==2.0.0` dependency declaration, the
-matching SDK version, local standard-input/output transport, and the exact four tool
-names. Doctor reports external conformance as `unproven`; it does not import or start
-the adapter.
+recorded `vivary-mcp` entry point, its single exact `mcp==` dependency declaration,
+the matching SDK version, local standard-input/output transport, and the exact four
+tool names. Published adapter 0.1.3 declares `mcp==2.0.0`; staged adapter 0.1.4 declares
+`mcp==2.2.0`. `sdk_compatible` follows that installed adapter's declaration. Missing,
+malformed, or unpinned declarations are incompatible. Doctor reports external
+conformance as `unproven`; it does not import or start the adapter.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then
@@ -3476,7 +3490,8 @@ its workspace. Vivary Core and its CLI workflow can create governed records when
 operation has evidence binding and explicit human approval; MCP never grants that
 approval or silently escalates into a write tool.
 
-`vivary-mcp` 0.1.3 is published on PyPI. It stays optional and off by default. No
+`vivary-mcp` 0.1.3 is published on PyPI and pins `mcp==2.0.0`. Source 0.1.4,
+staged and unpublished, pins `mcp==2.2.0`. It stays optional and off by default. No
 Vivary install starts it for you.
 
 ## Contract
@@ -3484,7 +3499,7 @@ Vivary install starts it for you.
 The adapter pins:
 
 - MCP protocol `2026-07-28`
-- official Python SDK `mcp==2.0.0` and `mcp-types==2.0.0`
+- official Python SDK `mcp==2.2.0` and `mcp-types==2.2.0`
 - local standard input/output transport only
 - SDK-owned discovery through `server/discover`
 - exactly four tools and no extensions
@@ -3648,9 +3663,13 @@ Doctor reads installed distribution metadata and entry-point declarations only. 
 does not import the adapter, start a process, connect to a server, or use the network.
 
 The capability is `not-installed` by default. Compatibility requires the active
-interpreter to see the `vivary-mcp` entry point and exact declared `mcp==2.0.0`
-dependency. Doctor reports a different SDK version as incompatible rather than
-accepting it speculatively.
+interpreter to see the `vivary-mcp` entry point and an SDK matching the installed
+adapter's single exact `mcp==` dependency declaration. Published adapter 0.1.3
+declares `mcp==2.0.0`; staged adapter 0.1.4 declares `mcp==2.2.0`. Both report
+`installed` and `sdk_compatible: true` with their matching SDK. A different SDK or
+a missing, malformed, or unpinned declaration is incompatible. Missing SDK artifacts
+and failed probes retain their existing status and reason codes. This reports the
+installed contract, not a recommendation to keep an older SDK.
 
 ## Verification
 
@@ -7772,6 +7791,13 @@ versions. A changed source version is not evidence of a registry release.
 The optional memory and MCP distributions remain outside the default path.
 Coordinated releases publish Core before its dependent role packages.
 
+Doctor passively checks the installed optional MCP adapter's exact SDK dependency
+from distribution metadata. A published adapter and a staged adapter can declare
+different pins; compatibility follows the installed declaration, with missing,
+incompatible, and unreadable evidence kept distinct. This starts no MCP process
+and does not establish external conformance. The [MCP contract](https://vivary.vercel.app/mcp/#passive-doctor-report)
+owns the report details.
+
 ## Runtime flows
 
 Desktop outgoing OAuth setup and browser reauthorization are unavailable
@@ -8040,6 +8066,51 @@ control under its own key, so leaving a conversation now ends the visit on
 unmount. A refused reply now points to a new Prepare, because a correction
 turn would be refused. The Prepare handoff section above records the changed
 behavior.
+
+2026-10-18 MCP package verification wording. The package README scopes its
+August 15 installation verification to published 0.1.3 and links staged 0.1.4's
+source-check evidence and final-candidate verification limits to the canonical
+changelog. No new verification or publication is claimed. Package boundaries and
+runtime behavior retain their existing contract.
+
+2026-10-18 Approval ownership fixture isolation. The HTTP ownership test disables
+Native's default integrations plugin through its supported process configuration.
+That plugin's retry timer could otherwise reconcile the deliberately unreconciled
+history between the fixture's snapshot and DELETE, making the expected refusal
+stale. The real auth, resources and action routes and explicit recovery calls stay
+active. The test retains its 409 and unchanged-custody assertions before recovery,
+then requires successful deletion after explicit reconciliation. Its diagnostic
+also reports the history read after DELETE. This changes test isolation only;
+production recovery and deletion ownership keep their existing contract.
+
+2026-10-18 MCP Doctor and canonical release status. The capability probe retains
+the installed adapter's single exact SDK pin for the MCP annotation, so published
+vivary-mcp 0.1.3 with SDK 2.0.0 and staged 0.1.4 with SDK 2.2.0 report compatibility
+consistently. Exact-pin enforcement applies only to the adapter's `mcp` dependency;
+other capability dependency floors keep their existing behavior. The metadata-probe
+regressions cover both releases, mismatched SDKs, invalid or unpinned declarations,
+and missing or failed evidence without importing the adapter. The canonical
+changelog and CLI release status now record unpublished vivary-mcp 0.1.4 and the
+Doctor change in the already-staged create-vivary 0.4.4, keeping the dated registry
+tables intact. The optional adapter and passive probe retain their existing owners
+and read-only boundary. Final integrated CI, wheel smokes, review and owner release
+approval remain separate requirements.
+
+The changelog's CLI release-status reference uses an absolute repository URL.
+The site generator preserves that URL and its existing `release-status` fragment,
+avoiding a relative `docs/` path under the generated changelog route. This corrects
+documentation navigation; runtime behavior and the release status are unchanged.
+
+2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
+`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
+`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
+GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
+adapter uses only the stdio transport, so the advisory was not reachable, and
+neither package is in the Windows desktop bundle. The CI wheel smokes follow the
+new pin; Doctor checks the installed adapter's declaration as reviewed above. The staged
+create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
+boundaries and the optional, off-by-default capability are unchanged, so the
+design description holds.
 
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
@@ -10737,6 +10808,34 @@ the `v0.1.0` line.
 **0.3.1** · `vivary-exo` **0.3.0** · `vivary` **0.1.10** · optional
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
+
+## [Unreleased: Optional MCP SDK update] - 2026-10-18
+
+Staged source versions are optional **vivary-mcp 0.1.4** and the already-staged
+**create-vivary / @vivary/create 0.4.4**. Publishing remains a manual human gate.
+These changes publish no registry artifact.
+
+- `vivary-mcp` 0.1.4 pins the official SDK to `mcp==2.2.0` and records
+  `mcp-types==2.2.0` as its schema revision. Local stdio transport, four read-only
+  tools, and unproven external conformance retain their existing contract.
+- `create-vivary` 0.4.4 checks the installed adapter's single exact SDK pin in its
+  passive Doctor report. Published adapter 0.1.3 with SDK 2.0.0 and staged adapter
+  0.1.4 with SDK 2.2.0 report consistent compatibility. A mismatched SDK or invalid
+  pin is incompatible; missing dependencies and failed probes keep their status
+  and reason codes. Doctor imports and starts no adapter.
+
+### Verification
+
+On Python 3.12.14, the focused source checks passed:
+
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k mcp -v`: 7 tests passed.
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k GovernedContextCapabilityTests -v`: 56 tests passed.
+
+These exercise the real metadata probe with installed-distribution fixtures.
+Official-SDK wire tests and Linux/Windows offline wheel smokes remain required
+on the final integrated candidate. No registry installation or desktop acceptance
+is established by these source checks. The [CLI release status](https://github.com/vivary-dev/vivary/blob/dev/docs/ORIGINAL-CLI.md#release-status)
+preserves the dated published-version tables and the latest availability check.
 
 ## [Windows prerelease 9884670] - 2026-09-22
 
