@@ -4205,7 +4205,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         root: Path,
         *,
         include_mcp: bool = True,
+        adapter_version: str = "0.1.4",
         sdk_version: str = "2.2.0",
+        sdk_requirements: tuple[str, ...] = ("mcp==2.2.0",),
     ) -> None:
         self._write_distribution(
             root, "vivary-core", "0.2.7", "vivary_core", package=True
@@ -4229,9 +4231,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self._write_distribution(
             root,
             "vivary-mcp",
-            "0.1.3",
+            adapter_version,
             "vivary_mcp",
-            requirements=("vivary-tropo>=0.5.3", "mcp==2.2.0"),
+            requirements=("vivary-tropo>=0.5.3", *sdk_requirements),
             script="vivary-mcp",
             package=True,
         )
@@ -4383,30 +4385,115 @@ class GovernedContextCapabilityTests(unittest.TestCase):
         self.assertEqual(interop["extensions"], [])
         self.assertEqual(interop["conformance_status"], "unproven")
 
-    def test_mcp_capability_requires_the_exact_reviewed_sdk_version(self):
-        with temp_workspace() as root:
-            self._write_mcp_install(root, sdk_version="2.0.1")
-            with mock.patch.object(
-                create_vivary,
-                "_capability_install_roots",
-                return_value=(root,),
-            ):
-                report = create_vivary.capability_report("coding")
+    def test_mcp_capability_matches_the_installed_adapters_declared_sdk_pin(self):
+        for adapter_version, sdk_version in (
+            ("0.1.3", "2.0.0"),
+            ("0.1.4", "2.2.0"),
+        ):
+            with self.subTest(adapter=adapter_version), temp_workspace() as root:
+                self._write_mcp_install(
+                    root,
+                    adapter_version=adapter_version,
+                    sdk_version=sdk_version,
+                    sdk_requirements=(f"mcp=={sdk_version}",),
+                )
+                with mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ):
+                    report = create_vivary.capability_report("coding")
 
-        interop = next(
-            item
-            for item in report["available_capabilities"]
-            if item["id"] == "interop:mcp"
-        )
-        self.assertEqual(interop["install_status"], "incompatible")
-        self.assertEqual(
-            interop["reason_codes"],
-            ["capability_contract_incompatible"],
-        )
-        self.assertTrue(interop["package_present"])
-        self.assertTrue(interop["entry_point_present"])
-        self.assertEqual(interop["sdk_version"], "2.0.1")
-        self.assertFalse(interop["sdk_compatible"])
+                interop = next(
+                    item for item in report["available_capabilities"]
+                    if item["id"] == "interop:mcp"
+                )
+                self.assertTrue(interop["installed"])
+                self.assertEqual(interop["install_status"], "installed")
+                self.assertEqual(interop["reason_codes"], [])
+                self.assertEqual(interop["missing_install"], [])
+                self.assertEqual(interop["sdk_version"], sdk_version)
+                self.assertTrue(interop["sdk_compatible"])
+
+    def test_mcp_capability_requires_the_exact_declared_sdk_version(self):
+        for sdk_version in ("2.0.0", "2.0.1"):
+            with self.subTest(sdk=sdk_version), temp_workspace() as root:
+                self._write_mcp_install(root, sdk_version=sdk_version)
+                with mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                interop = next(
+                    item for item in report["available_capabilities"]
+                    if item["id"] == "interop:mcp"
+                )
+                self.assertFalse(interop["installed"])
+                self.assertEqual(interop["install_status"], "incompatible")
+                self.assertEqual(
+                    interop["reason_codes"], ["capability_contract_incompatible"]
+                )
+                self.assertEqual(interop["missing_install"], [])
+                self.assertTrue(interop["package_present"])
+                self.assertTrue(interop["entry_point_present"])
+                self.assertEqual(interop["sdk_version"], sdk_version)
+                self.assertFalse(interop["sdk_compatible"])
+
+    def test_mcp_capability_requires_one_exact_sdk_pin_in_adapter_metadata(self):
+        for sdk_requirements in (
+            (),
+            ("mcp",),
+            ("mcp>=2.2.0",),
+            ("mcp==2.2.*",),
+            ("mcp==broken",),
+            ("mcp==2.2.0", "mcp==2.2.0"),
+            ("mcp==2.2.0,!=2.2.0",),
+        ):
+            with self.subTest(requirements=sdk_requirements), temp_workspace() as root:
+                self._write_mcp_install(root, sdk_requirements=sdk_requirements)
+                with mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                interop = next(
+                    item for item in report["available_capabilities"]
+                    if item["id"] == "interop:mcp"
+                )
+                self.assertFalse(interop["installed"])
+                self.assertEqual(interop["install_status"], "incompatible")
+                self.assertEqual(
+                    interop["reason_codes"], ["capability_contract_incompatible"]
+                )
+                self.assertEqual(interop["missing_install"], [])
+                self.assertEqual(interop["sdk_version"], "2.2.0")
+                self.assertFalse(interop["sdk_compatible"])
+
+    def test_mcp_capability_preserves_failure_precedence_with_an_invalid_pin(self):
+        for include_mcp, expected_status, expected_reason in (
+            (False, "incompatible", "capability_contract_incompatible"),
+            (True, "probe-failed", "capability_probe_failed"),
+        ):
+            with self.subTest(status=expected_status), temp_workspace() as root:
+                self._write_mcp_install(
+                    root, include_mcp=include_mcp, sdk_requirements=()
+                )
+                if include_mcp:
+                    record = next(root.glob("mcp-*.dist-info/RECORD"))
+                    record.write_text("not-a-record-row\n", encoding="utf-8")
+                with mock.patch.object(
+                    create_vivary, "_capability_install_roots", return_value=(root,)
+                ):
+                    report = create_vivary.capability_report("coding")
+
+                interop = next(
+                    item for item in report["available_capabilities"]
+                    if item["id"] == "interop:mcp"
+                )
+                self.assertFalse(interop["installed"])
+                self.assertEqual(interop["install_status"], expected_status)
+                self.assertEqual(interop["reason_codes"], [expected_reason])
+                self.assertEqual(interop["missing_install"], [])
+                self.assertIsNone(interop["sdk_version"])
+                self.assertFalse(interop["sdk_compatible"])
 
     def test_text_doctor_reports_optional_mcp_interoperability(self):
         output = io.StringIO()
@@ -4453,6 +4540,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 interop["reason_codes"], ["capability_dependency_missing"]
             )
             self.assertEqual(interop["missing_install"], ["mcp"])
+            self.assertFalse(interop["installed"])
+            self.assertIsNone(interop["sdk_version"])
+            self.assertFalse(interop["sdk_compatible"])
 
         with self.subTest(status="incompatible"), temp_workspace() as root:
             self._write_mcp_install(root)
@@ -4473,6 +4563,8 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 interop["reason_codes"], ["capability_contract_incompatible"]
             )
             self.assertEqual(interop["missing_install"], [])
+            self.assertFalse(interop["installed"])
+            self.assertFalse(interop["sdk_compatible"])
 
         with self.subTest(status="probe-failed"), temp_workspace() as root:
             self._write_mcp_install(root)
@@ -4488,6 +4580,9 @@ class GovernedContextCapabilityTests(unittest.TestCase):
                 interop["reason_codes"], ["capability_probe_failed"]
             )
             self.assertEqual(interop["missing_install"], [])
+            self.assertFalse(interop["installed"])
+            self.assertIsNone(interop["sdk_version"])
+            self.assertFalse(interop["sdk_compatible"])
 
     def test_command_capability_requires_recorded_launcher(self):
         for mutation in ("missing", "unrecorded"):

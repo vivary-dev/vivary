@@ -10747,6 +10747,8 @@ def _selected_extra_dependency(
 def _required_dependency_constraints(
     requirements: tuple[str, ...],
     expected_dependencies: tuple[str, ...],
+    *,
+    exact_dependencies: tuple[str, ...] = (),
 ) -> dict[str, tuple[str, tuple[int, int, int]]]:
     expected = {
         _normalize_distribution_name(dependency): dependency
@@ -10774,6 +10776,10 @@ def _required_dependency_constraints(
             for operator, release, wildcard in clauses
             if operator == ">=" and not wildcard and len(release) == 3
         ]
+        if dependency in exact_dependencies and (
+            len(clauses) != 1 or len(exact_clauses) != 1
+        ):
+            raise _CapabilityContractIncompatible
         if len(exact_clauses) == 1 and not floor_clauses:
             constraint = ("==", exact_clauses[0])
         elif len(floor_clauses) == 1 and not exact_clauses:
@@ -11239,10 +11245,14 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             dependency_constraints = _required_dependency_constraints(
                 observed_result["declared_requirements"],
                 expected_dependencies,
+                exact_dependencies=("mcp",) if role == "vivary-mcp" else (),
             )
         except _CapabilityContractIncompatible:
             results[role] = {"status": "incompatible"}
             continue
+        if role == "vivary-mcp":
+            # Installed adapter releases own their SDK pin, including older releases.
+            results[role]["required_sdk_version"] = dependency_constraints["mcp"][1]
         for dependency, (operator, required_version) in dependency_constraints.items():
             dependency_result = results.get(dependency)
             if dependency_result is None:
@@ -11356,8 +11366,9 @@ def _annotate_mcp_capability(capability: dict, results: dict[str, dict]) -> None
         else None
     )
     capability["sdk_compatible"] = (
-        sdk.get("status") == "installed"
-        and sdk.get("version") == (2, 2, 0)
+        package_status == "installed"
+        and sdk.get("status") == "installed"
+        and sdk.get("version") == package.get("required_sdk_version")
     )
 
 
