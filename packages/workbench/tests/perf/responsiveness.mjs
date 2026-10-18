@@ -153,7 +153,7 @@ async function seed(server, data, size) {
 async function fakeRuntime(data) {
   const bin = path.join(data, 'bin'); await mkdir(bin);
   // Only readiness is simulated. Any accidental execution fails instead of calling a provider.
-  await writeFile(path.join(bin, 'claude'), '#!/bin/sh\nif [ "$*" = "auth status --json" ]; then\n  printf \'{"loggedIn":true}\\n\'\nelse\n  exit 93\nfi\n', { mode: 0o700 });
+  await writeFile(path.join(bin, 'claude'), '#!/bin/sh\nif [ "$*" = "auth status --json" ]; then\n  printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}\\n\'\nelse\n  exit 93\nfi\n', { mode: 0o700 });
   await writeFile(path.join(bin, 'codex'), '#!/bin/sh\nprintf \'Not logged in\\n\' >&2\nexit 1\n', { mode: 0o700 });
   return { PATH: `${bin}:/usr/bin:/bin`, VIVARY_PERF_METRICS: '1' };
 }

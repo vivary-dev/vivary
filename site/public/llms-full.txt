@@ -8032,6 +8032,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Issue #188 guard harness auth fixture (PR #248). The paired CI guard
+(run 39145415272) failed at startup because the candidate's Code composer stayed
+disabled. The harness's fake `claude` answered `auth status --json` with only
+`loggedIn`. Since #223, `server/local-runtime-setup.ts` also requires a
+`claude.ai` first-party login with a subscription type, so the runtime reported
+unavailable. The fake now returns the same payload as the other #223 fixtures. The
+baseline checkout receives this harness as an untracked file, so the budget's
+`baselineDirtyHash` changes with it. It identifies the overlaid baseline source
+and is not a latency budget. It was recomputed with the harness's own source
+identity rule in a shallow `8b1d1e4` checkout prepared as CI prepares it. That
+procedure first reproduced the previous value, which CI also recorded in the failed
+run. Ceilings, the baseline commit, the overlay patch and the checker are unchanged.
+Runtime owners, persistence and trust boundaries above still hold, because only
+measurement fixtures changed.
+
 2026-10-18 Issue #188 E1 integration with dev. This merge brings dev at `abca1bd`
 into the E1 candidate at `f13862c` (branch `perf/responsiveness-188`). Both lines
 rewrote the same `usage/store.js` insert in the maintained Core patch to stop
