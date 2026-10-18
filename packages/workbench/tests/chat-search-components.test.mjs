@@ -38,6 +38,7 @@ const stubs = new Map([
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
   ["@agent-native/core/client/agent-chat", `import { createElement, useEffect } from "react";
     export const clearChatStorage = () => {};
+    export const sendToAgentChatAndConfirm = async () => { throw new Error("No handoff submit expected"); };
     export function AssistantChat(props) {
       useEffect(() => {
         props.loadHistoryRepository().catch(() => {});

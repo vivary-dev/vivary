@@ -501,6 +501,33 @@ or reconnect a project with multiple folder bindings. Restore missing or linked
 folders at their recorded paths before review. Complete Windows release
 acceptance remains under issue #23.
 
+### Prepare and save a handoff
+
+In a saved project conversation, **Prepare handoff** asks that conversation's agent
+for a structured reply. **Save handoff** validates its completed reply and writes a
+marked block at the end of the designated state document, retaining other text.
+A newer user request requires another Prepare, even if its reply stopped, failed,
+or is still running. Failed or partial replies are never completed check evidence.
+The [architecture contract](../../docs/ARCHITECTURE.md#prepare-handoff) owns read
+bounds, project facts, and persisted record details.
+
+Freshness checks run on opening the control, after conversation updates and
+successful Files saves or renames, and through explicit rechecks. They make no
+model call. A saved handoff becomes Out of date when the document, project facts,
+or recorded conversation progression changes. Older saves without progression
+facts require an update before Fresh is available. Only the selected Native branch
+counts. An unavailable document offers **Check again** after the file or workspace
+settings are repaired. An existing file too large for editing, a nontext or linked
+file, or an unreadable file is reported as noneditable; it is never replaced by a
+new file.
+
+A version conflict keeps the current document and requires another Prepare.
+After a write error, **Retry** is offered only when an authorized reread confirms
+the original document version and binding. If the outcome cannot be confirmed,
+or saving the record fails after the file write, inspect the document in Files or
+your editor, then prepare again. The message states that the file may have changed;
+Vivary does not assume success from a request marker in the text.
+
 ### Current acceptance and gaps
 
 The [desktop acceptance register](../../docs/product/multi-project/desktop-acceptance-status.md)

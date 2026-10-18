@@ -8,6 +8,14 @@ export const conversationLinks = table("vivary_conversation_links", {
   record: text("record_json").notNull(),
 }, row => [uniqueIndex("vivary_conversation_link_target").on(row.targetKind, row.targetId)]);
 
+// One saved handoff and at most one pending request per designated document. The file holds the narrative.
+export const handoffRecords = table("vivary_handoff_records", {
+  projectId: text("project_id").notNull(),
+  bindingId: text("binding_id").notNull(),
+  path: text("path").notNull(),
+  record: text("record_json").notNull(),
+}, row => [uniqueIndex("vivary_handoff_record_document").on(row.projectId, row.bindingId, row.path)]);
+
 export const projects = table("vivary_registry_projects", {
   projectId: text("project_id").primaryKey(),
   schemaVersion: integer("schema_version").notNull(),
