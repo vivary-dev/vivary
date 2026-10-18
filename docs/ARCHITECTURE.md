@@ -638,6 +638,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Approval ownership fixture isolation. The HTTP ownership test disables
+Native's default integrations plugin through its supported process configuration.
+That plugin's retry timer could otherwise reconcile the deliberately unreconciled
+history between the fixture's snapshot and DELETE, making the expected refusal
+stale. The real auth, resources and action routes and explicit recovery calls stay
+active. The test retains its 409 and unchanged-custody assertions before recovery,
+then requires successful deletion after explicit reconciliation. Its diagnostic
+also reports the history read after DELETE. This changes test isolation only;
+production recovery and deletion ownership keep their existing contract.
+
 2026-10-18 MCP Doctor and canonical release status. The capability probe retains
 the installed adapter's single exact SDK pin for the MCP annotation, so published
 vivary-mcp 0.1.3 with SDK 2.0.0 and staged 0.1.4 with SDK 2.2.0 report compatibility

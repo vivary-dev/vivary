@@ -29,6 +29,7 @@ Object.assign(process.env, { NODE_ENV: "production", APP_NAME: "Vivary",
   // Supported Native controls apply to this entire isolated test process.
   // HTTP and explicit approval/recovery calls remain live. Unrelated lazy pollers do not own this fixture.
   AGENT_NATIVE_DISABLE_INPROCESS_SWEEPS: "true", AGENT_NATIVE_DISABLE_RECURRING_JOBS: "true",
+  AGENT_NATIVE_DISABLED_PLUGINS: "integrations",
   DATABASE_URL: url, DATABASE_URL_UNPOOLED: url,
   BETTER_AUTH_SECRET: randomBytes(32).toString("hex") });
 approvalFixture = await import("./fixtures/automation-approval-fixture.mjs");
@@ -575,7 +576,8 @@ test("authenticated resource DELETE refuses terminal unreconciled approval befor
   const response = await resourceRequest(resource.id);
   const after = await custodySnapshot(resource, saved.id, pending);
   console.log("RESOURCE_HTTP_DELETE_TERMINAL " + JSON.stringify({ faultHits, successfulThreadSaves, httpStatus: response.status,
-    historyStatus: state.run.status, outcomeReconciled: state.outcomeReconciled, resourceRetained: Boolean(after.resource), configuredEffects: effects(fixture) }));
+    historyStatus: state.run.status, outcomeReconciled: state.outcomeReconciled,
+    outcomeReconciledAfterDelete: after.history.outcomeReconciled, resourceRetained: Boolean(after.resource), configuredEffects: effects(fixture) }));
   assert.equal(faultHits, 1); assert.equal(successfulThreadSaves, 1);
   assert.equal(state.run.status, "error"); assert.ok(state.run.finishedAt); assert.equal(state.outcomeReconciled, false);
   assert.equal(response.status, 409); assert.deepEqual(after, before);
