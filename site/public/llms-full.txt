@@ -8093,30 +8093,6 @@ offers Confirm and apply since PRs #80 and #81. Evidence: `git grep -i "browser 
 over the result and the updated `browser-access.test.mjs` assertions. Two 2026-10-17
 entries that sat above 2026-10-18 entries now follow them, with their text unchanged.
 
-2026-10-18 Windows pnpm runtime detection. On the Windows candidate from dev
-60d6f68, a new Code conversation showed Codex as unavailable while Codex 0.162.1
-ran in the owner's terminal. pnpm installs a global CLI as `codex.cmd` in its `bin`
-directory with the package under `..\global\v11\<hash>\node_modules`. On Windows,
-`resolveVivaryRuntimeCommand` in `packages/workbench/server/local-runtime-setup.ts`
-accepted only `codex.exe` or `node_modules\@openai\codex\bin\codex.js` in each
-searched directory, so it skipped the pnpm install and reached an older npm copy that
-cannot read the current configuration. On Windows the lookup now also reads the first
-8 KiB of `<command>.cmd` in each directory, after the two existing checks. It accepts
-a quoted `%~dp0` argument only when the resolved path ends in `node_modules` and the
-engine's package entry, the file exists, and the package manifest names
-`@openai/codex` or `@anthropic-ai/claude-code`. It then launches Node with that
-entry, the launch the npm branch already builds. The shim is never run, and no other
-text in it is used. Directory order, the filtered launch environment, and the other
-branches are unchanged, so the credential boundary and coding runtime descriptions in
-this document still hold. The lookup takes an optional platform and environment so
-tests reach the Windows branch on any host. The environment defaults to `process.env`,
-and the four fixed names it reads keep their `guard:allow-env-credential` reasons, now
-worded for the supplied environment. Six new cases in
-`packages/workbench/tests/local-runtime-setup.test.ts` failed on 60d6f68 and pass
-with the fix. They cover both CLIs, backslash and slash separators, a misnamed
-package, a target outside `node_modules`, another file, a variable, a missing entry,
-the read limit, an executable in the same directory, and PATH order.
-
 2026-10-18 Windows executable copyright. `packages/desktop/package.mjs` now passes
 `appCopyright` to Electron Packager, which writes it to the `LegalCopyright` field of
 `vivary.exe`. Earlier packages showed Electron's default "Copyright (C) 2015 GitHub,
