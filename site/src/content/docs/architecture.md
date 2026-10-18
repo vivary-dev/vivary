@@ -707,6 +707,30 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Issue #188 E1 integration with dev. This merge brings dev at `abca1bd`
+into the E1 candidate at `f13862c` (branch `perf/responsiveness-188`). Both lines
+rewrote the same `usage/store.js` insert in the maintained Core patch to stop
+numeric usage ID collisions. The merged patch keeps dev's `usage/store.js` sections
+whole, so dev's fix owns usage ID allocation: up to 16 candidate IDs, no replaced
+rows, and `isOwnUsageRow` recognizing a committed insert that the client resent.
+The Native usage cost section of the patch notes describes it. E1's own store
+change, its three collision tests in `native-usage-cost.test.ts`, its patch note
+and the collision sentences of its first entry below are dropped. Its tests asserted
+E1's error text and its connection-replay setting, which dev's version replaces
+with its own regressions. E1's other four Core sections (the shared Intl formatter
+module `date-time-format.js`, `formatDate` in `i18n.js`, and the UserMessage
+expandability observer in `message-components.js` and its declaration file) apply
+unchanged on top of dev's patch. The lockfile records the new patch hash and E1's
+pinned `playwright-core` 1.63.0 development dependency. The E1 entries below keep
+their wording otherwise. Runtime owners, persistence and trust boundaries above
+still hold, because the merge combines two reviewed lines without adding an owner
+or a data path. The paired guard keeps its fixed `8b1d1e4` baseline, its 0.76 Code
+and 0.75 Native ceilings and its validation logic. Dev changes made after that
+baseline therefore count against the candidate. Evidence inspected: a
+per-section comparison of the merged patch against dev and E1, the installed Core
+output for both lines' edits, and the focused checks listed on the integration
+pull request.
+
 2026-10-18 Handoff save wording (PR #236 review 5). The Prepare handoff paragraph in
 the unified workspace contract said every failed write keeps the previous version and
 shows Retry. It now matches `save()` in `packages/workbench/server/handoff.ts`: a
@@ -1672,6 +1696,104 @@ history reconstruction. Public inert-CLI and owner/project log-read regressions
 cover the source boundaries; real provider journeys, app UI testing and packaged
 Windows acceptance remain required. This change adds no executor, credential
 store, provider-log relocation or OS containment claim.
+
+Issue #188, budget validator. The paired performance validator now requires
+both established revisit budgets and rejects raised configuration ceilings.
+Future proven wins lower its policy ceilings and JSON values together, under
+source review. These changes preserve existing data ownership and access boundaries.
+
+The #188 CI site audit found GHSA-68fv-2mgg-jv7q in source-map-js 1.2.1. The site lockfile now selects patched 1.2.2 within every existing consumer range. Upstream advisory/release and registry tarball review establish the fix, publication age over 72 hours, no install scripts and no native build file. This changes site build tooling only; application runtime, data boundaries and architecture remain as described. The high-severity audit and site build remain required checks.
+
+Issue #188, experiment decision. The added Code record/transcript cache and its
+sign-out hook are removed after the identical built-app comparison failed the
+recorded incremental switching threshold. Against corrected E1, large Code
+first-pass medians changed from 2,127 to 2,055 ms (72 ms saved), while revisit
+changed from 2,138 to 2,269 ms (131 ms slower). Reduced reads and event-loop delay
+did not establish the required user-visible switching win. All six E2 runs and
+the independent review findings are retained as experiment evidence. Core's
+original record/transcript readers and the pre-experiment legacy draft-ID memo
+are restored; no new content cache ships. Removing that cache also removes its
+confirmed hosted sign-out gap. The proposed Better Auth regression was archived
+without execution; it does not supply a failing or passing test result.
+
+Corrected E1 remains: long Native first-pass medians improved from 77,989 to
+36,602 ms and revisit from 39,945 to 19,248 ms above the recorded noise rule.
+The 12-second long-thread target remains unmet. All six corrected E1 runs
+completed; one baseline memory journey crashed, so stability comparisons have
+that limit. Startup/load qualifications remain in the receipt. Actual UI checks and guard
+calibration are complete; final CI verification and owner acceptance remain separate. These decisions preserve the component and trust
+boundaries above and remove the rejected experiment's additional retention.
+
+Issue #188, calibrated latency guard and timeout cleanup. The existing built-app
+harness offers an ordinary-switch mode with fixed disjoint targets and explicit
+untimed startup selection, three fresh servers and fifteen first-visit/revisit
+samples per runtime. Paired calibration at clean `9b688f9` records Code revisit
+3,174→2,237 ms and Native 3,288→2,353 ms. The predeclared ratio-plus-repeat-spread
+rule sets ceilings 0.76 and 0.75 respectively; these must not rise to hide later
+failures. The new CI job builds pinned baseline and exact candidate separately,
+applies only the baseline’s measurement overlay, fails closed on validation,
+compares raw paired evidence and retains artifacts on failure. Its workflow
+contract has 31 passing tests, including demonstrated negative cases for a missing
+or weakened guard. Final exact-head paired/CI verification remains pending.
+
+The timeout path now handles repeated signals through owned browser/server
+cleanup, waits for both cleanup attempts and preserves failed evidence even when
+interrupted during setup. The launcher’s stop is idempotent. A real CLI probe
+first reproduced a detached server surviving SIGTERM; corrected setup and active
+browser probes each passed after three signals with no recorded descendants left.
+Actual desktop/narrow message-control and search-anchor checks at `9b688f9` also
+passed outside timing windows. These changes affect verification only; application
+runtime, component ownership and trust boundaries remain unchanged. The
+[measurement receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/188-conversation-responsiveness.md)
+owns full numbers, provenance, rejected E2, target gaps and remaining gates. The
+short guard does not replace long-thread, search, idle or memory acceptance.
+
+Issue #188, E1 correctness follow-up. The shared formatter cache now pins its key
+and formatter to the effective timezone. It resolves the system default once per
+synchronous rendering batch, then releases that memo in a microtask so a later
+render observes a system timezone change. Explicit timezone and exotic option
+semantics remain owned by Intl. This changes only Native client formatting;
+message persistence, scope admission and the server owners above remain unchanged.
+The timezone regression first reproduced a stale UTC result after switching to
+New York. The installed maintained patch passes nine formatter/observer checks
+and twenty rendered-component tests, including timezone changes, non-enumerable
+options and eight shared formatters plus one timezone resolver per rendering batch.
+The corrected built-app measurements and actual UI acceptance are recorded above;
+final exact-head latency/CI verification remains pending.
+
+Issue #188, round 3 experiment 1. The maintained Native Core patch now shares a
+bounded Intl formatter cache between message timestamps and locale `formatDate`,
+and defers Yesterday translation until its label is displayed. UserMessage obtains
+expandability from ResizeObserver geometry on unclipped inner text; its existing
+outer cap also applies while awaiting the first delivery. Observation cleanup
+rejects retired callbacks and reconnects after text or edit-mode transitions.
+Native still owns message rendering, transcripts and run lifecycle; the Workbench
+composition, persistence and trust boundaries described above remain accurate.
+Reviewed the coordinator's long-thread CPU profile, the original Core formatting
+and collapse paths, and ten socket-free regressions for output equality, constant
+constructor work, bounded eviction, lazy live translation and observer lifecycle.
+The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#long-native-conversation-rendering)
+own the implementation contract and removal condition. Corrected E1 browser
+latency and desktop/narrow scrolling/visual checks are recorded above. These
+checks used synthetic saved messages and do not establish real provider execution.
+
+Issue #188, round 3 measurement harness. `packages/workbench/tests/perf/responsiveness.mjs`
+drives the normal built app in system Chrome against a seeded disposable history and times
+what a person waits for: startup to a usable list, conversation switches until messages and the
+current composer or provider state are usable, and search until the expected conversation is listed.
+Conversation readiness requires the final message to intersect its clipped viewport naturally.
+An actual browser regression rejects an off-screen marker that passes Playwright visibility;
+the same helper and regression run on both CI builds. Harness identity includes that helper.
+Earlier raw samples used visibility alone and remain retained with that limitation. It measures
+idle requests and bytes, server event-loop delay and memory, with crash-safe per-switch memory
+traces. Full mode guides experiments; its shorter paired mode now supplies the
+CI latency guard described above. The opt-in `server/plugins/04-perf.ts` Nitro
+plugin logs per-second event-loop delay and RSS only when `VIVARY_PERF_METRICS=1`; ordinary
+launches create no timer or histogram. `tests/built-app.mjs` also returns the spawned server's PID
+and readiness time. Seeding uses the existing owner routes and Code run store, and the harness
+blocks provider requests. Runtime composition, persistence and trust boundaries are unchanged, so
+the design above remains accurate. Reviewed the plugin's gating and shutdown, the harness's routes
+and fixture writes, and the [harness notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/tests/perf/README.md).
 
 Issue #11 second reintroduction, PR #194 Native start-snapshot fix. New searches
 use one scoped metadata aggregate to include Native saves whose monotonic update

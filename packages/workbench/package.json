@@ -49,7 +49,8 @@
     "test:credential-redaction": "node --import tsx --test --test-concurrency=1 tests/credential-redaction.test.ts tests/native-redaction.test.ts tests/code-run-redaction.test.ts tests/code-run-worker.test.ts tests/code-run-worker-redaction.test.ts tests/code-run-worker-legacy-model.test.ts",
     "test:linked-conversations": "node --import tsx --test --test-concurrency=1 --test-timeout=60000 tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs",
     "test:handoff": "node --import tsx --test --test-concurrency=1 --test-timeout=120000 tests/handoff.test.ts tests/handoff-components.test.mjs tests/files-handoff-components.test.mjs",
-    "test:maintained": "pnpm run test:registry-actions && pnpm run test:registry && pnpm run test:registry-http && pnpm run test:project-services && pnpm run test:shell && pnpm run test:mutation-admission && pnpm run test:mutation-quarantine && pnpm run test:chat-title && pnpm run test:chat-draft && pnpm run test:chat-draft-adapter && pnpm run test:shared-ui && pnpm run test:settings-chat-handoff && pnpm run test:native-chat && pnpm run test:chat-search && pnpm run test:linked-conversations && pnpm run test:handoff && pnpm run test:email && pnpm run test:credential-redaction && pnpm run test:browser-access && pnpm run test:mcp-oauth",
+    "test:conversation-perf": "node --test tests/perf/intl-formatters.test.mjs tests/perf/user-message-expandability.test.mjs tests/perf/responsiveness-budget.test.mjs",
+    "test:maintained": "pnpm run test:registry-actions && pnpm run test:registry && pnpm run test:registry-http && pnpm run test:project-services && pnpm run test:shell && pnpm run test:mutation-admission && pnpm run test:mutation-quarantine && pnpm run test:chat-title && pnpm run test:chat-draft && pnpm run test:chat-draft-adapter && pnpm run test:shared-ui && pnpm run test:settings-chat-handoff && pnpm run test:native-chat && pnpm run test:conversation-perf && pnpm run test:chat-search && pnpm run test:linked-conversations && pnpm run test:handoff && pnpm run test:email && pnpm run test:credential-redaction && pnpm run test:browser-access && pnpm run test:mcp-oauth",
     "build": "agent-native build",
     "dev": "agent-native dev",
     "start": "node bin/start.mjs",
@@ -75,7 +76,8 @@
     "vitest": "4.1.11",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "playwright-core": "1.63.0"
   },
   "bin": {
     "vivary-gui": "bin/start.mjs"

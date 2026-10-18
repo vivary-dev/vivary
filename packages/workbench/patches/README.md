@@ -11,6 +11,46 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Long Native conversation rendering
+
+Issue [#188](https://github.com/vivary-dev/vivary/issues/188), round 3 experiment 1.
+The coordinator's Chrome profile at `8b1d1e4` found 8.6 seconds in timestamp
+formatting and 7.0 seconds in synchronous user-message collapse measurements
+while opening 2,000 messages. Cold opens took about 27–30 seconds, compared with
+5.6 seconds for 200 messages. These exploratory observations differ from the
+subsequent repeated full-harness baseline. The
+[measurement receipt](../../../docs/product/multi-project/receipts/188-conversation-responsiveness.md)
+records corrected E1 gains, regressions, noise and remaining targets.
+
+Core shares up to 64 Intl date formatters by locale and sorted primitive options,
+with FIFO eviction. A default timezone is resolved once per synchronous rendering
+batch and included in the cache key and constructor options; a microtask releases
+that batch memo. Subsequent rendering batches observe system timezone changes
+without a timezone constructor for every message. Explicit timezones remain
+unchanged, and exotic options retain Intl's original coercion. Timestamp output
+and locale resolution stay the same. The Yesterday translation resolves
+only when displayed and remains live across catalog changes.
+
+UserMessage observes an unclipped inner text element, using delivered
+`contentRect.height > 200` without synchronous layout reads. Its outer text
+container keeps the existing 200 px cap while unmeasured, so skipped off-screen
+messages can await layout without first appearing fully expanded. Later deliveries
+re-evaluate expandability; cleanup rejects callbacks from a retired observation.
+Editing or removing text disconnects it, and returning text gets a new observation.
+
+Run `pnpm --dir packages/workbench run test:conversation-perf`; `test:maintained`
+includes these socket-free regressions. Remove these hunks and the shared helper
+when pinned upstream Core preserves the same formatting, bounded constructor
+reuse, and deferred collapse behavior and passes these tests without the patch.
+
+## Responsiveness baseline overlay
+
+`responsiveness-baseline.patch` is applied only to the fixed pre-E1 checkout by
+the paired CI guard. It adds the pinned Playwright importer and built-app helper
+metadata/idempotent shutdown. It is not a pnpm package patch and contains no E1
+runtime change. The baseline also receives the current harness and opt-in metrics
+plugin. The guard’s recorded dirty-source hash binds this exact overlay.
+
 ## Claude launcher and provider errors
 
 The optional `claudeCli` executor options preserve the resolved executable,
