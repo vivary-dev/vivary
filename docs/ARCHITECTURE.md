@@ -719,7 +719,9 @@ entry, the launch the npm branch already builds. The shim is never run, and no o
 text in it is used. Directory order, the filtered launch environment, and the other
 branches are unchanged, so the credential boundary and coding runtime descriptions in
 this document still hold. The lookup takes an optional platform and environment so
-tests reach the Windows branch on any host. Six new cases in
+tests reach the Windows branch on any host. The environment defaults to `process.env`,
+and the four fixed names it reads keep their `guard:allow-env-credential` reasons, now
+worded for the supplied environment. Six new cases in
 `packages/workbench/tests/local-runtime-setup.test.ts` failed on 60d6f68 and pass
 with the fix. They cover both CLIs, backslash and slash separators, a misnamed
 package, a target outside `node_modules`, another file, a variable, a missing entry,

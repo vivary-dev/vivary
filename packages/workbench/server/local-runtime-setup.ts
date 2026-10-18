@@ -215,7 +215,8 @@ async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undef
   });
 }
 
-// Tests pass another platform and environment to reach the Windows branches on any host.
+// The environment defaults to process.env. Tests pass another platform and environment to reach
+// the Windows branches on any host. The reads below take their names from that environment.
 export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine,
   { platform = process.platform, env: source = process.env }: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
 ): Promise<CommandLaunch | null> {
@@ -223,13 +224,13 @@ export async function resolveVivaryRuntimeCommand(engine: VivaryCodeEngine,
   if (!isAllowedCommand(spec.command)) return null;
   const windows = platform === "win32";
   const home = homedir();
-  // guard:allow-env-credential - OS executable search paths locate the fixed CLI allowlist.
+  // guard:allow-env-credential - The environment's executable search paths locate the fixed CLI allowlist.
   const executablePath = source.PATH ?? source.Path ?? "";
-  // guard:allow-env-credential - Package-manager installation directory, not a credential.
+  // guard:allow-env-credential - The environment's package-manager installation directory, not a credential.
   const pnpmHome = source.PNPM_HOME;
-  // guard:allow-env-credential - Windows user application directory locates installed CLI packages.
+  // guard:allow-env-credential - The environment's Windows user application directory locates installed CLI packages.
   const appData = source.APPDATA;
-  // guard:allow-env-credential - Windows local application directory locates installed CLI executables.
+  // guard:allow-env-credential - The environment's Windows local application directory locates installed CLI executables.
   const localAppData = source.LOCALAPPDATA;
   const directories = [
     ...executablePath.split(path.delimiter),
