@@ -668,7 +668,23 @@ The patch changes these files:
   partial reply stays, the turn is not marked `continued`, and the error text
   is not added to the reply. The live error event is unchanged, so a connected
   client still continues on its own. Every other caller keeps the default,
-  `true`, and its current behavior.
+  `true`, and its current behavior. The rule covers every error that
+  `isInternalContinuationError` accepts, not only the three codes above:
+  `http_408`, `http_429`, `http_500`, `http_502`, `http_503`, `http_504`,
+  `timeout`, `timeout_error`, `overloaded_error`, `rate_limited`,
+  `too_many_concurrent_requests`, `stale_run`, `builder_gateway_timeout`,
+  `builder_gateway_stream_ended`, the Builder gateway's internal-error code, an
+  error marked `recoverable: true`, and a message that names a timeout, a
+  closed or ended stream, a temporarily unavailable service, 502, 503, 504 or
+  529. `provider_stream_error`, `builder_gateway_error` and an error marked
+  `recoverable: false` stay final errors.
+- A reply whose error arrives before any text is saved with no content and its
+  `runError`, where the builder used to save nothing. A client save keeps an
+  empty reply that holds a recoverable `runError`, as it keeps an empty reply
+  the owner stopped, and so does the chat's thread import,
+  `dropEmptyAssistantMessages` in `client/chat/repo-helpers.js`. The chat
+  renders no bubble for it. The error card under the conversation offers
+  Retry, and the next request's history leaves the empty reply out.
 - `foldAssistantTurn` in the same file clears a saved `runError` when a new run
   of the same turn folds onto it with no error of its own, so a continuation
   that finishes leaves no stale error. A run already folded keeps it.
@@ -684,9 +700,8 @@ retries repeat only the model call, so a tool that finished before the failing
 call runs once and keeps its card. Stop during a retry wait still saves a
 stopped reply with no error.
 
-An exhausted error with no streamed text still saves no reply, as before. The
-issue covers partial replies. Soft-timeout `auto_continue` and `loop_limit`
-boundaries are still saved as `continued`.
+Soft-timeout `auto_continue` and `loop_limit` boundaries are still saved as
+`continued`.
 
 `tests/native-stream-errors.test.ts` runs an in-stream code 429, a
 `timeout_error` type and an `overloaded_error` type after "Partial" through
@@ -705,6 +720,18 @@ previous patch the three exhausted turns and their client saves, the heavier
 client copy, the finished continuation, the tool step, the source check and the
 card failed. The cases for a continuation that follows, a later run's copy, a
 second save, Stop, a clean finish and a final error already held.
+
+A follow-up set runs the same three errors with no streamed text. The saved
+reply must exist with no content, the `incomplete` status and the recoverable
+error, survive a client save of an empty copy of the same run, stay out of the
+next request's history, and become one finished reply when a later run of the
+same turn folds onto it. Stop before any text and a clean run with no text are
+checked too. `tests/native-chat-components.test.mjs` reloads the whole chat
+on a thread whose last reply holds only such an error, and on one whose last
+reply is "Partial" with the error, and checks the error card's Retry. On
+the previous patch the nine cases with no text and the reload with no text
+failed. The cases for a continuation that follows, Stop before any text, a
+clean run with no text and the reload of the partial reply already held.
 
 Upstream could take these changes as they are. Remove this part of the patch
 only when an upstream release shows an in-stream provider error with its

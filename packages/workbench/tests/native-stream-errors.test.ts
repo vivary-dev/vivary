@@ -455,3 +455,67 @@ test("the chat plugin saves a run with whether a server continuation follows it 
   assert.match(production,
     /run\.serverContinuationFollows =\s*!noProgressRepeat\.tripped && willChainBackgroundContinuation\(run\);\s*(?:\/\/[^\n]*\s*)*await baseHandleRunComplete\?\.\(run\);/);
 });
+
+// Issue #246 follow-up. The common rate-limit shape fails before any text streams. The saved turn then holds
+// no content, and it must still be saved with its error, so a reload shows the error and a Retry instead of a
+// question with no reply. A client save of an empty copy of the same run must keep it, and the next request's
+// history leaves the empty reply out.
+const clientEmptyCopy = (runId: string, turnId: string) => ({ id: "client-reply", role: "assistant", content: [],
+  status: { type: "incomplete", reason: "error" }, metadata: { runId, custom: { runId, turnId } } });
+
+test("an exhausted retryable in-stream error before any text saves an empty failed reply (#246)", async t => {
+  for (const exhausted of exhaustedTurns) {
+    const turn = await runTurn([providerError(exhausted.error)]);
+    const saved = savedTurnOf(turn, false);
+    const serverRepo = saved ? foldOnto(questionRepo(), saved, turn.runId, turn.turnId) : questionRepo();
+    await t.test(`${exhausted.name}, with no server continuation`, () => {
+      assert.deepEqual({ requests: turn.requests.length, saved: savedState(saved) },
+        { requests: 4, saved: failedState(exhausted.errorCode, turn.runId, []) });
+    });
+    await t.test(`${exhausted.name}, after a client save of an empty copy of the same run`, () => {
+      const merged = clientSave(serverRepo, clientEmptyCopy(turn.runId, turn.turnId));
+      const reply = replyOf(merged);
+      assert.deepEqual({
+        roles: merged.messages.map((entry: { message: { role: string } }) => entry.message.role),
+        status: reply?.status,
+        errorCode: reply?.metadata?.custom?.runError?.errorCode,
+        recoverable: reply?.metadata?.custom?.runError?.recoverable,
+        nextRequestRoles: threads.threadDataToEngineMessages(merged).map((message: { role: string }) => message.role),
+      }, { roles: ["user", "assistant"], status: FAILED, errorCode: exhausted.errorCode, recoverable: true, nextRequestRoles: ["user"] });
+    });
+    await t.test(`${exhausted.name}, then a later run that finishes the same turn`, () => {
+      const laterRunId = `run-${randomUUID()}`;
+      const folded = foldOnto(serverRepo, finishedRun(laterRunId, turn.turnId), laterRunId, turn.turnId);
+      const reply = replyOf(folded);
+      assert.deepEqual({
+        roles: folded.messages.map((entry: { message: { role: string } }) => entry.message.role),
+        status: reply?.status,
+        errorCode: reply?.metadata?.custom?.runError?.errorCode,
+        content: reply?.content,
+        foldedRunIds: reply?.metadata?.custom?.foldedRunIds,
+      }, { roles: ["user", "assistant"], status: COMPLETE, errorCode: undefined, content: [{ type: "text", text: " and the rest." }],
+        foldedRunIds: [turn.runId, laterRunId] });
+    });
+    // A server-chained continuation still picks the turn up, as before.
+    await t.test(`${exhausted.name}, when the server chains a continuation`, () => {
+      assert.equal(savedTurnOf(turn, true), null);
+    });
+  }
+});
+
+test("Stop during the retry wait before any text saves a stopped reply with no error (#246)", async () => {
+  const turn = await runTurn([providerError({ code: 429, message: "Rate limit exceeded" })],
+    { stopWhen: events => events.some(event => event.type === "clear") });
+  const saved = savedTurnOf(turn, false);
+  assert.deepEqual({ requests: turn.requests.length, terminal: turn.events.filter(event => TERMINAL_TYPES.has(String(event.type))),
+    content: saved?.content, userStopped: saved?.metadata?.custom?.userStopped, runError: saved?.metadata?.custom?.runError },
+  { requests: 1, terminal: [{ type: "done", reason: "user" }], content: [], userStopped: true, runError: undefined });
+});
+
+test("a clean run with no text saves the same whether or not a continuation follows (#246)", async () => {
+  const turn = await runTurn([finish]);
+  const shape = (message: Saved) => JSON.stringify(message && { content: message.content, status: message.status, metadata: message.metadata });
+  const plain = threads.buildAssistantMessage(turn.entries, turn.runId, { suppressInternalContinuation: true, turnId: turn.turnId });
+  assert.deepEqual({ withoutContinuation: shape(savedTurnOf(turn, false)), withContinuation: shape(savedTurnOf(turn, true)) },
+    { withoutContinuation: shape(plain), withContinuation: shape(plain) });
+});

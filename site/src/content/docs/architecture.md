@@ -647,7 +647,12 @@ finished continuation of the same turn clears the saved error, and a client
 save of the same run keeps it. `tests/native-stream-errors.test.ts` and
 `tests/native-chat-components.test.mjs` add the cases. The engine retry loop,
 the live error event, the client's automatic continuation and the saved-turn
-owner keep their roles, so the design description holds.
+owner keep their roles, so the design description holds. A follow-up commit
+keeps a reply whose error arrived before any text. The builder saves it with no
+content, and a client save keeps an empty reply that holds a recoverable error,
+so the error card and its Retry show after a reload. The saved-error rule
+covers every error that `isInternalContinuationError` accepts, which the patch
+README lists.
 
 2026-10-18 In-stream provider errors are not classified by their message. The
 maintained Core patch passed an OpenRouter in-stream error's message to
