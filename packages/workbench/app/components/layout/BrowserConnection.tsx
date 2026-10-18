@@ -49,7 +49,7 @@ export function BrowserConnection({ children }: { children: ReactNode }) {
   return <BrowserHost.Provider value={host}><div className="browser-connection">
     <div className="min-w-0 border-b bg-muted px-4 py-2 text-sm [overflow-wrap:anywhere]" role="status">
       {connection.problem === 'changed' ? 'The host at this address changed. Requests are paused. Return to your original host.'
-        : connection.problem === 'denied' ? (host ? 'Browser access ended. Keep this page open to preserve unsent text. Check access again or pair this browser from the desktop app.' : 'Browser access ended. Check access again or pair this browser from the desktop app.')
+        : connection.problem === 'denied' ? (host ? 'Remote access ended. Keep this page open to preserve unsent text. Check access again or pair this browser from the desktop app.' : 'Remote access ended. Check access again or pair this browser from the desktop app.')
           : connection.problem === 'unavailable' ? `Cannot reach ${host?.label ?? 'your Vivary host'}. Keep this page open to preserve unsaved text. Retry does not send messages.`
             : `Connected to ${host?.label ?? 'your Vivary host'}. Files and tools run on this host.`}
       {connection.problem && connection.problem !== 'changed' && <button className="ml-3 min-h-11 underline" onClick={() => setRetry(value => value + 1)}>{connection.problem === 'denied' ? 'Check access again' : 'Retry connection'}</button>}

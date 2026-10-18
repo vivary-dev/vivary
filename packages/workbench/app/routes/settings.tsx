@@ -81,7 +81,7 @@ export default function SettingsRoute() {
     group: "agent",
     content: <AutomationFileReview />,
   };
-  const browserTab = { id: "browser-access", label: "Browser access", icon: IconTerminal2, group: "agent", content: <BrowserAccessSettings /> };
+  const browserTab = { id: "browser-access", label: "Remote access", icon: IconTerminal2, group: "agent", keywords: "remote access another device phone pair browser https tailscale", content: <BrowserAccessSettings /> };
   const tabs = nativeTabs
     .filter((tab) => tab.id !== "organization" && tab.id !== "workspace")
     .map((tab) => (tab.id === "mcp" ? { ...tab, keywords: "mcp", searchEntries: [], content: <McpSettings /> } : tab))

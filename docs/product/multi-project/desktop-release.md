@@ -9,7 +9,7 @@ history, and memory stay on that host. A phone connects as a client.
 
 The first installed release targets Windows with a working `Vivary.exe` and its
 required runtime files. Local desktop opens without a Vivary account. Remote
-browser access is explicitly enabled and authenticated. Zo is the development
+access, which opens Vivary on another device, is explicitly enabled and authenticated. Zo is the development
 and private preview host, not a required service for users. Mac distribution is
 optional later roadmap work, outside this active milestone.
 

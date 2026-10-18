@@ -43,7 +43,7 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
   }
   const ended = () => { throw new Error('Preview access ended.'); };
   // Open runs through the action route, which shows a phone only contract errors below 500.
-  const listenerDown = () => fail('Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.',
+  const listenerDown = () => fail('Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Remote access settings.',
     { statusCode: 409, errorCode: 'vivary_preview_listener_unavailable' });
   const openEnded = () => listening() ? fail('Preview access ended. Open the preview again.', { statusCode: 409 }) : listenerDown();
   const active = record => !closed && !record.controller.signal.aborted && config().enabled
@@ -59,10 +59,10 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
     const key = `${deviceId}:${input.documentId}`;
     const previous = documents.get(key);
     if (input.operation === 'close') { if (previous) retire(previous); return { closed: true }; }
-    if (closed || !config().enabled || !config().preview) fail('Enable the separate preview origin in desktop Browser access settings.', { statusCode: 409 });
+    if (closed || !config().enabled || !config().preview) fail('Enable the separate preview origin in desktop Remote access settings.', { statusCode: 409 });
     // Refuse before any ticket. Otherwise the remote frame loads a bootstrap URL that nothing answers.
     if (!listening()) listenerDown();
-    if (documents.size >= 128 && !previous) fail('Too many preview documents. Restart browser access from the desktop.', { statusCode: 409 });
+    if (documents.size >= 128 && !previous) fail('Too many preview documents. Restart remote access from the desktop.', { statusCode: 409 });
     const target = await resolveTarget(context, input.projectId, input.launchId);
     const binding = `${input.projectId}:${input.launchId}:${target.generation}`;
     if (previous && previous.binding !== binding) fail('Save your work and refresh Vivary before opening a different preview.', { statusCode: 409 });
@@ -70,7 +70,7 @@ export function createPreviewGateway({ access, resolveTarget = ownedProjectPrevi
     if (previous) retire(previous);
     const controller = new AbortController();
     const grant = await access.admitPreviewGrant(deviceId, controller);
-    if (!grant) fail('Browser access ended.', { statusCode: 409 });
+    if (!grant) fail('Remote access ended.', { statusCode: 409 });
     let record;
     try {
       const settings = config();
