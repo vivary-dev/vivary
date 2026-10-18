@@ -55,8 +55,9 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
 1. Run `Vivary-Setup-<commit>.exe` after its checksum matches. The installer is
    not code signed, so Windows can show **Windows protected your PC** with an
    unknown publisher. Choose **More info**, then **Run anyway**.
-2. Setup needs no administrator rights. It installs Vivary for your Windows account
-   only, in `%LOCALAPPDATA%\Programs\Vivary`. You cannot choose another folder.
+2. Setup needs 64-bit Windows and no administrator rights. It installs Vivary for
+   your Windows account only, in `%LOCALAPPDATA%\Programs\Vivary`. You cannot
+   choose another folder. Only one setup or uninstaller runs at a time.
 3. Accept the license and wait for the files to copy.
 4. On the last page, **Launch Vivary** is selected. Select **Create a desktop
    shortcut** if you want one. Then choose **Finish**.
@@ -450,7 +451,9 @@ your firewall.
 | Windows protected your PC | The installer is not code signed. Confirm the checksum matches, then choose **More info** and **Run anyway**. |
 | Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** stops before any file is removed. |
 | Setup or the uninstaller says some Vivary files are in use | Another program, such as a terminal open in a Vivary folder, holds a file. Setup removed the files it could and kept its file list, uninstaller, and Installed apps entry. Close that program, then run setup or the uninstaller again. It continues from where it stopped. |
-| The uninstaller says `install-files.txt` is missing | The uninstaller removes only listed files, so it removed nothing. Run setup again to repair the install, then uninstall. |
+| Setup or the uninstaller says the folder has no `install-files.txt` | Without that list, neither can tell which files it installed, so both stop and change nothing. Close Vivary, then delete `%LOCALAPPDATA%\Programs\Vivary` by hand. Your projects, conversations, and settings are stored elsewhere and are not affected. Then run setup again. |
+| Setup says Vivary needs 64-bit Windows | Vivary runs only on 64-bit Windows. Setup installed nothing. |
+| Setup or the uninstaller says it is already running | Another setup or uninstaller is open for your account. Finish or close it, then try again. |
 | Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |
 | Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
 | Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary. Move them elsewhere, then run setup again. |

@@ -749,8 +749,20 @@ makes the installer the main install path with its acceptance pending, keeps the
 portable ZIP optional, adds an Uninstall section, and says that files added to the
 install folder are kept. From a review thread on PR #251, it also says that runtime
 detection skips a `codex.cmd` or `claude.cmd` that names no recognized package entry
-and has no npm package beside it. Evidence: 45 of 45 installer tests pass with `makensis` 3.10 and 44 pass with one skip
-without it, and each of 42 single-rule changes to the script fails the static tests.
+and has no npm package beside it. Review round 3: `.onInit` refuses 32-bit Windows before any other check, and setup and
+the uninstaller take the per-user mutex `Local\VivarySetup`, so a second instance
+exits non-zero. A recognized previous install without `install-files.txt` is no
+longer overwritten in place. Setup and the uninstaller change nothing and ask the
+user to remove the folder by hand. `build-installer.mjs` requires `--manifest`,
+counts `LICENSE` and `assets/vivary.ico` among the sources that must be committed,
+refuses payload paths that Windows would merge or reserve (case-only differences, a
+trailing dot or space, `CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`),
+refuses an existing checksum or receipt, removes every file it wrote when a step
+after `makensis` starts fails, and compares the output and payload paths
+case-insensitively on Windows. Evidence: 66 of 66 installer tests pass with
+`makensis` 3.10 and 65 pass with one skip without it, and each of 53 single-rule
+changes to the script fails the static tests. The 70957d1 installer passed install,
+reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

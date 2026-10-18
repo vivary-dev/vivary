@@ -42,6 +42,9 @@ AllowSkipFiles off
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary"
 !define UNINSTALLER "Uninstall Vivary.exe"
 !define INSTALL_LIST "install-files.txt"
+; One name for setup and the uninstaller, so they cannot run at the same time.
+!define SETUP_MUTEX "Local\VivarySetup"
+!define NO_LIST_TEXT "has no ${INSTALL_LIST}, so Vivary cannot tell which files it installed and removed nothing. Remove that folder by hand. Your projects, conversations and settings are stored elsewhere and are not affected."
 ; build-installer.mjs refuses payload paths longer than this.
 !define MAX_LIST_LINE 240
 !define KEPT_DATA_TEXT "Your projects, conversations and settings in %USERPROFILE%\.vivary and %APPDATA%\Vivary were kept. Project folders you opened in Vivary were not changed."
@@ -67,6 +70,7 @@ VIAddVersionKey "InstallerCommit" "${INSTALLER_COMMIT}"
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "x64.nsh"
 
 !define MUI_ICON "${ICON_FILE}"
 !define MUI_UNICON "${ICON_FILE}"
@@ -294,18 +298,40 @@ Function ${PREFIX}RemoveInstalledFiles
   Abort "A Vivary folder is a link. Nothing was removed."
 FunctionEnd
 
+; Holds a per-user mutex for the life of this process. A second setup or
+; uninstaller finds it taken (ERROR_ALREADY_EXISTS, 183) and exits non-zero.
+Function ${PREFIX}AcquireSetupMutex
+  System::Call 'kernel32::CreateMutexW(p 0, i 1, w "${SETUP_MUTEX}") p .r0 ?e'
+  Pop $1
+  StrCmp $0 0 busy
+  IntCmp $1 183 busy
+  Return
+  busy:
+  MessageBox MB_OK|MB_ICONSTOP "Vivary setup or its uninstaller is already running. Finish or close it, then try again." /SD IDOK
+  SetErrorLevel 2
+  Quit
+FunctionEnd
+
 !macroend
 !insertmacro VIVARY_SHARED_FUNCTIONS ""
 !insertmacro VIVARY_SHARED_FUNCTIONS "un."
 
 Function .onInit
+  ; The packaged application is 64-bit only.
+  ${IfNot} ${RunningX64}
+    MessageBox MB_OK|MB_ICONSTOP "Vivary needs 64-bit Windows. This computer runs 32-bit Windows, so setup installed nothing." /SD IDOK
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  Call AcquireSetupMutex
   ; A /D= command-line option would otherwise choose another folder.
   StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Vivary"
 FunctionEnd
 
 ; An existing folder is changed only when it holds a previous Vivary: its
 ; uninstall entry points here, or it has the file list, vivary.exe or the
-; uninstaller. A partly removed install still matches, so setup can repair it.
+; uninstaller. A partly removed install still has its list, so setup can
+; repair it. A previous install without a list is refused after this check.
 Function RequirePreviousVivary
   ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "InstallLocation"
   StrCmp $0 $INSTDIR found
@@ -327,9 +353,14 @@ Section "Vivary"
   Call RequirePreviousVivary
   DetailPrint "Removing the previous Vivary application files."
   Call RemoveInstalledFiles
+  ; Without a list setup cannot tell its files from others, so it changes nothing.
+  IntCmp $R8 1 no_list
   IntCmp $R7 0 copy_files
   MessageBox MB_OK|MB_ICONSTOP "Some files of the previous Vivary in $INSTDIR are in use. Close Vivary and any program using those files, then run setup again." /SD IDOK
   Abort "Some previous Vivary files are in use. Run setup again after closing them."
+  no_list:
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK
+  Abort "The installed-file list is missing. Nothing was changed."
   copy_files:
   ClearErrors
   SetOutPath "$INSTDIR"
@@ -369,6 +400,7 @@ Function CreateDesktopShortcut
 FunctionEnd
 
 Function un.onInit
+  Call un.AcquireSetupMutex
   Call un.RequireFixedInstallDir
 FunctionEnd
 
@@ -384,7 +416,7 @@ Section "Uninstall"
   MessageBox MB_OK|MB_ICONSTOP "Some Vivary files in $INSTDIR are in use and were not removed. Close the programs using them, then run the uninstaller again." /SD IDOK
   Abort "Some Vivary files are in use. Run the uninstaller again after closing them."
   no_list:
-  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR has no ${INSTALL_LIST}, so nothing was removed. Run Vivary setup to repair the install, then uninstall again." /SD IDOK
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK
   Abort "The installed-file list is missing. Nothing was removed."
   remove_entry:
   Delete "$SMPROGRAMS\Vivary.lnk"

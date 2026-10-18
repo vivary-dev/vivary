@@ -299,25 +299,33 @@ npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-wi
 
 The script reads the version and payload commit from the payload's
 `resources/workbench/build.json`. It refuses a payload built from a modified
-checkout, a payload with links, a path the installer cannot list, and an existing
-output file. With `--manifest`, it checks every payload file's relative path and
-SHA-256 against the package's file manifest and refuses missing, extra, or changed
-files. Release builds pass the manifest. It also refuses uncommitted changes to
-`installer/` or `build-installer.mjs`, so the installer commit it records holds the
-script that built the installer.
+checkout and a payload with links. It refuses a path the installer cannot list or
+Windows cannot hold: non-ASCII, a wildcard or drive character, a part ending in a dot
+or space, a reserved device name such as `CON` or `nul.txt`, or two paths that
+differ only in case. `--manifest` is required. The script checks every payload
+file's relative path and SHA-256 against the package's file manifest and refuses
+missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
+`build-installer.mjs`, `assets/vivary.ico`, and the repository `LICENSE`, so the
+installer commit it records holds every source file the build used. It also refuses
+an existing installer, `.sha256`, or `.receipt.json` at the output path.
 
 The script writes `install-files.txt`: every payload file, then every payload folder
 deepest first, with a trailing backslash on folder lines. After `makensis` finishes,
-it counts the files `makensis` reported adding and deletes the installer when that
-count differs from the payload plus the list. It writes `<output>.sha256` in the
-same format as the ZIP companion, and `<output>.receipt.json` with the installer's
-size and SHA-256, the payload and installer commits, the `makensis` version, the
-payload file count, and whether a manifest verified the payload. The installer's
-file properties carry the same two commits as `PayloadCommit` and `InstallerCommit`.
+it counts the files `makensis` reported adding and fails when that count differs
+from the payload plus the list. It writes `<output>.sha256` in the same format as
+the ZIP companion, and `<output>.receipt.json` with the installer's size and
+SHA-256, the payload and installer commits, the `makensis` version, the payload file
+count, and the manifest's SHA-256. Once `makensis` starts, any failure removes the
+files this build wrote, so the installer, checksum, and receipt exist together or
+not at all. The installer's file properties carry the same two commits as
+`PayloadCommit` and `InstallerCommit`.
 
 The installer script is `installer/vivary.nsi`. Its rules:
 
 - It runs as the current user, with no administrator prompt.
+- It refuses 32-bit Windows before any other check and exits with an error.
+- Setup and the uninstaller hold the per-user mutex `Local\VivarySetup`. A second
+  setup or uninstaller exits with an error instead of running alongside.
 - It installs to `%LOCALAPPDATA%\Programs\Vivary`. There is no folder choice,
   and it ignores the `/D=` option, so the uninstaller always knows its folder.
 - It adds a Start menu shortcut, and a desktop shortcut when the finish page
@@ -337,7 +345,9 @@ The installer script is `installer/vivary.nsi`. Its rules:
 - Both first confirm that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`
   and is not a link. An upgrade changes an existing folder only when its uninstall
   entry points there or it holds `install-files.txt`, `vivary.exe`, or the
-  uninstaller, so setup can repair a partly removed install.
+  uninstaller, so setup can repair a partly removed install. When such a folder has
+  no `install-files.txt`, setup and the uninstaller change nothing and ask the user
+  to remove the folder by hand.
 - When listed files remain, setup stops before copying, and the uninstaller keeps
   its entry, list, and itself so it can run again. Otherwise the uninstaller removes
   the shortcuts (the desktop one only when setup made it), then the list, the
@@ -349,6 +359,7 @@ The installer script is `installer/vivary.nsi`. Its rules:
 
 `tests/installer-script.test.mjs` checks these rules in the script source.
 `tests/installer-build.test.mjs` checks the argument validation, the path rules,
-the manifest check, the installer commit check, and the list order. It builds a
-small fixture installer when `makensis` is available and skips that build otherwise.
+the manifest check, the installer commit check, the list order, and the cleanup
+after a failed build, which uses a stand-in `makensis`. It builds a small fixture
+installer when the real `makensis` is available and skips that build otherwise.
 The installer is not code signed.

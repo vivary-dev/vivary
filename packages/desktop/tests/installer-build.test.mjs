@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  buildInstaller, countAddedFiles, findMakensis, installFileList, resolveInstallerCommit,
-  resolveInstallerInputs, verifyPayloadManifest,
+  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, outputFiles,
+  resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const installerCommit = "1111111111111111111111111111111111111111";
 const buildScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build-installer.mjs");
+// Case-sensitive names, trailing dots and device names exist only off Windows and macOS.
+const linuxOnly = process.platform !== "linux" && "needs a case-sensitive Linux file system";
 
 /**
  * Writes a minimal packaged folder. The smoke build needs the dot folder, the
@@ -33,21 +35,26 @@ async function writePayload(directory, build = {}) {
 }
 
 /** Writes a manifest of the payload's current files, as the package build records it. */
-async function writeManifest(payload, files, file) {
+async function writeManifest(payload, file) {
   const manifest = {};
-  for (const name of files) {
-    manifest[name] = createHash("sha256").update(await readFile(path.join(payload, ...name.split("/")))).digest("hex");
+  for (const entry of await readdir(payload, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const absolute = path.join(entry.parentPath, entry.name);
+    manifest[path.relative(payload, absolute).replaceAll(path.sep, "/")] =
+      createHash("sha256").update(await readFile(absolute)).digest("hex");
   }
   await writeFile(file, JSON.stringify(manifest));
-  return manifest;
 }
 
+/** Runs a test against a fresh payload whose manifest matches it. */
 async function withFixture(run) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-installer-"));
   try {
     const payload = path.join(directory, "Vivary-win32-x64");
+    const manifest = path.join(directory, "manifest.json");
     await writePayload(payload);
-    await run({ directory, payload, output: path.join(directory, "Vivary-Setup-2aaf04f.exe"), manifest: path.join(directory, "manifest.json") });
+    await writeManifest(payload, manifest);
+    await run({ directory, payload, manifest, output: path.join(directory, "Vivary-Setup-2aaf04f.exe") });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -58,15 +65,16 @@ const fixtureFiles = [
   "resources/workbench/build.json", "version", "vivary.exe",
 ];
 
-test("valid payload yields its files, folders, version and commit", () => withFixture(async ({ payload, output }) => {
-  const inputs = await resolveInstallerInputs({ payload, output });
+test("valid payload yields its files, folders, version, commit and manifest", () => withFixture(async ({ payload, output, manifest }) => {
+  const inputs = await resolveInstallerInputs({ payload, output, manifest });
   assert.equal(inputs.version, "0.0.0");
   assert.equal(inputs.payloadCommit, commit);
   assert.equal(inputs.payloadCommitShort, "2aaf04f");
   assert.deepEqual(inputs.files, fixtureFiles);
   assert.deepEqual(inputs.directories, ["resources", "resources/workbench", "resources/workbench/.output", "resources/workbench/.output/server"]);
   assert.equal(inputs.fileCount, 6);
-  assert.equal(inputs.manifest, null);
+  assert.equal(inputs.manifest.files, 6);
+  assert.equal(inputs.manifest.sha256, createHash("sha256").update(await readFile(manifest)).digest("hex"));
 }));
 
 test("the installed-file list names files, then folders deepest first", () => {
@@ -74,46 +82,51 @@ test("the installed-file list names files, then folders deepest first", () => {
     "a.txt\r\nb\\c.txt\r\nb\\d\\\r\nb\\\r\ne\\\r\n");
 });
 
-test("payload paths the installer cannot list are refused", async t => {
-  const refuse = (name, setup) => t.test(name, { skip: process.platform === "win32" && "Windows cannot create these names" },
-    () => withFixture(async ({ payload, output }) => {
+test("payload paths the installer cannot list or Windows cannot hold are refused", async t => {
+  const refuse = (name, setup, expected = /cannot list this payload path/) =>
+    t.test(name, { skip: linuxOnly }, () => withFixture(async ({ payload, output, manifest }) => {
       await setup(payload);
-      await assert.rejects(resolveInstallerInputs({ payload, output }), /cannot list this payload path/);
+      await writeManifest(payload, manifest);
+      await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), expected);
     }));
-  await refuse("colon", payload => writeFile(path.join(payload, "a:b"), "x"));
-  await refuse("wildcard", payload => writeFile(path.join(payload, "a*b"), "x"));
-  await refuse("backslash", payload => writeFile(path.join(payload, "a\\b"), "x"));
-  await refuse("non-ASCII", payload => writeFile(path.join(payload, "café.txt"), "x"));
-  await refuse("too long", async payload => {
-    const deep = path.join(payload, ...Array.from({ length: 25 }, () => "abcdefghij"));
-    await mkdir(deep, { recursive: true });
-    await writeFile(path.join(deep, "x"), "x");
-  });
-  await t.test("two dots inside a name are allowed", () => withFixture(async ({ payload, output }) => {
-    await writeFile(path.join(payload, "core+[...].mjs"), "x");
-    assert.ok((await resolveInstallerInputs({ payload, output })).files.includes("core+[...].mjs"));
+  const file = (...parts) => async payload => {
+    await mkdir(path.join(payload, ...parts.slice(0, -1)), { recursive: true });
+    await writeFile(path.join(payload, ...parts), "x");
+  };
+  await refuse("colon", file("a:b"));
+  await refuse("wildcard", file("a*b"));
+  await refuse("backslash", file("a\\b"));
+  await refuse("non-ASCII", file("caf\u00e9.txt"));
+  await refuse("too long", file(...Array.from({ length: 25 }, () => "abcdefghij"), "x"));
+  await refuse("trailing dot", file("notes."));
+  await refuse("trailing space", file("notes "));
+  await refuse("trailing dot on a folder", file("lib.", "x.js"));
+  for (const name of ["CON", "prn.txt", "Aux.tar.gz", "nul", "COM1.log", "com9", "LPT1", "lpt9.dat", "CON .txt"]) {
+    await refuse(`reserved name ${name}`, file(name));
+  }
+  await refuse("reserved folder name", file("resources", "NUL", "x.js"));
+  await refuse("files that differ only in case", file("Version"), /same file on Windows: Version and version|same file on Windows: version and Version/);
+  await refuse("folders that differ only in case", file("Resources", "x.js"), /same file on Windows/);
+  await t.test("names that only resemble reserved ones are allowed", () => withFixture(async ({ payload, output, manifest }) => {
+    for (const name of ["core+[...].mjs", "CONSOLE.txt", "com10", "auxiliary.js", "nul_file"]) {
+      await writeFile(path.join(payload, name), "x");
+    }
+    await writeManifest(payload, manifest);
+    const { files } = await resolveInstallerInputs({ payload, output, manifest });
+    for (const name of ["core+[...].mjs", "CONSOLE.txt", "com10", "auxiliary.js", "nul_file"]) assert.ok(files.includes(name), name);
   }));
 });
 
 test("the manifest must match every payload path and SHA-256", async t => {
-  await t.test("matching", () => withFixture(async ({ payload, output, manifest }) => {
-    await writeManifest(payload, fixtureFiles, manifest);
-    const inputs = await resolveInstallerInputs({ payload, output, manifest });
-    assert.equal(inputs.manifest.files, 6);
-    assert.equal(inputs.manifest.sha256, createHash("sha256").update(await readFile(manifest)).digest("hex"));
-  }));
   await t.test("missing file", () => withFixture(async ({ payload, output, manifest }) => {
-    await writeManifest(payload, fixtureFiles, manifest);
     await rm(path.join(payload, "version"));
     await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /1 missing \(version\), 0 extra/);
   }));
   await t.test("extra file", () => withFixture(async ({ payload, output, manifest }) => {
-    await writeManifest(payload, fixtureFiles, manifest);
     await writeFile(path.join(payload, "added.txt"), "x");
     await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /0 missing \(\), 1 extra \(added\.txt\)/);
   }));
   await t.test("changed file", () => withFixture(async ({ payload, output, manifest }) => {
-    await writeManifest(payload, fixtureFiles, manifest);
     await writeFile(path.join(payload, "version"), "changed");
     await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /1 changed \(version\)/);
   }));
@@ -123,21 +136,36 @@ test("the manifest must match every payload path and SHA-256", async t => {
   }));
 });
 
-test("missing arguments print usage", async () => {
+test("payload, output and manifest are all required", async () => {
   await assert.rejects(resolveInstallerInputs({}), /^Error: Usage: node build-installer\.mjs --payload/);
-  await assert.rejects(resolveInstallerInputs({ payload: "x" }), /Usage/);
+  await assert.rejects(resolveInstallerInputs({ payload: "x", output: "y.exe" }), /Usage: .* --manifest/);
   assert.throws(() => execFileSync(process.execPath, [buildScript], { stdio: "pipe" }),
     error => error.status === 1 && /Usage/.test(error.stderr.toString()));
 });
 
-test("output path is validated before any build", () => withFixture(async ({ directory, payload, output }) => {
-  await assert.rejects(resolveInstallerInputs({ payload, output: path.join(directory, "setup.zip") }), /must end in \.exe/);
-  await assert.rejects(resolveInstallerInputs({ payload, output: path.join(directory, "missing", "setup.exe") }), /output folder does not exist/);
-  await assert.rejects(resolveInstallerInputs({ payload, output: path.join(payload, "setup.exe") }), /outside the payload/);
-  await assert.rejects(resolveInstallerInputs({ payload, output: path.join(directory, "a$b.exe") }), /containing \$/);
-  await writeFile(output, "existing");
-  await assert.rejects(resolveInstallerInputs({ payload, output }), /Refusing to overwrite/);
+test("output paths are validated before any build", () => withFixture(async ({ directory, payload, output, manifest }) => {
+  const resolve = target => resolveInstallerInputs({ payload, output: target, manifest });
+  await assert.rejects(resolve(path.join(directory, "setup.zip")), /must end in \.exe/);
+  await assert.rejects(resolve(path.join(directory, "missing", "setup.exe")), /output folder does not exist/);
+  await assert.rejects(resolve(path.join(payload, "setup.exe")), /outside the payload/);
+  await assert.rejects(resolve(path.join(directory, "a$b.exe")), /containing \$/);
+  for (const existing of outputFiles(output)) {
+    await writeFile(existing, "existing");
+    await assert.rejects(resolve(output), error => error.message === `Refusing to overwrite ${existing}.`);
+    await rm(existing);
+  }
 }));
+
+test("output inside the payload is detected as each platform compares paths", () => {
+  assert.equal(isSameOrInside("C:\\Build\\Payload", "c:\\build\\payload\\Setup.exe", "win32"), true);
+  assert.equal(isSameOrInside("C:\\Build\\Payload", "C:\\BUILD\\PAYLOAD", "win32"), true);
+  assert.equal(isSameOrInside("C:\\Build\\Payload", "C:\\Build\\Payload2\\Setup.exe", "win32"), false);
+  assert.equal(isSameOrInside("C:\\Build\\Payload", "C:\\Build\\Setup.exe", "win32"), false);
+  assert.equal(isSameOrInside("/build/payload", "/build/payload/setup.exe", "linux"), true);
+  assert.equal(isSameOrInside("/build/payload", "/build/Payload/setup.exe", "linux"), false);
+  assert.equal(isSameOrInside("/build/payload", "/build/payload/..setup.exe", "linux"), true);
+  assert.equal(isSameOrInside("/build/payload", "/build/payload-other/setup.exe", "linux"), false);
+});
 
 test("payload must be a clean Vivary Windows package", async t => {
   const cases = [
@@ -149,37 +177,44 @@ test("payload must be a clean Vivary Windows package", async t => {
     ["bad version", { version: "0.0.0+2aaf04f" }, /major\.minor\.patch/],
   ];
   for (const [name, build, expected] of cases) {
-    await t.test(name, () => withFixture(async ({ payload, output }) => {
+    await t.test(name, () => withFixture(async ({ payload, output, manifest }) => {
       await writePayload(payload, build);
-      await assert.rejects(resolveInstallerInputs({ payload, output }), expected);
+      await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), expected);
     }));
   }
-  await t.test("not a folder", () => withFixture(async ({ directory, output }) => {
-    await assert.rejects(resolveInstallerInputs({ payload: path.join(directory, "absent"), output }), /not a folder/);
+  await t.test("not a folder", () => withFixture(async ({ directory, output, manifest }) => {
+    await assert.rejects(resolveInstallerInputs({ payload: path.join(directory, "absent"), output, manifest }), /not a folder/);
   }));
-  await t.test("no vivary.exe", () => withFixture(async ({ payload, output }) => {
+  await t.test("no vivary.exe", () => withFixture(async ({ payload, output, manifest }) => {
     await rm(path.join(payload, "vivary.exe"));
-    await assert.rejects(resolveInstallerInputs({ payload, output }), /no vivary\.exe/);
+    await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /no vivary\.exe/);
   }));
-  await t.test("no build.json", () => withFixture(async ({ payload, output }) => {
+  await t.test("no build.json", () => withFixture(async ({ payload, output, manifest }) => {
     await rm(path.join(payload, "resources", "workbench", "build.json"));
-    await assert.rejects(resolveInstallerInputs({ payload, output }), /no resources\/workbench\/build\.json/);
+    await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /no resources\/workbench\/build\.json/);
   }));
   await t.test("link inside the payload", { skip: process.platform === "win32" && "links need privileges on Windows" },
-    () => withFixture(async ({ directory, payload, output }) => {
+    () => withFixture(async ({ directory, payload, output, manifest }) => {
       await writeFile(path.join(directory, "outside.txt"), "outside");
       await symlink(path.join(directory, "outside.txt"), path.join(payload, "linked.txt"));
-      await assert.rejects(resolveInstallerInputs({ payload, output }), /only files and folders/);
+      await assert.rejects(resolveInstallerInputs({ payload, output, manifest }), /only files and folders/);
     }));
 });
 
-test("the installer commit must hold committed installer sources", () => withFixture(async ({ directory }) => {
+test("the installer commit must hold every committed installer source", () => withFixture(async ({ directory }) => {
   const repository = path.join(directory, "repository");
   const git = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim();
-  await mkdir(path.join(repository, "packages", "desktop", "installer"), { recursive: true });
-  await writeFile(path.join(repository, "packages", "desktop", "installer", "vivary.nsi"), "; script\n");
-  await writeFile(path.join(repository, "packages", "desktop", "build-installer.mjs"), "// build\n");
-  await writeFile(path.join(repository, "README.md"), "readme\n");
+  const sources = {
+    "packages/desktop/installer/vivary.nsi": "; script\n",
+    "packages/desktop/build-installer.mjs": "// build\n",
+    "packages/desktop/assets/vivary.ico": "icon\n",
+    "LICENSE": "license\n",
+    "README.md": "readme\n",
+  };
+  for (const [name, text] of Object.entries(sources)) {
+    await mkdir(path.dirname(path.join(repository, name)), { recursive: true });
+    await writeFile(path.join(repository, name), text);
+  }
   git("init", "-q");
   git("config", "user.email", "installer@example.test");
   git("config", "user.name", "Installer Test");
@@ -188,9 +223,11 @@ test("the installer commit must hold committed installer sources", () => withFix
   assert.equal(resolveInstallerCommit(repository), git("rev-parse", "HEAD"));
   await writeFile(path.join(repository, "README.md"), "other changes do not matter\n");
   assert.equal(resolveInstallerCommit(repository), git("rev-parse", "HEAD"));
-  await writeFile(path.join(repository, "packages", "desktop", "installer", "vivary.nsi"), "; changed\n");
-  assert.throws(() => resolveInstallerCommit(repository), /Commit the installer sources/);
-  git("checkout", "--", "packages/desktop/installer/vivary.nsi");
+  for (const name of Object.keys(sources).filter(name => name !== "README.md")) {
+    await writeFile(path.join(repository, name), "changed\n");
+    assert.throws(() => resolveInstallerCommit(repository), /Commit the installer sources/, name);
+    git("checkout", "--", name);
+  }
   await writeFile(path.join(repository, "packages", "desktop", "installer", "extra.nsh"), "; new\n");
   assert.throws(() => resolveInstallerCommit(repository), /Commit the installer sources/);
 }));
@@ -220,11 +257,50 @@ test("file count reads only makensis file lines", () => {
   assert.equal(countAddedFiles(log), 4);
 });
 
+/**
+ * Writes a stand-in for makensis that writes the -DOUTFILE file and reports
+ * FAKE_FILES added files, so the failure paths run without NSIS.
+ */
+async function writeFakeMakensis(directory) {
+  const program = path.join(directory, "fake-makensis");
+  await writeFile(program, [
+    "#!/bin/sh",
+    'if [ "$1" = "-VERSION" ]; then echo v3.10-fake; exit 0; fi',
+    'for argument in "$@"; do case "$argument" in -DOUTFILE=*) printf MZfake > "${argument#-DOUTFILE=}";; esac; done',
+    'i=0; while [ "$i" -lt "$FAKE_FILES" ]; do echo "File: \\"f$i\\" 1 bytes"; i=$((i + 1)); done',
+  ].join("\n"));
+  await chmod(program, 0o755);
+  return program;
+}
+
+test("a failed build leaves no installer, checksum or receipt", { skip: process.platform === "win32" && "the stand-in makensis is a shell script" },
+  async t => {
+    await t.test("file count mismatch", () => withFixture(async ({ directory, payload, output, manifest }) => {
+      const inputs = await resolveInstallerInputs({ payload, output, manifest });
+      process.env.FAKE_FILES = "3";
+      try {
+        await assert.rejects(buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /added 3 files/);
+      } finally { delete process.env.FAKE_FILES; }
+      for (const file of outputFiles(output)) assert.equal(await lstat(file).catch(() => null), null, file);
+    }));
+    await t.test("receipt cannot be written", () => withFixture(async ({ directory, payload, output, manifest }) => {
+      const inputs = await resolveInstallerInputs({ payload, output, manifest });
+      // A folder that appears at the receipt path after the inputs check.
+      await mkdir(`${output}.receipt.json`);
+      process.env.FAKE_FILES = "7";
+      try {
+        await assert.rejects(buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /EEXIST/);
+      } finally { delete process.env.FAKE_FILES; }
+      assert.equal(await lstat(output).catch(() => null), null, "installer removed");
+      assert.equal(await lstat(`${output}.sha256`).catch(() => null), null, "checksum removed");
+      assert.ok((await lstat(`${output}.receipt.json`)).isDirectory(), "a path this build did not write stays");
+    }));
+  });
+
 const makensis = (() => { try { return findMakensis(); } catch { return null; } })();
 
 test("makensis builds an installer and receipt from a fixture payload", { skip: !makensis && "makensis is not installed" },
   () => withFixture(async ({ payload, output, manifest }) => {
-    await writeManifest(payload, fixtureFiles, manifest);
     const inputs = await resolveInstallerInputs({ payload, output, manifest });
     await assert.rejects(buildInstaller(inputs, makensis, { installerCommit: "abc" }), /full Git commit/);
     const built = await buildInstaller(inputs, makensis, { installerCommit });

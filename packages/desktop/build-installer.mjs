@@ -10,9 +10,18 @@ import { parseArgs } from "node:util";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(root, "../..");
 const installerScript = path.join(root, "installer", "vivary.nsi");
-// Changes to these paths change what an installer does, so they must be committed.
-const installerSources = ["packages/desktop/installer", "packages/desktop/build-installer.mjs"];
-const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<commit>.exe> [--manifest <package-file-manifest.json>]";
+const licenseFile = path.join(repository, "LICENSE");
+const iconFile = path.join(root, "assets", "vivary.ico");
+// Every repository file the build reads or passes to makensis. A change to any
+// of them changes the installer, so the recorded installer commit must hold them.
+const installerSources = [
+  "packages/desktop/installer", "packages/desktop/build-installer.mjs",
+  "packages/desktop/assets/vivary.ico", "LICENSE",
+];
+const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<commit>.exe> --manifest <package-file-manifest.json>";
+// Windows reserves these device names in any path part, with or without an extension.
+const reservedNames = new Set(["CON", "PRN", "AUX", "NUL",
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`), ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)]);
 // Must match MAX_LIST_LINE in installer/vivary.nsi.
 const maxListLine = 240;
 
@@ -49,10 +58,33 @@ function requireListablePath(relative, isDirectory) {
   const line = relative.replaceAll("/", "\\") + (isDirectory ? "\\" : "");
   const parts = relative.split("/");
   if (!/^[\x20-\x7e]+$/.test(relative) || /[:*?"<>|\\]/.test(relative) || line.length > maxListLine
-    || parts.some(part => part === "" || part === "." || part === "..")) {
+    || parts.some(part => part === "" || part === "." || part === ".."
+      // Windows drops a trailing dot or space, so the file would land under another name.
+      || /[. ]$/.test(part) || reservedNames.has(part.split(".")[0].trimEnd().toUpperCase()))) {
     throw new Error(`The installer cannot list this payload path: ${relative}`);
   }
 }
+
+/** Refuses two payload paths that name the same file on Windows, which ignores case. */
+function requireDistinctOnWindows(paths) {
+  const seen = new Map();
+  for (const relative of paths) {
+    const key = relative.toLowerCase();
+    if (seen.has(key)) throw new Error(`These payload paths are the same file on Windows: ${seen.get(key)} and ${relative}`);
+    seen.set(key, relative);
+  }
+}
+
+/** Reports whether `child` is `parent` or inside it, comparing as the given platform does. */
+export function isSameOrInside(parent, child, platform = process.platform) {
+  const paths = platform === "win32" ? path.win32 : path.posix;
+  const fold = value => (platform === "win32" ? value.toLowerCase() : value);
+  const relative = paths.relative(fold(parent), fold(child));
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relative));
+}
+
+/** The installer and the two files written beside it. */
+export const outputFiles = output => [output, `${output}.sha256`, `${output}.receipt.json`];
 
 async function sha256(file) {
   const hash = createHash("sha256");
@@ -84,9 +116,10 @@ export async function verifyPayloadManifest(payloadDir, files, manifestFile) {
   return Object.freeze({ files: expected.size, sha256: await sha256(manifestFile) });
 }
 
-/** Validates the packaged folder, output path and optional manifest, and reads the version the installer will carry. */
+/** Validates the packaged folder, output paths and manifest, and reads the version the installer will carry. */
 export async function resolveInstallerInputs({ payload, output, manifest } = {}) {
-  if (!payload || !output) throw new Error(usage);
+  // The receipt records a verified payload, so the manifest is required.
+  if (!payload || !output || !manifest) throw new Error(usage);
   const payloadDir = path.resolve(payload);
   const outputFile = path.resolve(output);
   for (const value of [payloadDir, outputFile]) {
@@ -94,10 +127,12 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
     if (/[$"]/.test(value)) throw new Error(`The installer build cannot use a path containing $ or ": ${value}`);
   }
   if (path.extname(outputFile).toLowerCase() !== ".exe") throw new Error("The installer output must end in .exe.");
-  if (outputFile.startsWith(payloadDir + path.sep)) throw new Error("The installer output must be outside the payload.");
+  if (isSameOrInside(payloadDir, outputFile)) throw new Error("The installer output must be outside the payload.");
   const outputParent = await stat(path.dirname(outputFile)).catch(() => null);
   if (!outputParent?.isDirectory()) throw new Error(`The output folder does not exist: ${path.dirname(outputFile)}`);
-  if (await lstat(outputFile).catch(() => null)) throw new Error(`Refusing to overwrite ${outputFile}.`);
+  for (const file of outputFiles(outputFile)) {
+    if (await lstat(file).catch(() => null)) throw new Error(`Refusing to overwrite ${file}.`);
+  }
   const payloadInfo = await lstat(payloadDir).catch(() => null);
   if (!payloadInfo?.isDirectory()) throw new Error(`The payload is not a folder: ${payloadDir}`);
 
@@ -105,6 +140,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   if (!files.includes("vivary.exe")) throw new Error("The payload has no vivary.exe. Pass the packaged Vivary-win32-x64 folder.");
   for (const file of files) requireListablePath(file, false);
   for (const directory of directories) requireListablePath(directory, true);
+  requireDistinctOnWindows([...files, ...directories]);
   const buildFile = path.join(payloadDir, "resources", "workbench", "build.json");
   const build = JSON.parse(await readFile(buildFile, "utf8").catch(() => {
     throw new Error("The payload has no resources/workbench/build.json.");
@@ -120,7 +156,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   }
   // The installer's version names the commit, so the files must match it.
   if (build.sourceDirty !== false) throw new Error("The payload was built from a modified checkout.");
-  const manifestCheck = manifest ? await verifyPayloadManifest(payloadDir, files, path.resolve(manifest)) : null;
+  const manifestCheck = await verifyPayloadManifest(payloadDir, files, path.resolve(manifest));
   return Object.freeze({
     payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck,
     version: build.version, payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
@@ -175,14 +211,20 @@ export function countAddedFiles(log) {
 
 /**
  * Builds the installer, checks that every payload file went in, and writes a
- * .sha256 companion and a .receipt.json beside it. The makensis log is
- * returned, or attached to the error as `log` when the build fails.
+ * .sha256 companion and a .receipt.json beside it. Once makensis starts, any
+ * failure removes what this build wrote, so a partial set never looks like a
+ * finished build. The makensis log is returned, or attached to the error as `log`.
  */
 export async function buildInstaller(inputs, makensis, { installerCommit }) {
   if (!/^[0-9a-f]{40}$/.test(installerCommit ?? "")) throw new Error("The installer commit must be a full Git commit.");
   const version = spawnSync(makensis, ["-VERSION"], { encoding: "utf8" });
   if (version.error || version.status !== 0) throw new Error("makensis -VERSION failed.");
+  const [installer, checksum, receiptFile] = outputFiles(inputs.outputFile);
   const scratch = await mkdtemp(path.join(os.tmpdir(), "vivary-installer-list-"));
+  let log = "";
+  // The files this build wrote. The inputs check refused existing ones, and
+  // makensis creates the installer as soon as it starts writing.
+  const written = [installer];
   try {
     // The installed-file list's lines carry only the ASCII that requireListablePath allows.
     const listFile = path.join(scratch, "install-files.txt");
@@ -191,9 +233,9 @@ export async function buildInstaller(inputs, makensis, { installerCommit }) {
       "-V4", "-WX", "-INPUTCHARSET", "UTF8",
       `-DPAYLOAD_DIR=${inputs.payloadDir}`,
       `-DINSTALL_LIST_FILE=${listFile}`,
-      `-DOUTFILE=${inputs.outputFile}`,
-      `-DLICENSE_FILE=${path.join(repository, "LICENSE")}`,
-      `-DICON_FILE=${path.join(root, "assets", "vivary.ico")}`,
+      `-DOUTFILE=${installer}`,
+      `-DLICENSE_FILE=${licenseFile}`,
+      `-DICON_FILE=${iconFile}`,
       `-DAPP_VERSION=${inputs.version}`,
       `-DPAYLOAD_COMMIT=${inputs.payloadCommit}`,
       `-DPAYLOAD_COMMIT_SHORT=${inputs.payloadCommitShort}`,
@@ -202,32 +244,36 @@ export async function buildInstaller(inputs, makensis, { installerCommit }) {
       installerScript,
     ], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
     if (result.error) throw result.error;
-    const log = result.stdout + result.stderr;
-    const fail = async message => {
-      // makensis writes the output as it goes, so a failed build can leave part of a file.
-      await rm(inputs.outputFile, { force: true });
-      return Object.assign(new Error(message), { log });
-    };
-    if (result.status !== 0) throw await fail(`makensis failed with exit code ${result.status}.`);
+    log = result.stdout + result.stderr;
+    if (result.status !== 0) throw new Error(`makensis failed with exit code ${result.status}.`);
     // The payload count plus the installed-file list itself.
     const added = countAddedFiles(result.stdout);
     if (added !== inputs.fileCount + 1) {
-      throw await fail(`makensis added ${added} files but the payload and list have ${inputs.fileCount + 1}. The installer was removed.`);
+      throw new Error(`makensis added ${added} files but the payload and list have ${inputs.fileCount + 1}. The installer was removed.`);
     }
-    const digest = await sha256(inputs.outputFile);
-    const { size } = await stat(inputs.outputFile);
-    const name = path.basename(inputs.outputFile);
-    await writeFile(`${inputs.outputFile}.sha256`, `${digest}  ${name}\n`);
+    const digest = await sha256(installer);
+    const { size } = await stat(installer);
+    const name = path.basename(installer);
+    // "wx" refuses a file that appeared after the inputs were checked.
+    await writeFile(checksum, `${digest}  ${name}\n`, { flag: "wx" });
+    written.push(checksum);
     const receipt = {
       installer: name, bytes: size, sha256: digest,
       version: inputs.version, displayVersion: `${inputs.version}+${inputs.payloadCommitShort}`,
       payloadCommit: inputs.payloadCommit, installerCommit, makensisVersion: version.stdout.trim(),
       payloadFiles: inputs.fileCount, payloadFolders: inputs.directories.length, payloadBytes: inputs.totalBytes,
-      payloadManifest: inputs.manifest ? { verified: true, files: inputs.manifest.files, sha256: inputs.manifest.sha256 } : { verified: false },
+      payloadManifest: { verified: true, files: inputs.manifest.files, sha256: inputs.manifest.sha256 },
       filesAdded: added,
     };
-    await writeFile(`${inputs.outputFile}.receipt.json`, `${JSON.stringify(receipt, null, 2)}\n`);
-    return Object.freeze({ outputFile: inputs.outputFile, size, sha256: digest, filesAdded: added, receipt, log });
+    await writeFile(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+    written.push(receiptFile);
+    return Object.freeze({ outputFile: installer, size, sha256: digest, filesAdded: added, receipt, log });
+  } catch (error) {
+    // makensis writes the installer as it goes, so a failure can leave part of it.
+    for (const file of written) {
+      if ((await lstat(file).catch(() => null))?.isFile()) await rm(file, { force: true });
+    }
+    throw Object.assign(error, { log });
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -241,7 +287,6 @@ async function main() {
   const makensis = findMakensis();
   if (!makensis) throw new Error("makensis was not found. Install NSIS 3 or set MAKENSIS to its absolute path.");
   const installerCommit = resolveInstallerCommit();
-  if (!inputs.manifest) console.error("No --manifest given. The receipt records the payload as unverified.");
   const built = await buildInstaller(inputs, makensis, { installerCommit });
   process.stdout.write(built.log);
   console.log(`${built.outputFile}\n${built.size} bytes, ${built.filesAdded} files\nSHA-256 ${built.sha256}`);

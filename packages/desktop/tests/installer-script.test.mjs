@@ -40,6 +40,45 @@ test("install folder is fixed and cannot be redirected", () => {
   assert.doesNotMatch(code, /MUI_PAGE_DIRECTORY|InstallDirRegKey|PageEx\s+directory|Page\s+directory/i);
 });
 
+test("setup refuses 32-bit Windows before anything else", () => {
+  assert.ok(lines.includes('!include "x64.nsh"'));
+  const init = functionBody(".onInit");
+  assert.equal(init[0], "${IfNot} ${RunningX64}", "the first check in .onInit");
+  const end = position(init, "${EndIf}");
+  assert.ok(init.slice(0, end).some(line => line.startsWith("MessageBox ") && line.includes("64-bit")));
+  assert.ok(init.slice(0, end).includes("SetErrorLevel 2"), "exits non-zero");
+  assert.ok(init.slice(0, end).includes("Quit"));
+});
+
+test("setup and the uninstaller hold one per-user mutex", () => {
+  assert.ok(lines.includes('!define SETUP_MUTEX "Local\\VivarySetup"'));
+  const mutex = functionBody("${PREFIX}AcquireSetupMutex");
+  assert.equal(mutex[0], "System::Call 'kernel32::CreateMutexW(p 0, i 1, w \"${SETUP_MUTEX}\") p .r0 ?e'");
+  assert.deepEqual(mutex.slice(1, 4), ["Pop $1", "StrCmp $0 0 busy", "IntCmp $1 183 busy"], "ERROR_ALREADY_EXISTS or no handle refuses");
+  const busy = position(mutex, "busy:");
+  assert.deepEqual(mutex.slice(busy + 2), ["SetErrorLevel 2", "Quit"], "a second instance exits non-zero");
+  const init = functionBody(".onInit");
+  assert.ok(position(init, "${EndIf}") < position(init, "Call AcquireSetupMutex"));
+  assert.ok(position(init, "Call AcquireSetupMutex") < position(init, `StrCpy $INSTDIR "${installDir}"`));
+  assert.equal(functionBody("un.onInit")[0], "Call un.AcquireSetupMutex", "the uninstaller takes the same mutex first");
+});
+
+test("a previous install without a list is refused, never cleaned up", () => {
+  const install = sectionBody("Vivary");
+  const noList = position(install, "IntCmp $R8 1 no_list");
+  assert.ok(position(install, "Call RemoveInstalledFiles") < noList);
+  assert.ok(noList < position(install, "IntCmp $R7 0 copy_files"));
+  const label = position(install, "no_list:");
+  assert.deepEqual(install.slice(label + 1, label + 3), [
+    'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK',
+    'Abort "The installed-file list is missing. Nothing was changed."',
+  ]);
+  assert.ok(label < position(install, "copy_files:"));
+  const text = lines.find(line => line.startsWith("!define NO_LIST_TEXT "));
+  assert.match(text, /Remove that folder by hand\. Your projects, conversations and settings are stored elsewhere and are not affected\./);
+  assert.ok(sectionBody("Uninstall").includes('MessageBox MB_OK|MB_ICONSTOP "$INSTDIR ${NO_LIST_TEXT}" /SD IDOK'));
+});
+
 test("nothing is deleted recursively", () => {
   assert.doesNotMatch(code, /^RMDir\s+(\/\w+\s+)*\/r\b/im);
   assert.doesNotMatch(code, /\/REBOOTOK|\bReboot\b|SetRebootFlag/i);
