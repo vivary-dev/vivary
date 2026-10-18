@@ -51,8 +51,10 @@ Clean-profile first-run acceptance remains open, so report missing-runtime error
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
 provider access require their own supported installation and authentication.
 Vivary finds Codex and Claude Code when they are installed as an executable, or
-globally with npm or pnpm, in a directory on `PATH`. On Windows it picks the copy
-a terminal would run first.
+globally with npm or pnpm, in a directory on `PATH`. On Windows it prefers a copy
+with a launcher (`codex.exe` or `codex.cmd`) in PATH order, as a terminal does. It does
+not read `.com` or `.bat` wrappers, so a custom wrapper can lead it to a different copy
+than your terminal runs.
 Use your existing runtime subscription, tools, skills, and configured connections.
 Bundling Vivary does not include model-provider credentials or paid service access.
 Later builds offer no Builder.io account or credits. To use Native chat, add your own
