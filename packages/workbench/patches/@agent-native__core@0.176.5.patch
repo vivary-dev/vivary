@@ -269,20 +269,19 @@ index 4e80d7dd9e363aaa7356b55e676a0435c0a3a142..a137c7a53445fd78f1efefae0a359950
              // `streamText` reports a failed provider request as a stream part rather
              // than a throw, so this is the arrival path for most provider HTTP
              // failures. It used to emit the message alone, discarding the
-@@ -251,7 +257,23 @@ export function aiSdkPartToEngineEvents(part, toolNameMap) {
+@@ -251,7 +257,22 @@ export function aiSdkPartToEngineEvents(part, toolNameMap) {
                  type: "stop",
                  reason: "error",
                  error: errMsg,
 -                ...classifyProviderError(part.error),
 +                // A provider's own in-stream error gets a code of its own, so the
-+                // chat shows it with a Retry. A classification of its message and
-+                // code still wins. Its metadata never reaches the classifier, so an
-+                // upstream body cannot turn it into silent retries.
++                // chat shows it with a Retry. A classification of its code or status
++                // still wins. Its message and metadata never reach the classifier, so
++                // provider text cannot turn it into silent retries.
 +                ...(providerError
 +                    ? {
 +                        errorCode: "provider_stream_error",
 +                        ...classifyProviderError({
-+                            message: providerError.message,
 +                            code: providerError.code,
 +                            statusCode: providerError.statusCode,
 +                            isRetryable: providerError.isRetryable,

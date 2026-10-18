@@ -635,6 +635,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 In-stream provider errors are not classified by their message. The
+maintained Core patch passed an OpenRouter in-stream error's message to
+`classifyProviderError`, so a message naming a timeout, an overload, 429 or SSL
+replaced `provider_stream_error` with a retryable code. The turn was then
+retried three times over about 14 seconds, classified as continuable, and saved
+with no error. The patch now passes only the code, status and retryable flag.
+`tests/native-stream-errors.test.ts` adds one final-turn case per word. The
+engine, run manager and saved-turn owners are unchanged, so the design
+description holds.
+
 2026-10-17 Windows app icon. The Windows packager now passes
 `packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
 `vivary.exe`. The icon is a multi-size copy of the site mark. The executable

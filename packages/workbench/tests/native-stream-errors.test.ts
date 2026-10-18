@@ -231,6 +231,12 @@ const finalTurns: Array<{ name: string; chunks: Chunk[] }> = [
     { raw: `{"error":{"code":503,"message":"The model is overloaded. ${METADATA_MARKER}"}}` })] },
   { name: "metadata naming a timeout (Opus S5)", chunks: [text("Partial"), openRouterError("Provider returned error",
     { raw: `Request timed out ${METADATA_MARKER}` })] },
+  // The provider's message itself must not be classified either. Before 2026-10-18 each of these
+  // was retried three times, classified as continuable, and saved with no error.
+  { name: "a message naming a timeout", chunks: [text("Partial"), openRouterError("Upstream request timed out")] },
+  { name: "a message naming an overload", chunks: [text("Partial"), openRouterError("The model is overloaded. Please try again later.")] },
+  { name: "a message naming 429", chunks: [text("Partial"), openRouterError("Rate limited (429): too many requests")] },
+  { name: "a message naming SSL", chunks: [text("Partial"), openRouterError("Upstream SSL handshake failed")] },
 ];
 
 test("an in-stream provider error is final in every server check", async t => {

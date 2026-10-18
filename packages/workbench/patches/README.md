@@ -564,10 +564,13 @@ shown text for statuses, and a name such as "401 unauthorized" would swap the
 error card for the provider setup card. A name with a digit is left out, and
 the text keeps the message and code. The rest of `metadata` can hold the
 upstream provider's raw response, so it is never shown and never classified.
-`classifyProviderError` sees the message, the code, and that status. A
+`classifyProviderError` sees the code and that status, never the message. A
 classification it finds, such as `http_429` for an in-stream `"code":429` or
-`http_<status>` for a derived status, still replaces the code. An upstream
-body that says "overloaded" or "timed out" no longer does.
+`http_<status>` for a derived status, still replaces the code. Neither a
+message nor an upstream body that says "overloaded", "timed out", 429 or SSL
+does. Until 2026-10-18 the message reached the classifier, so those words
+turned the error into three silent retries, a continuable error and a saved
+turn with no error.
 
 The code is final in every check that reads an error's message: the engine
 retry (`isRetryableError`), the in-process resume of a main chat turn
@@ -621,10 +624,10 @@ long, an unknown chunk followed by a normal finish, an unknown chunk and the
 provider's error chunk in both orders, and a last chunk that fails its schema
 or is not JSON. No metadata or raw chunk may reach the stream. The
 error chunk then runs through `startRun` with Vivary's redactor and a held
-synthetic value in the provider message. A second table runs six turns through
+synthetic value in the provider message. A second table runs ten turns through
 `startRun`, with and without streamed text, with messages that name a closed
-stream or an unavailable service, and with metadata that names an overload or
-a timeout. Each must keep `provider_stream_error` after one provider request,
+stream, an unavailable service, a timeout, an overload, 429 or SSL, and with
+metadata that names an overload or a timeout. Each must keep `provider_stream_error` after one provider request,
 save a turn that keeps the error, and neither continue nor resume. A last case
 checks that an error with its own HTTP status keeps `http_<status>`.
 `tests/native-chat-components.test.mjs` passes an error event through
