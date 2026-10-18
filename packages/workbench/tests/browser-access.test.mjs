@@ -249,7 +249,7 @@ test('connection gate distinguishes access denial and network failure without re
         async function click(label){const button=[...document.querySelectorAll('button')].find(node=>node.textContent===label);assert.ok(button,label);await act(async()=>button.click());}
         const text=()=>document.body.textContent;
         await mount();
-        assert.match(text(),/Browser access ended/);assert.equal(mounts,0);
+        assert.match(text(),/Remote access ended/);assert.equal(mounts,0);
         assert.equal(document.querySelector('a').getAttribute('href'),'/pair');
         await act(async()=>tick());assert.equal(calls,1);
         reply=()=>Response.json(host);await click('Check access again');
@@ -259,7 +259,7 @@ test('connection gate distinguishes access denial and network failure without re
         reply=()=>Response.json(host);await click('Retry connection');
         assert.equal(document.querySelector('textarea'),draft);assert.equal(draft.value,'dirty draft');
         reply=()=>new Response(null,{status:401});await act(async()=>{const response=await fetch('/session');setDenied(response.status===401);tick();});
-        assert.match(text(),/Browser access ended/);assert.doesNotMatch(text(),/revoked/i);
+        assert.match(text(),/Remote access ended/);assert.doesNotMatch(text(),/revoked/i);
         assert.equal(document.querySelector('textarea'),draft);assert.equal(draft.value,'dirty draft');assert.equal(mounts,1);
         const notice=[...document.querySelectorAll('p')].find(node=>node.textContent==='Temporary server failure');
         assert.ok(notice);assert.ok(notice.closest('[hidden]'));
@@ -505,7 +505,7 @@ test('remote preview shows an open refusal as text and renders no frame', async 
     const bundlePath = path.join(bundleDirectory, 'proof.mjs');
     await writeFile(bundlePath, result.outputFiles[0].text);
     const proof = await import(bundlePath);
-    await proof.run(assert, 'Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Browser access settings.');
+    await proof.run(assert, 'Isolated preview is unavailable because its listener on this host could not start or has stopped. On the desktop, repair the preview port in Remote access settings.');
   } finally {
     for (const channel of channels) { channel.port1.close(); channel.port2.close(); }
     await rm(bundleDirectory, { recursive: true, force: true });
@@ -559,16 +559,16 @@ test('each isolated preview refusal reaches the remote page as its own text', as
     installPreviewGateway(gateway);
     await assert.rejects(action.run(input(), {}), readable('Use the paired browser to open an isolated preview.'));
     settings.preview = null;
-    await assert.rejects(remote(input()), readable('Enable the separate preview origin in desktop Browser access settings.'));
+    await assert.rejects(remote(input()), readable('Enable the separate preview origin in desktop Remote access settings.'));
     settings.preview = { origin: 'https://fixture.test:9443', port: 42301 };
     admit = false;
-    await assert.rejects(remote(input()), readable('Browser access ended.'));
+    await assert.rejects(remote(input()), readable('Remote access ended.'));
     admit = true;
     const documentId = randomUUID();
     await remote(input(documentId));
     await assert.rejects(remote(input(documentId)), readable('Save your work and refresh Vivary before opening a different preview.'));
     for (let index = 1; index < 128; index++) await remote(input());
-    await assert.rejects(remote(input()), readable('Too many preview documents. Restart browser access from the desktop.'));
+    await assert.rejects(remote(input()), readable('Too many preview documents. Restart remote access from the desktop.'));
   } finally { gateway.close(); installPreviewGateway(undefined); }
 });
 

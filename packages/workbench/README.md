@@ -617,13 +617,18 @@ Exercise changed flows through normal startup. The private handoff preserves
 actual browser and desktop results, including failed attempts. These checks do not
 establish the complete desktop/web release journey or macOS runtime acceptance.
 
-## Paired browser access
+## Remote access
 
-In the desktop app, Settings > Browser access accepts an already protected private
-HTTPS origin and a dedicated loopback ingress port. Access starts off. Confirm the
-change in the native desktop dialog, open `/pair` on that origin, and compare the
-code on both screens before approving the browser. Vivary does not configure the
-network path. Approved browsers share this host's projects, files and Native history.
+In the desktop app, Settings > Remote access opens Vivary on another device. It
+accepts an already protected private HTTPS origin and a dedicated loopback ingress
+port. You set up that HTTPS connection yourself, for example an appropriately
+configured Tailscale connection. Tailscale is an example, not a bundled or required
+component. Vivary does not create the tunnel or change the firewall. Access starts
+off. Confirm the change in the native desktop dialog, open `/pair` on that origin,
+and compare the code on both screens before approving the browser. Approved
+browsers share this host's projects, files and Native history. Remote access is
+separate from an agent controlling a browser. Code, routes and test scripts keep
+the `browser-access` name.
 
 Grants and the enabled setting survive restarts. Pending challenges expire on
 restart or after five minutes; grants expire after 30 days. Disable ends browser
@@ -642,7 +647,7 @@ restart and streaming-revocation journey. These commands use existing test runne
 
 ### Optional isolated paired-browser previews
 
-Remote preview stays off when the optional preview origin in desktop Browser
+Remote preview stays off when the optional preview origin in desktop Remote
 access settings is empty. An owner can prepare a second protected HTTPS port on
 the same hostname and a separate loopback ingress port, then confirm those exact
 values in the native dialog. Vivary does not create certificates, routes or public
