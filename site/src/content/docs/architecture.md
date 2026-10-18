@@ -719,7 +719,8 @@ the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\V
 menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU.
 `AllowSkipFiles off` makes a file that cannot be written stop setup with an error.
 Setup writes `install-files.txt`, every payload file and then every payload folder
-deepest first, as its last step. Nothing is deleted recursively. Upgrade and
+deepest first, as its last step. In a folder it creates, it first writes the marker
+`vivary-setup.txt`, before any payload file. Nothing is deleted recursively. Upgrade and
 uninstall read the previous list behind an exact-path and not-a-link check on the
 install folder, check every line (no drive, leading backslash, `.` or `..` part,
 wildcard, or line over 240 characters) and every listed folder for a link before
@@ -734,8 +735,11 @@ project folders, and neither stops a process. A running Vivary or bundled Node o
 Python makes setup ask the user to close it, with Retry or Cancel. The build script
 reads the version and payload commit from the payload's `build.json`, refuses a
 modified-checkout or linked payload, checks every payload path and SHA-256 against
-the package's file manifest when given one, refuses uncommitted installer sources,
-and compares the files `makensis` reports adding with the payload. It records the
+the package's file manifest, which `--manifest` must name, and refuses uncommitted
+installer sources. It counts the `File:` lines in the `makensis -V4` log and
+requires that number to equal the payload file count plus one for the list. It
+compares only that count, not names or contents. The manifest check covers the
+names and contents of the payload files on disk. It records the
 payload and installer commits as `PayloadCommit` and `InstallerCommit` in the
 installer's file properties and in a `.receipt.json` beside a `.sha256` companion.
 The Electron process, the packager, and the user data layout are unchanged. The
@@ -771,10 +775,18 @@ because Windows paths stop at 259 and the install root for a 40-character profil
 folder name takes 80. The builder records the longest payload path in the receipt,
 refuses a payload path past that cap, and refuses payload files named like setup's
 own.
-Evidence: 72 of 72 installer tests pass with `makensis` 3.10 and 71 pass with one
-skip without it, and each of 64 single-rule changes to the script fails the static
-tests. The 70957d1 installer passed install, reinstall, locked-file upgrade,
-recovery rerun, and uninstall on Windows.
+Review round 4: `package.mjs --windows-x64` writes `package-file-manifest.json`
+beside the packaged `Vivary-win32-x64` folder, mapping each file's path relative to
+that folder, with forward slashes, to its lowercase SHA-256. The package contents
+are unchanged. That file is the one the installer build's `--manifest` takes, so the
+documented package-to-installer path works from the repository alone. The builder
+also refuses a payload file or folder at the root whose name matches
+`install-files.txt`, `vivary-setup.txt`, or `Uninstall Vivary.exe` in any case.
+Evidence: 82 of 82 installer tests pass with `makensis` 3.10
+and 81 pass with one skip without it, each of 64 single-rule changes to the script
+fails the static tests, and the new manifest writer reproduces the 2aaf04f package
+manifest exactly (3,150 entries). The 70957d1 installer passed install, reinstall, locked-file
+upgrade, recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

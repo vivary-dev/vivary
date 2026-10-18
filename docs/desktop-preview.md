@@ -491,7 +491,16 @@ build verifies every payload file against the package's file manifest, checks th
 every file went into the installer, and records the payload and installer commits
 in the installer's file properties and a build receipt. Installation, launch,
 upgrade, profile preservation, and uninstallation are pending acceptance on
-Windows. The installer is not code signed. The rest of this section describes the
+Windows. The installer is not code signed.
+
+To build the installer from source, run
+`npm --prefix packages/desktop run package -- --windows-x64`. It writes the
+`Vivary-win32-x64` folder and `package-file-manifest.json` into a dated `dist/`
+folder. Then run `npm --prefix packages/desktop run installer` with `--payload` set
+to that `Vivary-win32-x64` folder, `--manifest` set to that
+`package-file-manifest.json`, and `--output` set to `Vivary-Setup-<commit>.exe`.
+The [desktop package README](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#windows-installer)
+covers the tools it needs. The rest of this section describes the
 2026-09-22 portable prerelease.
 
 The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.

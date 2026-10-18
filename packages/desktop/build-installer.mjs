@@ -29,7 +29,9 @@ const reservedNames = new Set(["CON", "PRN", "AUX", "NUL",
 // every payload path, and MAX_LIST_LINE in installer/vivary.nsi must equal it.
 const longestInstallRoot = "C:\\Users\\".length + 40 + "\\AppData\\Local\\Programs\\Vivary\\".length;
 export const maxPayloadPath = 259 - longestInstallRoot;
-// Setup writes these into the install folder, so the payload must not hold them.
+// Setup writes these into the install folder root, so no payload file or folder
+// there may share a name with them, in any case. installer/vivary.nsi writes
+// nothing else into the install folder besides the payload.
 const setupFiles = new Set(["install-files.txt", "vivary-setup.txt", "uninstall vivary.exe"]);
 
 /** Lists every regular file and folder under the payload. Links are refused, because makensis would follow them. */
@@ -64,7 +66,7 @@ async function listPayload(directory) {
 function requireListablePath(relative, isDirectory) {
   const parts = relative.split("/");
   if (!/^[\x20-\x7e]+$/.test(relative) || /[:*?"<>|\\]/.test(relative)
-    || (!isDirectory && setupFiles.has(relative.toLowerCase()))
+    || setupFiles.has(relative.toLowerCase())
     || parts.some(part => part === "" || part === "." || part === ".."
       // Windows drops a trailing dot or space, so the file would land under another name.
       || /[. ]$/.test(part) || reservedNames.has(part.split(".")[0].trimEnd().toUpperCase()))) {

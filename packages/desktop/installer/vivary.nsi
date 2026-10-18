@@ -267,6 +267,7 @@ Function ${PREFIX}RemoveInstalledFiles
   StrCmp $2 "\" 0 check_line
   ; Read the folder's own attributes. A trailing backslash would follow a link.
   StrCpy $6 $R4 -1
+  ; .r3 is $3, not $R3, so the list handle in $R3 stays intact.
   System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\$6") i .r3'
   IntCmp $3 -1 check_line
   IntOp $3 $3 & 0x400

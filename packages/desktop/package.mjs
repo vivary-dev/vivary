@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -58,6 +60,34 @@ export async function snapshotTrackedRepository(repository, destination) {
     sourceCommit, sourceDirty, trackedOverlayCount: trackedOverlay.length,
     kind: trackedOverlay.length > 0 ? "git-archive-with-tracked-overlays" : "git-archive",
   });
+}
+
+/**
+ * Writes package-file-manifest.json for a packaged tree: each file's path
+ * relative to the tree, with forward slashes, mapped to its lowercase SHA-256.
+ * build-installer.mjs --manifest checks a payload against this file. The tree
+ * may hold only files and folders, as the installer build requires.
+ */
+export async function writePackageFileManifest(tree, file) {
+  const manifest = {};
+  const pending = [tree];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(absolute);
+      else if (entry.isFile()) {
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(absolute)) hash.update(chunk);
+        manifest[path.relative(tree, absolute).replaceAll(path.sep, "/")] = hash.digest("hex");
+      } else {
+        throw new Error(`A package file manifest covers only files and folders: ${absolute}`);
+      }
+    }
+  }
+  const sorted = Object.fromEntries(Object.keys(manifest).sort().map(name => [name, manifest[name]]));
+  await writeFile(file, `${JSON.stringify(sorted, null, 1)}\n`, { flag: "wx" });
+  return Object.keys(sorted).length;
 }
 
 async function packageDesktop() {
@@ -173,6 +203,12 @@ async function packageDesktop() {
         path.join(buildPath, "resources", "original-runtime"), { recursive: true, verbatimSymlinks: true })],
     });
     for (const directory of built) console.log(directory);
+    if (values["windows-x64"]) {
+      // The Windows installer build verifies its payload against this file.
+      const manifestFile = path.join(output, "package-file-manifest.json");
+      const files = await writePackageFileManifest(built[0], manifestFile);
+      console.log(`${manifestFile} (${files} files)`);
+    }
   } finally {
     if (path.dirname(stage) !== stagingParent || !path.basename(stage).startsWith("package-")) {
       throw new Error("Refusing to clean an unexpected packaging directory.");

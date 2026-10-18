@@ -10,6 +10,7 @@ import {
   buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPath,
   maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
+import { writePackageFileManifest } from "../package.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const installerCommit = "1111111111111111111111111111111111111111";
@@ -102,9 +103,16 @@ test("payload paths the installer cannot list or Windows cannot hold are refused
   await refuse("trailing space", file("notes "));
   await refuse("trailing dot on a folder", file("lib.", "x.js"));
   await refuse("trailing space on a folder", file("lib ", "x.js"));
-  for (const name of ["install-files.txt", "VIVARY-SETUP.txt", "Uninstall Vivary.exe"]) {
-    await refuse(`setup's own file ${name}`, file(name));
+  for (const name of ["install-files.txt", "VIVARY-SETUP.txt", "Uninstall Vivary.exe", "INSTALL-FILES.TXT", "uninstall vivary.EXE"]) {
+    await refuse(`setup's own file name ${name}`, file(name));
+    await refuse(`setup's own file name ${name} as a folder`, file(name, "x.js"));
   }
+  await t.test("setup's file names below the root are allowed", () => withFixture(async ({ payload, output, manifest }) => {
+    await mkdir(path.join(payload, "docs"));
+    await writeFile(path.join(payload, "docs", "install-files.txt"), "x");
+    await writeManifest(payload, manifest);
+    assert.ok((await resolveInstallerInputs({ payload, output, manifest })).files.includes("docs/install-files.txt"));
+  }));
   for (const name of ["CON", "prn.txt", "Aux.tar.gz", "nul", "COM1.log", "com9", "LPT1", "lpt9.dat", "CON .txt"]) {
     await refuse(`reserved name ${name}`, file(name));
   }
@@ -139,6 +147,24 @@ test("the manifest must match every payload path and SHA-256", async t => {
     await assert.rejects(verifyPayloadManifest(payload, fixtureFiles, manifest), /must map each relative path/);
   }));
 });
+
+test("the packager's file manifest is the one the installer build checks", () => withFixture(async ({ directory, payload, output }) => {
+  const manifest = path.join(directory, "package-file-manifest.json");
+  assert.equal(await writePackageFileManifest(payload, manifest), 6);
+  const written = JSON.parse(await readFile(manifest, "utf8"));
+  assert.deepEqual(Object.keys(written), fixtureFiles, "paths relative to the tree, forward slashes, sorted");
+  assert.equal(written.version, createHash("sha256").update("44.3.0").digest("hex"));
+  for (const digest of Object.values(written)) assert.match(digest, /^[0-9a-f]{64}$/);
+  const inputs = await resolveInstallerInputs({ payload, output, manifest });
+  assert.equal(inputs.manifest.files, 6);
+  await assert.rejects(writePackageFileManifest(payload, manifest), /EEXIST/, "an existing manifest is not replaced");
+}));
+
+test("the packager's file manifest refuses links", { skip: process.platform === "win32" && "links need privileges on Windows" },
+  () => withFixture(async ({ directory, payload }) => {
+    await symlink(path.join(payload, "version"), path.join(payload, "linked"));
+    await assert.rejects(writePackageFileManifest(payload, path.join(directory, "m.json")), /only files and folders/);
+  }));
 
 test("the path budget leaves room for a 40-character profile folder", () => {
   // 259 usable characters minus C:\Users\<40 characters>\AppData\Local\Programs\Vivary\ (80).

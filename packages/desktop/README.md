@@ -248,6 +248,11 @@ assets, replaces the binding only in the staged copy, and asks Electron Packager
 for Windows x64. It uses the build host's `tar` command for the one SQLite entry.
 The source checkout and its installed native modules stay intact.
 
+This mode also writes `package-file-manifest.json` beside the `Vivary-win32-x64`
+folder in the dated `dist/` directory. It maps each file's path relative to that
+folder, with forward slashes, to its lowercase SHA-256. The
+[Windows installer](#windows-installer) build takes it as `--manifest`.
+
 [Node checksums](https://nodejs.org/dist/v24.20.0/SHASUMS256.txt) and the
 [SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.11.1)
 are the asset authorities. [Electron Packager](https://github.com/electron/packager/blob/v20.3.0/README.md)
@@ -294,16 +299,21 @@ It stops when neither has it. When `makensis` was extracted rather than installe
 set `NSISDIR` to its data folder (the one holding `Include`, `Plugins`, and `Stubs`).
 
 ```console
-npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <package-file-manifest.json>
+npm --prefix packages/desktop run package -- --windows-x64
+npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
+
+The first command writes the dated `<dist>/<time>/` folder, which holds both the
+`Vivary-win32-x64` payload and its `package-file-manifest.json`.
 
 The script reads the version and payload commit from the payload's
 `resources/workbench/build.json`. It refuses a payload built from a modified
 checkout and a payload with links. It refuses a path the installer cannot list or
 Windows cannot hold: non-ASCII, a wildcard or drive character, a part ending in a dot
 or space, a reserved device name such as `CON` or `nul.txt`, two paths that differ
-only in case, or a file named like setup's own (`install-files.txt`,
-`vivary-setup.txt`, `Uninstall Vivary.exe`). It refuses a path longer than 179
+only in case, or a file or folder at the payload root named like a file setup
+writes there (`install-files.txt`, `vivary-setup.txt`, `Uninstall Vivary.exe`, in
+any case). It refuses a path longer than 179
 characters: Windows paths stop at 259, and the install root for a 40-character
 profile folder name takes 80 of them. The receipt records the longest path.
 `--manifest` is required. The script checks every payload
