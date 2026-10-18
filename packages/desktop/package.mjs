@@ -160,6 +160,8 @@ async function packageDesktop() {
       dir: appDir, out: output, name: "Vivary", executableName: "vivary",
       appBundleId: "com.vivary.desktop", appVersion: manifest.version,
       win32metadata: { CompanyName: "Vivary", ProductName: "Vivary", FileDescription: "Vivary local desktop" },
+      // The owner's copyright replaces Electron's default in the executable's file properties.
+      appCopyright: "Copyright (C) 2026 Jeff Kazzee",
       // Embedded in vivary.exe, so Explorer, the taskbar and the window use the Vivary mark.
       icon: path.join(sourceDesktop, "assets", "vivary.ico"),
       electronVersion: manifest.devDependencies.electron,
