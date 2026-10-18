@@ -710,6 +710,27 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
+Codex or Claude Code package that no terminal would run, or miss one installed
+globally with pnpm. A package directory left behind without a launcher, earlier on
+PATH, was accepted before a working pnpm launcher later on PATH, so a new Code
+conversation showed the runtime as unavailable. On Windows
+`packages/workbench/server/local-runtime-setup.ts` now makes two passes over the same
+search directories. The first pass accepts `<command>.exe` or a `<command>.cmd`
+launcher in PATH order. For a launcher it takes the package entry that a pnpm shim
+names when a strict check passes, or else the npm entry beside the launcher, which
+is npm's global layout. The strict check reads one bounded quoted `%~dp0` argument
+outside comment lines, requires the exact package entry file, and requires the
+package's `package.json` name. The shim itself never runs. The second pass runs only
+when the first finds nothing and accepts a package with no launcher, as before.
+`.com` and `.bat` launchers and pnpm targets on another drive are not resolved
+(#252). `resolveVivaryRuntimeCommand` reads `PATH`, `PNPM_HOME`, `APPDATA` and
+`LOCALAPPDATA` from `process.env` under its `guard:allow-env-credential` reasons and
+passes them to `resolveRuntimeCommandIn`, which tests call with Windows semantics.
+Launch shapes, the filtered environment and the lookup on other platforms are
+unchanged. `packages/workbench/tests/local-runtime-setup.test.ts` covers launcher
+order, pass order, comment lines, case, traversal and package-name refusal.
+
 2026-10-18 Remote access wording. The owner renamed the user-visible Browser access
 feature to Remote access on 2026-10-18. The Settings tab, its heading, intro, status and
 error text, the remote browser banner, the phone pairing page, the desktop confirmation
