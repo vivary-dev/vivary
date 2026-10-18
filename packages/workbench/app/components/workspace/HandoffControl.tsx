@@ -27,13 +27,14 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   latestRunActive.current = runActive;
   useEffect(() => {
     visit.current++; setNotice(null); setBusy(false); setRunning(false);
+    let current = true;
     const probe = latestRunActive.current;
-    if (!probe) return;
     // A run event that arrives while the read is pending is newer, so it wins.
     const seen = runEvents.current;
-    let current = true;
-    void probe().then(active => { if (current && runEvents.current === seen) setRunning(active); }, () => {});
-    return () => { current = false; };
+    if (probe) void probe().then(active => { if (current && runEvents.current === seen) setRunning(active); }, () => {});
+    // Conversations mount this control under their own key, so leaving one unmounts it.
+    // Ending the visit here drops a Prepare or Save result that arrives afterwards.
+    return () => { current = false; visit.current++; };
   }, [key]);
   const query = useQuery({ queryKey: ["vivary-handoff-freshness", key], enabled: ready, retry: false, staleTime: 0,
     queryFn: () => call<HandoffFreshness>("vivary-handoff-freshness", { projectId, conversation }) });
@@ -83,7 +84,8 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   const save = (requestId: string) => act(async () => {
     const result = await call<HandoffSaveResult>("vivary-handoff-save", { projectId, conversation, requestId });
     // A conflict or failed write comes back as the Failed status on the refetch.
-    if ("problems" in result) setNotice({ text: "The reply was not saved. Ask the agent to correct it, then click Save handoff.", problems: result.problems });
+    // A correction sent in this conversation is a new turn, which Save refuses, so recovery is a new Prepare.
+    if ("problems" in result) setNotice({ text: "The reply was not saved. Prepare the handoff again to ask for a new reply.", problems: result.problems });
     else if ("status" in result) setNotice({ text: result.message });
   });
 

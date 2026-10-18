@@ -694,8 +694,12 @@ a change during the reply nor later turns read Fresh. Reply text can no longer
 recreate a block marker, because comment stripping repeats until stable and
 also removes `--!>`. Retry is offered only after a failed write. An update
 moves the block back to the end. The end of a Code run rechecks freshness, and
-a stale Prepare result is not submitted to another conversation. The Prepare
-handoff section above records the changed behavior.
+a stale Prepare result is not submitted to another conversation. Review 2
+found that guard missed the real path, where each conversation mounts the
+control under its own key, so leaving a conversation now ends the visit on
+unmount. A refused reply now points to a new Prepare, because a correction
+turn would be refused. The Prepare handoff section above records the changed
+behavior.
 
 2026-10-17 Site TOML parser update. The documentation site's lockfile moves
 `smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is

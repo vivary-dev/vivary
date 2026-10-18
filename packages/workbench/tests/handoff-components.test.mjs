@@ -111,6 +111,8 @@ test("a refused reply lists the problems and keeps Save handoff", async () => {
   await render(); await settle();
   await click("Save handoff");
   assert.match(host.textContent, /goal: Required/);
+  // A correction would be a new turn, which Save refuses, so the notice points to a new Prepare.
+  assert.match(host.textContent, /Prepare the handoff again/);
   assert.ok(button("Save handoff"));
 });
 
@@ -157,19 +159,22 @@ test("a Code run that ends rechecks freshness", async () => {
   assert.deepEqual(handoffFixture.submitted, []);
 });
 
-test("a Prepare that returns after the owner opened another conversation sends nothing", async () => {
-  handoffFixture.status = { status: "none", path: "STATE.md" };
-  let finish;
-  const answer = handoffFixture.call;
-  handoffFixture.call = (name, input) => name === "vivary-handoff-prepare"
-    ? new Promise(resolve => { finish = () => resolve(answer(name, input)); })
-    : answer(name, input);
-  await render({ conversation: { kind: "native", id: "thread-a" } }); await settle();
-  await act(async () => button("Prepare handoff").click());
-  await render({ conversation: { kind: "native", id: "thread-b" } }); await settle();
-  await act(async () => finish()); await settle();
-  assert.deepEqual(handoffFixture.submitted, [], "the request is not delivered to the newly selected conversation");
-});
+for (const keyed of [true, false]) {
+  test(`a Prepare that returns after the owner opened another conversation sends nothing (${keyed ? "remounted per conversation, as production keys it" : "same instance"})`, async () => {
+    handoffFixture.status = { status: "none", path: "STATE.md" };
+    let finish;
+    const answer = handoffFixture.call;
+    handoffFixture.call = (name, input) => name === "vivary-handoff-prepare"
+      ? new Promise(resolve => { finish = () => resolve(answer(name, input)); })
+      : answer(name, input);
+    const open = id => render({ conversation: { kind: "native", id }, ...(keyed ? { key: "handoff:" + id } : {}) });
+    await open("thread-a"); await settle();
+    await act(async () => button("Prepare handoff").click());
+    await open("thread-b"); await settle();
+    await act(async () => finish()); await settle();
+    assert.deepEqual(handoffFixture.submitted, [], "the request is not delivered to the newly selected conversation");
+  });
+}
 
 test("a conflict that the same request can never save offers Update handoff, not Retry", async () => {
   handoffFixture.status = { status: "failed", requestId: "req-1", conversation: { kind: "code", id: "run-a" },
