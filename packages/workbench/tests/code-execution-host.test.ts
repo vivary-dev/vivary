@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { checkStoppedWorker, checkWorkerCleanup, CLEANUP_TIMEOUT_MS, endWorkerLeftovers, executeVivaryCodeWorker, parseWindowsEndResults,
   parseWindowsProcessRows,
   readLinuxProcStat, scanLinuxWorkerGroup, STARTUP_TIMEOUT_MS, TERMINATION_GRACE_MS, VivaryCodeWorkerCleanupError,
-  waitForLinuxWorkerGroupExit, windowsLeftovers, windowsWorkerStoppedCleanly, workerCleanupTarget,
+  waitForLinuxWorkerGroupExit, windowsLeftovers, windowsWorkerStoppedCleanly, windowsWorkerTarget, workerCleanupTarget,
   type CleanupCheck, type CleanupTarget, type WindowsProcessIdentity, type WindowsProcessRow,
 } from "../server/code-execution-host.ts";
 import { isVivaryCodeWorkerRequest } from "../server/code-execution-protocol.ts";
@@ -1275,6 +1275,47 @@ test("Windows scan failure categories survive cleanup verification", {
   } finally {
     // guard:allow-env-credential - Restores the real system directory after the isolated test.
     if (previous === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = previous;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("Windows observation keeps an exited intermediate's grandchild after an unavailable scan", async () => {
+  let target: CleanupTarget = windowsWorkerTarget(100, 1_000, 7_000, null);
+  const live = windowsLeftovers([scanRow(100, 50, 2_000), scanRow(200, 100, 3_000), scanRow(300, 200, 4_000)],
+    target.tracked, target.traced);
+  target = { platform: "win32", tracked: live.tracked, traced: live.traced };
+  const io = { bootId: async () => null, windowsProcesses: async (): Promise<WindowsProcessRow[]> => { throw new Error("scan unavailable"); },
+    windowsEnd: async () => assert.fail("an observation ended a process"),
+    proc: { signalGroup: () => undefined, list: async () => [], stat: async () => "", kill: () => undefined } };
+  assert.equal((await checkWorkerCleanup(target, io)).result, "unavailable");
+  const later = await checkWorkerCleanup(target, { ...io, windowsProcesses: async () => [scanRow(300, 200, 4_000)] });
+  assert.equal(later.result, "remaining");
+  if (later.result === "remaining") assert.deepEqual(later.remaining.map(process => process.pid), [300]);
+});
+
+
+test("worker failure keeps bounded provider detail and rejects malformed IPC errors", { timeout: WORKER_TEST_TIMEOUT_MS }, async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "vivary-worker-error-detail-"));
+  const server = path.join(fixture, ".output", "server");
+  await mkdir(server, { recursive: true });
+  await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+process.on("message", message => {
+  if (message.type !== "vivary:code-worker:start") return;
+  const errors = { detail: "Codex sign-in expired. [redacted credential]", empty: "", oversized: "x".repeat(701), malformed: {} };
+  process.send({ type: "vivary:code-worker:failed", runId: message.runId, error: errors[message.prompt] });
+});
+process.send({ type: "vivary:code-worker:ready" });
+`);
+  try {
+    process.chdir(fixture);
+    for (const prompt of ["detail", "empty", "oversized", "malformed"]) {
+      await assert.rejects(executeVivaryCodeWorker({ runId: request.runId, prompt,
+        ownerEmail: request.ownerEmail, signal: new AbortController().signal }), {
+        message: prompt === "detail" ? "Codex sign-in expired. [redacted credential]" : "The Native coding executor failed.",
+      });
+    }
+  } finally {
+    process.chdir(originalCwd);
     await rm(fixture, { recursive: true, force: true });
   }
 });

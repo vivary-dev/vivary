@@ -1,5 +1,21 @@
 import { index, integer, table, text, uniqueIndex } from "@agent-native/core/db/schema";
 
+// Metadata only. Native threads and Code transcripts remain the history owners.
+export const conversationLinks = table("vivary_conversation_links", {
+  linkId: text("link_id").primaryKey(),
+  targetKind: text("target_kind").notNull(),
+  targetId: text("target_id").notNull(),
+  record: text("record_json").notNull(),
+}, row => [uniqueIndex("vivary_conversation_link_target").on(row.targetKind, row.targetId)]);
+
+// One saved handoff and at most one pending request per designated document. The file holds the narrative.
+export const handoffRecords = table("vivary_handoff_records", {
+  projectId: text("project_id").notNull(),
+  bindingId: text("binding_id").notNull(),
+  path: text("path").notNull(),
+  record: text("record_json").notNull(),
+}, row => [uniqueIndex("vivary_handoff_record_document").on(row.projectId, row.bindingId, row.path)]);
+
 export const projects = table("vivary_registry_projects", {
   projectId: text("project_id").primaryKey(),
   schemaVersion: integer("schema_version").notNull(),

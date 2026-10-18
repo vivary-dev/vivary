@@ -1,3 +1,4 @@
+import { backgroundActionsExpression, evaluatePluginExpression, pluginObjectAfter } from "./fixtures/automation-plugin-expressions.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
@@ -6,8 +7,8 @@ import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
 
 // Owner decision (Vivary #51, 2026-09-26): scheduled, event, webhook, and Run now runs are
-// local-only. They get 12 allowlisted tools, the kept tools refuse outward and configuration
-// changes, and an automation that lists MCP tools fails before any model call. Core's package
+// local by default. They get 12 allowlisted tools, which refuse outward and configuration
+// changes. A declared MCP tool without a configured manager fails before any model call. Core's package
 // entries do not export these modules, so load the installed, patched files by path.
 const caseRoot = await mkdtemp(path.join(os.tmpdir(), "vivary-automation-local-only-"));
 const database = `file:${path.join(caseRoot, "automations.sqlite")}`;
@@ -102,7 +103,7 @@ test("an automation run is offered exactly the 12 local tools", async () => {
   ]);
 });
 
-test("an automation that lists MCP tools fails before any tool runs", () => {
+test("a declared MCP tool without a configured manager fails before any tool runs", () => {
   assert.ok(surface, "Core ships jobs/unattended-surface.js");
   let ran = false;
   const entry = { tool: { description: "", parameters: { type: "object", properties: {} } }, run: async () => { ran = true; } };
@@ -241,11 +242,114 @@ test("manage-notifications from an automation run reaches the inbox only", async
   }
 });
 
-test("the plugin restricts both background surfaces and loads every kept tool up front", async () => {
+test("scheduler, trigger and approval dependencies execute the confined registry and prompt paths", async () => {
   const plugin = await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8");
-  assert.ok(/restrictActionsForUnattendedRun\(/.test(plugin), "the background surface goes through the allowlist");
-  assert.ok(!/getInitialToolNames\s*:/.test(plugin), "neither deps block defers tools behind tool-search");
-  assert.ok(!/getJobMcpActionEntries\(automation\)/.test(plugin), "background runs load no MCP tools");
-  assert.equal(plugin.split("disabledFrameworkGroups: unattendedPromptGroups").length - 1, 2,
-    "both run prompts leave out the workspace apps list that names call-agent");
+  assert.ok(!/getInitialToolNames\s*:/.test(plugin), "no unattended dependency defers tools behind tool-search");
+  assert.ok(!/getJobMcpActionEntries\(automation\)/.test(plugin), "no legacy MCP registry fallback");
+  // Execute the actual small dependency expressions from the installed plugin.
+  // Booting Nitro would launch unrelated owners. Their real tool restriction
+  // and MCP adapter remain loaded, while only prompt IO and native groups are fake.
+  const evaluate = evaluatePluginExpression;
+  const objectAfter = marker => pluginObjectAfter(plugin, marker);
+  const { mcpToolsToActionEntries } = await load("mcp-client/index.js");
+  const name = "mcp__confinement__write";
+  const raw = { name: "write", inputSchema: { type: "object", properties: { value: { type: "string" } } } };
+  const configured = { name, originalName: "write", source: "confinement", raw, inputSchema: raw.inputSchema };
+  let invoked = 0;
+  let caller;
+  const entry = { tool: { parameters: { type: "object", properties: { action: {}, path: {}, content: {}, channels: {} } } },
+    run: async (_input, ctx) => { caller = ctx.caller; return "local-result"; } };
+  const manager = { getTools: () => [configured], getTool: key => key === name ? configured : null,
+    getConfig: () => ({ servers: { confinement: { type: "http", url: "https://invalid.example/confinement" } } }),
+    callTool: async () => { invoked++; throw new Error("No configured tool call is authorized by this fixture."); } };
+  for (const lazyContext of [true, false]) {
+    const getBackgroundActionEntries = evaluate(backgroundActionsExpression(plugin), {
+      restrictActionsForUnattendedRun: surface.restrictActionsForUnattendedRun,
+      resourceScripts: Object.fromEntries([...surface.UNATTENDED_TOOLS, "web-request", "core-send-email", "call-agent", "future-tool"].map(key => [key, entry])),
+      docsScripts: {}, frameworkContextTool: {}, chatScripts: {}, jobTools: {}, automationTools: {}, notificationTools: {}, progressTools: {},
+      lazyContext, mcpToolsToActionEntries, mcpManager: manager, mcpActionEntryOptions: {}, ensureMcpInitialized: async () => {},
+    });
+    for (const marker of ["const schedulerDeps = {", "const approvalDeps = {", "await initTriggerDispatcher({"]) {
+      let loaded = false;
+      const deps = evaluate(objectAfter(marker), { getBackgroundActionEntries, lazyContext, options: { appId }, databaseToolsMode: "off",
+        resolveConfiguredAgentModel: () => "fake-model", unattendedBasePrompt: () => surface.UNATTENDED_PROMPT_NOTE,
+        unattendedPromptGroups: new Set(["workspaceApps"]),
+        loadResourcesForPrompt: async (who, _lazy, _app, _unused, options) => {
+          assert.equal(who, owner);
+          assert.equal(options.disabledFrameworkGroups.has("workspaceApps"), true, marker);
+          loaded = true;
+          return "retained-owner-context";
+        }, buildSchemaBlock: async () => "" });
+      const actions = await asOwner(() => deps.getActions({ name: "confinement", meta: {} }));
+      assert.deepEqual(Object.keys(actions).sort(), [...surface.UNATTENDED_TOOLS].sort(), marker);
+      assert.match(await actions.resources.run({ action: "write", path: "jobs/forbidden.md", content: "x" }, {}), /cannot/);
+      assert.match(await actions["manage-automations"].run({ action: "define" }, {}), /cannot/);
+      assert.equal(await actions.resources.run({ action: "write", path: "notes/allowed.md", content: "x" }, {}), "local-result");
+      assert.equal(caller, "automation");
+      const gated = await asOwner(() => deps.getActions({ name: "confinement", meta: { mcpTools: [name] } }));
+      assert.deepEqual(Object.keys(gated).sort(), [...surface.UNATTENDED_TOOLS, name].sort(), marker);
+      assert.equal(gated[name].needsApproval, true);
+      assert.equal(gated[name].allowPersistentApproval, false);
+      assert.throws(() => gated[name].run({ value: "pending" }, {}), /exact owner approval/);
+      const prompt = await deps.getSystemPrompt(owner);
+      assert.equal(loaded, true, marker);
+      assert.ok(prompt.includes(surface.UNATTENDED_PROMPT_NOTE));
+      assert.ok(prompt.includes("retained-owner-context"));
+    }
+  }
+  assert.equal(invoked, 0);
+});
+
+test("declared configured tools await cold initialization, warm reuse and retry after settings failure", async () => {
+  const plugin = await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8");
+  const start = plugin.indexOf("const ensureMcpInitialized = ") + "const ensureMcpInitialized = ".length;
+  const end = plugin.indexOf("\n            setGlobalMcpManager", start);
+  assert.ok(start > 0 && end > start);
+  const initializer = plugin.slice(start, end).trim().replace(/;$/, "");
+  const { mcpToolsToActionEntries } = await load("mcp-client/index.js");
+  const name = "mcp__cold__write";
+  const raw = { name: "write", inputSchema: { type: "object", properties: {} } };
+  const configured = { name, originalName: "write", source: "cold", raw, inputSchema: raw.inputSchema };
+  for (const failFirst of [false, "settings", "discovery"]) {
+    let initializeCalls = 0;
+    let tools = [];
+    let snapshots = 0;
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const ensure = new Function("initializeMcpManager", "let mcpInitializationPromise; return (" + initializer + ");")(async () => {
+      initializeCalls++;
+      if (failFirst && initializeCalls === 1) throw new Error(`Fixture ${failFirst} unavailable.`);
+      await held;
+      tools = [configured];
+    });
+    const manager = { getTools: () => { snapshots++; return tools; }, getTool: key => tools.find(tool => tool.name === key),
+      getConfig: () => ({ servers: { cold: { type: "http", url: "https://invalid.example/cold" } } }),
+      callTool: () => assert.fail("Cold registry construction dispatches no configured action") };
+    const factory = evaluatePluginExpression(backgroundActionsExpression(plugin), {
+      ensureMcpInitialized: ensure, restrictActionsForUnattendedRun: surface.restrictActionsForUnattendedRun,
+      resourceScripts: {}, docsScripts: {}, frameworkContextTool: {}, chatScripts: {}, jobTools: {}, automationTools: {},
+      notificationTools: {}, progressTools: {}, lazyContext: true, mcpToolsToActionEntries, mcpManager: manager, mcpActionEntryOptions: {},
+    });
+    await factory({ meta: {} });
+    assert.equal(initializeCalls, 0, "local-only work skips MCP settings and discovery");
+    if (failFirst) await assert.rejects(factory({ meta: { mcpTools: [name] } }), /settings unavailable|discovery unavailable/);
+    const before = snapshots;
+    let settled = false;
+    const cold = factory({ meta: { mcpTools: [name] } });
+    // Handle an old-runtime refusal so the red control reports missing
+    // initialization behavior rather than an unrelated unhandled rejection.
+    void cold.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(initializeCalls, failFirst ? 2 : 1, "the actual factory entered the existing cold initializer");
+    assert.equal(settled, false);
+    assert.equal(snapshots, before, "configured entries are not snapshotted before initialization finishes");
+    release();
+    const entries = await cold;
+    assert.equal(entries[name].needsApproval, true);
+    assert.equal(entries[name].allowPersistentApproval, false);
+    await factory({ meta: { mcpTools: [name] } });
+    assert.equal(initializeCalls, failFirst ? 2 : 1, "the existing initializer caches only a successful attempt");
+    tools = [];
+    await assert.rejects(factory({ meta: { mcpTools: [name] } }), /unavailable|refused|configured/i);
+  }
 });

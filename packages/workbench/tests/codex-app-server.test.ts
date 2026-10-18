@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { setTextRedactor } from "@agent-native/core/audit";
+import { createCredentialRedactor } from "../server/credential-redaction.ts";
+import { createCodeAgentRunRecord, executeCodeAgentRun, getCodeAgentRunRecord, listCodeAgentTranscriptEvents } from "@agent-native/core/code-agents";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -35,6 +39,16 @@ rl.on("line",line=>{
 // guard:allow-env-credential - Disposable test paths and fixture behavior, not credentials.
  writeFileSync(process.env.FIXTURE_RECEIPT,JSON.stringify({pid:process.pid,args:process.argv.slice(2),messages}));
  if (message.method==="initialize") reply(message.id,{});
+ if (message.method==="account/read" && mode.startsWith("stderr-")) {
+  // guard:allow-env-credential - Random synthetic diagnostic text for the test.
+  const text=process.env.FIXTURE_STDERR_TEXT;
+  if(mode==="stderr-split") process.stderr.write(text.slice(0,24),()=>setTimeout(()=>process.stderr.write(text.slice(24),()=>process.exit(2)),20));
+  else process.stderr.write(text,()=>process.exit(2));
+  return;
+ }
+ if (message.method==="account/read") reply(message.id,{account:{type:mode==="api-key"?"apiKey":"chatgpt"}});
+ if (message.method==="config/read") reply(message.id,{config:{model_provider:"openai",
+  ...(mode==="custom-provider"?{model_providers:{openai:{base_url:"https://example.invalid/alternate"}}}:{})}});
  if (message.method==="thread/start" || message.method==="thread/resume") {
   const p=message.params;
   reply(message.id,{thread:{id:threadId},cwd:p.cwd,model:mode==="bad-model"?"other-model":p.model,
@@ -123,6 +137,31 @@ rl.on("line",line=>{
   return { root, options, calls, resolved, notifications,
     receipt: async () => JSON.parse(await readFile(receipt, "utf8")) };
 }
+
+test("Native Code records Codex continuity on the existing run", async t => {
+  const f = await fixture(t);
+  const native = await mkdtemp(path.join(tmpdir(), "vivary-codex-session-record-"));
+  const previous = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+  process.env.AGENT_NATIVE_CODE_AGENTS_HOME = native;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+    else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previous;
+    await rm(native, { recursive: true, force: true });
+  });
+  const run = createCodeAgentRunRecord({ title: "Fixture", goalId: "vivary-local-code", cwd: f.root,
+    permissionMode: "auto-edit", metadata: { engine: "codex-cli" } });
+  const codexCli = { ...f.options, permissionMode: "normal" as const, configMode: "native" as const };
+  const first = await executeCodeAgentRun({ runId: run.id, prompt: "First question", model: "gpt-6-astra", codexCli,
+    streamToolOutputToStdout: false });
+  assert.equal(first?.metadata?.codexSessionId, "native-thread-1");
+  assert.equal(first?.metadata?.providerSessionMode, "new-session");
+  assert.equal(getCodeAgentRunRecord(run.id)?.metadata?.codexSessionId, "native-thread-1");
+  const second = await executeCodeAgentRun({ runId: run.id, prompt: "Follow up", codexCli,
+    streamToolOutputToStdout: false });
+  assert.equal(second?.metadata?.codexSessionId, "native-thread-1");
+  assert.equal(second?.metadata?.providerSessionMode, "native-resume");
+  assert.equal((await f.receipt()).messages.some(message => message.method === "thread/start"), false);
+});
 
 test("app-server starts a bounded native thread and preserves commentary and agent notifications", async t => {
   const f = await fixture(t);
@@ -315,3 +354,48 @@ for (const mode of ["v2-summary", "v2-live", "v2-failed"]) test(`${mode} retains
   assert.equal(reads.length, mode === "v2-live" ? 0 : 1);
   if (reads.length) assert.deepEqual(reads[0].params, { threadId: "v2-child", limit: 1, sortDirection: "desc", itemsView: "summary" });
 });
+
+
+for (const mode of ["api-key", "custom-provider"]) test(`the executing Codex process refuses changed ${mode} routing before a thread or turn`, async t => {
+  const f = await fixture(t, mode);
+  const result = await runCodexAppServer(f.options);
+  assert.equal(result.status, "failed");
+  assert.match(result.error, mode === "api-key" ? /not signed in with ChatGPT/ : /configured for another provider/);
+  const messages = (await f.receipt()).messages;
+  assert.equal(messages.some(message => ["thread/start", "thread/resume", "turn/start"].includes(message.method)), false);
+  assert.equal(messages.some(message => message.method === "account/rateLimits/read"), false);
+});
+
+
+for (const mode of ["held-overflow", "pattern-overflow", "held-split", "held-short", "plain-short"] as const) {
+  test(`Codex ${mode} diagnostics do not persist credential fragments`, { timeout: 20_000 }, async t => {
+    const token = randomBytes(24).toString("hex");
+    const credential = mode.startsWith("pattern") ? `ghp_${token}` : token;
+    const redactor = createCredentialRedactor(mode.startsWith("pattern") ? [] : [{ name: "FIXTURE_SECRET", value: credential }]);
+    setTextRedactor(redactor.redact);
+    t.after(() => setTextRedactor(null));
+    const overflow = mode.endsWith("overflow") || mode.endsWith("split");
+    const diagnostic = mode === "plain-short" ? "Fixture disconnected safely."
+      : `Fixture output: ${credential}${overflow ? " ".repeat(4080) : "."}`;
+    const f = await fixture(t, mode.endsWith("split") ? "stderr-split" : "stderr-one");
+    const previous = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(f.root, "runs");
+    t.after(() => {
+      if (previous === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
+      else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previous;
+    });
+    const run = createCodeAgentRunRecord({ title: "Diagnostic fixture", goalId: "vivary-local-code", cwd: f.root,
+      permissionMode: "auto-edit", metadata: { engine: "codex-cli", model: "gpt-6-astra" } });
+    const result = await executeCodeAgentRun({ runId: run.id, prompt: "Read the fixture.", model: "gpt-6-astra",
+      codexCli: { ...f.options, env: { ...f.options.env, FIXTURE_STDERR_TEXT: diagnostic },
+        permissionMode: "normal", configMode: "native" }, streamToolOutputToStdout: false });
+    assert.equal(result?.status, "errored");
+    const persisted = JSON.stringify({ run: getCodeAgentRunRecord(run.id), events: listCodeAgentTranscriptEvents(run.id) });
+    assert.equal(persisted.includes(credential.slice(-16)), false, "a credential suffix reached persisted state or transcript");
+    if (overflow) assert.match(String(result?.metadata?.executionError), /withheld/);
+    else if (mode === "plain-short") assert.equal(result?.metadata?.executionError, diagnostic);
+    else assert.match(String(result?.metadata?.executionError), /\[redacted FIXTURE_SECRET\]/);
+    const receipt = await f.receipt();
+    assert.throws(() => process.kill(receipt.pid, 0), { code: "ESRCH" });
+  });
+}

@@ -3,6 +3,7 @@ import type { AgentChatPluginOptions } from "@agent-native/core/server";
 import { getRequestOrgId } from "@agent-native/core/server";
 import { createError, HTTPError } from "h3";
 import { refreshHeldCredentials } from "./credential-redaction.ts";
+import { prepareLinkedNativeMessage } from "./linked-conversations";
 import { projectIdentity, sameProject } from "./project-files.ts";
 import {
   projectMemory,
@@ -110,9 +111,11 @@ export const prepareVivaryNativeChatProject =
  * Native `prepareRequest`. The held credentials reload first, so a key saved
  * since the last send is redacted in this reply. Then the project guard runs.
  */
-export async function prepareVivaryNativeChatSend(details: PrepareRequestDetails): Promise<void> {
+export async function prepareVivaryNativeChatSend(details: PrepareRequestDetails) {
   await refreshHeldCredentials();
   await prepareVivaryNativeChatProject(details);
+  try { return await prepareLinkedNativeMessage(details); }
+  catch (error) { throw conversationError(error, "The linked source history is unavailable. Open the original conversation."); }
 }
 
 /**

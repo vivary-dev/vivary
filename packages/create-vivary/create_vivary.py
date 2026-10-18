@@ -3925,7 +3925,9 @@ def _windows_create_temporary_file(
         handle = _WINDOWS_CREATE_FILE(
             str(temporary),
             _WINDOWS_GENERIC_WRITE | _WINDOWS_DELETE,
-            _WINDOWS_FILE_SHARE_READ_WRITE | _WINDOWS_FILE_SHARE_DELETE,
+            # Keep the temporary file in its locked parent until our own
+            # handle commits or deletes it. Other handles cannot rename it.
+            _WINDOWS_FILE_SHARE_READ_WRITE,
             None,
             _WINDOWS_CREATE_NEW,
             _WINDOWS_FILE_ATTRIBUTE_TEMPORARY,
@@ -3948,7 +3950,6 @@ def _windows_create_temporary_file(
 
 def _windows_rename_open_file(
     file_handle: int,
-    parent_handle: object,
     name: str,
     *,
     replace_existing: bool,
@@ -3958,7 +3959,9 @@ def _windows_rename_open_file(
     buffer = ctypes.create_string_buffer(size)
     information = _WindowsRenameInformation.from_buffer(buffer)
     information.replace_if_exists = replace_existing
-    information.root_directory = parent_handle
+    # The temporary file and destination share the locked parent. Windows
+    # requires a null RootDirectory for this same-directory rename.
+    information.root_directory = None
     information.file_name_length = len(encoded_name)
     ctypes.memmove(
         ctypes.addressof(buffer) + _WindowsRenameInformation.file_name.offset,
@@ -4174,7 +4177,6 @@ def _atomic_write_bytes_no_follow(
                     before_commit()
                 _windows_rename_open_file(
                     file_handle,
-                    parent_handle,
                     dst.name,
                     replace_existing=replace_existing,
                 )
@@ -10745,6 +10747,8 @@ def _selected_extra_dependency(
 def _required_dependency_constraints(
     requirements: tuple[str, ...],
     expected_dependencies: tuple[str, ...],
+    *,
+    exact_dependencies: tuple[str, ...] = (),
 ) -> dict[str, tuple[str, tuple[int, int, int]]]:
     expected = {
         _normalize_distribution_name(dependency): dependency
@@ -10772,6 +10776,10 @@ def _required_dependency_constraints(
             for operator, release, wildcard in clauses
             if operator == ">=" and not wildcard and len(release) == 3
         ]
+        if dependency in exact_dependencies and (
+            len(clauses) != 1 or len(exact_clauses) != 1
+        ):
+            raise _CapabilityContractIncompatible
         if len(exact_clauses) == 1 and not floor_clauses:
             constraint = ("==", exact_clauses[0])
         elif len(floor_clauses) == 1 and not exact_clauses:
@@ -11237,10 +11245,14 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             dependency_constraints = _required_dependency_constraints(
                 observed_result["declared_requirements"],
                 expected_dependencies,
+                exact_dependencies=("mcp",) if role == "vivary-mcp" else (),
             )
         except _CapabilityContractIncompatible:
             results[role] = {"status": "incompatible"}
             continue
+        if role == "vivary-mcp":
+            # Installed adapter releases own their SDK pin, including older releases.
+            results[role]["required_sdk_version"] = dependency_constraints["mcp"][1]
         for dependency, (operator, required_version) in dependency_constraints.items():
             dependency_result = results.get(dependency)
             if dependency_result is None:
@@ -11354,8 +11366,9 @@ def _annotate_mcp_capability(capability: dict, results: dict[str, dict]) -> None
         else None
     )
     capability["sdk_compatible"] = (
-        sdk.get("status") == "installed"
-        and sdk.get("version") == (2, 0, 0)
+        package_status == "installed"
+        and sdk.get("status") == "installed"
+        and sdk.get("version") == package.get("required_sdk_version")
     )
 
 
@@ -12083,14 +12096,14 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             else:
                 print(f"create-vivary wizard: {exc}", file=sys.stderr)
             return 1
-        decisions = _run_wizard(args)
-        _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
-        installed = decisions.get("installed") or (
-            []
-            if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
-            else _ensure_backend_installed(decisions["provider"], _yes)
-        )
         try:
+            decisions = _run_wizard(args)
+            _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
+            installed = decisions.get("installed") or (
+                []
+                if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
+                else _ensure_backend_installed(decisions["provider"], _yes)
+            )
             vivary_paths = _write_vivary_dir(
                 target,
                 decisions["storage"],

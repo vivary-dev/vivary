@@ -1,3 +1,4 @@
+import { evaluatePluginExpression, pluginObjectAfter } from "./fixtures/automation-plugin-expressions.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -332,7 +333,25 @@ test("a later automation run loads no file an earlier run wrote", async () => {
   // The scheduler's and the dispatcher's getSystemPrompt build a run's prompt with loadResourcesForPrompt for the
   // owner, the same loader a chat uses.
   const plugin = await readFile(path.join(coreRoot, "dist", "server", "agent-chat-plugin.js"), "utf8");
-  assert.equal(plugin.split("loadResourcesForPrompt(owner, lazyContext, options?.appId, undefined, { disabledFrameworkGroups: unattendedPromptGroups })").length - 1, 2);
+  for (const marker of ["const schedulerDeps = {", "const approvalDeps = {", "await initTriggerDispatcher({"]) {
+    let loaded = false;
+    const deps = evaluatePluginExpression(pluginObjectAfter(plugin, marker), {
+      getBackgroundActionEntries: async () => ({}), lazyContext: true, options: { appId: "workbench" },
+      databaseToolsMode: "off", resolveConfiguredAgentModel: () => "fake-model",
+      unattendedBasePrompt: () => "", unattendedPromptGroups: new Set(["workspaceApps"]),
+      buildSchemaBlock: async () => "",
+      loadResourcesForPrompt: async (who, lazy, app, unused, policy) => {
+        assert.equal(who, owner, marker);
+        assert.equal(policy.disabledFrameworkGroups.has("workspaceApps"), true, marker);
+        loaded = true;
+        return loadResourcesForPrompt(who, lazy, app, unused, policy);
+      },
+    });
+    const actual = await runWithRequestContext({ userEmail: owner }, () => deps.getSystemPrompt(owner));
+    assert.equal(loaded, true, marker);
+    assert.doesNotMatch(actual, /CHAIN-AGENTS|CHAIN-SKILL/, marker);
+    assert.match(actual, REVIEW_NOTE, marker);
+  }
   const runPrompt = await runWithRequestContext({ userEmail: owner }, () =>
     loadResourcesForPrompt(owner, true, "workbench", undefined, { disabledFrameworkGroups: ["workspaceApps"] }));
   assert.ok(!runPrompt.includes("CHAIN-AGENTS"), "the next run's prompt holds no planted AGENTS.md");

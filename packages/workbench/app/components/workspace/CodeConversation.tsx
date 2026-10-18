@@ -16,14 +16,17 @@ import { useAppStateWriter } from "@/lib/native-state";
 import { registerSelectionCloseFlush, trackSelectionWrite, useChatDraftList, useNativeChatDraft } from "@/lib/chat-draft";
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger, Skeleton } from "@agent-native/toolkit/ui";
 import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-react";
-import type { VivaryCodeRunState, VivaryCodeState } from "../../../server/local-code-agent";
+import type { VivaryCodeRunState, VivaryCodeSessionDetails, VivaryCodeState } from "../../../server/local-code-agent";
 import { codeDraftSelectionKey, codeDraftThreadId } from "../../../shared/code-draft";
 import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
+import { codeConversationModelChoices } from "../../lib/code-conversation-model-choices";
 import { useProjects } from "../projects/ProjectContext";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
+import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
+import { HandoffControl } from "./HandoffControl";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -360,6 +363,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -405,6 +409,86 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 
     </div>
   </section>;
+}
+
+const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> = {
+  "new-session": "This turn requested a new provider session.",
+  "reconstructed-context": "This turn reconstructed context from the saved conversation.",
+  "resume-requested": "This turn requested native resume; the runtime has not confirmed it.",
+  "native-resume": "The runtime confirmed native resume for this turn.",
+  "not-recorded": "Continuity for the last turn was not recorded.",
+};
+
+function CodeSessionDetails({ runId, projectId, engine, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; active: boolean }) {
+  const [open, setOpen] = useState(false);
+  // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
+  const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
+    projectId: projectId ?? undefined, runId, details: true,
+  }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
+  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  useEffect(() => {
+    const refresh = finalRefresh.current;
+    const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
+    const settled = !scopeChanged && refresh.wasActive && !active;
+    refresh.runId = runId;
+    refresh.projectId = projectId;
+    refresh.wasActive = active;
+    if (!open || scopeChanged || active) refresh.pending = false;
+    else if (settled) refresh.pending = true;
+    // Refetch during the first request can deduplicate into its older snapshot.
+    // Retain the final update until it can start a fresh request, then consume it once.
+    if (refresh.pending && !details.isFetching) {
+      refresh.pending = false;
+      void details.refetch();
+    }
+  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
+    <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
+      aria-label="Session details">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Session details</h3>
+        <Button variant="ghost" size="sm" disabled={details.isFetching}
+          onClick={() => { void details.refetch(); }}>Refresh</Button>
+      </div>
+      {engine === "codex-cli" && active && <p className="text-xs text-muted-foreground">
+        Use Refresh to update Codex session details while this run is active.
+      </p>}
+      {details.isLoading && <p role="status">Loading session details…</p>}
+      {details.isError && <div role="alert"><p>Session details could not be loaded.</p>
+        <Button variant="ghost" size="sm" onClick={() => { void details.refetch(); }}>Retry</Button></div>}
+      {details.data && !details.isError && <>
+        <p>{details.data.engineLabel} · <span className="font-mono break-all">{details.data.runId}</span></p>
+        <p>{continuityLabels[details.data.continuity]}</p>
+        <p>Provider session: {details.data.sessionId ? <code className="break-all">{details.data.sessionId}</code> : "Not reported"}</p>
+        <p>{details.data.nextTurn === "native-resume"
+          ? "The next message will request resume of this provider session."
+          : "The next message will reconstruct context from the saved conversation."}</p>
+        <h4 className="font-medium">Native transcript</h4>
+        <p className="text-xs font-mono break-all">{details.data.log.reference}</p>
+        {details.data.log.status === "missing" ? <p>The transcript log is missing.</p>
+          : details.data.log.status === "unavailable" ? <p>The transcript log is unavailable.</p>
+          : details.data.log.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"
+            tabIndex={0} aria-label="Native transcript excerpt">{details.data.log.excerpt}</pre>
+          : <p>No complete transcript entries are available.</p>}
+        {details.data.log.truncated && <p className="text-xs">Showing a bounded excerpt. Some entries or text were omitted.</p>}
+        <h4 className="font-medium">Provider session log</h4>
+        {details.data.providerLog.reference?.startsWith("codex-thread:") && <p className="text-xs text-muted-foreground">
+          Recent turn summaries show the first user and last assistant message per turn. Messages in between are omitted.
+        </p>}
+        {details.data.providerLog.reference && <p className="text-xs font-mono break-all">{details.data.providerLog.reference}</p>}
+        {details.data.providerLog.status === "available"
+          ? details.data.providerLog.excerpt ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs"
+            tabIndex={0} aria-label="Provider session excerpt">{details.data.providerLog.excerpt}</pre>
+            : <p>No user or assistant text is available.</p>
+          : <p>{({ missing: "The provider session log is missing.", unavailable: "The provider session log is unavailable.",
+            unsupported: "This provider log location or format is not supported.", malformed: "The provider session log could not be safely interpreted.",
+            "too-large": "The provider session log exceeds the inspection limit." })[details.data.providerLog.status]}</p>}
+        {details.data.providerLog.truncated && <p className="text-xs">Showing a bounded excerpt. Some messages or text were omitted.</p>}
+        <p className="text-xs text-muted-foreground">Provider logs remain with the runtime. Tools, thinking, and private metadata are omitted.</p>
+      </>}
+    </PopoverContent>
+  </Popover>;
 }
 
 type LocalCodeConversationProps = PreviewChatProps & {
@@ -492,20 +576,20 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, []);
   const availableModels = useMemo(() => props.state.engines
     .filter(engine => !props.selection.runId || engine.engine === choice.engine)
-    .map(engine => ({ ...engine, models: [...engine.models] })),
-  [props.state.engines, props.selection.runId, choice.engine]);
+    .map(engine => ({ ...engine, models: codeConversationModelChoices(engine, Boolean(props.selection.runId),
+      engine.engine === choice.engine ? choice.model : undefined) })),
+  [props.state.engines, props.selection.runId, choice.engine, choice.model]);
   const selectedEngine = props.state.engines.find(engine => engine.engine === choice.engine);
-  const modelChoices = !props.selection.runId && choice.engine === "codex-cli"
-    ? selectedEngine?.modelCatalog?.status === "ready" ? selectedEngine.modelCatalog.models.map(model => model.id) : []
-    : selectedEngine?.models ?? [];
-  const availableDraftModel = !props.selection.runId && selectedEngine?.configured
-    && !modelChoices.includes(choice.model) ? modelChoices[0] : undefined;
-  useEffect(() => {
-    if (!availableDraftModel) return;
-    const next = { engine: choice.engine, model: availableDraftModel };
-    setChoice(next);
-    latest.current.onChoice(next);
-  }, [availableDraftModel, choice.engine]);
+  const modelChoices = availableModels.find(engine => engine.engine === choice.engine)?.models ?? [];
+  // Keep a saved choice even when the catalog changes. Only a deliberate selection replaces it.
+  const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
+  const selectedModelAvailable = modelChoices.includes(choice.model)
+    && (!selectedClaudeModel || selectedClaudeModel.support === "supported");
+  // A retained conversation keeps its model. A new one can switch only to a listed
+  // choice that a configured runtime can send.
+  const otherModelAvailable = !props.selection.runId && availableModels.some(engine => engine.configured && engine.models.some(model =>
+    !(engine.engine === choice.engine && model === choice.model)
+    && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
@@ -518,7 +602,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
-    || (!!props.selection.runId && !props.run) || !!props.state.cleanup;
+    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -546,7 +630,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
@@ -568,6 +652,22 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     </div>}
     composerSlot={<div className="min-h-0 overflow-auto">
       {props.notices}
+      {!props.viewingMatch && props.run && <>
+        <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
+        <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
+          sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
+          workspaceAvailable={props.workspaceAvailable}
+          saveDraft={sourceDraftSaver(draft, draftThreadId)} />
+        {props.projectId && <HandoffControl key={"handoff:" + props.run.id} projectId={props.projectId}
+          conversation={{ kind: "code", id: props.run.id }} disabled={disabled}
+          submit={async message => {
+            // Core's window submit reaches only Native chats. This chat's own handle
+            // sends through the Code adapter and leaves the composer draft alone.
+            if (!chatRef.current) return false;
+            chatRef.current.sendMessage(message);
+            return true;
+          }} />}
+      </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">
         <span>{draft.draftSaveStatusForThread(draftThreadId) === "saved"
           ? "Draft saved for this conversation." : "Saving draft…"}</span>
@@ -592,37 +692,11 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             }}>Restore draft for editing</Button>)}
         <Button variant="ghost" size="sm" onClick={() => void draft.discard(draftThreadId)}>Discard draft</Button>
       </div>}
-      {!props.selection.runId && <div className="local-agent-notice">
-        <label className="flex items-center gap-2 text-sm">
-          Runtime
-          <select aria-label="Conversation runtime" value={choice.engine}
-            className="rounded-md border bg-background px-2 py-1 text-foreground"
-            disabled={!props.workspaceAvailable || props.active || props.streaming}
-            onChange={event => chooseRuntime(event.target.value)}>
-            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}>
-              {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
-            </option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 items-center gap-2 text-sm">
-          Model
-          <select aria-label="Conversation model" value={choice.model}
-            className="min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-foreground"
-            disabled={!props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
-            onChange={event => {
-              const model = event.target.value;
-              if (!selectedEngine || !modelChoices.includes(model)) return;
-              const next = { engine: selectedEngine.engine, model };
-              setChoice(next);
-              props.onChoice(next);
-            }}>
-            {!modelChoices.length && <option value={choice.model}>Models unavailable</option>}
-            {modelChoices.map(model => <option key={model} value={model}>
-              {selectedEngine?.modelCatalog?.status === "ready"
-                ? selectedEngine.modelCatalog.models.find(item => item.id === model)?.label ?? model : model}
-            </option>)}
-          </select>
-        </label>
+      {selectedClaudeModel && selectedClaudeModel.support !== "supported" && <div className="local-agent-notice" role="status">
+        <span>{selectedClaudeModel.message} Check Runtime settings.</span>
+      </div>}
+      {!selectedClaudeModel && choice.engine === "claude-cli" && <div className="local-agent-notice" role="status">
+        <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model for a new conversation.</span>
       </div>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
@@ -630,6 +704,40 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       <Button variant="outline" size="sm" onClick={props.onSettings}>Open runtime settings</Button>
       </div> : null}
     </div>}
+    composerToolbarSlot={<div className="local-agent-composer-controls">
+        <label className="local-agent-composer-runtime">
+          Runtime
+          <select aria-label="Conversation runtime" value={choice.engine}
+            className="local-agent-composer-select"
+            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming}
+            onChange={event => chooseRuntime(event.target.value)}>
+            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}>
+              {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
+            </option>)}
+          </select>
+        </label>
+        <label className="local-agent-composer-model">
+          Model
+          <select aria-label="Conversation model" value={choice.model}
+            className="local-agent-composer-select"
+            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
+            onChange={event => {
+              const model = event.target.value;
+              if (!selectedEngine || !modelChoices.includes(model)) return;
+              const next = { engine: selectedEngine.engine, model };
+              setChoice(next);
+              props.onChoice(next);
+            }}>
+            {!modelChoices.includes(choice.model) && <option value={choice.model}>{choice.model} (saved, unavailable)</option>}
+            {modelChoices.map(model => <option key={model} value={model}
+              disabled={selectedEngine?.claudeModels?.find(item => item.id === model)?.support === "upgrade-required"}>
+              {selectedEngine?.modelCatalog?.status === "ready"
+                ? selectedEngine.modelCatalog.models.find(item => item.id === model)?.label ?? model
+                : selectedEngine?.claudeModels?.find(item => item.id === model)?.label ?? model}
+            </option>)}
+          </select>
+        </label>
+      </div>}
     composerExtraActionButton={props.active && !props.streaming ?
       <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => void props.onStop()} aria-label="Stop response">
         <IconSquare size={14} /> Stop

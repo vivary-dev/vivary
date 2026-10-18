@@ -11,6 +11,34 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
 
+## [Unreleased: Optional MCP SDK update] - 2026-10-18
+
+Staged source versions are optional **vivary-mcp 0.1.4** and the already-staged
+**create-vivary / @vivary/create 0.4.4**. Publishing remains a manual human gate.
+These changes publish no registry artifact.
+
+- `vivary-mcp` 0.1.4 pins the official SDK to `mcp==2.2.0` and records
+  `mcp-types==2.2.0` as its schema revision. Local stdio transport, four read-only
+  tools, and unproven external conformance retain their existing contract.
+- `create-vivary` 0.4.4 checks the installed adapter's single exact SDK pin in its
+  passive Doctor report. Published adapter 0.1.3 with SDK 2.0.0 and staged adapter
+  0.1.4 with SDK 2.2.0 report consistent compatibility. A mismatched SDK or invalid
+  pin is incompatible; missing dependencies and failed probes keep their status
+  and reason codes. Doctor imports and starts no adapter.
+
+### Verification
+
+On Python 3.12.14, the focused source checks passed:
+
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k mcp -v`: 7 tests passed.
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k GovernedContextCapabilityTests -v`: 56 tests passed.
+
+These exercise the real metadata probe with installed-distribution fixtures.
+Official-SDK wire tests and Linux/Windows offline wheel smokes remain required
+on the final integrated candidate. No registry installation or desktop acceptance
+is established by these source checks. The [CLI release status](https://github.com/vivary-dev/vivary/blob/dev/docs/ORIGINAL-CLI.md#release-status)
+preserves the dated published-version tables and the latest availability check.
+
 ## [Windows prerelease 9884670] - 2026-09-22
 
 [Download and installation](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-22).

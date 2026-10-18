@@ -3,24 +3,31 @@ import { readCodeTranscriptWindow } from "./code-transcript-page";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
 import { createHash } from "node:crypto";
-import { lstat, realpath, readdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
 import { fail, type ActionRunContext } from "@agent-native/core/action";
 import {
   appendCodeAgentTranscriptEvent,
+  codeAgentRunTranscriptPath,
   createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   isActiveCodeAgentRun,
   listCodeAgentRunRecords,
   listCodeAgentTranscriptEvents,
+  readClaudeCodeSessionLog,
+  readCodexCodeSessionLog,
   updateCodeAgentRunRecord,
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
 
 import { getCodexModels, type CodexModelCatalog } from "./codex-models";
+import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
+  claudeCodeModelChoices, type ClaudeCodeModelId } from "../shared/claude-models";
+import { codexSessionLogLifecycle } from "./codex-session-process";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 
 import {
@@ -29,6 +36,7 @@ import {
   type CleanupCheck, type CleanupFailure, type CleanupTarget, type EndAttempt, type EndOutcome, type LeftoverProcess,
 } from "./code-execution-host";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
+import type { PreparedLinkedContext } from "../shared/linked-conversation";
 import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
 import { getVivaryRuntimeStatus, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
 
@@ -37,13 +45,9 @@ export const VIVARY_CODE_DEFAULT_ENGINE: VivaryCodeEngine = "claude-cli";
 
 const VIVARY_CODE_GOAL_ID = "vivary-local-code";
 const VIVARY_CODE_APP_MARKER = "vivary-workbench-local-code";
-export type VivaryCodeModel = "sonnet" | "opus" | "fable";
-export const VIVARY_CODE_MODELS = [
-  "sonnet",
-  "opus",
-  "fable",
-] satisfies [VivaryCodeModel, ...VivaryCodeModel[]];
-export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = "sonnet";
+export type VivaryCodeModel = ClaudeCodeModelId;
+export const VIVARY_CODE_MODELS = CLAUDE_CODE_MODELS.map(model => model.id);
+export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = CLAUDE_CODE_DEFAULT_MODEL;
 const MAX_RUNS = 20;
 const MAX_TRANSCRIPT_EVENTS = 400;
 const MAX_FOLLOW_UP_EVENTS = 24;
@@ -158,7 +162,8 @@ export type VivaryCodeState = VivaryCodeHostState & {
   defaultEngine: VivaryCodeEngine;
   runtime: VivaryRuntimeStatus;
   permissionMode: CodePermissionMode;
-  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null }[];
+  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null;
+    claudeModels: ReturnType<typeof claudeCodeModelChoices> | null }[];
   runs: VivaryCodeRunSummary[];
   run: VivaryCodeRunState | null;
   error?: string;
@@ -804,7 +809,7 @@ export async function getVivaryCodeHostState(
 
 function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
-  const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
+  const owned = runs.filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
   const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
   const recent = owned.find(run => !activeRuns.has(run.id));
@@ -832,6 +837,7 @@ export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: Vi
   if (wanted.size === 0) return linked;
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   for (const run of runs) {
+    if (!isListedRun(run)) continue;
     if (scope ? !isOwnedRun(run, ownerEmail, orgId, scope)
       : !isOwnedIdentity(run, ownerEmail, orgId) || metadataString(run, "projectId") !== null) continue;
     const draftThreadId = runDraftThreadId(run);
@@ -847,9 +853,9 @@ export function hasOwnedVivaryCodeSubmit(
   ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope | undefined,
   draftThreadId: string, submitId: string,
 ): boolean {
-  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run =>
+  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && (
     scope ? isOwnedRun(run, ownerEmail, orgId, scope)
-      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null);
+      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null));
   return runs.some(run => listCodeAgentTranscriptEvents(run.id).some(event =>
     event.kind === "user" && event.metadata?.draftThreadId === draftThreadId
       && event.metadata?.draftSubmitId === submitId));
@@ -878,6 +884,7 @@ export async function getVivaryCodeState(
     const models = engine === "claude-cli" ? [...VIVARY_CODE_MODELS]
       : modelCatalog?.status === "ready" ? modelCatalog.models.map(model => model.id) : [];
     return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex", models, modelCatalog,
+      claudeModels: engine === "claude-cli" ? claudeCodeModelChoices(runtime.version) : null,
       configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
 
@@ -900,10 +907,11 @@ export async function getVivaryCodeState(
   if (!selectedRuntime) fail("Choose an available coding runtime.", {
     errorCode: "vivary_code_runtime_unavailable", statusCode: 503,
   });
-  if (selected && selectedEngine === "codex-cli" && !selectedRuntime.models.includes(modelFromRun(selected))) {
+  if (selected && !selectedRuntime.models.includes(modelFromRun(selected))) {
     selectedRuntime.models.push(modelFromRun(selected));
   }
   selectedRuntime.runtime = runtime;
+  if (selectedEngine === "claude-cli") selectedRuntime.claudeModels = claudeCodeModelChoices(runtime.version);
   selectedRuntime.configured = runtime.status === "ready"
     && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
@@ -956,6 +964,8 @@ export async function sendVivaryCodeMessage(input: {
   projectContext?: ProjectContextLoad;
   /** Called once the send has passed its refusals and claimed the host slot, so the panel's last load is true. */
   recordProjectContext?: (load: ProjectContextLoad) => void;
+  /** Revalidate the frozen link after runtime discovery, before claiming the host. */
+  loadLinkedContext?: () => Promise<PreparedLinkedContext | null>;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
@@ -964,9 +974,25 @@ export async function sendVivaryCodeMessage(input: {
   assertCodeHostAvailable();
 
   const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
+  if (existing?.metadata?.linkedCreationPending || (existing?.metadata?.linkedHistoryId && !input.loadLinkedContext)) {
+    fail("The linked history could not be verified. Retry from the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
+  }
   const selectedEngine = existing ? engineFromRun(existing) : input.engine ?? VIVARY_CODE_DEFAULT_ENGINE;
   if (input.engine && input.engine !== selectedEngine) {
     fail("Start a new conversation to change coding runtimes.", { errorCode: "vivary_code_engine_changed", statusCode: 409 });
+  }
+  // Refuse before any run record, transcript append, or worker launch.
+  // Ownership and pinned project checks still apply to retained conversations.
+  if (existing && input.model && input.model !== modelFromRun(existing)) {
+    fail("Start a new conversation to change its model.", { errorCode: "vivary_code_model_changed", statusCode: 409 });
+  }
+  if (input.revalidateWorkspace) {
+    const current = await input.revalidateWorkspace();
+    if (!current || !sameWorkspace(current, workspace)) {
+      fail("The selected project changed. Select it again.", { errorCode: "vivary_code_project_changed", statusCode: 409 });
+    }
   }
   const runtime = await getVivaryRuntimeStatus(selectedEngine);
   if (runtime.status !== "ready") {
@@ -978,18 +1004,30 @@ export async function sendVivaryCodeMessage(input: {
   }
   const supportedModels = catalog?.status === "ready" ? catalog.models.map(model => model.id) : [];
   const recordedModel = existing ? modelFromRun(existing) : undefined;
-  if (existing && input.model && input.model !== recordedModel) {
-    fail("Start a new conversation to change its model.", { errorCode: "vivary_code_model_changed", statusCode: 409 });
-  }
   const selectedModel = resolveVivaryCodeModel(selectedEngine,
     input.model ?? recordedModel ?? (catalog?.status === "ready" ? catalog.defaultModel : undefined),
-    recordedModel ? [...supportedModels, recordedModel] : supportedModels);
+    recordedModel ? [...supportedModels, recordedModel] : supportedModels, recordedModel);
+  const claudeModel = selectedEngine === "claude-cli"
+    ? claudeCodeModelChoices(runtime.version).find(model => model.id === selectedModel) : undefined;
+  if (claudeModel && claudeModel.support !== "supported") {
+    fail(claudeModel.message, { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  }
   if (!existing && selectedEngine === "codex-cli" && selectedModel === "default") {
     fail("Choose a model reported by Codex before starting a conversation.", { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
   }
   const permissionMode = await getCodePermissionMode(input.ownerEmail, input.orgId);
   // The worker's fingerprints and the transcript's user event use the credentials held now.
   await refreshHeldCredentials();
+  let linkedContext: PreparedLinkedContext | null = null;
+  if (input.loadLinkedContext) {
+    try { linkedContext = await input.loadLinkedContext(); }
+    catch { fail("The linked source history could not be verified. Open the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    }); }
+    if (existing?.metadata?.linkedHistoryId && !linkedContext) fail("The retained history link is missing.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
+  }
   if (input.revalidateWorkspace) {
     const current = await input.revalidateWorkspace();
     if (!current || !sameWorkspace(current, workspace)) {
@@ -1027,10 +1065,14 @@ export async function sendVivaryCodeMessage(input: {
     },
   });
 
-  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine, input.message,
+  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine,
+    linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
     input.projectContext?.block);
   appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
     metadata: { source: "vivary-workbench", permissionMode,
+      // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
+      // An unavailable source supplies no block and no portion, so nothing claims linked context.
+      ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
       ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
         draftThreadId: input.draftThreadId } : {}) } });
   if (input.projectContext) {
@@ -1043,6 +1085,100 @@ export async function sendVivaryCodeMessage(input: {
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, permissionMode });
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+}
+
+export type VivaryCodeSessionDetails = {
+  runId: string;
+  engineLabel: string;
+  sessionId: string | null;
+  continuity: "new-session" | "reconstructed-context" | "resume-requested" | "native-resume" | "not-recorded";
+  nextTurn: "native-resume" | "reconstructed-context";
+  log: { reference: string; status: "available" | "missing" | "unavailable"; excerpt: string; truncated: boolean };
+  providerLog: { reference: string | null; status: "available" | "missing" | "unavailable" | "unsupported" | "malformed" | "too-large";
+    excerpt: string; truncated: boolean };
+};
+
+/** Sanitize each complete Details text before either source applies its excerpt limits. */
+function sanitizeSessionDetailsText(text: string): string {
+  return redactCredentialsInValue(text)
+    // Match web URLs first so their scheme/path stay intact, including credential placeholders.
+    // Host paths consume through line end: spaces/apostrophes may be filename characters,
+    // so ambiguous trailing prose is also hidden. The next line stays intact.
+    .replace(/https?:\/\/(?:\[redacted [A-Za-z0-9_.:-]{1,64}\]|[^\s<>"'])+|(?<![A-Za-z0-9_+.-])file:[^\r\n]+|(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+|(?<![A-Za-z0-9:])\/[^\r\n]+/gi, value => /^https?:\/\//i.test(value) ? value : "[path]");
+}
+
+/** Authorize the run before Native opens its provider log; the client supplies no path. */
+export async function getVivaryCodeSessionDetails(
+  ownerEmail: string, runId: string, selectedWorkspace?: VivaryCodeReadScope, orgId?: string,
+): Promise<VivaryCodeSessionDetails> {
+  const workspace = selectedWorkspace ?? await resolveWorkspace();
+  const run = requireOwnedRun(runId, ownerEmail, orgId, workspace);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(run.id)) fail("Local Vivary code run not found.", { statusCode: 404 });
+  const sessionId = providerSessionId(run, engineFromRun(run));
+  const mode = metadataString(run, "providerSessionMode");
+  const continuity = mode === "new-session" || mode === "reconstructed-context" ? mode
+    : sessionId && (mode === "native-resume" || mode === "resume-requested") ? mode : "not-recorded";
+  const details: VivaryCodeSessionDetails = {
+    runId: run.id, engineLabel: engineLabelFromRun(run), sessionId, continuity,
+    nextTurn: sessionId ? "native-resume" : "reconstructed-context",
+    log: { reference: `native-transcript:${run.id}`, status: "unavailable", excerpt: "", truncated: false },
+    providerLog: { reference: sessionId ? `${engineFromRun(run) === "claude-cli" ? "claude-session" : "codex-thread"}:${sessionId}` : null,
+      status: "unsupported", excerpt: "", truncated: false },
+  };
+  await refreshHeldCredentials();
+  if (sessionId) {
+    const provider = engineFromRun(run) === "claude-cli"
+      ? await readClaudeCodeSessionLog(run) : await readCodexCodeSessionLog(run, codexSessionLogLifecycle);
+    // Redact each whole text before any output truncation, including a secret
+    // that crosses the excerpt boundary. Paths and opaque provider data stay private.
+    const messages = provider.messages.map(message => ({ role: message.role, text: sanitizeSessionDetailsText(message.text) }));
+    const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
+    details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(-20_000),
+      truncated: ("truncated" in provider && provider.truncated === true) || messages.length > 40
+        || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
+  }
+  let file;
+  try {
+    const logPath = codeAgentRunTranscriptPath(run.id);
+    const before = await lstat(logPath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) return details;
+    file = await open(logPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = await file.stat({ bigint: true });
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== 1n || opened.size > BigInt(Number.MAX_SAFE_INTEGER)) return details;
+    // Read the final 64 KiB once. A partial first/last line is omitted, never parsed as another event.
+    const size = Number(opened.size);
+    const offset = Math.max(0, size - 64 * 1024);
+    const buffer = Buffer.alloc(Math.min(size, 64 * 1024));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, offset);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (offset) text = text.includes("\n") ? text.slice(text.indexOf("\n") + 1) : "";
+    const lines = text.split("\n").slice(0, -1);
+    const messages: string[] = [];
+    let truncated = offset > 0 || bytesRead < size;
+    for (const line of lines) {
+      let event;
+      try { event = JSON.parse(line); } catch { truncated = true; continue; }
+      if (!event || event.runId !== run.id || typeof event.message !== "string"
+          || !["user", "system", "note", "artifact", "status"].includes(event.kind)) continue;
+      if (event.message.length > 1_500) truncated = true;
+      messages.push(`${event.kind}: ${sanitizeSessionDetailsText(event.message).slice(0, 1_500)}`);
+    }
+    if (messages.length > 40) truncated = true;
+    const excerpt = messages.slice(-40).join("\n\n");
+    details.log = { ...details.log, status: "available", excerpt: excerpt.slice(-20_000),
+      truncated: truncated || excerpt.length > 20_000 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") details.log.status = "missing";
+  } finally { await file?.close(); }
+  return details;
+}
+
+export function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
+  if (metadataString(run, "engine") !== engine) return null;
+  const id = metadataString(run, engine === "claude-cli" ? "claudeSessionId" : "codexSessionId");
+  return id && (engine === "claude-cli"
+    ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    : /^[A-Za-z0-9_-]{1,128}$/.test(id)) ? id : null;
 }
 
 export async function approveVivaryCodeMessage(input: {
@@ -1277,9 +1413,17 @@ export async function getVivaryCodeFiles(
   };
 }
 
+/**
+ * A linked target still being created, or left unfinished by a crash, is not an owner's conversation yet. Every
+ * owner listing (history, the host's recent run, draft runs and submit lookups) uses this one predicate.
+ */
+function isListedRun(run: CodeAgentRunRecord): boolean {
+  return !run.metadata?.linkedCreationPending;
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
-    (run) => isOwnedRun(run, ownerEmail, orgId, scope),
+    (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
   );
 }
 
@@ -1381,7 +1525,7 @@ function assertCodeHostAvailable(): void {
   }
 }
 
-function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
+export function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
   const fields = ["root", "projectId", "bindingId", "rootId", "bindingRevision", "policyRevision"] as const;
   return fields.every(field => left[field] === right[field]);
 }
@@ -1441,7 +1585,7 @@ function engineLabelFromRun(run: CodeAgentRunRecord): string {
 function modelFromRun(run: CodeAgentRunRecord): string {
   return metadataString(run, "model")
     ?? (metadataString(run, "engine") === "claude-cli"
-      ? VIVARY_CODE_DEFAULT_MODEL
+      ? "sonnet"
       : "default");
 }
 
@@ -1453,13 +1597,14 @@ function engineFromRun(run: CodeAgentRunRecord): VivaryCodeEngine {
   });
 }
 
-export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string, codexModels: readonly string[] = []): string {
+export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string, codexModels: readonly string[] = [], retainedModel?: string): string {
   if (engine === "codex-cli") {
     if (!requested || requested === "default") return "default";
     if (codexModels.includes(requested)) return requested;
   } else {
     if (!requested) return VIVARY_CODE_DEFAULT_MODEL;
-    if (VIVARY_CODE_MODELS.some(model => model === requested)) return requested;
+    if (VIVARY_CODE_MODELS.some(model => model === requested)
+      || CLAUDE_CODE_LEGACY_ALIASES.includes(requested) || requested === retainedModel) return requested;
   }
   fail("Choose a model supported by the selected coding runtime.", {
     errorCode: "vivary_code_model_unsupported", statusCode: 400,
@@ -1519,12 +1664,10 @@ function recordStoppingRun(
 }
 
 /**
- * The engine prompt for one message. A new run and a resumed Codex thread
- * get the raw message. Other follow-ups quote the transcript, because each
- * Claude turn is a fresh CLI session. Every turn of every engine gets the
- * full project block first. A resumed Codex thread therefore holds one block
- * per turn, which is accepted so a thread never relies on a block Codex may
- * have compacted away.
+ * The engine prompt for one message. A new run and a saved provider session
+ * get the raw message. Legacy follow-ups without a provider ID quote the
+ * transcript. Every turn gets the full project block, so a resumed session
+ * never relies on a block its provider may have compacted away.
  */
 export function buildVivaryCodeExecutionPrompt(
   existing: CodeAgentRunRecord | null,
@@ -1532,8 +1675,8 @@ export function buildVivaryCodeExecutionPrompt(
   message: string,
   projectContext?: ProjectContextBlock,
 ): string {
-  const resumesCodexThread = engine === "codex-cli" && existing !== null && metadataString(existing, "codexSessionId") !== null;
-  const prompt = existing && !resumesCodexThread
+  const resumesProviderSession = existing !== null && providerSessionId(existing, engine) !== null;
+  const prompt = existing && !resumesProviderSession
     ? buildVivaryCodeFollowUpPrompt(listCodeAgentTranscriptEvents(existing.id), message) : message;
   return projectContext ? `${projectContext}\n\n${prompt}` : prompt;
 }

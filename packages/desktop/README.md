@@ -242,17 +242,22 @@ A Linux build host can also assemble the unsigned Windows x64 folder:
 npm --prefix packages/desktop run package -- --windows-x64
 ```
 
-This mode requires Workbench output built with Node 24.19.0 (ABI 137) and
+This mode requires Workbench output built with Node 24.20.0 (ABI 137) and
 `better-sqlite3` 12.11.1. It verifies pinned official Windows Node and SQLite
 assets, replaces the binding only in the staged copy, and asks Electron Packager
 for Windows x64. It uses the build host's `tar` command for the one SQLite entry.
 The source checkout and its installed native modules stay intact.
 
-[Node checksums](https://nodejs.org/dist/v24.19.0/SHASUMS256.txt) and the
+[Node checksums](https://nodejs.org/dist/v24.20.0/SHASUMS256.txt) and the
 [SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.11.1)
 are the asset authorities. [Electron Packager](https://github.com/electron/packager/blob/v20.3.0/README.md)
 supports cross-platform packaging. A successful package build establishes an
 artifact, not Windows runtime acceptance.
+
+`vivary.exe` carries the Vivary name and icon. The icon is
+`assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`
+(256 x 256) with PNG entries at 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256
+pixels. Replace both together if the mark changes.
 
 The folder must stay together: `vivary.exe` uses its sibling `resources` files.
 For this portable preview, extract the archive to a short path such as
@@ -266,3 +271,15 @@ The unpublished `df4aedc` package verified missing-runtime guidance and a real
 Codex/Astra file turn in a fresh application profile. Its reviewed npm preview
 started, rendered, and stopped. Upgrade/removal behavior and the complete
 release journey remain outside this candidate's acceptance.
+
+The bundled runtime can be checked without opening Electron or calling a provider:
+
+```console
+<selected-node-executable> --test packages/desktop/tests/node-shutdown.test.mjs
+```
+
+This control uses only a loopback redirect server and child processes. It checks
+normal exit and exit after a failed fetch, including the Windows shutdown failure
+fixed by [Node #61999](https://github.com/nodejs/node/pull/61999). Each child has a
+cleared environment and a bounded timeout. Passing does not establish native
+desktop acceptance.

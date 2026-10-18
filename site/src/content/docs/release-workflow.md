@@ -182,7 +182,7 @@ working directory, job boundary, or install-before-audit ordering from drifting.
 
 ### Astro remote-image dependency replacement
 
-The site replaces Astro 7.3.3's vulnerable `http-cache-semantics` dependency with
+The site replaces Astro 7.3.5's vulnerable `http-cache-semantics` dependency with
 a private local module, `@vivary/astro-no-cache-policy`. Its source and maintenance
 contract are in [the policy README](https://github.com/vivary-dev/vivary/blob/dev/site/vendor/astro-no-cache-policy/README.md).
 No patched upstream release was available for GHSA-ch52-4w7c-c8xp on 2026-10-03.

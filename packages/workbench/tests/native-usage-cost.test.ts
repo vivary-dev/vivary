@@ -73,6 +73,11 @@ const cutByProviderError: Respond = response => {
   send(response, { error: { code: 502, message: "Upstream provider failed" } });
   response.end("data: [DONE]\n\n");
 };
+// A dropped connection after streamed text, which the loop retries.
+const resetAfterText: Respond = response => {
+  send(response, chunkOf({ choices: [{ index: 0, delta: { role: "assistant", content: "Partial" }, finish_reason: null }] }));
+  setTimeout(() => response.destroy(), 20);
+};
 const answerWithoutUsage: Respond = response => {
   send(response, chunkOf({ choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }] }));
   send(response, chunkOf({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }));
@@ -141,7 +146,7 @@ async function runTurn(model: string, respond: Respond, { stopOnText = false, th
     await runWithRequestContext({ userEmail: owner, run: {} }, () => runAgentLoop({ engine: provider.engine, model,
       systemPrompt: "", tools: actionsToEngineTools(actions), actions, messages: userTurn, signal: stop.signal,
       send: (event: { type: string }) => { if (stopOnText && event.type === "text") stop.abort(); },
-      onUsage: turn.add, onModelCall: turn.startCall })).catch((error: unknown) => {
+      onUsage: turn.add, onModelCall: turn.startCall, onModelCallRefused: turn.refuseCall })).catch((error: unknown) => {
       if (stop.signal.aborted) return;
       if (!throws) throw error;
       threw = true;
@@ -203,6 +208,15 @@ const turns: Array<{ name: string; model: string; respond: Respond; stopOnText?:
   { name: "a turn whose second call reports no usage records no reported cost", model: "probe/paid-model",
     respond: (response, index) => (index === 0 ? callTool(0.0123) : answerWithoutUsage)(response, index), requests: 2,
     row: { centicents: 0, source: "unavailable" } },
+  // A retried attempt that streamed output before failing may have been charged, and it reports no
+  // usage, so the retry's reported cost is not the turn's cost.
+  { name: "a connection reset after streamed text and a retry that reports a cost records no reported cost",
+    model: "probe/paid-model", respond: (response, index) => (index === 0 ? resetAfterText : answer(0.0123))(response, index),
+    requests: 2, row: { centicents: 0, source: "unavailable" } },
+  // A rate limit rejects the request before the model runs, so the retry's reported cost is the turn's cost.
+  { name: "a rate-limited attempt and a retry that reports a cost record that cost", model: "probe/paid-model",
+    respond: (response, index) => (index === 0 ? rateLimited : answer(0.0123))(response, index), requests: 2,
+    row: { centicents: 123, source: "reported" } },
 ];
 
 test("a main chat turn records its cost", async t => {
@@ -258,71 +272,6 @@ test("the Usage tab's metrics count the calls whose cost is unknown", async () =
   });
 });
 
-// CI exposed a real primary-key collision when consecutive calls shared a millisecond.
-// Separate store modules also cover an existing ID left by another store instance.
-test("simultaneous usage calls with the same generated ID both retain their costs", async (t) => {
-  const owner = `owner-${randomUUID()}@example.test`;
-  const otherStore = await import(`${coreUrl("usage/store.js")}?collision=${randomUUID()}`);
-  await store.ensureUsageTable();
-  await otherStore.ensureUsageTable();
-  const now = Date.now();
-  const clock = t.mock.method(Date, "now", () => now);
-  const random = t.mock.method(Math, "random", () => 0);
-  try {
-    const call = { ownerEmail: owner, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
-      label: "chat", model: "probe/reported", costSource: "reported" };
-    await Promise.all([
-      store.recordUsage({ ...call, costCentsX100: 60 }),
-      otherStore.recordUsage({ ...call, costCentsX100: 50 }),
-    ]);
-  } finally {
-    clock.mock.restore();
-    random.mock.restore();
-  }
-  const usage = await usageFor(owner);
-  assert.deepEqual(figure(usage.totals), { costCents: 1.1, calls: 2, unknownCostCalls: 0 });
-  assert.equal(usage.recent.length, 2);
-  assert.equal(new Set(usage.recent.map((row: { id: number }) => row.id)).size, 2);
-  assert.deepEqual(usage.recent.map((row: { costCents: number }) => row.costCents).sort((a: number, b: number) => a - b), [0.5, 0.6]);
-});
-
-test("usage ID collision exhaustion is bounded and preserves existing costs", async (t) => {
-  const owner = `owner-${randomUUID()}@example.test`;
-  await store.ensureUsageTable();
-  const now = Date.now() + 2_000;
-  const clock = t.mock.method(Date, "now", () => now);
-  const random = t.mock.method(Math, "random", () => 0);
-  const call = { ownerEmail: owner, inputTokens: 1, outputTokens: 0, label: "chat",
-    model: "probe/reported", costCentsX100: 10, costSource: "reported" };
-  try {
-    for (let i = 0; i < 16; i++) await store.recordUsage(call);
-    await assert.rejects(store.recordUsage(call), /Usage ID allocation exhausted after 16 conflicts/);
-  } finally {
-    clock.mock.restore();
-    random.mock.restore();
-  }
-  const usage = await usageFor(owner);
-  assert.deepEqual(figure(usage.totals), { costCents: 1.6, calls: 16, unknownCostCalls: 0 });
-  const summary = await store.getUsageSummary({ ownerEmail: owner, sinceMs: now - 1_000 });
-  assert.equal(new Set(summary.recent.map((row: { id: number }) => row.id)).size, 16);
-});
-
-test("a refused usage insert still rejects without recording a charge", async () => {
-  const owner = `owner-${randomUUID()}@example.test`;
-  await store.ensureUsageTable();
-  const trigger = `refuse_usage_${randomBytes(4).toString("hex")}`;
-  await getDbExec().execute(`CREATE TRIGGER ${trigger} BEFORE INSERT ON token_usage WHEN NEW.owner_email = '${owner}'
-    BEGIN SELECT RAISE(ABORT, 'usage refused'); END`);
-  try {
-    await assert.rejects(store.recordUsage({ ownerEmail: owner, inputTokens: 1, outputTokens: 0,
-      model: "probe/reported", costCentsX100: 10, costSource: "reported" }), /usage refused/);
-  } finally {
-    await getDbExec().execute(`DROP TRIGGER ${trigger}`);
-  }
-  const usage = await usageFor(owner);
-  assert.deepEqual(figure(usage.totals), { costCents: 0, calls: 0, unknownCostCalls: 0 });
-});
-
 // The tab lists four models. Five priced models cost more than the unpriced one's known cost of 0.
 test("the Usage tab's model list keeps a model whose cost is unknown", async () => {
   const owner = `owner-${randomUUID()}@example.test`;
@@ -333,6 +282,68 @@ test("the Usage tab's model list keeps a model whose cost is unknown", async () 
   const usage = await usageFor(owner);
   assert.deepEqual(usage.byModel.map((row: { key: string }) => row.key),
     ["probe/unpriced-model", "anthropic/claude-sonnet-5", "mistral-large-latest", "anthropic/claude-haiku-5"]);
+});
+
+test("usage writers preserve both records when their generated numeric IDs collide", async t => {
+  const stores = await Promise.all([startStore("collision-first"), startStore("collision-second")]);
+  await Promise.all(stores.map(writer => writer.ensureUsageTable()));
+  const owner = `owner-${randomUUID()}@example.test`;
+  // Independent workers can choose the same timestamp/random suffix. Exercise the real primary key.
+  t.mock.method(Date, "now", () => 1_700_000_000_000);
+  t.mock.method(Math, "random", () => 0);
+  await Promise.all(stores.map((writer, index) => writer.recordUsage({ ownerEmail: owner,
+    inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, label: "chat", model: "probe/free-model",
+    costCentsX100: index, costSource: "reported", runId: `collision-${index}` })));
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT id, run_id, cost_cents_x100, cost_source FROM token_usage WHERE owner_email = ? ORDER BY run_id",
+    args: [owner],
+  });
+  assert.equal(rows.length, 2);
+  assert.equal(new Set(rows.map(row => Number(row.id))).size, 2);
+  assert.deepEqual(rows.map(row => [row.run_id, Number(row.cost_cents_x100), row.cost_source]),
+    [["collision-0", 0, "reported"], ["collision-1", 1, "reported"]]);
+});
+
+test("a usage write whose committed insert the client retries records it once", async t => {
+  await store.ensureUsageTable();
+  const owner = `owner-${randomUUID()}@example.test`;
+  const client = getDbExec();
+  const execute = client.execute.bind(client);
+  // A lost reply: the first insert commits, then the client sends the same statement again.
+  let replayed = false;
+  t.mock.method(client, "execute", async (statement: { sql?: string }) => {
+    if (!replayed && typeof statement === "object" && statement.sql?.startsWith("INSERT INTO token_usage")) {
+      replayed = true;
+      await execute(statement);
+    }
+    return execute(statement);
+  });
+  await store.recordUsage({ ownerEmail: owner, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, label: "chat",
+    model: "probe/free-model", costCentsX100: 123, costSource: "reported", runId: "lost-reply" });
+  t.mock.restoreAll();
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT run_id, cost_cents_x100 FROM token_usage WHERE owner_email = ?", args: [owner] });
+  assert.deepEqual(rows.map(row => [row.run_id, Number(row.cost_cents_x100)]), [["lost-reply", 123]]);
+});
+
+test("usage writer reports exhausted IDs without replacing existing records", async t => {
+  await store.ensureUsageTable();
+  const owner = `owner-${randomUUID()}@example.test`;
+  const now = 1_700_000_000_100;
+  const ids = Array.from({ length: 16 }, (_, index) => now * 1000 + index);
+  for (const id of ids) await getDbExec().execute({
+    sql: "INSERT INTO token_usage (id, owner_email, created_at) VALUES (?, ?, ?)", args: [id, owner, now],
+  });
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(Math, "random", () => 0);
+  await assert.rejects(store.recordUsage({ ownerEmail: owner, inputTokens: INPUT_TOKENS,
+    outputTokens: OUTPUT_TOKENS, model: "probe/free-model", costCentsX100: 123, costSource: "reported" }),
+    /Could not allocate a unique token usage ID after 16 attempts/);
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT id, input_tokens, cost_cents_x100 FROM token_usage WHERE owner_email = ? ORDER BY id", args: [owner],
+  });
+  assert.deepEqual(rows.map(row => [Number(row.id), Number(row.input_tokens), Number(row.cost_cents_x100)]),
+    ids.map(id => [id, 0, 0]));
 });
 
 // Rows written before this change hold the catch-all Sonnet price for models the table does not
@@ -537,4 +548,118 @@ test("the webhook handler records and settles a failed integration run", async t
     assert.deepEqual(await integrationTask({ engine: "probe-missing-engine", deliver: true }), { status: "completed",
       requests: 0, usedMicros: 0, reservedMicros: 0, rows: [] });
   });
+});
+
+
+test("new direct API estimates require route, request length and cache TTL evidence", () => {
+  const estimate = (model: string, inputTokens: number, outputTokens: number, cacheReadTokens = 0,
+    cacheWriteTokens = 0, cacheWrite1hTokens?: number, engineName = "anthropic") =>
+    store.estimateUsageCost({ model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
+      cacheWrite1hTokens, engineName }, { perRequest: true });
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 1_000_000), 120_000);
+  assert.equal(estimate("claude-opus-5-5", 1_000_000, 1_000_000), 240_000);
+  assert.equal(estimate("claude-fable-5-1", 1_000_000, 1_000_000), 600_000);
+  assert.equal(estimate("claude-haiku-5-5", 100_000, 1000), 105);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 1000), 525);
+  assert.equal(estimate("claude-haiku-5-5", 100_000, 1000, 100_000), 15);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 1000, 100_000), 75);
+  for (const [model, rate] of [["claude-sonnet-5-5", 1000], ["claude-opus-5-5", 2000], ["claude-fable-5-1", 2500]] as const) {
+    assert.equal(estimate(model, 1_000_000, 0, 1_000_000), rate);
+  }
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 0, 0, 100_001, 0), 625);
+  assert.equal(estimate("claude-haiku-5-5", 100_001, 0, 0, 100_001, 100_001), 1000);
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 0, 0, 1_000_000, 0), 25_000);
+  assert.equal(estimate("claude-sonnet-5-5", 1_000_000, 0, 0, 1_000_000, 1_000_000), 40_000);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 10_000), undefined);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 0, 0, "builder"), undefined);
+  assert.equal(estimate("claude-sonnet-5-5", 50_000, 0, 0, 0, 0, "ai-sdk:openrouter"), undefined);
+  assert.equal(estimate("anthropic/claude-sonnet-5-5", 50_000, 0), undefined);
+  assert.equal(estimate("claude-custom-unpriced", 50_000, 0), undefined);
+});
+
+test("Haiku turns sum individual request estimates and reported cost takes precedence", async () => {
+  const model = "claude-haiku-5-5";
+  const usage = { model, inputTokens: 60_000, outputTokens: 0, cacheReadTokens: 0,
+    cacheWriteTokens: 0, cacheWrite1hTokens: 0, engineName: "anthropic" };
+  const turn = agent.createTurnUsage(model);
+  for (let call = 0; call < 2; call++) { turn.startCall(); turn.add(usage); }
+  const record = turn.usageRecord();
+  assert.equal(record.inputTokens, 120_000);
+  assert.equal(record.costCentsX100, 120);
+  assert.equal(record.costSource, "estimated");
+  const runId = "run-" + randomUUID();
+  await store.recordUsage({ ownerEmail: "owner-" + randomUUID() + "@example.test", ...record, runId });
+  assert.deepEqual(await usageRows("run_id", runId), [{ tokens: 120_000, centicents: 120, source: "estimated" }]);
+  const reported = agent.createTurnUsage(model);
+  reported.startCall(); reported.add({ ...usage, cacheWriteTokens: 1000, cacheWrite1hTokens: undefined, costUsd: 0 });
+  assert.equal(reported.usageRecord().costCentsX100, 0);
+  assert.equal(reported.usageRecord().costSource, "reported");
+  const mixed = agent.createTurnUsage(model);
+  mixed.startCall(); mixed.add({ ...usage, costUsd: 0.0123 });
+  mixed.startCall(); mixed.add(usage);
+  assert.equal(mixed.usageRecord().costCentsX100, 183);
+  assert.equal(mixed.usageRecord().costSource, "estimated");
+});
+
+test("incomplete new API evidence records Unknown and gateway reported cost wins", async () => {
+  const ownerEmail = "owner-" + randomUUID() + "@example.test";
+  for (const incomplete of [
+    { model: "claude-haiku-5-5", engineName: "anthropic", inputTokens: 120_000, outputTokens: 0 },
+    { model: "claude-sonnet-5-5", inputTokens: 1000, outputTokens: 200 },
+    { model: "claude-sonnet-5-5", engineName: "anthropic", inputTokens: 1000, outputTokens: 200, cacheWriteTokens: 500 },
+  ]) {
+    const runId = "run-" + randomUUID();
+    await store.recordUsage({ ownerEmail, ...incomplete, runId });
+    assert.equal((await usageRows("run_id", runId))[0].source, "unavailable");
+  }
+  const incomplete = agent.createTurnUsage("claude-haiku-5-5");
+  incomplete.startCall(); incomplete.add({ model: "claude-haiku-5-5", engineName: "anthropic", inputTokens: 1000,
+    outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 500 });
+  assert.equal(incomplete.usageRecord().costSource, "unavailable");
+  const routed = await recordTurn("anthropic/claude-sonnet-5-5", answer(0.0123));
+  assert.equal(routed.rows[0].centicents, 123);
+  assert.equal(routed.rows[0].source, "reported");
+});
+
+test("a turn counts every attempt, keeps each attempt's usage, and settles a refused attempt at $0", () => {
+  const model = "probe/paid-model";
+  const usage = { model, inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS, cacheReadTokens: 0,
+    cacheWriteTokens: 0, engineName: "ai-sdk:openrouter" };
+  // Both attempts reported a cost, so the total is known even though the first one failed.
+  const bothReported = agent.createTurnUsage(model);
+  bothReported.startCall(); bothReported.add({ ...usage, costUsd: 0.01 });
+  bothReported.startCall(); bothReported.add({ ...usage, costUsd: 0.02 });
+  assert.deepEqual(bothReported.usageRecord(), { inputTokens: 2 * INPUT_TOKENS, outputTokens: 2 * OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model, costCentsX100: 300, costSource: "reported" });
+  // A refused attempt is a known $0 call with no tokens.
+  const refused = agent.createTurnUsage(model);
+  refused.startCall(); refused.refuseCall();
+  refused.startCall(); refused.add({ ...usage, costUsd: 0.0123 });
+  assert.deepEqual(refused.usageRecord(), { inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model, costCentsX100: 123, costSource: "reported" });
+  // An attempt with no usage and no refusal has an unknown cost. The retry's tokens stay recorded.
+  const partial = agent.createTurnUsage(model);
+  partial.startCall();
+  partial.startCall(); partial.add({ ...usage, costUsd: 0.0123 });
+  assert.deepEqual(partial.usageRecord(), { inputTokens: INPUT_TOKENS, outputTokens: OUTPUT_TOKENS,
+    cacheReadTokens: 0, cacheWriteTokens: 0, model });
+  // A priced model cannot estimate the unknown attempt either.
+  const pricedModel = "claude-haiku-5-5";
+  const pricedUsage = { ...usage, model: pricedModel, engineName: "anthropic", cacheWrite1hTokens: 0 };
+  const priced = agent.createTurnUsage(pricedModel);
+  priced.startCall();
+  priced.startCall(); priced.add(pricedUsage);
+  assert.equal(priced.usageRecord().costSource, "unavailable");
+  assert.equal(priced.usageRecord().costCentsX100, undefined);
+  const pricedRefused = agent.createTurnUsage(pricedModel);
+  pricedRefused.startCall(); pricedRefused.refuseCall();
+  pricedRefused.startCall(); pricedRefused.add(pricedUsage);
+  assert.equal(pricedRefused.usageRecord().costSource, "estimated");
+  // A refused attempt that already sent a $0 usage report counts once.
+  const reportedThenRefused = agent.createTurnUsage(model);
+  reportedThenRefused.startCall(); reportedThenRefused.add({ ...usage, inputTokens: 0, outputTokens: 0, costUsd: 0 });
+  reportedThenRefused.refuseCall();
+  reportedThenRefused.startCall(); reportedThenRefused.add({ ...usage, costUsd: 0.0123 });
+  assert.equal(reportedThenRefused.usageRecord().costCentsX100, 123);
+  assert.equal(reportedThenRefused.usageRecord().costSource, "reported");
 });

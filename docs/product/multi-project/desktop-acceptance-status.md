@@ -1,9 +1,45 @@
 # Desktop acceptance status
 
-Updated 2026-10-02. This page is the current tracked acceptance register for the
+Updated 2026-10-06. This page is the current tracked acceptance register for the
 Windows desktop and self-hosted Workbench. GitHub issues still own task
 scope and lifecycle. Dated receipts preserve detailed evidence. This page states
 what a new contributor or tester can rely on now.
+
+## Claude provider log reader, October 6
+
+The [reader receipt](receipts/10-claude-log-reader.md) records verified Native-owned
+Claude inspection through the official SDK and scoped details action. Installed
+focused checks passed 50 with one existing policy skip; redaction passed 36,
+details 15 and desktop host 20. Typecheck/build, desktop/narrow browser and an
+isolated copied production server passed. A retained real log preserved its hash;
+inspection made zero provider calls. SDK notices are packaged and eight optional
+executors excluded. The worker is not an OS sandbox.
+
+Prior PR #197 Claude Stop/restart/resume acceptance remains unchanged. PR #198
+merged at `df354d0` with successful postmerge CI. Issue #10 stays open: the
+[Codex stored-thread reader](receipts/10-codex-stored-thread-reader.md) passes affected
+regressions, actual retained-thread inspection with unchanged provider-file checksum,
+and built desktop/390px project-isolation/redaction/shutdown checks. Independent
+Spec and Standards source reviews pass. The broader local maintained suite reached
+its wrapper timeout and remains incomplete. Current private packaged Windows
+acceptance is unrun. Commit-bound publisher review, exact-head CI, Entire
+verification and owner approval remain required for this new increment; no
+release or main promotion is accepted here.
+
+## Runtime sandbox coverage, October 6
+
+The [runtime coverage receipt](receipts/runtime-sandbox-coverage-2026-10-06.md)
+separates launcher configuration from coordinator-run Linux probes. The dev Node
+adapter denied outside reads/writes and spawn, allowing temp writes and loopback.
+Direct explicit Codex profiles allowed sibling reads, restricted writes and denied
+loopback for parent and ordinary child; these are not actual app-server proof.
+Direct QuickJS lacked process/require/fetch and denied Node import, while its
+approved host bridge read the outside canary. Full chat code execution defaults
+off. Claude's file-tool launcher enables no explicit OS sandbox. CLI hooks/MCP,
+Claude access, actual production composition and Windows checks remain UNRUN.
+Correlated capture metadata outside writer roots is not a controlled hook escape
+test. Electron renderer isolation does not contain host processes. This partial
+evidence establishes neither whole-product OS containment nor #10/#23 acceptance.
 
 ## Windows first launch and packaged runtime, September 23
 
@@ -730,7 +766,7 @@ acceptance; this source result does not extend the packaged evidence below.
 
 | Area | Verified now | Still required |
 | --- | --- | --- |
-| Code conversations | Windows `2f4a5df` file work, session continuity, MCP call, real subagent card, 125.19-second command, native Allow/Decline, active-command Stop, and shutdown | Linked conversations, and broader cross-runtime work under [issue #38](https://github.com/vivary-dev/Vivary-New/issues/38) |
+| Code conversations | Windows `2f4a5df` file work, session continuity, MCP call, real subagent card, 125.19-second command, native Allow/Decline, active-command Stop, and shutdown | Linked conversations and Prepare handoff under [issue #38](https://github.com/vivary-dev/Vivary-New/issues/38). Controlled concurrency is deferred to [#228](https://github.com/vivary-dev/vivary/issues/228). |
 | Codex CLI | Subscription turns, file tools, MCP call, child public result, long command, native action decisions, and command cancellation in local `2f4a5df`. The `df4aedc` Windows package completed a real Codex/Astra file turn and Stop | Further connection-specific journeys and broader issue #38 scope. The public `9884670` prerelease retains its earlier-candidate proof boundary |
 | Native conversations | Project-scoped storage, history controls, saved-head repair, and deterministic-provider journeys. Real OpenRouter turns with project read and evaluate tools, follow-up history, project isolation, rename, pin, archive, Stop, provider failure, and Retry passed on the unpublished `265a7ede` package ([#50 receipt](receipts/50-real-native-provider.md)). The unpublished `0697293f` package recorded OpenRouter's reported $0 cost for a free model, read an old guessed cost as unknown, and labeled a reply the owner stopped before and after the next message (PR #128). The unpublished `9698ca24` package archived a chat from its row menu, restored one with the keyboard and one in the narrow sheet, showed the Restored line with Open, refreshed the section after another archive, and restored and opened a chat (PR #132). PR #132's commits from `2ae5b82` on have not run in a package | The limits in the #50 receipt. PR #126 closed #101 and #102 and merged into `dev` as `4032e96`. PR #128 closed #103 and #106 and merged into `dev` as `080eecf`. PR #129 closed #107 and merged into `dev` as `a4032a0`. PR #132 closed #105 and merged into `dev` as `390271a` |
 | Models and providers | Codex model choices come from its catalog; saved conversations keep their model; CLI choices do not enter Native provider setup | Broader provider modes and other runtime catalogs in their owning issues |

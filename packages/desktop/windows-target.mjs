@@ -25,9 +25,9 @@ const SQLITE_ARCHIVE_ENTRY = "build/Release/better_sqlite3.node";
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
 const NODE_ASSET = Object.freeze({
-  fileName: "node-v24.19.0-win-x64.exe",
-  sha256: "3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237",
-  url: "https://nodejs.org/dist/v24.19.0/win-x64/node.exe",
+  fileName: "node-v24.20.0-win-x64.exe",
+  sha256: "5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5",
+  url: "https://nodejs.org/dist/v24.20.0/win-x64/node.exe",
 });
 
 const SQLITE_ASSET = Object.freeze({
@@ -39,7 +39,7 @@ const SQLITE_ASSET = Object.freeze({
 export const WINDOWS_X64_TARGET = Object.freeze({
   platform: "win32",
   arch: "x64",
-  nodeVersion: "v24.19.0",
+  nodeVersion: "v24.20.0",
   nodeAbi: "137",
   nodeExecutable: "node.exe",
 });
@@ -99,7 +99,7 @@ async function verifyTracedRuntime(serverRoot, sqliteRoot, sqliteBinding) {
     runtime.nodeVersion !== WINDOWS_X64_TARGET.nodeVersion ||
     runtime.nodeAbi !== WINDOWS_X64_TARGET.nodeAbi
   ) {
-    throw new Error("Windows packaging requires Workbench built with Node 24.19.0 ABI 137.");
+    throw new Error("Windows packaging requires Workbench built with Node 24.20.0 ABI 137.");
   }
 
   const sqlite = JSON.parse(await readFile(path.join(sqliteRoot, "package.json"), "utf8"));

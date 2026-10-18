@@ -49,6 +49,364 @@ Workbench composes Agent-Native's application, chat, run, action, and storage ow
 
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/harness-adapters.md), [Native owner map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/native-owners.md), and [runtime source map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
+### Coding model selection and provider routes
+
+The Code composer embeds the runtime and model selectors inside its existing
+toolbar. Saved draft choices remain unchanged when a model catalog changes.
+Unavailable selections keep the composer disabled with a reason to choose another
+model, update Claude Code, or verify its installed version. Retained conversations
+keep their recorded model ID. A historical Claude run
+without a model still means the legacy `sonnet` alias, independently of the exact
+`claude-sonnet-5-5` default for new conversations.
+
+[`shared/claude-models.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/claude-models.ts) owns the
+Claude Code IDs, minimum CLI versions, and API list price references, verified
+2026-10-13 against Anthropic's
+[model overview](https://platform.claude.com/docs/en/models/overview),
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
+[Claude Code configuration](https://code.claude.com/docs/en/model-config).
+Installation manifests establish CLI version support without an account call.
+When native Claude has no usable manifest, Workbench runs `--version` through
+the same resolved executable, launch prefix, and filtered environment. It accepts
+only a successful complete Claude version response. This local probe retains the
+existing ten-second process timeout and output bound and creates no model turn.
+An unknown installation version remains unverified. A discovered version stays
+visible while signed out, so compatibility is independent of sign-in state. The
+send boundary checks the
+selected Claude catalog ID against that installed version before creating a run,
+appending a message, or launching a worker, including resumed conversations after
+a CLI downgrade. Legacy aliases and retained historical IDs keep their existing
+admission behavior. Codex's account-effective
+`model/list` remains its model authority. API list prices do not establish a
+subscription bill or included model entitlement.
+
+Native's [maintained API patch](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#native-api-claude-catalog)
+separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
+use `claude-sonnet-5-5`. Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1 have
+documented 1M context and 128K output limits. Older catalog IDs and saved choices
+remain intact, including Sonnet 4.6 and Sonnet 5 regardless of Native's legacy
+Sonnet switch. A fresh, unconfigured Native instance reports Anthropic with its
+registered Sonnet 5.5 default and `chosen: false`, so Custom keys starts with a model
+from the displayed provider. Explicit stored/app choices and custom-model handling
+retain their existing paths. Builder and OpenRouter keep their own IDs and defaults. No account
+availability is inferred from the catalog, and the optional AI-SDK Anthropic
+adapter remains hidden by Workbench. The pinned dependency graph includes its SDK.
+
+The API estimator requires the actual direct engine identity before applying
+these new rates. It prices Haiku per request, using total prompt tokens including
+cache reads and writes to choose the tier above 100,000 tokens. Observed cache-write
+duration determines the 5-minute or 1-hour rate. Native's existing turn owner sums
+request estimates. Missing route, request-length, or cache-duration evidence stays
+unknown, including aggregates that cannot establish a Haiku tier. Provider-reported
+cost takes precedence. These are standard global API estimates, not bills, plan
+entitlements, or controls preventing paid usage. Historical estimates for these
+model IDs are not recalculated. Existing Native usage labels and unknown-cost
+display remain the owners of presentation.
+
+Exact new models use adaptive thinking and omit withdrawn sampling parameters.
+Supported explicit thinking settings remain usable. The pinned AI SDK cannot
+encode Sonnet's `between_tools` mode, so that adapter refuses it locally. Incompatible saved settings
+receive a local error before provider transport. Native preserves signed thinking
+blocks, but offline request checks cannot verify provider-side signature binding
+after a change to earlier history. Live API and installed optional-adapter
+acceptance remain separate from fake-transport validation.
+
+Runtime readiness requires Claude Code to report both `authMethod: "claude.ai"`
+and `apiProvider: "firstParty"`, with a nonempty `subscriptionType`, or Codex to
+report ChatGPT sign-in. Claude API-key,
+cloud-provider, and unknown auth routes stay unavailable in Code. Native API
+providers remain a separate selection. These checks do not change saved runtime,
+model, or conversation selections.
+
+Code uses the selected signed-in runtime and model for new and resumed turns.
+Native API chat remains an explicit separate surface with its selected provider,
+credentials, and model. Vivary does not enforce an app-wide funding policy, read
+usage-credit switches, or block a supported route because its billing controls
+are unknown. The provider owns its account limits and billing behavior.
+
+The send owner still checks sign-in, model support, project ownership, and cleanup
+before writing a turn. The execution worker resolves only the selected runtime. Codex reads its account
+and provider configuration in that process before starting a thread, so a stale
+status cache cannot admit API-key or custom-provider routing. These reads check
+route identity, not funding. Provider errors remain on that conversation, including authentication failures,
+unavailable models, and usage-limit rejections. Vivary does not switch runtimes,
+models, or API surfaces after a failure. Retained funding metadata is ignored.
+Saved choices, native session continuity, approval requests, and Stop keep their
+existing owners. The maintained Native patch preserves resolved Claude launcher
+prefixes and Windows SystemRoot while retaining credential filtering.
+
+Offline runtime fixtures cover route selection and error handling. Live provider
+execution and packaged Windows acceptance remain separate checks.
+
+### Linked runtime conversations
+
+The saved Code and Native conversation surfaces can open a linked inactive target
+in the same authorized project. Claude Code and Codex can link to each other or to
+Native chat. Native can link to either configured Code harness. A Claude Code
+target gets the first model the installed Claude Code supports, and the service
+refuses an unsupported Claude model with the same check a send makes, so a
+target is never pinned to a model it cannot use. If the Native eligibility check
+or the runtime state fails to load, the conversation shows that failure with
+Retry instead of hiding the chooser. While the project folder is unavailable, the
+Code chooser offers only the Native target, because a Code target needs the folder. A Native source can link only to Code, so it
+shows no chooser when no configured Code harness has a usable model. The
+chooser and this check share `linkTargetChoices`. A project with no connected folder is a
+state, not a failure: the eligibility check runs only while the workspace is
+available, and the server reports such a project's conversations as not a link
+source, so no alert appears there. A new Native
+conversation is not a source until its first request saves it. The chooser
+rechecks eligibility when Native reports a finished request or a thread list
+update, and stops rechecking once the conversation is a source. Selection saves
+the source draft through its current owner. A send waiting for review
+has no unsaved text and stays pending in the source, so linking skips that flush
+instead of failing on it. The record status decides this, because a loaded pending
+draft always carries its review notice as an error. Saving first waits for any draft read, reconciliation,
+save or discard still in flight, and refuses if the draft failed to load, conflicts,
+or failed to save or discard. Selection then creates a paused Code record or
+an empty Native thread and its cleared draft. Project history lists that empty
+thread by a durable thread source URL, `vivary:linked-conversation`, set when the
+link is finalized, so an unfinished thread is never listed. The service sets it
+with the same fill-only update as Core's unexported `setThreadSourceIfMissing`.
+Core never overwrites a thread's source and rename changes
+only the title, so a renamed empty target stays listed. `native-history-rows.ts`
+keeps one row per thread, so an unsent draft in the target never adds a second row,
+and an archived thread's draft never returns as an active draft row. It submits no prompt, requests no
+worker, consumes no approval and transfers no provider session. The target's
+cleared draft is written after the link metadata row and the target's
+finalization. The row is inserted with `creationPending` and loses it only as the
+last step, so a link is finished only when its row says so, and pages and sends
+refuse an unfinished one. The target becomes visible (a Code run loses
+`linkedCreationPending` and a Native thread gets its marker) only after that, so a
+crash before then leaves it hidden, and a Retry of the operation publishes it.
+Every Code owner listing (history, the host's recent run, draft runs and submit
+lookups) excludes an unfinished target through one predicate. If a creation step fails, the service removes the new
+Code record or Native thread, the row and the cleared draft, whichever were written.
+Creation is idempotent per choice. The chooser sends one operation ID for a choice
+and reuses it on Retry. The target ID derives from the owner, organization and that
+ID, and the link stores it, so a retry after a lost response returns the finished
+target. A replay first rechecks the current project binding or personal workspace
+and the target's own link, so after a rebind or workspace move it refuses clearly
+instead of returning a route that would not open. It checks custody before it
+publishes a target a crash left unpublished, so an unusable target never appears. A retry while the first request
+is still running gets "still being created". The server tracks in-flight operations in memory, which holds because
+production runs one supervised server process. A retry that finds an unfinished
+row or target with no request in flight treats it as left by a failed rollback or a
+process exit: it removes that row and target and creates the link again. A
+finished-looking target with no row is damage and refuses. Reusing an ID for
+another project, source or harness refuses with `vivary_link_operation_mismatch`.
+After a stale or mismatched refusal the chooser shows the server's reason and
+drops that operation ID, so the next attempt, Retry included, starts a new one.
+Core has no Code run removal, so the service deletes the record file in
+`codeAgentRunsDir`. A failed link
+keeps the source selected and offers Retry. The host execution guard is unchanged.
+
+`linked-conversations.ts` uses Native records and the existing Workbench database
+migration owner. Its metadata row binds actor, application, organization, project
+binding, source and target creation identities, and the completed source
+boundary with a digest. It contains no transcript copy. Registry migration 5
+creates the link table, and project services skip that migration while
+unconfigured or before bootstrap finishes. A missing table therefore counts as no
+link for an ordinary conversation. A target records that it is linked (a Code
+run in `linkedHistoryId`, a Native thread in its source URL), so a marked target
+whose row or table is missing refuses its pages and sends instead of continuing
+without its history. The marker alone does not gate a Code send: every send to
+an existing run probes link metadata, so a run that lost its marker but still has
+a link row refuses rather than sending without its history. While a row exists,
+its target must keep its marker, so a Native thread whose source URL was removed or
+changed also refuses. Every source is
+checked the same way, marked or not, so a target whose link is invalid, or that
+lost its marker but kept its row, is neither offered as a source nor linked
+onward. Downstream reads apply the same check to a source that is itself a linked
+target, so a source whose own link later breaks becomes unavailable downstream. Creating a link refuses with a clear message before it makes any
+target, run, thread or draft. A Native send reads link metadata only when its pinned chat scope is a
+project or personal workspace scope, the only scopes a link target can have, so
+an ordinary send never depends on the table. Pages and explicit sends
+recheck current membership, project access, both records and the frozen prefix.
+Record ownership matches the project and binding, as `isOwnedRun` does, so a
+project folder reconnect, which changes only the root epoch, keeps the link and
+its older sources usable. A personal workspace Code record must match the
+currently configured personal workspace root, the same scope `isOwnedRun`
+applies, so a changed personal workspace setting withholds the old root's history.
+Linking to Code resolves the folder again after target-model discovery and
+compares it with `sameWorkspace`, as Code send admission does, so a project or
+personal workspace change during discovery creates no run at a stale root. A replaced binding or an invalid target link record
+fails closed. A source that is deleted, revoked or no longer matches its frozen
+prefix is reported as unavailable instead. The page also reports whether the
+original still exists. If it does, the notice keeps its link and says its
+completed history no longer matches. If it was deleted, replaced or is no longer
+authorized, the notice names it without a link. A Native original archived after
+linking still supplies its frozen history, and the page reports it as archived. The
+notice then names it without a link and says to restore it from Archived
+conversations, because the link would open the archived thread with an editable
+composer. The service opens a retained Code
+transcript without following links where the platform has `O_NOFOLLOW`, and on
+every platform it compares the opened file with an `lstat` of the path, as
+`original-runtime.ts` does for Windows, which has no such flag. A transcript
+replaced by a symbolic link or otherwise no longer a safe regular file
+therefore counts as unavailable. The open also uses `O_NONBLOCK`, so a transcript
+replaced by a FIFO with no writer is rejected instead of blocking the read.
+The source eligibility check reads the same prefix a new link would, so a source
+whose retained history cannot be read is not offered for linking. Only a linked Code target that has never sent
+(phase `linked-inactive`) has no transcript by design. Any other missing Code
+transcript was deleted, so new linking refuses it rather than linking an empty
+history. The target stays usable, its sends
+proceed without linked history, and nothing records a prepared or accepted
+portion for them. A Code boundary is the executor's turn completion event
+(status completed, phase complete). Codex subagent and agent-operation status
+events also report completed inside a running turn, so they never end the
+prefix. Each Vivary send appends one user event, so a Code turn runs from one
+user event to the next. An earlier turn whose last terminal status is a stop
+(paused) or a failure (errored) keeps its request and drops its assistant text,
+tool output and artifacts, as Native does for stopped replies. Code retains the server-captured
+prefix byte length, never a caller byte cursor, so later appends cannot widen a
+page. Native follows the saved branch when linking and excludes pending approvals, stopped
+turns and live or still-saving execution chunks at the boundary. A reply the
+owner stopped or a failed run anywhere earlier in the prefix is left out of the
+quoted text, while the request before it stays. Native's own engine history
+replays such replies, so this rule lives in `linked-history.ts`. Later reads walk parent links
+from the retained boundary message, so editing or regenerating the boundary or an
+earlier message, which moves the head to a sibling branch, leaves the linked
+prefix unchanged. A link frozen with no completed portion keeps that empty
+prefix without reading the source again, so later source data, even malformed,
+cannot change it. No completed prefix means an
+explicit empty-history notice. Source drafts and approval custody stay unchanged.
+
+A Code target that resumes its own provider session receives the block once: after
+an accepted send has supplied it, later sends in that session carry no block and
+record no linked portion, and the notice says so. Without a resumable session,
+Code rebuilds context from its transcript, which keeps only the raw request, and
+Native persists only the visible message (`displayMessage`), so both receive the
+block on every send.
+An explicit send receives at most 12,000 characters from 100 recorded entries as
+quoted historical data. The send block holds the latest entries that fit, ending
+at the boundary, because a send continues the most recent work. When it omits
+earlier entries it says so, and a boundary entry longer than the whole block keeps
+its latest text behind an omission notice. The limit counts the block as it is
+encoded, JSON escaping included, so the prompt block and the reported characters
+agree. Every rendered entry, its label included, stays within the block. A
+transcript event or Native message ID must be a short generated identifier
+(letters, digits, `.`, `_`, `:` and `-`, at most 256 characters). Any other ID,
+such as one with a line break that could escape the quoted framing, makes the
+source unavailable as malformed history. The block also JSON-encodes every ID it
+renders, so the framing holds even if that rule changes. The source is also
+unavailable when a Native status or metadata on the walked prefix is present but
+not an object, when a Native content part or attachment on the walked prefix is not
+an object, when the walked ancestry reaches a missing, invalid or duplicated
+message ID (an unrelated malformed, invalid or duplicated sibling or newer message
+cannot break a frozen link), when a Native run ID is not a generated identifier,
+when a
+transcript line is valid JSON but not an event object, or when a transcript
+repeats an event ID, so the boundary byte length and the prefix
+can never describe different events.
+Inspection pages still start from the
+oldest entry. Actual retained tool results and labeled artifact references
+become text, never executable requests or new instruction authority. Runtime
+bookkeeping and private reasoning are excluded. For Code, only a completed tool
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+content part such as an image or a source reference, becomes a named placeholder
+that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
+repository represents no completed history, so an inactive Native target can
+link onward to Code. The target keeps its normal tools and project guard.
+The UI distinguishes available entries, prepared context and accepted Code sends
+from source-to-target session continuity. Preparation records only a small portion
+receipt on the link. Code acceptance binds that portion to the actual user event
+appended after final project and host admission. Refused sends leave the previous
+accepted receipt unchanged. Native preparation preserves separate visible user
+text and records its preparation stage. Neither stage proves provider ingestion.
+A notice read verifies the caller, then looks for a link row, and resolves project
+history and organization membership only when a row exists. Code conversations
+support an owner with no organization, so an ordinary run's follow-up send and
+notice need none. Linking does need one: such an owner is not offered the chooser,
+and creation refuses with a clear reason. The Code and Native choosers both appear
+only after the same source eligibility check, so an owner without an organization,
+or a target whose link no longer validates, is not offered choices that cannot work. An unlinked conversation in a project whose
+folder is not connected therefore shows no notice and no false verification error.
+The mounted notice refreshes through ordinary Code thread updates and Native
+request lifecycle events. A Code send refused after linked preparation emits
+`vivary:linked-history-updated`, which refreshes only the notice, so it shows the
+recorded preparation without presenting the request as accepted. Its collapsed view gives the source title, counts and
+stage. The source title opens the original through router navigation, never a
+document load, so a pending draft in the target still saves. Boundary identifiers and session details remain in expanded inspection.
+Source-bound continuation revalidates access on every page, with explicit truncation and a readable original link.
+Each refreshed first page replaces the later pages already shown, so a redaction
+or access change applies to the whole displayed excerpt.
+New linking reads at most 8 MiB of source data, and an oversized source refuses
+new linking rather than claiming full context. A later read of a Native source
+parses at most 64 MiB and checks only the walked prefix against 8 MiB, so source
+work after the boundary cannot break an existing link. An entry that does not fit
+the rest of a page starts the next page, so paging never skips text. Only an
+entry longer than a whole page is shortened, and its text ends with an omission
+notice that points to the original. The original remains the complete history owner. This is the
+first linked-history slice of issue #38. Controlled concurrent execution remains
+separate work under issue #228. Independent review and built UI acceptance of
+this slice remain required.
+
+### Prepare handoff
+
+A saved project conversation shows a handoff control beside the linked-history
+notice. **Prepare handoff** records the project facts in one pending row and
+submits a request message to that conversation. A Code conversation sends it
+through its own chat handle and adapter. Native sends it with Core's same-window
+submit, which only Native chats receive. Neither path changes the composer draft.
+The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+is a second owner click. `handoff.ts` reads the reply from the conversation's
+completed history, never from the client. It reads a conversation only through
+the linked conversation service: a linked target's own link is checked as every
+linked read checks it, and retained history the linked reader cannot parse is
+refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
+block, another request ID, an unknown key, or a passed or failed check without a
+completed evidence event. It fills every fact itself, redacts held credentials,
+and writes one marked block at the end of the workspace's designated state
+document through `projectFileService.save` with the prepared version and
+binding. An update moves the block back to the end when text was added after
+it, and keeps that text. Save refuses a reply followed by a newer user request,
+including one whose reply stopped, failed or is still active. A separate progression
+observation checks all recorded Code events or the selected Native ancestry, with
+the same owner and link validation and an 8 MiB read limit. Completed history
+still owns reply text and check evidence; failed or partial output never becomes
+completed evidence. It records the project version observed at Prepare, so a change
+while the agent replied reads Out of date. A plain workspace or a missing, private,
+protected or noneditable state file refuses Prepare. Noneditable files retain the
+file owner's reason instead of being reported as missing. A conflict preserves the
+current file and saved record and marks the request Failed. After a write exception,
+a fresh authorized state read must confirm the original version and project binding
+before Vivary promises preservation and offers Retry. A changed or unreadable file,
+or failed record finalization after a successful write, reports that the outcome
+could not be confirmed and the file may have changed. It requires inspection and a
+new Prepare, and the same failed request cannot be retried. A conflict also needs a
+new Prepare, because the same request can never pass its version check again.
+Reply text is stripped of HTML comment openers and closers until none remain,
+so it cannot recreate a block marker. Nothing is cleaned, stashed or
+committed. A dirty tree is reported as a count. A new Native conversation
+shows no control until its thread is saved, because nothing in it can be
+handed off yet. Prepare is disabled while a run is active, including a run
+already active when the control opens. Native reads the same `runs/active`
+endpoint its composer reads on mount, then follows run events. Code uses the
+run state its composer already has, and the end of a Code run rechecks
+freshness. Successful Files saves and renames invalidate the mounted handoff query,
+and an unavailable control offers Check again. Neither refresh submits a request.
+A Prepare that returns after the owner opened another conversation sends nothing,
+because Native submits to whichever chat is open.
+
+Freshness is computed on request, with no timer and no model call. It compares
+the state file version, Git HEAD and branch, the dirty entry list and each dirty
+file's size and modified time, or the bounded file listing without Git, and the
+covered completed conversation boundary and prefix digest, plus the independent
+progression digest. A stopped, failed or active follow-up therefore makes a saved
+handoff Out of date. Native's unselected branches do not affect progression.
+Older saved records without a progression digest require an update before they can
+report Fresh. The state file is excluded from the project facts because its own version is compared. The
+observer refuses a directory entry, such as Git's single entry for a new
+untracked directory, so a project holding one reads Unverifiable until that
+directory is committed or removed. A listing at its cap or an unknown Git state
+is Unverifiable, never Fresh. Git facts come
+from a read-only `observe` creator bridge operation over
+`vivary_core.workspace_observe`, gated like `context` and reported relative to
+the project folder. If the project folder and its checkout root resolve to
+different Windows drives, the version reads as unknown. Migration 6 adds `vivary_handoff_records`, one row per
+project binding and document, holding the pending request and the saved record.
+
+
 ### Original engine
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](/commands/) and [package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages).
@@ -108,18 +466,56 @@ versions. A changed source version is not evidence of a registry release.
 The optional memory and MCP distributions remain outside the default path.
 Coordinated releases publish Core before its dependent role packages.
 
+Doctor passively checks the installed optional MCP adapter's exact SDK dependency
+from distribution metadata. A published adapter and a staged adapter can declare
+different pins; compatibility follows the installed declaration, with missing,
+incompatible, and unreadable evidence kept distinct. This starts no MCP process
+and does not establish external conformance. The [MCP contract](/mcp/#passive-doctor-report)
+owns the report details.
+
 ## Runtime flows
+
+Desktop outgoing OAuth setup and browser reauthorization are unavailable
+under the existing desktop callback and navigation controls. Connection forms
+explain this before sign-in. Saved OAuth Test and retry can still use a valid
+grant or a successful bound refresh. When no usable grant remains, they explain
+that signing in again is unavailable and retain the saved connection. Other
+launches and non-OAuth connections retain their existing flow. The
+[maintained OAuth contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#desktop-outgoing-oauth-availability)
+owns the request and credential details.
+
+Search Vivary uses Native's command menu. Closing returns focus to its connected
+opener while the same route remains current and another control has not taken
+focus. The [maintained focus owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#command-menu-return-focus)
+keeps this contract separate from menu navigation.
+
+Resource editing separates viewing from content changes. Toolkit's shared rich
+editor emits saved content only for document-changing transactions and changes
+editability without an update event. Opening Visual or switching views therefore
+does not autosave a serialized replacement of the stored source. Settings gives
+the existing resource panel a responsive height within its normal scrolling page,
+so Code uses the panel's available editing space rather than two intrinsic rows.
+The [maintained editor contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#resource-editor-preservation-and-height)
+keeps schema support and the existing one-second autosave owner unchanged.
 
 1. **Select a project.** Workbench resolves the authenticated actor, stable project ID, current binding, policy revision, and observed root. Project selection changes the files and history shown. A missing folder leaves authorized history available but blocks file-dependent execution. [Project registry](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-registry/index.md) owns the identity contract.
 2. **Send and continue.** A Native chat send rechecks its pinned project scope before model or attachment work. A Code send starts or resumes the selected native session against its bound project. Native stores the resulting run and transcript. A model choice or project switch cannot silently move an active run. [`native-chat-project.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/native-chat-project.ts), [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts), and the [session model](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-release.md#one-understandable-model) own this flow.
-   Each project message also loads the project's context when it starts. [`project-memory.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs, Claude follow-ups (each a fresh CLI session), and resumed Codex threads. A resumed Codex thread therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a thread never depends on an earlier block that Codex may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
+   Each project message also loads the project's context when it starts. [`project-memory.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs and Claude or Codex follow-ups. A resumed provider session therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a session never depends on an earlier block that its runtime may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
+   Claude Code now receives the pinned Native participant's persistence option. Native records the UUID reported by its init event before a turn can be interrupted and requests resume of that UUID on later turns. A different or invalid reported UUID stops the turn without replacing the saved reference. Codex keeps its existing app-server thread owner and resume check. Each executor records whether the current turn requested resume, confirmed native resume, started fresh, or reconstructed context. Older runs without a validated provider ID still quote bounded Native history; runs with an ID send the new request and project block directly. The owner-only Details branch of `vivary-code-state` authorizes the existing project/run identity before reading at most 64 KiB of its Native transcript. It returns a logical reference and at most 20,000 characters of redacted text, refuses linked files, and distinguishes missing or unavailable transcripts. Native and Provider Details text share complete-text credential and filesystem-path sanitization before per-message or aggregate limits. Ordinary web URLs and Native Running/Finished status events remain; path redaction conservatively hides ambiguous prose through the line end without rewriting stored transcripts. The Code conversation's Session details view labels this as Native transcript data. Provider logs remain in each runtime's storage. The Claude reader uses Native's retained run cwd and UUID to derive one documented short default location, refuses linked paths and a store inside the selected project, and reads a whole snapshot of at most 256 KiB. Framing caps line count, line size and JSON depth before parsing; identity checks reject colliding project names and mixed sessions. Provider keys and cwd metadata use the SDK's Darwin-only NFC normalization; filesystem canonical-path and link checks retain the original path spelling, and Linux Unicode names stay distinct. The official Claude SDK interprets opaque entries through a read-only custom store in a terminable Node worker with a three-second deadline and memory limits. Native serializes inspections through one active reader and at most four FIFO waiters, each waiting at most 15 seconds; overload remains unavailable. Its empty environment removes inherited environment values only; the worker retains OS filesystem/network rights and is not an OS sandbox. Retained canonical cwd may be absent without reporting an intact log as missing; existing linked project paths are refused. Workbench redacts only returned user/assistant text before shortening it, then retains the newest 20,000 characters of the latest 40 messages; provider tools, thinking and metadata stay private. HTTP/HTTPS links retain their text after credential redaction, while POSIX, Windows, UNC and file-URI host paths are scrubbed. Path redaction consumes through the line end, including spaces, apostrophes and enclosing quotes; ambiguous trailing prose is hidden with the path, while the next line remains intact. The 256 KiB input and 32 KiB line limits bound processing; the 20,000-character excerpt limit applies after redaction. Session details labels provider and Native sources separately and retains both logical references for missing or refused files. Its query uses `staleTime: 0` to revalidate on every open, including completion while the panel was closed; it polls every two seconds only while the selected Claude run is active. Codex details use open/reopen and manual Refresh rather than automatic active polling, with visible Refresh guidance. Both providers refresh once when an open run settles, retaining a pending final refresh across an in-flight request. Custom storage and hashed long names are unsupported. The [reader receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/10-claude-log-reader.md) records passing installed-reader, scoped-action, browser and isolated production-output checks. Inspection makes no provider call or directory scan and does not relocate credentials. Nitro traces only the official SDK package and seeds its resolved worker entry; peer dependencies retain existing Core/app bundling. The previously accepted real Claude Stop/restart/resume journey remains valid for the unchanged executor. Native also owns a read-only Codex stored-thread reader using metadata-only `thread/read` and one descending summary page of at most 20 turns through `thread/turns/list`. Retained thread/canonical cwd and outside-project provider-path guards precede text selection. Raw wire bytes, lines, UTF-8/depth, page size, protocol duration and FIFO admission are bounded; Workbench supplies only its trusted filtered launcher and existing process-tree cleanup. A process-global reader registry is shared by plugin and action module instances. Normal host shutdown closes admission before other stops, awaits active readers and pending opens, and propagates unconfirmed cleanup; repeated close hooks share the same shutdown result. Windows readers retain observed PID/creation identities during inspection, so final checks retain descendants whose intermediate parent exited. Close lets an already in-flight Windows observation use the remaining 15-second cleanup budget minus the existing three-second teardown reserve before terminating the reader; the scanner retains its own 10-second bound. A successful Windows observation must first establish the original root PID within its retained creation-time window; a reused PID does not count. After that, later root-absent snapshots can use the retained ancestry. A failed/timed-out pending scan or failure to establish that original root retains an uncheckable refusal that later root-only checks cannot clear. Periodic observation is not OS containment and cannot prove ancestry that was never observed; retained targets and overflow survive unavailable scans. Retained cleanup rechecks require both confirmed pipe closure and a clean identity scan; a clean original group cannot clear refusal while an escaped helper holds inherited output descriptors. After preserving the pre-stop observation, the reader closes stdin and drains output for a bounded graceful exit. Existing tree stop is the fallback. Windows cleanup also ends only safely traced PID/creation identities through the existing end primitive and rechecks them within the same deadline, including when the root exited first; untraced or reused identities are never killed. Unconfirmed targets refuse new spawns until verified clean; shutdown never reopens admission. Linux/Windows lifecycle confirmation is implemented; other platforms report unavailable. Each turn summary contains the first user and last assistant message, regardless of phase; middle messages are omitted and Session details explains this subset. This text uses the same full redaction before output limits, with older pages reflected in truncation. Only pinned missing-error operation/code/message/retained-ID combinations report missing; generic errors remain unavailable and provider error text stays private. RPC bounds do not bound internal provider file parsing or establish an OS sandbox. The [Codex reader receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/10-codex-stored-thread-reader.md) separates passing installed-reader, lifecycle and browser checks from pending packaged Windows acceptance. Current Codex reader and Windows acceptance remain open under [issue #10](https://github.com/vivary-dev/vivary/issues/10).
 3. **Approve, deny, or stop.** Native owns an action request and its execution lifecycle. Workbench checks the owner, project, run, and exact request before relaying a decision. Stop targets the owned running work. During a Windows Code run, the host periodically records descendant PIDs and creation times while parent links are still visible. Every Windows stop checks those recorded identities after tree termination, including when `taskkill` reports success. When a stop cannot confirm that a run's coding processes ended, Code refuses new sends and the host strip names what is left, by process name and PID. End them ends only listed processes that Vivary traced to the run, each after it checks the process's PID and start time at the moment it acts. Continue anyway lifts the refusal on the owner's word once End them has run or cannot act, and only for processes the owner was shown. A later check lifts it on its own when nothing is left. Client closure does not itself approve or replay an action. The [coding permission decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#native-coding-permissions-and-activity-2026-09-16) and [authority module](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/modules.md#m05-authority-and-approvals) own the rules.
 4. **Read and change project files.** Scoped file actions list and read bounded content. Explicit Save and Rename check the selected project and file revision. Project memory is the only caller of the file service's exclusive Create and version-checked Remove, which reuse the same link refusal, per-project mutation queue, and conflicts. The Memory section in Project details calls two owner actions, `vivary-project-memory` and `vivary-project-memory-write`. It shows the memory folder and why it applies, the role assignments, when changes apply, each fact with its source and file, the exact block the next message receives, and the last load in this app session. Remember, correct, and forget write the owning file, and forget states what it cannot erase. Neither action is an agent tool. The Search panel walks one authorized project with caps, private-file exclusions, and continuation. It does not use a persistent index or a shell search process. [`project-files.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-files.ts), [`project-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-search.ts), and the [write-back map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-writeback/index.md) own the behavior and limits.
 5. **Call the original engine.** The bundled Python runtime receives a bounded command and a selected project root. The seven project read reports, Doctor, Check, Find, Capabilities, Receipts, Review, and Impact, share one server module for the Details panel and the Native tool. Review findings carry a rule code that the app renders from a closed sentence table, so an unknown rule makes the report unreadable instead of passing text through. The agent tool gets its project from the chat's pinned scope, not model-supplied input. Public Doctor, Find, and Check use the privacy-filtered CLI path. For issue #20, the CLI's public Review and Impact build their graph only from the documents in Tropo's privacy-filtered snapshot, before any rule runs. A link to a private note therefore reads exactly like a link to a missing id, findings carry no free-text message, and a private, missing, or unknown Impact target gets one `target_unavailable` refusal. Only the Structure and Editorial packs have a public form, because Context budget reads routing files from disk. Ozone loads one Tropo engine per process on first use, so the plain and public paths share its facade errors, and public note ids longer than 256 characters are left out and counted. Decide and control run through a separate server module, shown to the owner in the Evaluate section of Project details, where the owner picks whether to evaluate as themself or as the project's agent and every result states it was not saved and shows a refusal from Strato, Exo, or Vivary as an alert, including a refusal Core reports inside an ordinary result, [`project-evaluate.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-evaluate.ts), behind the `vivary-project-evaluate` agent tool and an owner action. The runner, not the caller, binds the actor: a tool call is always this project's agent, an opaque id hashed from the owner's actor id and the project id, and the owner chooses to evaluate as themself or as that agent. [`governed-request.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/governed-request.ts) is the only writer of the actor, contributor authority, project scope, and clocks, and the clocks are taken after the project lock is held. Input that names a server-owned field is refused by name, never overwritten. The agent may run decide, claim, release, expire_leases, and dependencies only, and may not submit a receipt, a verdict, or an execution log, because Native cannot verify them. Results carry `persisted: false` and are never saved. Host paths cross that boundary only as `.` and `./` project paths, and only at the absolute-path positions Core, Strato, and Exo declare. Each position names Core's capsule or claim spelling, so decoding restores claim ids and capsule fingerprints, and any other string is text that is redacted on the way out and never rewritten on the way in. An agent's scope and capsule paths are checked by their text alone, never on disk, so a claim cannot reveal whether a private file exists. A Windows device-namespace root is refused. Native has no capsule producer, so an agent decide without an owner-supplied capsule ends in Strato's own refusal. Governed writes retain their own plan, authority, and receipt rules. The creator bridge starts Python through the same runner. It previews and creates a managed project, lists the installed guidance patterns, and reads a project's memory settings, with the runner's environment allowlist, reader-writer gate, 30-second limit, receipts, and shutdown. A settings read takes its project's read lock, so it waits for a write to that project. Any queued write to that project likewise waits for the settings reads already holding its gate, and behind a slow one it can fail its own 30-second queue wait. A plan and an apply share a gate on their target folder, and the catalog shares one gate with no project. An apply records a required receipt and a plan an optional one. Catalog and settings reads record nothing, because project memory reads settings whenever its memo misses, for example after a change to the settings file or to a memory folder's listing. The creator may print 512 KiB, counting stdout and stderr together, and its stderr is then discarded. Its answer is parsed exactly as printed, and only its refusal message and an invalid settings message are redacted. Every bundled child, an original command or a creator call, compiles its bytecode once into `python-cache/<build>` in the data folder rather than on every launch, where `build` is the first 8 hex digits of the bundle manifest's sha256. The first launch that prepares the cache removes other builds' folders. A child keeps `-B` when the cache would sit in the install folder or the call's project, when the call's project sits in the cache folder, when the data folder is missing, when a cache folder is not a plain directory or cannot be created, and for any Python outside the bundle. [`python-bytecode.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/python-bytecode.ts) makes that decision, and `runGated` requires it. [`original-runtime.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/original-runtime.ts), [`project-read.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-read.ts), and the [issue #19 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/09b-original-read-tools.md) record the delivered slice.
 6. **Find a past conversation.** Project and unassigned history offer title/message search through the owner-only, read-only GET action `vivary-chat-search`. Authorized Native repositories are parsed once per session page; Code metadata establishes scope before transcript access or session counts. Bounded scans use recency cursors, skip malformed records, and retain Native results when Personal Code history is unavailable. The client continues automatically toward a page of hits, shows progress/Cancel, highlights excerpt terms and preserves matches/cursors on Retry. Clear/Escape restores the ordinary list. Search and Native match reads use the owner transport's session rejection registry and invalidation hook on 401. Opening a result imports the Native path through the match to its retained head/leaf, or a checked Code window with preceding context and normal deduplication. A normally hidden Code event gets a transient row in saved event order with the parent chain preserved. Focus, theme-aware marking and scroll settling reveal the match. Replay refuses execution and server saves; the standalone Native import is cleared from session storage on exit. The Native match read reports authoritative archive state; Return stays disabled while loading and for archived matches. Project and Personal archived matches explain restoration through Archived conversations and reopening; Unassigned matches say they are archived and read-only here because that history has no restore control. A failed read explains recovery; Return removes the unread thread and match anchors, then uses the existing saved-selection restore, which refuses archived threads. Read-only replay preserves that saved selection. Malformed or missing Native match data returns the same stale-result 404. Project switching clears message and event anchors before admitting the new conversation. The normal twenty-run list and latest-400-event Code view stay unchanged. No index or new transcript owner is created. Forgotten or removed active-memory facts can remain findable in chat history. [The workspace contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/unified-workspace.md#conversation-content-search) owns interaction, ordering and scan limits.
 7. **Preview a project.** A reviewed local command starts a project process. The app presents its page in an isolated frame and supports Stop. The selected coding runtime can inspect and repair the project through its supported browser tools. The [preview receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/11e-live-project-preview.md) states what passed on Zo and what still needs packaged or platform proof.
 
+8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
+
 ## Data and trust boundaries
+
+Outgoing OAuth availability uses the existing listener-owned desktop
+request identity. Core refuses an unavailable interactive start before discovery
+or registration. This adds no origin, callback, cookie, capability or navigation
+authority. Existing manager startup and tool-call ownership remain unchanged.
 
 | Data or effect | Owner and boundary |
 | --- | --- |
@@ -127,7 +523,8 @@ Coordinated releases publish Core before its dependent role packages.
 | Project identities and bindings | Workbench registry tables in private Native-backed application data. The server checks actor, collection, device, policy, and observed root before effects. |
 | Raw database tools | Owner chats expose `db-schema` and `db-query`. Project chats remove database tools. The maintained Core patch shares token inspection across query, exec, patch, and extensions SQL checks. Quoted values remain data, protected and qualified table references remain visible in joins, comma lists, and parenthesized groups, and write scoping uses parsed targets and clauses. Unsupported write forms, replacement conflicts, caller-supplied organization ownership, and unsupported dialect quoting return an error before execution. Extensions keep their separate table policy and delegate execution to the same Core scripts. Tests use production scoping and require a returned owner row before asserting a refusal. Each PostgreSQL transaction pins standard string escaping before scoped-view setup and user SQL. Its transaction-order tests use a mocked connection with synthetic rows. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#raw-sql-inspection) list each inspection and its limits. |
 | Conversations, runs, and approvals | Native records in private application data. Workbench stores references and project scope rather than copying full transcripts into a second store. Archive only sets a chat's archive time. A project's Archived conversations list and Restore go through the `vivary-native-archive` owner action, which clears that time only for the owner's chat in the same organization or with none and in the exact project scope, so a restored chat keeps its transcript and scope. |
-| Unattended automation runs | Scheduled, event, webhook, and Run now runs execute in the Vivary server process with no one present to approve a step. The owner decided on 2026-09-26 that they are local-only, and the maintained Core patch enforces it with an allowlist. A run gets 12 Native tools: `resources`, `save-memory`, `delete-memory`, `chat-history`, `manage-progress`, `manage-notifications`, `manage-jobs`, `manage-automations`, and four lookups over files bundled with Core. It cannot send email or messages, reach the web or other agents, call MCP tools, change settings, jobs, or automations, or read or change agent profiles, remote agent manifests, or MCP configuration. It cannot pass an argument its tool does not declare. Since issue #111, chats get the same argument rules: Core's CLI bridge passes each value as one `--name=value` token, and each tool behind the CLI bridge refuses a name its schema does not declare ([patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#cli-bridge-arguments)). Notifications from a run reach the in-app inbox only. An automation that lists MCP tools fails before any model call, because an approval cannot be granted after the fact in an unattended run. A run can still read resources and change its owner's personal resources, memory, chat history, and progress. Every write a run makes records the run. A proposed instruction or memory change waits for the owner's review in Settings > Automation files. Chats and later runs keep loading the saved accepted version until the owner accepts the proposal. Discard restores the saved version or removes a proposal with no saved predecessor. Settings keeps an unconfirmed decision notice for each affected file until that file has a confirmed decision. A run's `LEARNINGS.md` write goes to the app default unless it names the personal scope, so it is refused. A chat's prompt says only how many files wait, though a chat can still list their paths, and Core's raw database tools refuse the `resources` table. A run writes and deletes only its owner's personal files, and writes only under a plain path, because app default, organization, and workspace files load for other people and the loaders match a path as it was stored. The store refuses run deletion of instruction and memory paths. Its trusted review metadata keeps one accepted predecessor, conditional writes retry after a competing change, and pending proposals cannot hide that predecessor with scratch visibility or expiry. Legacy pending rows have no recoverable predecessor. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#automation-written-instruction-files) own the path rules, loader coverage and inheritance limit. Two outward paths stay, and only the owner sets them from a chat or the app: reply delivery to the automation's delivery platform and dispatch to a paired execution host. Interactive chats keep their tools. A webhook call starts a run too. On the desktop its URL names the loopback address, so only programs on the same computer can call it while Vivary runs. In self-hosted mode with an app URL, anyone who has the URL can. The URL token is a stored secret, so redaction hides it, and the request body reaches the run fenced as untrusted data. A webhook or event automation with a condition sends the request body or the event's data to Anthropic's API to check it, and needs an Anthropic key for that. For an automation created through the service, only a run that a schedule, Run now, or a webhook call started, or a refused, failed, or expired webhook call, emits `automation.run.finished`. That includes a scheduled run on a paired execution host. A run that an event started finishes silently, so event automations inside Vivary cannot keep starting themselves or each other through that event. An automation also never starts from its own run, so running an automation subscribed to that event with Run now does not start it again. An automation with 20 calls waiting refuses more, and a call that waited 24 hours is expired unrun. A normal quit ends a run in progress as interrupted, returns an interrupted webhook call to the queue, and releases the run's lease if it holds one. The scheduler lease covers one scan. Each scheduled run or Run now holds a lease of its own until its outcome is written, or until it is queued on a paired host, so a long run does not delay other automations. Event and webhook runs take none ([issue #139](https://github.com/vivary-dev/vivary/issues/139)). After a hard kill the run reads running for up to 15 minutes after it started, the lease of a scheduled run or Run now holds until 10 minutes after its last renewal and blocks only that automation, and an interrupted webhook call runs again about 15 minutes after its claim. During that wait Settings shows when scheduling resumes instead of a next run that passes with no run ([issue #140](https://github.com/vivary-dev/vivary/issues/140)). An automation whose next run falls after the wait keeps that time. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#local-only-automation-runs) own the allowlist and the refusals. The [packaged Windows follow-up](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/windows-runtime-followups-2026-10-02.md) checks accepted projection through the shipped store and actual Settings decisions with a synthetic automation context, separate from owner-chat and scheduler execution. |
+| Unattended automation runs | Scheduled, event, webhook, and Run now runs execute in the Vivary server process. The owner decided on 2026-09-26 that their default surface is local-only. Issue #108 adds durable owner approval for each explicitly declared configured MCP call. A run keeps 12 default Native tools: `resources`, `save-memory`, `delete-memory`, `chat-history`, `manage-progress`, `manage-notifications`, `manage-jobs`, `manage-automations`, and four lookups over files bundled with Core. These default tools cannot send email or messages, reach the web or other agents, change settings, jobs, or automations, or read or change agent profiles, remote agent manifests, or MCP configuration. Only exact configured MCP declarations can add a capability and every call requires exact owner approval without persistent allowance. It cannot pass an argument its tool does not declare. Since issue #111, chats get the same argument rules: Core's CLI bridge passes each value as one `--name=value` token, and each tool behind the CLI bridge refuses a name its schema does not declare ([patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#cli-bridge-arguments)). Notifications from a run reach the in-app inbox only. An unavailable or hidden MCP declaration fails before any model call. Approval is checked against the current definition, exact Native ask and current restricted tool fingerprint before claim, consumption and invocation. A changed endpoint under the same name fails closed. A run can still read resources and change its owner's personal resources, memory, chat history, and progress. Every write a run makes records the run. A proposed instruction or memory change waits for the owner's review in Settings > Automation files. Chats and later runs keep loading the saved accepted version until the owner accepts the proposal. Discard restores the saved version or removes a proposal with no saved predecessor. Settings keeps an unconfirmed decision notice for each affected file until that file has a confirmed decision. A run's `LEARNINGS.md` write goes to the app default unless it names the personal scope, so it is refused. A chat's prompt says only how many files wait, though a chat can still list their paths, and Core's raw database tools refuse the `resources` table. A run writes and deletes only its owner's personal files, and writes only under a plain path, because app default, organization, and workspace files load for other people and the loaders match a path as it was stored. The store refuses run deletion of instruction and memory paths. Its trusted review metadata keeps one accepted predecessor, conditional writes retry after a competing change, and pending proposals cannot hide that predecessor with scratch visibility or expiry. Legacy pending rows have no recoverable predecessor. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#automation-written-instruction-files) own the path rules, loader coverage and inheritance limit. Three outward paths stay. The owner sets two of them from a chat or the app: reply delivery to the automation's delivery platform and dispatch to a paired execution host. The third is a declared configured MCP call, and each such call waits for the owner's exact approval. Interactive chats keep their tools. A webhook call starts a run too. On the desktop its URL names the loopback address, so only programs on the same computer can call it while Vivary runs. In self-hosted mode with an app URL, anyone who has the URL can. The URL token is a stored secret, so redaction hides it, and the request body reaches the run fenced as untrusted data. A webhook or event automation with a condition sends the request body or the event's data to Anthropic's API to check it, and needs an Anthropic key for that. For an automation created through the service, only a run that a schedule, Run now, or a webhook call started, or a refused, failed, or expired webhook call, emits `automation.run.finished`. That includes a scheduled run on a paired execution host. A run that an event started finishes silently, so event automations inside Vivary cannot keep starting themselves or each other through that event. An automation also never starts from its own run, so running an automation subscribed to that event with Run now does not start it again. An automation with 20 calls waiting refuses more, and a call that waited 24 hours is expired unrun. A normal quit ends active work as interrupted and releases its lease if held. Ordinary interrupted webhook work returns to the queue. A webhook waiting for approval stays waiting, and a consumed approval with an unconfirmed outcome is never automatically retried. The scheduler lease covers one scan. Each scheduled run or Run now holds a lease of its own until its outcome is written, or until it is queued on a paired host, so a long run does not delay other automations. Event and webhook runs take none ([issue #139](https://github.com/vivary-dev/vivary/issues/139)). After a hard kill the run reads running for up to 15 minutes after it started, the lease of a scheduled run or Run now holds until 10 minutes after its last renewal and blocks only that automation, and an interrupted webhook call runs again about 15 minutes after its claim. During that wait Settings shows when scheduling resumes instead of a next run that passes with no run ([issue #140](https://github.com/vivary-dev/vivary/issues/140)). An automation whose next run falls after the wait keeps that time. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#local-only-automation-runs) own the allowlist and the refusals. The [packaged Windows follow-up](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/windows-runtime-followups-2026-10-02.md) checks accepted projection through the shipped store and actual Settings decisions with a synthetic automation context, separate from owner-chat and scheduler execution. |
+| Automation approval storage | Native `automation_runs` retains the pending ask ID, exact server binding and input, definition and restricted registry fingerprints, readiness and conditional decision claim. Native `agent_tool_approvals` atomically consumes the exact owner/org/thread/turn/tool/input ask with expiry. MCP configuration and credentials are not copied into continuation storage. The same Native thread and logical turn retain tools through the existing fold and journal. Each execution chunk has a fresh ID so event sequences cannot conflict. Unresolved rows are retained. Resource waiting publication compares history ID, current chunk, ready waiting state and unfinished history in the same SQL statement as the resource version check. Terminal history or a newer chunk refuses a late writer. PostgreSQL holds the matched history row lock through the write, serializing with its decision claim. SQLite serializes writes. A webhook also keeps its original pending-task row in waiting. A terminal Native chunk with a still-pending ask permits recovery of an unfinished save or claim. A consumed ask after an unconfirmed crash ends interrupted without replay. Ask creation and wait persistence share the exact resource custody transaction. Deletion rechecks persisted history in that transaction before token, secret or definition mutation. PostgreSQL locks the resource row and SQLite uses the existing immediate transaction. A missing or replaced resource refuses custody. Durable storage failure at a gate aborts. There is no exactly-once external-effect guarantee. The source fixtures cover these boundaries but runtime and built acceptance remain pending under #108. Native run and event retention exempts unresolved approval chunk references. The existing history reconciliation marker protects incomplete terminal bookkeeping from history pruning. Task settlement and resource CAS use the retained identities, with newer history excluded. Local SQLite queues public statements behind connection-owned transactions, whose callbacks use the supplied executor. Webhook deletion prepares token and app-secret schema memos before custody without deleting their data. Public SQLite cleanup also waits behind transaction ownership before clearing the singleton. This prevents an unrelated admission from becoming part of a custody rollback. PostgreSQL retains its connection-bound transaction contract. |
 | CLI credentials and logs | Stay in each provider's supported location. Vivary references native sessions. A coding runtime runs commands its agent chooses. [`local-runtime-setup.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-runtime-setup.ts) builds the Codex launch and the CLI status checks from the host environment without any credential-shaped name, in any letter case. A name is withheld when it contains PASSWORD, PASSWD, SECRET, TOKEN, APIKEY, CREDENTIAL, CONNECTION_STRING, CONNECTIONSTRING, COOKIE, or WEBHOOK, when one of its `_`-separated words is KEY, KEYS, PASS, PAT, or DSN, when its last word is AUTH, or when a URL or URI word follows a word that ends in DB or starts with DATABASE, DATASOURCE, POSTGRES, PG, MYSQL, MARIADB, MONGO, REDIS, KV, BROKER, AMQP, or CLOUDAMQP. It is also withheld when it is `MCP_SERVERS`, `MYSQL_PWD`, `DOCKER_AUTH_CONFIG`, `GIT_CONFIG_PARAMETERS`, or `BW_SESSION`, when it starts with `OP_SESSION_`, or when it belongs to Git's `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n` group, which is withheld whole because Git needs complete pairs. Five names that match stay, because tools need them and they hold no secret: `GCM_CREDENTIAL_STORE`, `GCM_AZREPOS_CREDENTIALTYPE`, `NUGET_CREDENTIALPROVIDERS_PATH`, `COOKIECUTTER_CONFIG`, and `TIKTOKEN_CACHE_DIR`. That covers Native provider keys, the sign-in secret, secret-store keys, and the conventional names of integration secrets. A credential under an unconventional name still passes. Proxies, locale, and most toolchain paths pass through, including a proxy URL that carries a user name and password. A path whose name matches the rule, such as `PASSWORD_STORE_DIR`, is withheld. A user's own token variables, such as `GITHUB_TOKEN`, are withheld too, so each CLI uses its own login. Claude Code turns receive only Agent-Native's short allowlist. Issue #98 applies the same filter to the coding worker that starts Codex and Claude Code, so the process above a runtime starts without a credential-shaped name as well. The worker needs none. Claude Code gets `--strict-mcp-config` with no MCP configuration, native Codex uses its own configuration and never reaches Core's merged MCP settings, and runs are stored in files under the code-runs folder, not the database. The worker starts without database settings, so a future Core call that queried the database from the worker would open an empty default database in its working folder, and a Workbench test that runs the Claude Code path fails if that happens. [`code-execution-host.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-execution-host.ts) builds that environment and still removes the desktop and standalone host markers. The filter controls what a runtime inherits, not what it can reach. The runtime runs as the same operating-system user, so a determined command can still read the private data folder, including the sign-in secret file and the database. Every credential in Vivary's launch environment, such as provider keys and a user's own token variables, stays in the start environment of the server and of the desktop process that starts it, and a same-user command can read it there. Where the operating system allows it, a same-user process can also read another's memory. Windows allows it between one user's processes at one integrity level, which Vivary's are, and Linux allows it when Yama `ptrace_scope` is 0 or Yama is absent. On Windows, the settings that `bin/start.mjs` assigns at startup, including the sign-in secret, also sit in the server process's environment block. The [#98 packaged Windows check](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/98-coding-worker-environment.md) ran a command in a Codex run before and after the fix, and both times it read their names from the server's environment, five processes above it. App-invoked original command receipts go to private application data. Every Python child the original runner starts, the original commands and the creator bridge, gets only the Windows system, home, temp, locale, `TZ`, and `PATH` names, `PYTHONNOUSERSITE`, and, for an original command that receives a receipt path, `VIVARY_RECEIPT_LOG`, so a provider key or the sign-in secret in the server environment does not reach it (issue #156). On Windows, Node's process launcher also adds the account names `HOMEDRIVE`, `HOMEPATH`, `LOGONSERVER`, `SYSTEMDRIVE`, `USERDOMAIN`, and `USERNAME` from the server's environment, none of them a credential. The child's `PATH` keeps only absolute entries not spelled inside the call's project folder, and a creator catalog call has no project, so it keeps every absolute entry. The filter compares spellings, not the folders they reach, so an entry that reaches the project through a symlink, a junction, a `subst` drive, or an 8.3 short name stays. Node's process launcher finds a bare `VIVARY_PYTHON` or `python3` for the creator on that filtered `PATH`, and on Windows it first looks in the child's working folder, which is the bridge's folder. A project's own Python therefore never runs for that project through a `PATH` entry spelled inside the project's folder. A relative `VIVARY_PYTHON` path resolves against the server's working folder. |
 | Credentials in shown, stored, and model-bound text | Issue #97. Vivary replaces a credential with a placeholder before text reaches a model, storage, a log, or the screen. [`credential-redaction.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/credential-redaction.ts) holds the values Vivary knows: credential-named server environment settings, named by the same rule as the coding runtime filter, values in the Agent-Native secret store, legacy credential settings, and the credential environments and headers in `mcp.config.json`. A JSON bundle adds its credential-named fields, a `Bearer` value adds its token, and a URL adds its password and its credential-named query values, or its whole address when the setting is a webhook. Values under 16 characters, numbers, booleans, hosts, ports, `file:` URLs, base URLs, and paths in settings named for a path, file, or folder are not held. The set reloads at startup, after each secret write or delete, and before each Native chat send and each Code send. An exact held value, or its URL-encoded, JSON-escaped, or base64 form, becomes `[redacted NAME]`. Pattern rules turn formats Vivary does not hold into `[redacted credential]`: `sk-`, Stripe live, GitHub, GitLab, `AKIA`, `AIza`, and `xox` tokens, JSON Web Tokens, `Bearer` tokens that look like tokens, URL passwords, and credential-named assignments such as `OPENROUTER_API_KEY=...`. Assignments skip names that print ordinary data: identifiers, names, paths, addresses, expiry times, pagination tokens, and public, cache, storage, and idempotency keys. A webhook-named assignment whose value is a URL is redacted. Every rule scans a line in linear time. The maintained Core patch applies the registered redactor to a whole Native tool result before truncation, so the model, the screen, and the run journal share one redacted string, and to tool error text, the recovered-result ledger on write and replay, every run event before it is kept or stored, the saved provider-failure message, saved and forked threads, earlier turns the browser sends back, automation run errors and last errors, and Code transcript events and run records. A streamed text, thinking, or tool-input delta keeps back its last word or two, up to the longest held form plus 256 characters and at most 16,384, so a value split across deltas is redacted whole. Vivary redacts the per-message project context block, Codex approval cards, original command output and component receipts, and every server stdout and stderr write. The creator bridge's answer is the exception. It is parsed exactly as printed, because a placeholder in a file path would name a different file. Vivary redacts its refusal message and an invalid settings message, and discards its stderr. For Codex and Claude Code runs, the host sends the coding worker salted fingerprints of the held forms, never the values, because the CLI it starts can read the worker's memory on Windows and on Linux hosts where Yama `ptrace_scope` is 0 or Yama is absent. On Linux with scope 1 or higher, the CLI can still read the worker's start environment and command line. A fingerprint is a form's length, 20 bits of a keyed rolling hash of its first 16 characters, a salted SHA-256 digest, and its placeholder. A credential typed into a chat reaches the model in the turn it is typed. Later turns, saved threads, and forks get the placeholder. Limits: pattern matching misses hex, reversed, line-split, and partial prints, compressed or custom encodings, base64 of values Vivary does not hold, and secrets with no known format, and it does no entropy detection. It can redact text that only looks like a credential, and a model that rewrites a file it read can write the placeholder back. Events stored before this change keep their text. The Codex or Claude CLI still sends raw tool output to its own provider and keeps its own session files. The worker starts without credential-shaped names (issue #98), but anything that can read the worker can test guesses against a fingerprint's digest, which finds a weak held value of 16 or more characters. Core's `captureError` forwards a raw error message to a configured tracking or error-reporting provider, which stays inactive without telemetry. The desktop startup error dialog shows server startup errors, which are Vivary's own messages, without redaction. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#credential-redaction) own the Core call sites. |
 | Bundled Python bytecode | Issue #155. The install folder ships no `.pyc` file and receives none. A bundled child compiles into `python-cache/<build>` in private application data. CPython runs a cached file whose header matches its source's modification time and size without reading the source, so a process that can write the cache changes what the next command runs without touching a source. That process runs as the same user, who can already edit the bundle's sources in a user-writable install and read the server's `auth-secret` file in the same data folder, so the cache adds a place to tamper, not a capability. No integrity check closes it, because any key the app could check sits within that user's reach. The cache is refused inside the install folder and inside the call's project, and a call whose project sits inside the cache folder keeps `-B`, so a coding runtime confined to a project outside the data folder cannot reach the cache. A project that holds it already exposes `auth-secret`. The cache can also hold bytecode for a project file a command imports, for example `doctor` loading a project's `packages/tropo/tropo.py`, outside the project and the install folder. [`python-bytecode.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/python-bytecode.ts) owns the folder. The [Windows measurements](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/windows-runtime-followups-2026-10-02.md) show warm direct interpreter calls reusing cached bytecode and no bytecode in the install folder. They do not measure GUI latency or prove long paths with the Windows policy disabled. The same-profile `d6241f03` upgrade removed the old build cache, preserved an unrelated sentinel and completed a creator preview without writing bytecode into the install folder. |
@@ -200,6 +597,9 @@ app credentials and upstream cookies, blocks workers and upgrades, and forwards
 only to the established socket verified as belonging to the selected registered
 project launch. Existing process identities, launch ownership and shutdown remain
 the owners. Unknown ownership fails closed, including on unsupported platforms.
+Opening a remote preview checks that the dedicated listener is bound at that
+moment, not only that settings name a port. While it is not, Open issues no ticket
+and returns a readable refusal that the paired browser shows in place of the frame.
 
 One app document is locked to one project, launch and host generation because
 removing an iframe does not reset its credentialless storage partition. Opening a
@@ -225,6 +625,64 @@ acceptance.
 
 The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) own those limits.
 
+OS sandbox coverage belongs to each execution surface. Full chat production code
+execution defaults off; optional QuickJS evaluation does not contain host bridge
+actions. The dev Node adapter uses Node permissions, with selected Linux denials
+and allowed loopback observed. Claude's file-tool launcher enables no explicit OS
+sandbox. Codex requests its selected CLI policy, while hooks and MCP processes
+remain separately unverified. Direct Linux Codex profiles verified broad reads,
+restricted writes and network denial for a command and its ordinary child; they
+do not prove Vivary app-server policy. Direct QuickJS lacked host globals/imports,
+but its approved host bridge read an outside canary. Electron renderer isolation
+and owned-process cleanup do not contain host tools or subprocess access. The [runtime coverage
+receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/runtime-sandbox-coverage-2026-10-06.md)
+owns the versioned source map, harmless Linux observation and UNRUN platform and
+surface checks; it does not establish whole-product containment or acceptance.
+
+An approval's history and webhook task can be saved on opposite sides of a
+process loss. The pending-task owner restores only the exact task named by the
+retained history before claim, retry or terminal settlement. It rechecks app,
+projected execution owner, organization, Native thread, ask, external thread and
+payload binding, then conditionally transfers custody without running a model or
+tool. Native liveness and ask-consumption rules still govern the owner decision.
+Terminal task and resource outcomes precede the existing FIFO wake. Unfinished
+wait retention covers the pending context's original chunk as well as current
+and resume chunks, using explicit SQLite and PostgreSQL JSON selectors. Settlement
+releases that evidence to ordinary pruning. Supported legacy job deletion resolves
+the persisted creator and organization before checking unfinished history, while
+keeping its existing creator and admin authorization. This history projection does
+not require the stored creator's current execution eligibility. An authorized
+admin can delete an ordinary job after that creator leaves, while conflicting
+persisted history scope still refuses deletion before mutation. A job whose
+creator or organization scope cannot be resolved refuses deletion only when
+unfinished or unreconciled history is bound to that exact resource. When an
+organization run's owner can no longer act, a principal with deletion authority
+over the same automation may decline its wait, never approve it. An expired request is declined by the
+next settlement pass, so no wait blocks its job forever. If a write fails after a pass
+claims an expired wait, a later pass settles that claim once its lease has passed. A wait saved before its turn was marked
+ready is first recovered, once its run has ended, as an owner's decision recovers it. A personal
+job that runs under an organization keeps its history there, keyed by path, so it is refused
+connected tools at start, and the approval gate refuses to create a wait on any history row
+whose owner or organization differs from the run's binding. Settings Delete by such a principal
+declines that wait first, reads the job again, then deletes it. A job that runs as the shared
+or organization identity and declares connected tools is refused at start,
+because no person can approve for that identity. Retained history-ID Decline can work without a definition, but a blocked
+deletion preserves normal discovery.
+
+Automation terminal ownership follows admitted execution, not request insertion.
+`automation_runs.admitted_at` is recorded at initial Native thread attachment and
+preserved across approval continuations. Durable history attachment is required
+before a Native chunk starts, so failed admission cannot execute model or tool
+work without an execution owner. Attached legacy rows retain their original
+start-time ordering when a continuation fills a missing admission marker.
+Queue claims and admission refusals keep
+it null. The history precheck and resource CAS share one admitted-owner predicate,
+scoped by owner, path, app and organization. Existing resource identity, version,
+definition and fresh-running checks still apply. A completed approval task wakes
+its FIFO follower only after the resource is terminal. Recovery revalidates the
+retained task and current resource before claim-safe dispatch, and a failed dispatch
+keeps the same terminal history unreconciled. No original tool or delivery is retried.
+
 ## Delivery and known gaps
 
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
@@ -249,13 +707,997 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
-The #188 maintained CI failure exposed collisions in Core's millisecond/random
-usage IDs. The maintained patch now lets database uniqueness arbitrate at most
-sixteen consecutive safe-integer candidates, with connection replay disabled for
-each insert. It preserves existing costs, propagates other failures and enqueues
-alerts only after a confirmed insert. Public usage regressions cover simultaneous
-store instances, exhaustion and refusal; the original collision demonstrated a
-real failing test before correction. The paired performance validator now requires
+2026-10-18 Issue #188 E1 integration with dev. This merge brings dev at `abca1bd`
+into the E1 candidate at `f13862c` (branch `perf/responsiveness-188`). Both lines
+rewrote the same `usage/store.js` insert in the maintained Core patch to stop
+numeric usage ID collisions. The merged patch keeps dev's `usage/store.js` sections
+whole, so dev's fix owns usage ID allocation: up to 16 candidate IDs, no replaced
+rows, and `isOwnUsageRow` recognizing a committed insert that the client resent.
+The Native usage cost section of the patch notes describes it. E1's own store
+change, its three collision tests in `native-usage-cost.test.ts`, its patch note
+and the collision sentences of its first entry below are dropped. Its tests asserted
+E1's error text and its connection-replay setting, which dev's version replaces
+with its own regressions. E1's other four Core sections (the shared Intl formatter
+module `date-time-format.js`, `formatDate` in `i18n.js`, and the UserMessage
+expandability observer in `message-components.js` and its declaration file) apply
+unchanged on top of dev's patch. The lockfile records the new patch hash and E1's
+pinned `playwright-core` 1.63.0 development dependency. The E1 entries below keep
+their wording otherwise. Runtime owners, persistence and trust boundaries above
+still hold, because the merge combines two reviewed lines without adding an owner
+or a data path. The paired guard keeps its fixed `8b1d1e4` baseline, its 0.76 Code
+and 0.75 Native ceilings and its validation logic. Dev changes made after that
+baseline therefore count against the candidate. Evidence inspected: a
+per-section comparison of the merged patch against dev and E1, the installed Core
+output for both lines' edits, and the focused checks listed on the integration
+pull request.
+
+2026-10-18 Handoff save wording (PR #236 review 5). The Prepare handoff paragraph in
+the unified workspace contract said every failed write keeps the previous version and
+shows Retry. It now matches `save()` in `packages/workbench/server/handoff.ts`: a
+changed file or project binding stops the save, a failed write offers Retry only when
+a reread finds the version from Prepare, and an unconfirmed write or an unstored save
+record reports that the file may have changed. The recovery design in the entry below
+still holds, because only the contract text was wrong. A foreign-actor subtest title in
+`handoff.test.ts` no longer claims Save coverage. No source behavior changed.
+
+2026-10-18 Handoff progression and recovery (PR #236). Handoff Save and freshness
+now observe later stopped, failed and active requests independently from linked
+completed evidence, retaining selected Native ancestry and bounded no-follow Code
+reads. Files saves and renames refresh the mounted control, and unavailable state
+can be checked again. A post-write exception or record-finalization failure no
+longer promises the old bytes survived: only a reread of the unchanged original
+version permits Retry. The state-document check preserves existing noneditable
+reasons. The Prepare handoff contract above and the Workbench README describe the
+recovery paths. Focused production-service and mounted-component regressions cover
+these changes; installed-Core, real-agent and packaged acceptance remain separate.
+
+2026-10-17 Handoff review fixes (PR #236 review 1 and the Codex review). A new
+test records that an untracked directory leaves the Git state unknown, so an
+edit inside it reads Unverifiable, never Fresh. Save records the Prepare-time
+project version and refuses a reply the conversation continued past, so neither
+a change during the reply nor later turns read Fresh. Reply text can no longer
+recreate a block marker, because comment stripping repeats until stable and
+also removes `--!>`. Retry is offered only after a failed write. An update
+moves the block back to the end. The end of a Code run rechecks freshness, and
+a stale Prepare result is not submitted to another conversation. Review 2
+found that guard missed the real path, where each conversation mounts the
+control under its own key, so leaving a conversation now ends the visit on
+unmount. A refused reply now points to a new Prepare, because a correction
+turn would be refused. The Prepare handoff section above records the changed
+behavior.
+
+2026-10-18 MCP package verification wording. The package README scopes its
+August 15 installation verification to published 0.1.3 and links staged 0.1.4's
+source-check evidence and final-candidate verification limits to the canonical
+changelog. No new verification or publication is claimed. Package boundaries and
+runtime behavior retain their existing contract.
+
+2026-10-18 Approval ownership fixture isolation. The HTTP ownership test disables
+Native's default integrations plugin through its supported process configuration.
+That plugin's retry timer could otherwise reconcile the deliberately unreconciled
+history between the fixture's snapshot and DELETE, making the expected refusal
+stale. The real auth, resources and action routes and explicit recovery calls stay
+active. The test retains its 409 and unchanged-custody assertions before recovery,
+then requires successful deletion after explicit reconciliation. Its diagnostic
+also reports the history read after DELETE. This changes test isolation only;
+production recovery and deletion ownership keep their existing contract.
+
+2026-10-18 MCP Doctor and canonical release status. The capability probe retains
+the installed adapter's single exact SDK pin for the MCP annotation, so published
+vivary-mcp 0.1.3 with SDK 2.0.0 and staged 0.1.4 with SDK 2.2.0 report compatibility
+consistently. Exact-pin enforcement applies only to the adapter's `mcp` dependency;
+other capability dependency floors keep their existing behavior. The metadata-probe
+regressions cover both releases, mismatched SDKs, invalid or unpinned declarations,
+and missing or failed evidence without importing the adapter. The canonical
+changelog and CLI release status now record unpublished vivary-mcp 0.1.4 and the
+Doctor change in the already-staged create-vivary 0.4.4, keeping the dated registry
+tables intact. The optional adapter and passive probe retain their existing owners
+and read-only boundary. Final integrated CI, wheel smokes, review and owner release
+approval remain separate requirements.
+
+The changelog's CLI release-status reference uses an absolute repository URL.
+The site generator preserves that URL and its existing `release-status` fragment,
+avoiding a relative `docs/` path under the generated changelog route. This corrects
+documentation navigation; runtime behavior and the release status are unchanged.
+
+2026-10-17 MCP SDK pin 2.2.0 (replaces Dependabot #229). The optional
+`vivary-mcp` adapter moves its exact reviewed pin from `mcp==2.0.0` to
+`mcp==2.2.0` and its source version to 0.1.4, unpublished. 2.0.0 carries
+GHSA-84m7-p3x7-pcfv, which affects only stateful Streamable HTTP servers. The
+adapter uses only the stdio transport, so the advisory was not reachable, and
+neither package is in the Windows desktop bundle. The CI wheel smokes follow the
+new pin; Doctor checks the installed adapter's declaration as reviewed above. The staged
+create-vivary 0.4.4 carries the change, so it needs no new version. The adapter's
+boundaries and the optional, off-by-default capability are unchanged, so the
+design description holds.
+
+2026-10-17 Windows app icon. The Windows packager now passes
+`packages/desktop/assets/vivary.ico` to Electron Packager, which embeds it in
+`vivary.exe`. The icon is a multi-size copy of the site mark. The executable
+name, product name and window title were already Vivary. The packaging flow,
+its source-snapshot inputs and the packaged layout are unchanged, so the design
+description holds.
+
+2026-10-17 Site TOML parser update. The documentation site's lockfile moves
+`smol-toml` from 1.8.0 to 1.9.1 for advisory GHSA-r4xh-jqrq-34v2. The site is
+built statically, so the parser runs only at build time. The new version has no
+dependencies and the same Node engine range, and both dependents accept it.
+Nothing the app ships changes, so the design description holds.
+
+2026-10-17 Linux preview socket rows that are not visible yet. The ownership
+check in `server/preview-socket-owner.ts` waited only while the server's row in
+`/proc/net/tcp` showed inode 0. A read of that table is not atomic. On a busy
+host a read can skip a row or list it twice, and a check run before the
+handshake ends finds no established row. Each of those refused the connection at
+once, and the never-accepted test failed after 453 ms inside a full suite. A
+loopback churn check on the server listed a stable row twice in 1 of 127 reads.
+The check now waits while a handshake row or an inode 0 row is visible, and a
+row missing from both tables is refused after five consecutive reads. It treats
+repeated rows that name one socket as one row. Rows that name different sockets
+are refused at once. Inode 0 and a missing row never count as owned, and the
+existing three second deadline still refuses a connection that stays pending.
+Ownership rules and owners are unchanged, so the remote preview description
+holds. Evidence: two tests in `tests/preview-socket-owner.test.ts` feed the
+check a missing row, a handshake row, a repeated row, a row that never appears
+and conflicting rows. PR #233 review found that a torn read crossing the accept
+can list one connection with inode 0 and with its real inode. Inode 0 now means
+not yet accepted, never a second socket, so only two different nonzero inodes
+refuse at once. A further test lists both forms of the row, and the tests no
+longer assume how many reads happen before the server accepts. A later review
+found that a preview that accepts and then closes or resets the connection left
+the check waiting for the full deadline, so every asset request stalled for
+three seconds before its 502. The socket's close now ends verification, and a
+test closes the connection before its row is visible and expects an early
+refusal. A further review found that the check read only `/proc/net/tcp`. Many
+dev servers ignore `HOST` and listen on `::`, so the 127.0.0.1 connection is
+accepted on an IPv6 socket listed only in `/proc/net/tcp6` as
+`::ffff:127.0.0.1`. Those previews now verify through the same inode and
+process group check, because the check reads both tables and matches the
+IPv4-mapped address. Only a handshake row or an inode 0 row, which prove the
+connection exists, keep the check waiting until the deadline. A row missing
+from both tables gets five consecutive reads of grace for a torn read, then
+refuses, and a pending row restarts that grace. Different nonzero inodes across
+the two tables refuse at once. Tests cover a real dual-stack listener, skipped
+on a host without IPv6, a row missing from both tables, misses split by a
+pending row and a conflict across the tables.
+
+2026-10-17 Maintained checks time limit. The `maintained workbench checks`
+CI job ran `test:maintained` under a 10 minute limit. On `dev` the job took 6
+to 10 minutes, and runs were cancelled at the limit on `dev` (2026-10-16 13:01
+UTC) and on a pull request (2026-10-17 00:18 UTC) with no failing test. The
+limit is now 20 minutes. Only the time limit changes. The job's steps, its
+gate role and every other job stay the same, so the design description holds.
+
+2026-10-16 Linux preview socket ownership before accept. The Linux ownership
+check in `server/preview-socket-owner.ts` finds the preview server's side of the
+established connection in `/proc/net/tcp` and follows its socket inode to a
+process in the launch group. Linux lists a connection that the server has not
+accepted yet with inode 0, so a slow accept made the check refuse a socket the
+launch owned. The gateway then answered 502, and the gateway test failed about
+once in ten runs on `dev` and on this branch. The check now rereads the table
+with a backoff from 10 ms up to 200 ms until the inode appears. Inode 0 never
+counts as owned, and the existing three second connection deadline still
+refuses a connection that is never accepted. Ownership rules and owners are
+unchanged, so the remote preview description holds. Evidence: two tests in
+`tests/preview-socket-owner.test.ts` feed the check unaccepted reads, and the
+gateway test passed in repeated runs.
+
+2026-10-16 Isolated preview refusal text. The remaining Open refusals in
+`server/preview-ingress.mjs` (no gateway installed, a caller that is not the
+paired browser, the preview origin turned off, too many preview documents, a
+different launch in the same app document, and a device grant that ended) were
+plain errors. The action route turned each into "Internal server error" on the
+paired browser. They now use `fail()` with status 403 or 409 and keep their
+existing wording, which names no credential or path. Gateway rules, ticket
+issue and proxying are unchanged, so the remote preview description holds.
+Evidence: a new test in `tests/browser-access.test.mjs` runs each refusal
+through the `vivary-remote-preview` action and checks the error type, status
+and text. PR #231 review found that Open could still end with a plain error when
+the listener dropped, settings changed or the launch ended while the target
+lookup or grant admission was pending. Those late Open checks now use `fail()`
+with status 409, giving the listener message when the listener is the cause and
+"Preview access ended. Open the preview again." otherwise. Request liveness on
+the gateway keeps its plain errors, because those requests answer with the
+gateway's own refusal text. A further test drops the listener or the settings
+during each pending step and checks the readable error and the released grant.
+A later PR #231 review found the same gap inside the launch check itself: the
+production check awaits the workspace lookup, and `live()` rechecked only the
+aborted controller afterward. It now repeats the full listener, settings,
+expiry and controller conditions after that await, so Open issues its ticket
+only after a final gate that follows its last await. A further test changes
+the listener or the settings while the check is pending and checks that no
+ticket is issued and the grant is released.
+
+2026-10-16 Isolated preview listener state. If the preview origin's loopback
+listener failed to bind, the failure was kept only as a desktop settings message.
+Open still checked only the saved configuration, issued a ticket and sent the
+paired browser to a bootstrap URL that nothing answered, which showed as an empty
+white frame. `createBrowserListener` in `server/browser-ingress.mjs` now reports
+whether its own server is listening and forgets a server that later errors or
+closes. `createPreviewGateway` in `server/preview-ingress.mjs` refuses Open
+through `fail()` before resolving the target or admitting a grant while that
+listener is down, and also ends open preview access then. A bare error would
+reach the browser only as "Internal server error", because the action route
+echoes contract errors alone. `RemoteProjectPreview` already shows an Open
+error as an alert and renders no frame. The remote preview paragraph in Data and
+trust boundaries now states this check. Evidence: four new tests in
+`tests/browser-access.test.mjs` cover a real port conflict, a bound listener, a
+closed listener, a later server error or close, the action error type, and the
+rendered refusal.
+
+2026-10-16 Concurrency release scope. Jeff chose to defer controlled
+concurrency for Code conversations from this release to issue #228. The
+desktop release page now states the limitation once: one Code conversation
+runs at a time on a host, and a second request is refused before any write
+with an Open button for the running one. The unified workspace acceptance
+row, the specification README and the acceptance register point to #228.
+No code changed. The host-wide single Code run guard described above is
+unchanged, so the design description holds.
+
+2026-10-16 Prepare handoff and handoff freshness (A083, A084). New
+`server/handoff.ts`, three owner actions with `agentTool: false`, a
+`HandoffControl` in the Code and Native conversation surfaces, migration 6, the
+creator bridge `observe` operation, and `stateDocument` in project memory. The
+linked conversation service now exposes its owner scope, record check and
+completed-prefix reader instead of duplicating them. The Prepare handoff section
+above describes the design. `test:handoff` covers refused replies, conflicts,
+a failed write, a dirty tree, staleness without a model call, and the control.
+The Python bridge case covers `observe`. Built-app and real-agent acceptance
+remain required.
+
+2026-10-16 Linked conversations on current dev. The October 8 linked-runtime
+slice (`5831173`) never reached `dev`. It is applied to `dev` and rebased onto `3a0576f`,
+with its design text above unchanged. Its Code-admission test now gives the
+fake Claude CLI the version and subscription-route answers that current runtime
+admission requires, as the other send fixtures already do. The 26 linked tests
+and typechecking pass. Linking still submits no prompt, transfers no provider
+session and keeps the host-wide single Code run guard, so the design
+description holds. Built-app and packaged Windows acceptance in each direction
+remain required for issue #38.
+
+2026-10-16 Workbench build gate. The production build runs `agent-native
+doctor`, which refuses environment reads outside its deploy allowlist. The
+legacy-model worker test added on 2026-10-15 saved and restored `PATH`,
+`VIVARY_ACCESS_MODE` and a dynamic set of fixture names, so `pnpm --dir
+packages/workbench build` failed on `dev` while every CI job passed. Those
+reads now carry the existing per-line opt-out with a reason, as the other
+fixture tests do, and the workbench CI job runs `pnpm --dir packages/workbench
+run doctor` after typechecking so a build-only gate cannot fail silently again.
+The `run` matters: `pnpm doctor` is pnpm's own built-in command and never
+reaches `agent-native doctor`. No runtime, credential or
+environment behavior changes, so the design description holds.
+
+This dependency review raises fast-uri from 3.1.7 to 3.1.8 and ip-address from 10.7.0 to 10.7.4 within their existing dependency ranges. The Native runtime, provider funding admission, project boundaries, and pinned Astro cache replacement keep their existing owners and contracts. Only the two Workbench transitive resolutions change. The existing dependency-advisory guard now enforces both minimum versions so future lockfile changes reject the older vulnerable releases.
+
+2026-10-16 Retained Code model advice review. A retained Code conversation keeps
+its runtime and model, and the server refuses a model change on an existing run.
+The composer therefore never suggests choosing another model for a retained
+conversation, and it points to the version update, version check, or Runtime
+settings instead. A new conversation still offers another sendable choice. The
+model-choice test executes the component's real selection block for both cases.
+No server, worker, or persistence behavior changes, so the design description
+holds.
+
+2026-10-16 Review follow-up for usage writes, Code model advice, and Native
+startup. A usage insert that finds its ID taken now reads that row and treats an
+exact match of every stored value as its own committed write. A database client
+resends a statement whose reply it lost, and the resend previously recorded the
+call a second time. A different record at the same ID still moves to the next
+candidate. The Code composer offers "choose another model" only when a
+configured runtime lists another choice it can send. Otherwise it points to the
+version check or Runtime settings. The explicit-selection paragraph above now
+states that Vivary's startup reopens the saved conversation at any age, which is
+the release journey's requirement and unchanged behavior. A component control
+mounts `NativeConversation` with a thirteen-hour-old saved conversation and
+checks that it reaches Core as the URL selection with Core's restore off. The
+route-selection tests now run the real model resolver, and a refusal of an
+unretained historical Claude ID was added. The usage store, the Usage tab, and
+the Code worker boundaries are otherwise unchanged, so the design description
+holds.
+
+2026-10-16 Native retry cost review. A failed model attempt that the agent loop
+retries now counts as a call in the turn's usage, so a turn whose first attempt
+streamed output and then dropped no longer records the retry's reported cost as
+the complete turn cost. It records the tokens it knows and an unknown cost. An
+attempt refused before the model produced output, by a rate limit, an overload,
+or a context overflow, counts as a known $0 call, so a rate-limited attempt and
+a retry that reports a cost still record that cost. A usage report with no
+tokens and no cost, which the AI SDK sends before a refusal, is not output. The
+chat handler and the webhook handler wire the same hook. The usage store, the
+Usage tab, and budgets are unchanged, so the design description holds. Loop
+tests drive a dropped connection after streamed text and two rate-limited
+attempts through the real agent loop, and direct tests cover both attempts
+reporting, a refused attempt, an attempt with unknown cost, and a refused
+attempt that already reported $0.
+
+2026-10-16 Claude failure-path and local first-run review. Claude Code stderr
+is retained only while the complete diagnostic stays within its existing
+128 KiB bound. A write that would exceed the bound discards the retained
+diagnostic, and a nonzero exit then records a generic withheld-output error, so
+a partial credential cannot bypass downstream redaction. This is the policy the
+Codex executor already applies. Complete diagnostics within the bound keep their
+existing redaction and error behavior. In local mode, where Builder offers are
+off, both Back controls on the first-run key form return to the intro instead
+of rendering the same form again. Self-hosted mode still returns to the Builder
+choice. Participant tests cover a held credential that crosses the bound in one
+write and split before, at, and after it, plus a split credential inside the
+bound. Onboarding component tests drive both Back controls from the intro and
+keep an offers-on control. No provider, permission, persistence, or
+process-cleanup ownership changes.
+
+2026-10-16 Codex failure-path review. App-server stderr is retained only while
+the complete diagnostic stays within its existing 4096-character bound. Once it
+exceeds the bound, the executor discards the diagnostic and records a generic
+withheld-output error, so a partial credential cannot bypass downstream
+redaction. Complete short diagnostics keep their existing redaction and error
+behavior. A route refusal before native resume preserves missing or null saved
+model metadata until Codex reports an actual model. The existing public Send
+and actual-worker regression now covers refusal, account repair, and retry for
+both retained model shapes. Direct app-server tests cover held and prefixed
+credentials across the retention boundary, split writes, and short controls.
+No provider, permission, or process-cleanup ownership changes.
+
+2026-10-15 Retained Codex default-model review. The worker now compares an
+omitted Codex IPC model with the host's retained default sentinel. The actual
+executor still receives the omitted model so the native session chooses its own
+model. Claude comparisons and explicit model mismatch refusals remain strict.
+The public Send regression reproduces the previous worker refusal for both
+missing and null saved Codex model metadata. It uses the real host request and
+worker with an inert Codex app-server fixture, checks native resume without a
+model override, and preserves the single user event. Existing worker tests also
+reject changed, default, and omitted model inputs for explicit saved models.
+The regression is included in the maintained credential-redaction command.
+Execution, account, credential, and cleanup ownership boundaries are unchanged.
+
+2026-10-15 Code regression coverage review. Successful-send fixtures again
+exercise the public host path for slot exclusion, permission snapshots, draft
+reconciliation, Stop ownership, and fresh project context on each turn. Their
+inert CLI fixtures report the subscription route and version required by current
+runtime admission. Cleanup-refusal tests also use public Send after cleanup,
+instead of exporting the private execution starter from a fixture bundle. The
+maintained shared-UI command now includes editor content-preservation and command
+menu focus regressions. Review compared removed assertions with the baseline,
+checked the fixture call sites, and traced maintained commands from CI. These
+changes restore coverage without changing runtime behavior or bringing back the
+obsolete funding gate. The execution and credential boundaries remain unchanged.
+
+2026-10-15 Code model-choice review. The composer and send adapter now share
+new-conversation model admission from the current catalog. Exact historical IDs
+remain available for retained conversations, and saved supported Claude aliases
+pass both layers without replacing their identity. The server still owns runtime
+compatibility, record ownership, and retained-route immutability. The picker and
+actual-adapter regressions reproduced the mismatches before their fixes. The
+restored real-host and worker fixture verifies opaque held-value fingerprint
+delivery and redaction in transcripts, state, and follow-up context, alongside the
+existing Claude and Codex route fixtures. The 25-test worker and composer run and
+the final 24-test adapter and composer run passed without skips, with unchanged
+worker sources in the latter. Type checking passed. Maintained CI discovers the
+new tests. Execution ownership and credential boundaries remain as described
+above. Live provider and Windows package acceptance remain separate.
+
+2026-10-15 provider route correction. The app-wide included-only policy and its
+metadata probes, funding bindings, and pre-prompt control exchange are removed.
+The selected Code runtime or Native API provider remains authoritative. Send and
+worker fixtures cover new and resumed turns, provider failures, and unchanged
+route choices. Claude error result envelopes and rejected rate-limit events now
+produce an errored conversation instead of a completed turn. Error redaction
+precedes normalization and truncation. The Codex execution process checks its
+actual sign-in and provider configuration before a thread or turn. The earlier
+subscription sign-in and Windows SystemRoot fixes remain intact. This replaces
+the funding admission described in the dated reviews below. Live provider and
+Windows package acceptance are still separate.
+
+The Native Claude participant retains only the Windows SystemRoot setting across case variants so Node-based runtimes can initialize crypto. Its existing credential and environment allowlist boundary stays in place. Claude 2.1.300 joins the experimentally verified control-protocol versions after native and SDK metadata-only Windows checks. Funding admission, shared allowance limits, record ownership, and the unknown-version refusal remain unchanged.
+
+2026-10-14 Windows Claude control compatibility. A metadata-only probe used
+the existing packaged SDK 0.3.288 and Windows CLI 2.1.296, allowed only initialize
+and get_usage input, read the same explicit OFF fields and exhausted weekly
+allowance, and verified all owned processes closed. The allowlist now accepts
+that exact version alongside server 2.1.289. Bindings retain the observed version
+so model minimum versions use the actual runtime. Unknown versions still refuse.
+This establishes control-read compatibility only. Positive model execution and
+the package containing this source remain separate acceptance gates.
+
+2026-10-14 conditional Code funding admission. Claude's exact installed
+experimental control bridge replaces unconditional refusal with explicit-off,
+allowance, account, runtime, and workspace checks at send and Native execution.
+Focused fixtures cover positive new and resumed turns, refusal before writes,
+changed account and credits, model-specific UI messages, and private control
+metadata. The provider UI OFF change and matching metadata read established the
+version-specific control shape. Actual weekly allowance remained exhausted.
+Codex stays blocked for the precise missing overflow-control capability. The
+maintained Core patch adds an optional pre-prompt callback, preserving other
+participant callers. Source tests do not establish live execution or package
+acceptance.
+
+2026-10-14, Code subscription authentication: Claude readiness now requires its
+reported Claude sign-in method, first-party provider, and subscription type.
+This matches the existing Native executor and Codex's ChatGPT-only route check. Focused status tests cover API keys, cloud routes, missing
+fields, and private account data. This establishes route separation only. The
+included-only funding guarantee and live subscription acceptance remain separate.
+
+2026-10-13 desktop outgoing OAuth and hourly schedule summary. Native's
+production origin fallback, desktop redirect restriction and callback admission
+cannot complete the current browser sign-in journey. The maintained Core patch
+accepts Workbench's trusted availability policy and carries its reason to the
+existing forms. Saved Test and retry preserve valid grants and bound refresh.
+Only an unusable grant reports that reauthorization is unavailable. Installed
+handler and rendered-component fixtures cover these paths without a provider.
+The Custom hourly preview now states the interval and minute while preserving
+Native's cron generator. Issuer and desktop capability regressions remain part
+of focused validation. This is source evidence. A new package and its native
+Windows acceptance remain separate gates.
+
+2026-10-13 Native usage record ID collisions. The usage writer retains its numeric
+primary key and existing schema. If another writer already inserted its generated
+ID, it tries the next ID, up to 16 candidates. Only primary-key conflicts retry.
+Other database failures and exhaustion still reject the write, existing records
+are never replaced, and alert evaluation starts only after a successful insert.
+The regression forces independent store modules to choose the same clock/random
+candidate and checks that both records retain their costs. A second case fills
+all candidates and checks explicit failure without changing those records.
+Pricing, aggregation, provider execution, and funding admission are unchanged,
+so the existing Native usage flow and trust boundaries still hold.
+
+2026-10-13 resource editor preservation and height. Windows acceptance reproduced
+an untouched instruction table being flattened and saved merely by opening Visual.
+Toolkit's editability effect emitted an update without a document change, and the
+shared callback serialized that snapshot. The effect now suppresses emission and
+the callback rejects non-document updates before serialization. Real local edits
+retain the existing reconciliation guards and host callback. Separately, Settings
+mounted the percentage-height resource editor in normal document flow, leaving
+Code at its two-row intrinsic height. A responsive height at the Settings panel
+boundary now supplies the definite space its existing flex layout requires.
+The installed-editor regression uses the supported JSON-document seam because the
+existing DOM fixture cannot establish Markdown display fidelity. It also exercises
+the real resource view-switch/autosave boundary and renders the Settings height
+owner. Actual Markdown rendering, pixel layout, and Windows acceptance remain
+required. Resource schema features, autosave timing, provider behavior, and file
+version guards are unchanged.
+
+2026-10-13 Search Vivary return focus. Native's controlled command menu has no
+registered dialog trigger. Its focus owner now captures the actual focused opener
+before opening and restores that connected element on close only while the same
+route remains current and no other control has taken focus. Keyboard opening,
+menu commands, and navigation keep their existing owners. Focus-contract tests
+cover button and keyboard openers, removed openers, route/query changes, and focus
+already held elsewhere. Delayed close events cannot take focus from a reopened
+menu. The existing DOM component fixture could not initialize
+the real menu within its bound, so rendered dialog and Windows keyboard acceptance
+remain required. File-version conflict guards are unchanged because the observed
+Alpha save conflict has not been reproduced with its identity/stat tuple.
+
+2026-10-13 fresh Native provider fallback. Rendered acceptance found that a fresh
+unconfigured instance reported Anthropic with the global Builder model. Core's
+engine-list owner now pairs that fallback with the registered Anthropic default,
+without writing settings or changing saved/app candidates, custom normalization,
+readiness, or funding. A real installed action regression reproduces the prior
+mismatch and checks fresh, saved legacy, and custom choices through disposable
+storage with outbound transport refused. The provider catalog and request owners
+above remain accurate. Final rendered and package checks remain separate gates.
+
+2026-10-13 Native API catalog. The maintained Core patch updates only direct
+Anthropic model metadata and defaults, preserves older saved selections, and leaves
+gateway catalogs unchanged. Actual engine identity, individual Haiku prompt length,
+and observed cache-write duration govern new API estimates. Missing evidence is
+unknown and reported cost wins. The existing usage, budget, and trace owners retain
+that distinction without adding an account or funding probe. Focused regressions
+inspect real SDK requests through intercepted transport, catalog separation,
+saved choices, tier boundaries, cache durations, and unknown estimates. Code's
+included-only refusal remains unchanged. Live API, rendered UI, and packaged
+Windows acceptance remain separate gates.
+
+2026-10-13 Code catalog, funding, and composer. Workbench uses exact Claude
+model IDs, keeps saved choices and historical model interpretation, and embeds
+the existing selectors through Native's public composer toolbar slot. Installed
+metadata determines version support. Subscription authentication remains separate
+from funding verification. The server send boundary and coding worker refuse
+unverified included-only execution before any provider work. The affected tests
+check no execution or transcript mutation on new and resumed requests, retained
+identity, version support, and draft recovery. Build, real provider execution,
+and packaged Windows acceptance remain separate gates.
+
+Explicit Native history selection. The maintained Core tab initialization and
+active-tab inclusion retain the conversation named by the URL even when its last
+activity is older than twelve hours. This applies to both project and Unassigned
+history on first mount and after changing scope. Vivary's ordinary startup
+reopens the saved conversation at any age, as the release journey's "return
+tomorrow, reopen the same session" requires. `NativeConversation` writes the
+saved selection into the URL before Core mounts and keeps Core's own tab restore
+off, so Core treats it as the explicit selection. Core still replaces a stale
+restored tab with a fresh chat on a surface that restores its active tab without
+a URL selection, which Vivary does not mount. The existing scoped thread lookup and message restoration remain the owners of
+access and content, so the conversation storage and project boundaries above
+still hold. The real Core component regressions exercise both scopes, route and
+active-ID retention, saved messages, scope changes and the no-selection controls
+without a model submission. Source checks do not establish acceptance of a new
+Windows package.
+
+Native action JSON input. The maintained Core patch retains each action's
+declared Standard Schema through discovery, so its wrapped validator owns input
+validation instead of a coercing check of the advertised schema. Manually
+declared JSON-schema tools first validate without coercion and keep valid JSON
+numbers, booleans, nulls, records and arrays. Otherwise invalid but coercible
+inputs retain the existing compatibility path. Native's real agent-loop
+regressions use an injected engine and the actual Decide adapter to check numeric
+budgets, JSON values, malformed inputs, and authority refusals before the runner.
+The selected-project and actor boundaries above remain unchanged. The
+[patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#native-action-json-values)
+describe the conversion failure and validation owners. The frozen Windows
+package remains unchanged, and a fixed package's native acceptance remains open.
+
+2026-10-11 outgoing MCP OAuth issuer binding. Workbench pins MCP SDK 1.31.0,
+and Native resolves the same SDK plus aligned client, core and server 2.2.0
+dependencies. The unrelated WebMCP types dependency retains server and core
+2.0.0, whose server-only use is excluded from the advisory. Native still owns
+outgoing configured connections, discovery, PKCE and encrypted credentials.
+Managed HubSpot and Google clients carry their catalog's trusted issuer.
+Native's custom provider preserves issuers on saved credentials and refuses
+reads for a different issuer. Its direct refresh binding check remains intact.
+Revocation requires the same nonempty issuer across discovery, client information
+and tokens before sending credentials. An unbound or mismatched grant skips
+remote revocation and can still be unlinked through the existing local revision
+comparison. A concurrent replacement survives. Unexpired legacy bearers retain
+their canonical resource binding without an authorization-server request.
+The [maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#mcp-oauth-issuer-binding)
+owns the dependency and credential details. Installed-owner synthetic tests
+cover these controls, legitimate static-client PKCE and refresh rotation.
+Incoming MCP and OAuth routes remain disabled. Built outgoing OAuth, packaged
+acceptance and real account connections remain distinct validation gates.
+
+2026-10-11 Windows bundled Node shutdown. The Windows packager pins Node
+24.20.0 and its official executable checksum, retaining ABI 137 and the existing
+SQLite 12.11.1 asset. The exact-version Workbench build marker remains required.
+This replaces the Node 24.19.0 runtime that reproducibly asserts during exit
+after a failed loopback fetch. The upstream delayed-task shutdown guard is
+included in [Node 24.20.0](https://nodejs.org/en/blog/release/v24.20.0).
+A maintained pure-runtime control tests plain exit and failed-fetch exit four
+times each with cleared child environments and bounded timeouts. Parent Windows
+controls passed all eight with the verified 24.20.0 binary, and the unchanged
+0dd3ed9d application server passed its twelve local persistence and restart
+checks with only the runtime replaced. This evidence identifies the bundled
+runtime failure without changing application shutdown or masking exit codes.
+It does not establish Electron UI acceptance or a new built package. The
+packager retains hash verification and exact-version license collection.
+
+
+2026-10-11 original creator wizard failure handling. Optional embedded
+backend installation, including interactive selection, now shares the wizard's
+existing configuration-error boundary. A failed install returns exit 1 and the requested JSON error
+without writing configuration, instead of escaping as a traceback.
+The installer and storage choices retain their existing owners. Normal automatic and interactive
+failure regressions inject an installation failure without downloading
+anything and verify that the target stays unchanged. Configuration-only tests stub that boundary rather than install
+an optional backend. This preserves the original-engine flow and does not
+establish an installed embedded-provider capability.
+
+2026-10-11 Windows temporary-file custody. Creator temporary files now
+share read and write access only. Their own handle retains delete access
+for the commit and failure cleanup. Denying delete sharing keeps the
+same-parent rename condition enforced for the lifetime of that handle,
+while the existing parent locks and identity checks remain. The ordinary
+native Windows create, replacement, collision and cleanup regression and
+exact-plan create/adopt checks validate this lifecycle. Microsoft's
+[sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
+explains that delete sharing permits later handles to request rename or
+delete access. No adversarial filesystem probe was run for this correction.
+
+2026-10-11 Windows creator atomic commits. The creator renames its open
+temporary file within the same locked destination parent. It now supplies
+a null `RootDirectory`, as the Windows same-directory rename contract
+requires, rather than passing the parent handle. The parent locks, inode
+checks, reparse-point refusals and open-file cleanup stay in their existing
+owners. A native Windows regression checks create, replace and collision
+refusal with actual files and no leftover temporary file. The original-engine
+ownership and authorized-root design above remain accurate. The retained
+packaged-runtime probe reproduced invalid-handle status with two valid handles
+and succeeded after changing only `RootDirectory` to null. See Microsoft's
+[rename contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information).
+
+Issue #23 TipTap advisories. Toolkit 0.19.3 pins its TipTap packages at
+3.30.1, and @tiptap/core 3.30.1 carries the high GHSA-j95f-988m-3j2f and the
+moderate GHSA-cp6q-959q-f8rh. TipTap packages pin each other exactly, so
+overrides scoped to `@agent-native/toolkit@0.19.3>@tiptap/<name>` move
+Toolkit's 18 direct TipTap pins to 3.30.5, and the aligned set of 39 TipTap
+packages resolves at 3.30.5. @tiptap/y-tiptap keeps its own 3.0.7. The lock
+was written from pnpm's resolution in a throwaway copy, kept in the existing
+layout. Toolkit's and Core's peer suffixes change with the TipTap versions.
+Core's patch hash and the Toolkit patch are unchanged. The retained alignment
+receipt records the 39 packages' integrity, provenance and publication more
+than 72 hours earlier, with no failed metadata gate. Toolkit's composer, rich
+Markdown editor and Workbench's Files and Architecture readers keep their
+roles. The advisory test now checks the TipTap floors and one shared release,
+and a Markdown reader test pins the document, HTML and Markdown that Toolkit's
+shared editor extensions produce. Runtime flows and trust boundaries are
+unchanged.
+
+Issue #23 SheetJS advisories. Core's spreadsheet parser, which pre-upload
+attachments call for XLS and XLSX files, loaded xlsx 0.18.5, which carries the
+high GHSA-4r6h-8v6p-xvw6 and GHSA-5pgg-2g8v-p4x9. SheetJS publishes the fixed
+releases only on its CDN. Workbench now depends on the reviewed xlsx 0.20.3
+archive at `cdn.sheetjs.com` by URL, and an override scoped to
+`@agent-native/core@0.176.5>xlsx` routes Core's optional `^0.18.5` to the same
+archive, so Core and Workbench resolve one package. The lock records that
+tarball URL with its SHA-512 integrity and drops the eight helper packages only
+0.18.5 needed: its seven direct helpers adler-32, cfb, codepage, crc-32, ssf,
+wmf and word, plus frac, which ssf brings in. 0.20.3's exports map selects an ES module that starts without
+codepage tables, which 0.18.5's CommonJS build carried, so Excel 95 and older
+workbooks would lose their 8-bit text. The new
+`server/plugins/00-xlsx-codepages.mjs` loads SheetJS's `cpexcel.full.mjs` into
+the shared module when the server starts. The built server bundles one xlsx
+0.20.3 module, which Core's parser and the plugin both import. Tests cover a
+synthesized Windows-1251 BIFF5 workbook, a Unicode XLSX workbook, one shared
+package, the advisory floors and the archive source. The Apache-2.0 license
+text is byte-identical to 0.18.5's. The parser still runs in the server
+process on the same uploads within Core's size and sheet limits, so runtime
+flows and trust boundaries are unchanged.
+
+Issue #23 PDF.js advisory. officeparser 7.8.0, Core's optional document
+parser, pins pdfjs-dist 6.1.200 exactly, and that release carries the high
+GHSA-hq66-cqwq-w95j. A Workbench override scoped to
+`officeparser@7.8.0>pdfjs-dist` now resolves 6.2.108, the first fixed release,
+without an officeparser major upgrade. The lock records the same override and
+changes the PDF.js package key, its integrity, its snapshot key and
+officeparser's reference. 6.2.108 keeps the `@napi-rs/canvas` optional
+dependency and the Node engine range. Its SHA-512 integrity matches the
+retained registry receipt and archive inspection, which also record
+publication more than 72 hours earlier and no install scripts or binding.gyp.
+Core reaches officeparser
+only through `parseOfficeDocument` in its public ingestion export, Workbench
+source does not call it, and the built server output contains neither
+package. Runtime flows, dependency owners and trust boundaries are therefore
+unchanged. The advisory floor test now covers pdfjs-dist. A PDF ingestion
+test in the `maintained workbench checks` CI job calls `parseOfficeDocument` with a generated
+two-page PDF and a corrupt one. It passed unchanged on 6.1.200 and 6.2.108,
+so text order, the single text part and the "Invalid PDF structure" rejection
+are preserved.
+
+Issue #23 proxy-addr and brace-expansion advisories. A Workbench test reads the
+Workbench `pnpm-lock.yaml` and the desktop packager's `package-lock.json`, and
+fails when any locked version of an advised package is below its first fixed
+release in SemVer order, so a prerelease of the fixed release also fails. The
+floors are proxy-addr 2.0.8 for GHSA-jqcg-44mw-7w3h and brace-expansion 5.0.12
+for GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p and the moderate
+GHSA-q2hr-2g5m-vwhr. The `maintained workbench checks` CI job runs it beside the Native package
+tests. The Workbench lock now resolves proxy-addr 2.0.8 under Express 5.2.1,
+which MCP SDK 1.30.0 brings in, and brace-expansion 5.0.12 under minimatch
+10.2.6. Both versions fit their parents' existing ranges and keep the same
+dependencies and engines. Eight Workbench lock lines change: two package keys,
+their integrity values, two snapshot keys and the two parent references. The
+desktop packager's development lock moves brace-expansion from 5.0.9 to 5.0.12
+under its own minimatch 10.2.6, changing only version, resolved and integrity.
+Manifests, workspace settings, Core and Toolkit pins and patch hashes are
+unchanged. The retained dependency review and a 5.0.12 receipt record SHA-512
+integrity matching both locks, publication more than 72 hours earlier, and no
+install scripts or binding.gyp. These are transitive request and glob helpers,
+so runtime flows, dependency owners and trust boundaries are unchanged.
+
+Documentation site Astro 7.3.5, replacing Dependabot PR #185. Dependabot moved
+the site to Astro 7.3.5 and Starlight 0.42.4 but left the Astro-scoped
+cache-policy override keyed to 7.3.3, so `npm ci` failed with ERESOLVE. The
+override now keys on `astro@7.3.5`, and the pin, the remote-image policy test,
+the policy README and the release workflow name 7.3.5. Astro 7.3.5 still
+declares `http-cache-semantics` ^4.2.0, which has no patched release for
+GHSA-ch52-4w7c-c8xp. In the 7.3.3 and 7.3.5 registry archives, whose SHA-512
+values match the lock, `dist/assets/build/remote.js` is the only importer and
+is byte-identical, constructing the policy and calling only `storable()` and
+`timeToLive()`. The local `@vivary/astro-no-cache-policy` module therefore
+still covers the caller, and the lock still links `http-cache-semantics` to
+it. The changed transitive packages were published more than 72 hours earlier
+with provenance and run no install scripts. The site remains a static
+documentation build outside the desktop and hosted application boundaries, so
+the described design still holds.
+
+2026-10-09 required-review corrections for issue #108. The complete chunked
+review of `012fd0a6` found defects that this change corrects in the Core patch.
+A scheduled run that waits for approval now moves its next run forward when the
+decision settles. The runner stores the resolved schedule-advance value, so the
+scheduler sweep's omitted option keeps its meaning, and Run now still stores
+false. When an organization run's owner can no longer act, a principal with
+deletion authority over the same automation may decline the wait, never approve
+it, and Settings Delete declines such a wait before deleting. Declining executes
+nothing. A lifecycle trace found the shared cause behind these findings: a wait
+had no clock, so any request its owner never decided blocked the job forever. The
+settlement pass now declines a ready wait whose request expired, with error code
+`automation_approval_expired`. The review of that commit found two gaps, each reproduced
+by a failing test. A wait saved before its turn was marked ready skipped expiry, so expiry
+now recovers it once its run has ended, then declines it. A queued Run now row keeps the
+resource owner, so for a personal job that runs under an organization its wait could be
+decided by nobody, did not block other runs, and could not be settled or deleted. Run now
+now refuses such a job when it declares connected tools, and the gate refuses any wait whose
+history row holds another owner or organization, with error code
+`automation_run_binding_mismatch`. Writing the history owner into the queued row instead
+would break the queued run's resource lookup, which reads the row owner. The trust-boundary
+table now names the approved configured MCP call as the third outward path. An end-to-end run
+on the built app found that Settings hid Delete, Edit, Run now and the on and off switch for
+every organization job that records an app ID, because `list-recurring-jobs` checked edit
+rights without the app ID while the Settings action that deletes passes it. The list now
+passes it too, so Settings offers Delete to the admin on the departed-owner path. A thread
+whose stored snapshot is malformed now reads as an ordinary thread unless its scope marks an
+automation run, so the run-custody check on each chat send no longer fails that chat. The
+review of the next head found three more gaps, each reproduced by a failing test. A webhook
+worker whose call a retry sweep put back to pending while the run continued could not
+complete it, so the call ran again. The worker now completes its own call over a pending row
+with the same payload, and still never replaces a settled row or another worker's claim. An
+approved continuation now keeps the run's integration request context and its automation
+caller, so the resumed half of a turn runs in the same context as the first. Moving a job
+file now takes the same approval custody check as deleting it. The review of the following
+head found that a personal job that runs under an organization shares its history key, the
+organization owner and the path, with other members' jobs of the same name, so its wait
+blocked their runs and deletes and stayed hidden from its owner's list. The owner chose the
+narrow correction: such a job is refused connected tools at start, as a shared-identity job
+is, so it never holds a wait. Keying waits by resource is issue #209. The review of the
+next head found two more gaps, each reproduced by a failing test. When a webhook run saved a
+wait and then failed on the call's last allowed attempt, the worker overwrote the task custody
+that the dispatcher had restored and added a second history row. The worker's failure write
+now changes only a pending or processing task, and it records the exhausted-attempts history
+only when that write changed the row. Settings Delete of a modern organization automation
+whose creator left declined the wait, which records its outcome on the definition, then
+refused against its earlier read of the definition. Delete now reads the definition again
+after the decline step and refuses one that was replaced. The Codex review found that an
+expiry pass whose write failed after its claim left the job blocked, and that Inspect run threw
+on a message whose content is a string. A later pass now settles the expiry pass's own stale
+claim, and the inspection renders string content as text. The task, history and deletion
+boundaries described above are unchanged. An owner's approval that crashes mid-resume still
+waits for the owner to revisit it, which issue #205 tracks. A shared job that declares connected tools is refused at start, since no
+person can approve for its pseudo-identity. Legacy job
+deletion with an unresolvable creator or organization scope refuses only when
+history is bound to that exact resource. History cleanup removes an ordinary
+run still in flight, so a reused name cannot inherit it. Approval custody stays.
+A removed member listing organization history gets a 403 refusal. Client thread
+saves cannot rewrite an automation run's transcript, which its approved
+continuation reloads. Title-only saves still work. The structure, flows and
+boundaries above describe the corrected behavior.
+
+2026-10-09 organization history inspection capability. The list action derives each run's advisory canInspect flag through the existing read-only inspection binding owner. Details hides Inspect when that capability is false or missing and retains the separate older-run unavailable wording for NULL-app history. Shared organization history remains visible to current members, while transcript inspection and decisions keep exact execution-owner and current-membership authorization. Listing does not resume work, resolve tools, reconcile outcomes or write bookkeeping. Maintained HTTP controls cover owner and second-member listing for waiting and terminal runs, direct access refusals, removed and foreign scope, and unchanged execution and custody. The existing component fixture renders actual list-action capability results. This successor has source syntax, documentation sync and patch-integrity checks only. Runtime validation and affected acceptance remain pending.
+
+2026-10-09 resource tool and ID/path deletion custody. Database job deletion through the personal Native resources tool, public resource ID/path helpers and legacy Settings action now delegates to the existing guarded full-snapshot deletion owner. The guard serializes with approval publication and refuses waiting, resuming and terminal-unreconciled custody before mutation. Legacy Settings requires a successful snapshot deletion before history cleanup. Existing owner and organization scope, retained history, ordinary resource deletion and both local workspace branches remain unchanged. Webhook token-setup compensation uses the same guard and preserves its original setup failure. Modern custody internals retain direct SQL and do not nest public helper transactions. Maintained controls exercise the actual resource script entry and Settings action, exact resource/history/thread/ask/task retention, zero extra execution, settled deletion, local files and snapshot contention. These successor runtime controls remain unrun. Source syntax, patch roundtrip, documentation sync and whitespace checks do not establish runtime acceptance.
+
+2026-10-09 authenticated resource deletion custody. The mounted Native resource DELETE path now checks the existing exact approval-history guard inside resourceDeleteIfCurrent's custody transaction for job definitions. PostgreSQL row locking and SQLite transaction ownership serialize deletion with durable approval publication. The full mutable-row snapshot DELETE remains the stale-write boundary, and deletion events follow commit. Waiting, resuming and terminal-unreconciled history cannot lose its definition through this route. Existing owner and organization authorization, admin cleanup without custody, ordinary non-job deletion and retained history remain unchanged. Maintained real HTTP controls mount Native authentication and the resources plugin, verify session lookup and an authenticated route positive, and cover custody refusal, settled and ordinary deletion, wrong-owner refusal, stale snapshots and the actual snapshot DELETE interleaving. Syntax, patch roundtrip, documentation sync and whitespace checks are the source-only validation for this successor. Controller runtime execution, complete independent review and affected acceptance remain pending. The incomplete published review remains failed coverage, not whole-PR approval.
+
+2026-10-09 known terminal outcome and legacy inspection correction. Approval continuation completion retains exact known success, error or interruption evidence and the original error code in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion, distinct from the known execution outcome. The existing sweep can settle successfully retained evidence only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome but cannot guarantee durable automatic recovery. Ordinary run bookkeeping retains its existing contract. Recovery redispatches no model, tool or delivery and never finishes an unfinished row from age or a projected status. Settings keeps NULL-app legacy history visible but labels its inspection unavailable. The shared inspection and approval authorizer stays strict. Maintained controls cover one and two selected pre-commit terminal-write rejections, exhausted writes with successfully retained evidence, healthy webhook success/error, an actually live resuming negative, settlement after storage restoration without another decision or execution, scoped legacy listing and rendered unavailable versus current Inspect states. Source syntax, documentation sync and patch integrity are the checks for this allocation. Runtime controls and affected acceptance remain unrun for these successor bytes.
+
+2026-10-08 terminal approval deletion custody. The existing resource transaction now refuses deletion when exact scoped approval history is finished but its outcome remains unreconciled, as well as while waiting or resuming. The guard still validates persisted application, owner, organization, resource, history, thread and ask binding before token or definition mutation. It does not change execution admission, terminal errors or departed-creator admin cleanup without retained custody. After real reconciliation, supported deletion removes eligible finished history before a same-name replacement is created. The maintained completion fixture covers a real terminal approval error, safe deletion diagnostics, refusal without resource or token changes, reconciliation, deletion and a genuine replacement run whose history and metadata survive later recovery. Only syntax, documentation sync and patch integrity checks run in this source allocation. Controller regression execution and candidate acceptance remain pending.
+
+2026-10-08 webhook completion custody correction. A terminal completion callback failure after durable approval waiting must reach the webhook worker with its original error. The dispatcher now recognizes an exact persisted terminal error history with retained approval context, checks the resource, execution owner, organization, app and thread binding, and uses the existing task custody owner before rethrowing. The worker preserves the waiting payload, and its existing claim and reconciliation paths settle the failed task and resource without model redispatch or tool effects. Webhook completion atomically checks the exact still-processing claim, including owner, organization, platform, external thread, payload and claim version. A late worker cannot overwrite a settled approval or a newer claim and reports failure without changing that current owner or dispatching its follower. Generic event and no-context webhook error handling, typed gate-storage failure and interruption retry remain unchanged. Maintained child-isolated controls cover the selected post-save stop-marker read failure, the identical healthy webhook wait and a no-context error. Deterministic barriers also cover reconciliation before the dispatcher history lookup and task settlement or replacement at the actual completion write. The pre-reconciliation delivery check runs before any owner decision. This successor has syntax and patch-integrity checks only. The passing b80cfa4 CI/build/UI observations preceded these bytes and do not establish candidate acceptance. Controller runtime checks, independent review and affected acceptance remain pending.
+
+2026-10-08 CI grouping for issue #108. The complete 26-file Node regression command now has its own step in the existing `workbench-maintained` job, separate from the `workbench` sequence that runs state-transport tests, Python coverage and typecheck. The batch also gained three issue #108 files: `native-thread-fold.test.mjs`, `automation-approval.test.mjs` and `automation-approval-owner-scope.test.mjs`. Natural exit is unchanged. Both jobs retain their IDs, status names, ten-minute limits, dependency setup, conditions and other commands. The design flow above remains accurate because this changes CI grouping only. The hosted run that motivated the move passed the earlier regression groups, including the 417 assertions and seven Python tests, but exceeded the existing workbench job budget during remaining configuration/typecheck work. The regrouped hosted jobs later passed, for example in run 37984385775.
+
+2026-10-08 issue #108 validation checkpoint. The Native completion callback now rejects its runner promise for any thrown callback error, including a failed durable turn-abort read after thread persistence, while rethrowing the original error to Native's completion handler. Stop, shutdown, typed approval-storage failure and response classification retain distinct outcomes. The focused controller gate passed 7/7, including text and approval-wait completion with selected marker-read faults, healthy reads, terminal persistence and existing wait/storage/event controls. These cases are included in, not added to, the ordinary 26-file batch, which passed 417/417 naturally. Configured workbench typecheck also passed. A failed waiting completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered wait. The local slice-review set includes an independent Native execution review of all 29 assigned sections, which found one Major completion-settlement defect that is now repaired. This scoped review set is not the required published exact-head review. These results validate the uncommitted 0.176.5 candidate, not the retained 4a01d31 CI/build artifact. A new-head build and built UI journey, required published review, live PostgreSQL execution and packaged Windows acceptance remain pending. Earlier source-only and unrun statements below record their original checkpoints.
+
+The automation completion callback now rejects its runner promise on every thrown callback error, including a failed durable turn-abort read after thread persistence. It also rethrows the original callback error so Native records its terminal failure. Existing interruption, typed approval-storage failure and response classification remain in their original order. Native finalization is awaited outside the callback before active ownership is released. Four maintained installed-owner controls cover completed text and approval-wait completion with a selected marker-read fault and matching healthy reads. A failed waiting completion records terminal history error with its unconsumed pending ask, rather than claiming a recovered wait. Only source checks have run for this correction.
+
+Cold webhook deletion prepares the existing token and app-secret schema memos before resource custody, then keeps token, secret, history and resource mutation on the supplied transaction executor. This avoids awaiting global initialization behind the transaction that owns the SQLite connection. Public singleton cleanup now awaits the same queued close owner, with repeated close sharing one promise. Old closed executors reject queries and later singleton initialization opens a new connection. Fresh-process deletion, wait refusal and held-transaction closure controls are maintained targets. Only source checks have run for this correction.
+
+The current approval correction validates organization membership with a parameterized organization and caller query. Nullable or unavailable membership fails closed for organization history while personal null-organization history remains accessible. Local SQLite serializes all public statements and transactions on its single connection. Transaction callbacks use their supplied executor, so unrelated admission cannot commit early or disappear with a custody rollback. PostgreSQL keeps its connection-bound implementation. Maintained storage controls cover rollback, commit, ordinary admission and two transaction contention. Healthy delete-first contention requires the changed-resource outcome. Runtime checks for this correction remain pending.
+
+Issue #108 current-head custody corrections. Settings requests recent bounded
+history plus owner, application and organization scoped unresolved or recoverable
+approval records. The history owner deduplicates the union and keeps the ordinary
+list and scheduler limit contract. A late pre-execution webhook contention result
+is retry, while a wait established for that exact task remains waiting. SQLite's
+existing immediate transaction and PostgreSQL's resource row lock serialize wait
+establishment with authorized deletion. Ask and history wait writes use that same
+transaction and check the exact live resource identity. Deletion rechecks persisted
+history scope before its token, secret and resource writes in the same transaction.
+A deleted or replaced definition cannot acquire custody. An admitted unfinished
+history survives ordinary deletion cleanup so its refusal can be recorded. No
+execution eligibility, owner permission or tool surface was broadened. Maintained
+controls use actual refused Run now records, authenticated history and inspection
+routes, a row-specific webhook barrier, and real modern/legacy deletion entrypoints.
+The races release held transaction barriers before awaiting readiness. New runtime
+controls, PostgreSQL execution, typecheck and app acceptance are unrun. Source
+syntax and patch roundtrip checks do not establish those results.
+
+Issue #108 approval predicate Stop correction. Review identified a real Stop
+window while Native awaits the configured tool's asynchronous needsApproval
+predicate. The pre-write stopping and surface-validation guards now remain
+outside the approval-persistence catch. A refusal there cannot infer a storage
+failure or change an existing abort reason. A second stopping check follows
+validation. Actual failed persistence still records its typed failure, while an
+already established concurrent Stop cause is retained on the Native chunk.
+The maintained child controls hold the real configured action predicate, invoke
+Native owner Stop or shutdown, release before shutdown drain, and assert zero
+approval-storage faults and configured effects. Ordinary Stop remains an error,
+shutdown remains interrupted and the webhook returns to pending with attempts
+restored. The selected SQL-fault diagnostic and retry-before-reconciliation
+control remain unchanged. New runtime controls are unrun. Syntax and patch
+integrity evidence do not establish runtime or app acceptance.
+
+Issue #108 thrown approval-storage failure correction. The selected task-wait SQL
+fault reached the runner once with zero configured effects, but its abort lost the
+storage error code and the webhook dispatcher reported completion. Native now
+preserves the typed gate-storage failure before generic abort classification and
+propagates only that webhook failure to the existing worker. The worker's ordinary
+failure transition retains the payload as pending. Exact-bound terminal approval
+reconciliation settles that task and resource without another model or tool run.
+Generic event errors and shutdown interruption retain their existing handling.
+The maintained diagnostic asserts the fault before the worker result and adds
+payload binding, typed terminal history, repeat reconciliation and refused replay
+checks. The no-fault wait/approve positive and actual quit retry controls remain.
+Only syntax and patch integrity checks were run for these new bytes. Controller
+runtime validation, independent review and acceptance remain required.
+
+Issue #108 departed-creator deletion correction. Independent review found that
+the legacy wait guard made current execution eligibility a deletion prerequisite,
+blocking an authorized admin from cleaning up an ordinary departed creator's job.
+Deletion now keeps the original mutation authority and independently projects the
+stored resource, recovered Factory scope, creator and organization through the
+existing history owner. Its unresolved-history query also includes exact retained
+resource/context bindings, so changed or missing scope cannot hide custody under
+another owner. It refuses unknown or conflicting scope before definition mutation.
+No membership or execution gate was broadened. Maintained normal-schema controls
+remove the creator's actual membership, prove execution refusal, allow no-wait
+admin cleanup, preserve waiting/resuming custody, then explicitly restore membership
+only for owner-decline cleanup. Missing and conflicting stored history scope and
+foreign app/org/non-admin attempts preserve resource and token snapshots. Existing
+task recovery, FIFO, original-chunk retention, Stop and answer folding are unchanged.
+The PostgreSQL pruning case is a static adapter/query-contract control, not real
+PostgreSQL database execution. Only syntax and patch integrity checks run here.
+Independent review and controller runtime, typecheck, CI and app gates remain
+required. The prior 1200-second implementation receipt remains interrupted.
+
+Issue #108 durable-owner recovery gaps. Source triage confirmed a crash between
+history and task wait writes, pruning of the original pending chunk after fresh
+attachment, and an omitted legacy deletion guard. Exact-bound task custody repair
+now runs through the existing task/history owners before claims, retries and
+settlement. Current app and stored context are conditional write bindings, not
+new execution permissions. Retention protects the pending context's original
+chunk for waiting and resuming histories. The legacy manage-jobs owner projects
+the resolved execution identity with the existing two-argument history helper
+before any delete. Maintained SIGKILL controls distinguish hard process loss from
+thrown storage errors and require actual fault-hit receipts, fresh-process owner
+decisions, zero or one configured effect, retained identity, pruning after
+settlement and FIFO wake after terminal bookkeeping. Personal, shared creator,
+personal-with-organization and org-admin deletion controls use normal Native
+schema initialization. Existing Stop, consumed replay refusal, reliable admission
+and progressive final-answer ownership remain unchanged. This source allocation
+runs syntax and patch integrity checks only. Controller runtime tests, independent
+review, typecheck, CI and built application acceptance remain required. Historical
+review coverage failure and prior evidence are preserved.
+
+Issue #108 admission persistence correction. The independent review found that
+thread attachment still swallowed a database failure before Native insertion and
+start. Initial history creation and its conditional thread attachment now fail
+closed before model or tool work. A failed attachment leaves an explicit failed
+history rather than a new admitted execution owner. Existing history ordering and
+the atomic resource CAS retain their shared predicate, so a genuinely admitted
+later completion remains protected. Continuations fill a legacy null admission
+marker from the already-attached history's original start time rather than the
+new chunk's clock. Maintained scheduler controls select one later-history SQL
+fault and compare a real no-fault completion. Fresh-process controls retain exact
+legacy wait and claim identity, recover only ended unconsumed claims, and refuse
+consumed replay. The FIFO wake and process-scoped transport controls remain
+unchanged. Only source checks run in this sandbox. Proposed-lock mismatch and
+pipe/loopback restrictions leave candidate runtime validation, ordinary batch
+exit, independent review and app acceptance with the controller.
+
+Issue #108 final admission and webhook lifecycle correction. The existing Native
+history owner now records initial execution admission separately from a durable
+Run now request or worker claim. Only admitted owners participate in the shared
+history and atomic resource ordering predicate. An admission timestamp and history
+ID form a total order, including timestamp ties. Continuation chunks retain that
+initial admission. Legacy attached history uses its recorded start timestamp.
+A refused queue cannot strand the original terminal resource at waiting.
+After durable approval task settlement and resource reconciliation, the existing
+claim-safe dispatcher wakes the next validated task on that same external thread.
+Dispatch failure leaves bookkeeping recoverable without replaying the consumed
+action. The normal transport fixture disables unrelated background loops through
+Native's supported process controls before imports, while explicit HTTP decisions
+and recovery stay live. Old-installed controls reproduced refused-queue suppression,
+equal-time ambiguity and the absent fresh-follower wake. Revised runtime gates and
+ordinary concurrent-batch natural exit remain controller checks.
+
+Issue #38 linked review correction. Inspected the final independent findings and
+actual Codex completion emitter, artifact projection, Code final admission and
+Native prepareRequest/displayMessage owners. Quoted history now retains actual
+results and artifact references. Preparation is distinct from the accepted Code
+user event and neither claims provider ingestion. The notice refreshes while
+mounted and keeps opaque identities in expanded inspection. Canonical empty
+Native sources can link onward without creating a prompt. New projection,
+request, admission and notice controls cover these boundaries. Source-sandbox
+checks and controller runtime/UI acceptance remain separate gates.
+
+Issue #38 linked conversations. The saved chooser now creates inactive targets
+through Native Code/thread and draft owners. Workbench stores only an immutable
+source boundary and scoped link metadata. Reads and explicit sends revalidate
+membership, project/root binding and retained identities. Runtime tools,
+approvals, provider resume state and the host-wide Code execution guard retain
+their existing owners. The linked-conversation design above describes bounded
+quoted context and the difference between available history, supplied excerpt
+and source session continuity. Focused production storage and component tests
+cover inactive creation, all supported directions, completed-prefix exclusion,
+source-bound paging, revocation, draft custody and failed creation with Retry.
+Source checks do not establish built-app acceptance or completion of issue #38.
+
+Issue #108 progressive approval answer persistence. The retained real continuation journal included the final model text, but saving its tool result first made the later fold compare that chunk with the longer accumulated waiting turn. Automation persistence now supplies the Native event sequence to the existing fold owner. Its retained per-chunk snapshots replace the current chunk when a later authoritative save arrives, including a shorter correction, while preserving earlier chunks and the waiting sentence. Equivalent or stale saves do not append content again. A consumed ask is removed from recorded snapshots as well as visible content so its unexecuted card cannot return during a rebuild. Chat and team callers retain the existing default fold policy. Pure source checks exercise progressive persistence, idempotence, earlier content, shorter corrections and new-turn isolation. Maintained approval and normal owner HTTP assertions require the final answer in a fresh durable thread read. Historical owner-scope, typecheck, build and UI custody results preceded these bytes. Affected installed suites, configured typecheck, independent review and the built UI final-answer journey remain required. No live profile, tool effect or provider call was changed, and publication remains held.
+
+Issue #108 personal approval ownership correction. The normal app reached a durable personal wait but its Inspect action returned an ownership refusal because Native's action transport backfilled the owner's active organization. The background runner now compares retained thread and continuation organization against the persisted run rather than that ambient selection. A run with an organization still requires the actor's exact organization and current membership. App, owner, history, thread and pending-action identity remain bound. New maintained tests mount the production Native actions through the normal HTTP route and cover personal inspection, decline without an effect, approve once, duplicate refusal, another owner, another app and real organization scope and membership refusals. The former personal wrong-organization assertion moves to an organization-bound transport control. The historical 268 tests, typecheck and app build preceded these bytes. This correction has only source checks until independent review, old-installed red controls, refresh, affected tests and the resumed built UI journey complete. The actual waiting profile and prior evidence remain untouched. Publication remains held.
+
+Issue #108 scoped lifecycle review correction. The completed independent review confirmed that terminal reconciliation passed the wrong argument shape to the existing history-owner projection. It now passes the retained user and organization together as the helper's second argument. This preserves the existing legacy shared creator and legacy personal-with-organization ownership contracts without changing authority, lifecycle states or the flow and storage descriptions. Added controls exercise those two supported identities, scoped personal and organization identities, and refusal of a forged retained creator through the existing recovery sweep. The fixture factory parser now stops at a bounded top-level terminator for both installed expression-bodied and proposed block-bodied arrows. Selected task faults normalize SQL whitespace and prove terminal history committed before the exact task or resource write failure. Fresh-process controls use the maintained retry sweep with dispatch candidates excluded and observe history, task, resource and reconciliation marker state. Source syntax and extraction-boundary checks remain distinct from unrun runtime controls. Prior interrupted and normal closeout receipts are retained. Controller refresh, meaningful old controls, exact-source review, affected runtime tests, CI and built UI acceptance remain required. External publication remains held.
+
+Issue #108 lifecycle correction after the published exact-head review. The completed read-only review confirmed lost Native wait evidence after ordinary pruning, incomplete terminal task and resource settlement after a crash, and deletion removing the owner decision route. Primary-source triage also confirmed that cold configured-tool construction omitted the existing MCP initialization await. The history and retention owners now retain unresolved chunk references and unreconciled terminal bindings. Existing scheduler and task recovery sweeps finish only recorded terminal bookkeeping, with an atomic history-bound resource guard and stable completion time. They do not dispatch a tool, send delivery or emit another finished event. Supported deletion refuses unresolved history before any definition, resource, token or history mutation. Declared configured tools await the idempotent initializer and local-only work skips it. Real storage controls exercise aged wait pruning, ordinary pruning, deletion, both decisions and interrupted bookkeeping boundaries with fresh-process recovery and unchanged effect counts. The prompt regression evaluates every scheduler, trigger and approval dependency using planted files rather than counting text copies. The retained CI job had 336 passing cases and one static-count failure. This wave performs source syntax and integrity checks only. No refreshed runtime green is claimed. Exact-source review, controller-owned offline refresh, deterministic runtime reruns, typecheck, applicable CI and built UI acceptance remain required. Prior evidence and capture holds remain retained.
+
+Issue #108 owner Stop repair. The retained lifecycle run completed with 86 passing tests and one failure. Its unchanged owner-Stop-then-quit test found that the approval settlement guard relabeled an ordinary aborted run as interrupted. The runner now recognizes an initial run explicitly aborted with reason user and lets its existing aborted error taxonomy finish the history. Shutdown still records interruption. Approval continuations keep their interrupted outcome, including Stop after the approved tool confirmed completion. The persisted-turn tool guard and interactive automation-thread refusal remain in place. Added deterministic controls cover initial owner Stop with and without a durable turn marker, shutdown, Stop after a consumed tool result and refusal of a stopped waiting turn before its configured side effect. The existing quit regression and prior approval assertions remain unchanged. The flow, storage and trust descriptions remain accurate because this restores their existing ownership contract rather than adding a new state or authority. Only source syntax and patch integrity checks are authorized in this repair wave. Scoped review, offline package refresh and runtime reruns remain pending. Prior receipts and capture history remain retained.
+
+Issue #108 source repair after independent review. The prior offline regression group recorded 70 passing tests and four failures, and a separate retained probe confirmed that late waiting metadata overwrote terminal outcomes. The runner now awaits Native terminal finalization outside onComplete before publishing readiness or retiring active ownership. Its explicit consumed and unconfirmed interruption survives the generic Native errored callback. The existing resource conditional writer adds an atomic history and chunk condition for waiting publication, used by scheduler, trigger and approval continuation paths. This prevents stale waiting writes after a decision and after a newer gate without loosening the unresolved-run guard. The real policy setter now uses SQLite integer bindings and PostgreSQL boolean bindings. Added regressions retain immediate process-exit restart coverage, hold the real Native terminal write, exercise both caller and decision combinations with delayed reads and writes, and test actual policy enable and disable APIs. The three confined plugin dependency paths replace the brittle prompt-occurrence count. The flow and storage descriptions and patch guide now state the finalization and monotonic publication rules. These repairs have source syntax checks only. Independent re-review, offline package refresh, deterministic reruns, typecheck, CI, capture verification and built UI acceptance remain required. Prior failures, probe evidence and historical receipts remain retained.
+
+Issue #108 source checkpoint. The maintained Core patch adds durable approval waiting and same-run continuation in the existing runner, history and Native approval owners. Scheduler, Run now, event and webhook callers propagate waiting. Settings inspects the retained thread through owner actions, while the production chat handler rejects crafted interactive continuation of an automation thread. The default twelve tools retain their restrictions. Explicit configured MCP calls require exact approval and current definition, visibility and connection fingerprints, with persistent allowance disabled. Runtime flow 8 and the unattended and approval-storage rows now explain conditional claims, fresh Native chunks, restart persistence and consumed-ask crash refusal. The patch guide and desktop guide distinguish source behavior from accepted packages. Deterministic installed-Core fixtures cover the lifecycle and trust boundaries and are registered in CI. Only source syntax, patch integrity, diff and documentation synchronization are permitted in this sandbox writer wave. Runtime suites, pinned-package refresh, type checks, independent exact-head review, CI and a built UI journey remain unrun. Issue #108 remains open through acceptance and merge. Historical receipts and their limits are unchanged.
+
+Issue #10 / PR #199 delayed Windows observation. The controller reproduced the fixed three-second pre-stop cutoff on unchanged `23304b8`: the real reader owner returned false after 3,017 ms before a valid 4,500 ms snapshot, then refused the second read. The public reader returned unavailable twice instead of available twice. Close now gives the in-flight scanner the remaining cleanup budget minus the teardown reserve. The 15-second overall deadline, three-second reserve, scanner's 10-second bound, original-root identity and fail-closed refusal/pipe-closure checks remain unchanged. The retained two-read regression simulates Windows executables on Linux; it is not packaged Windows acceptance. Controller green, affected checks, independent review and a matching new package/Windows acceptance remain pending. The original Windows scanner output was not captured, so this reproduction does not prove that incident's precise internal branch. Earlier scoped acceptance and failures remain preserved.
+
+Issue #10 / PR #199 Native Details privacy. Windows QA at `7631f7d` found local file links in the Native excerpt while Provider summaries were already path-redacted. Workbench now reuses the existing complete-text credential/path sanitizer for both source projections before truncation. Stored transcripts, source labels, event selection and read/output bounds remain unchanged; Native Running/Finished status text stays visible. Public-action regressions cover drive, UNC, file-URI and POSIX paths with spaces/apostrophes, paths crossing the 1,500-character cutoff, web links, URL credentials and unchanged transcript bytes. Controller preflight passes all nine checks; the complete details suite passes 40 tests with no failures or skips, including both new Native cases. Workbench typecheck exits zero through Native's TypeScript --noEmit branch, and Native Doctor, line endings and diff checks pass. Typecheck also emits missing production BETTER_AUTH_SECRET diagnostics, so it does not establish production configuration acceptance. Corrected built/packaged privacy acceptance and final-head published review, CI and Entire approval remain pending; prior Windows privacy failure, scoped observations and separate cleanup receipts are preserved.
+
+Issue #10 / PR #199 original-root observation. Required review found that a syntactically complete first Windows snapshot could miss the exited root and intermediate parent while leaving a disconnected grandchild. The reader now establishes the original root PID and retained creation-time identity before trusting ancestry; a different creation identity cannot satisfy that condition. Once established, later root-absent cleanup still uses retained identities. The existing actual-owner scanner fixture adds rootless-first and reused-root-first refusals, preserving admission/shutdown failure and no unsafe end selection; a reopened reader now gets its own live identity snapshot. All eight actual-owner observation regressions and both shared-shutdown tests pass, along with typecheck and explicit Native Doctor. Independent source reviews pass. The Linux reader/UI behavior is unchanged, so prior actual retained-read and browser evidence is reused. Simulated Windows rows do not establish native packaged acceptance or OS containment; final-head review/CI and Windows acceptance remain pending.
+
+Issue #10 / PR #199 reader test portability. Required review found that Linux executable fixtures also ran on Darwin, where the existing Codex reader owner refuses inspection because it cannot verify descendant cleanup. Successful stored-thread and held-reader lifecycle fixtures now run only on Linux; existing Windows-specific cleanup coverage keeps its platform gates. A public reader-owner regression simulates unsupported Darwin and FreeBSD platforms and asserts null with zero process launches, restoring the platform and spawn spy afterward. This test correction preserves the implemented Linux/Windows cleanup boundary and adds no platform support. The reader owner, fixture gates and published finding were inspected. All 16 affected public-reader and held-reader checks pass, along with typecheck and explicit Native Doctor. Unsupported-platform identity is simulated, not native macOS acceptance. Independent source review and the unchanged production/browser evidence are retained; renewed exact-head publisher/CI and packaged Windows acceptance remain required.
+
+Issue #10 Codex stored-thread details. Native reads bounded recent turn summaries through the existing Codex app-server APIs after owner/project authorization, preserves logical references on refusal and shares complete-text redaction. The reader registry closes admission, waits for cleanup and retains Windows ancestry before stopping. Required review at `8c8d335` found that a clean process scan could clear refusal despite open output pipes; retained owners now require live pipe closure too. Further review found repeated active Codex polling, early-root-exit Windows helpers and force-stop before graceful EOF. Codex details now use open/manual/final refresh without an active interval, and cleanup drains output after EOF before bounded fallback and ends only safely traced Windows identities. The corrected affected lifecycle/details suite passes 109 tests with four native-Windows-only skips; all 45 automation quit tests pass, including the two old CI failures. Typecheck, explicit Native Doctor and the guarded Node 24.19.0 build pass. Independent Spec and Standards source reviews report no findings. The built-browser polling check failed on old source with two extra reads in 5.5 seconds and passes with zero on the correction; manual/final/reopen refresh, desktop/390px isolation and redaction, and held-reader shutdown pass. Actual retained-thread inspection returns a redacted summary with unchanged provider-file checksum and no new model turn. The earlier local maintained-suite timeout and all failed fixture/CI/review results remain preserved; new exact-head CI is required. App-server startup helpers and outbound attempts are not contained merely by using read-only RPCs. The [Codex receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/10-codex-stored-thread-reader.md) distinguishes initial test-first evidence, later fixture corrections, simulated Windows rows and actual read/browser checks. PR #198 is merged at `df354d0`; accepted Claude work is preserved. Root records these factual results after the captured writer stopped. Final-head publisher/CI, Entire owner approval and existing-controller packaged Windows acceptance remain pending; issue #10 stays open without release/main promotion.
+
+Issue #10 / PR #198 spaced provider paths. Required review found that whitespace and apostrophes ended host-path redaction early and exposed private filename suffixes. The path alternatives now consume through the line end after whole HTTP/HTTPS matches and credential redaction. This deliberately hides ambiguous same-line prose without changing the next line, ordinary web links or the existing session identity guards. The public details regression covers unquoted and quoted POSIX, drive, UNC and file-URI paths, apostrophes and URL credentials; its test-only delta is retained. Replaying the regression against old source exposed the suffix while the correction passed; this was after authoring, not red-before-implementation. All nine coordinator preflight checks, 59 focused tests (one existing policy skip), type checking and the guarded build pass. Actual built desktop and settled 390-pixel browser checks preserve web links and next-line text, hide spaced-path suffixes, deny crossed-project details and make zero provider calls. Required review, final CI and owner approval remain pending.
+
+Issue #10 / PR #198 reopening details. A built-browser regression on clean `50ff1ae` closed an active panel, completed the selected run while closed and reopened within the global 30-second freshness window; no fresh details request occurred. Session details now overrides only its query with `staleTime: 0`, so reopening revalidates the cached excerpt. Active polling, final-refresh handling, manual Refresh and global cache settings are unchanged. Root verified the built-browser reopening regression green and the existing refresh regressions, including manual Refresh, with zero provider calls; the chat-draft checks (23 passing), typecheck and build also passed. All prior acceptance results and final review/CI/owner gates remain in force.
+
+Issue #10 / PR #198 provider links. The candidate-specific path scrubber treated the drive-like suffix of HTTP/HTTPS schemes as a filesystem path and damaged web links. Workbench now matches those URLs as whole text after existing credential redaction while still scrubbing POSIX, Windows, UNC and file-URI host paths before excerpt limits. File-URI matching requires a scheme/name boundary so ordinary labels such as `profile:default` remain intact. The maintained public details-action regression covers that label, ordinary and credential-bearing web links and each host-path form. The coordinator passed all nine preflight checks, 58 focused tests (one existing policy skip), 36 redaction tests, type checking and a guarded production build. Replaying the new public regression against the old source failed on the web-link assertion; the corrected source passed, without claiming red-before-implementation. The built app displays intact web links and redacted file URIs at desktop and settled 390-pixel layouts, denies crossed-project details, and makes no provider call. Prior acceptance evidence and strict Native scope guards are unchanged.
+
+Issue #10 / PR #198 concurrent reads and settled details. Native now admits ordinary overlapping reads through a small bounded FIFO while keeping one worker active and releasing admission after failure. Workbench keeps the redacted aggregate excerpt's newest tail. Session details uses the selected run's activity to stop history polling, preserves open/manual/error fetches and retains a pending final update until an in-flight fetch finishes, consuming it once and clearing it on close or scope change; parent host/status controls are unchanged. Public reader/action regressions cover concurrent same/different logs, failure release, overload and newest redacted text. A root-owned queued-message fixture follows the inspected official SDK's separate cross-session origin semantics without weakening root identity checks. The reader receipt records passing installed regressions, redaction, typecheck/build and copied-app browser acceptance, including the held-first-response race with synthetic phase-only transitions. Final exact-head review, CI and owner approval remain delivery gates. Earlier accepted evidence below is preserved.
+
+Issue #10 / PR #198 Unicode compatibility. The official SDK normalizes canonical cwd to NFC on Darwin before deriving its project key. Native now applies that same provider identity rule to keys, entry cwd and SDK session info while preserving exact filesystem canonical-path, link and session checks. The public details fixture uses a decomposed project name and known platform-specific SDK keys; negative cases reject another project's colliding name and distinct Linux NFC/NFD metadata. The reader receipt records passing installed regressions/build and a simulated Darwin boundary probe; native macOS filesystem acceptance remains unrun. Earlier verified reader and PR #197 evidence below is retained.
+
+Issue #10, bounded Claude provider inspection. Native owns exact-location discovery, bounded file reading and official SDK interpretation; Workbench authorizes owner/org/project first and redacts text before truncation. Session details keeps provider and Native sources separate. The Node worker limits time/memory and clears its environment but retains OS filesystem, subprocess and network rights. Nitro traces only the SDK's dynamic worker package, retaining its resources and proprietary notices without externalizing competing peer versions. Installed focused checks passed 50 cases with one existing policy skip; redaction passed 36, details 15, desktop host 20, and typecheck/build passed. Desktop/narrow browser checks and an isolated copied production server passed; real retained-log inspection preserved its bytes and invoked no provider. The [reader receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/10-claude-log-reader.md) owns measurements, SDK license terms and acceptance limits. Existing PR #197 continuity and performance evidence is unchanged. This Claude increment leaves issue #10 open for Codex viewing, current Windows acceptance and final delivery gates.
+
+PR #197 CI repair. Compatible version replacements in the site and Workbench
+locks update 28 existing entries in each: sharp and its platform packages to
+0.35.5, libvips packages to 1.3.4, and source-map-js to 1.2.2, addressing the two
+preexisting high CI advisories. Package membership, manifests, Core/Toolkit pins
+and patch hashes, and unrelated dependency values are preserved. The retained
+dependency review records matching SHA-512 integrity, publication more than
+72 hours earlier, and no lifecycle scripts or binding.gyp actions. Workbench
+sharp is Core's optional runtime dependency; its exported ingestion/media helpers
+have no current application callers and are absent from the inspected `.output`.
+
+The cleanup self-process exclusion confirms a PID-dependent fixture hazard; the
+actual CI host PID was not logged. The hidden-group wording fixture derives
+distinct synthetic identities from the host PID while retaining traced/none/mixed
+assertions and production PID/start and self-process protections. These dependency
+and fixture fixes leave runtime launcher policies and the described design unchanged.
+Final install/audit/build and affected test verification remain pending.
+
+Issue #10 malformed Claude session review fix. The independently reproduced
+numeric init/result bypass led to a narrow event guard: init/result frames require
+a valid UUID, and any other frame with an explicit identity is checked before
+transcript attachment. ID-less ordinary content/tool events remain compatible.
+The regression matrix checks numeric/null/missing/empty identities, preserved
+native references, excluded invalid output and requested versus confirmed resume.
+It is added but UNRUN here; frozen install and affected execution checks remain
+with the coordinator. Runtime flow 2's session ownership and continuity contract
+remain accurate. The runtime coverage receipt also incorporates coordinator-run
+direct Codex/QuickJS probes, with app-server/hooks/MCP/Windows proof still open.
+
+Release #10 runtime sandbox documentation. Reviewed the Native 0.176.5 launcher,
+evaluator and MCP owners, Workbench permission/worker/project hooks, Electron
+renderer settings, and the coordinator's retained Linux dev Node, direct Codex
+profile and QuickJS/host-bridge probes. The trust-boundary section now
+distinguishes requested CLI policy, evaluator API
+permissions, host actions and renderer isolation. The linked receipt and
+acceptance note preserve allowed temp/loopback and outside-canary reads, plus
+UNRUN Windows, hooks/MCP/Claude and production-composition checks.
+Existing execution owners and permissions remain accurate; this documentation
+changes no runtime configuration or acceptance gate.
+
+Issue #10 provider continuity slice. The maintained Native executor now enables
+Claude participant persistence, retains the reported session UUID on the existing
+run, resumes that UUID and stops mismatched-session output. Codex records its
+existing thread continuity through the same truthful turn status. The scoped Code
+action and Session details view expose a bounded redacted Native transcript
+reference, including missing/unavailable states. That slice did not expose
+provider-native logs. Runtime flow 2 now describes provider resume and legacy
+history reconstruction. Public inert-CLI and owner/project log-read regressions
+cover the source boundaries; real provider journeys, app UI testing and packaged
+Windows acceptance remain required. This change adds no executor, credential
+store, provider-log relocation or OS containment claim.
+
+Issue #188, budget validator. The paired performance validator now requires
 both established revisit budgets and rejects raised configuration ceilings.
 Future proven wins lower its policy ceilings and JSON values together, under
 source review. These changes preserve existing data ownership and access boundaries.
@@ -548,7 +1990,7 @@ The receipt, desktop guide, desktop README and acceptance register now distingui
 Issue #141. Details showed the list entry captured when it opened, and nothing refreshed the automation lists while the Automations tab stayed open, so LAST CHECKED, NEXT RUN, LAST RUN, and LAST STATUS could be minutes old. The first commit added three cases to `packages/workbench/tests/automation-status.test.mjs`. They bundle Core's real `AgentJobsTab.js`, `AutomationDetailsDialog.js`, and `use-jobs.js`, check the esbuild metafile for all three, run the hooks on React Query with a fake transport, and render under linkedom. All three failed on dev. The fix commit changes the maintained Core patch, which gains a hunk for `client/agent-page/use-jobs.js`, and its hash moves from `5d78cfc6` to `9157237f`, then to `631aa57e` in the round 1 fix commit, to `7dafe048` in the round 2 fix commit, to `5073ad3f` in the round 3 fix commit, to `0b780607` in the round 4 fix commit, to `51754920` in the round 5 fix commit, to `27eb641a` in the round 6 fix commit, and to `c8415a61` in the round 7 fix commit. `AgentJobsTab.js` keeps the open entry's key, its kind and resource id, and looks the key up in the current lists on each render, so Details shows current values and closes when its entry leaves the lists. A resource id is the primary key of the `resources` table, so the key is unique across both scopes. Every Details control goes through one function that also refetches the list that holds the entry. `useRecurringJobs`, `useAutomations`, and `useAutomationRuns` refetch every 30 seconds, half the scheduler's heartbeat interval, and React Query skips that refetch while the page is hidden. The fix commit adds a recurring-job assertion to the timed-refresh case, a case where past runs refresh while Details stays open, and a case where Details closes when its automation leaves the list. A mutation check found that no case clicked the hidden row button or the View details link, so the third commit adds a case that opens Details from each of the three controls and counts a list fetch for each. Every case opened a personal automation, so the fourth commit adds a case that opens Details on a personal recurring job and on an organization automation and checks that each refetches its own list. The round 1 fix commit closes that round's findings. An effect clears the key once no entry matches it, so a departed entry that returns does not reopen Details. A failed refresh keeps the last answer. Past runs keeps its list, and a section reports a load error only for a list with no answer. The three hooks set `refetchOnWindowFocus: true`, because Vivary does not mount the `useDbSync` that the house client's `false` assumes, so a return to a hidden window refetches stale data. Its cases pin the id key with one automation name in both scopes, close Details through a stub Close control, keep a returning entry closed, keep rows, Details values, and past runs through a failed refresh, skip the timer while hidden and refetch on return, check that every interval is exactly 30 seconds and that none outlives the tab, open Details from closed through each control, and cover the organization recurring-job branch. Past runs stays within 30 seconds of LAST RUN. A visible tab sends four list GETs every 30 seconds and a fifth while Details is open, and each reads the owner's job rows. The round 2 fix commit makes a refresh that keeps failing visible. A section whose list failed to refresh after an answer shows "Could not refresh automations. The values shown may be out of date.", and Details shows "Could not refresh. These values may be out of date." when its own list or Past runs did. Both notes follow React Query's `isRefetchError` and clear on the next successful refresh, so with a note shown, a LAST CHECKED far older than 90 seconds is the last value Settings received, because the latest refresh failed, and Vivary's server may be down, unreachable, or failing. Its cases check both notes and their clearing, that opening Details refetches no other list, and that Past runs fetches nothing after Close. A test commit then fails each of the four lists in turn and checks that the section note shows above that section's rows and not in the other section. The desktop guide's Automations bullet gains the failure caveat. The round 3 fix commit sets `networkMode: "always"` on the three hooks, so they keep fetching while the browser reports no network, because the desktop window's server runs on the same computer. It splits the Details note. The line above the fields follows only the entry's list, and Past runs shows "Could not refresh run history." for its own refresh. A pause, resume, edit, or delete from the page writes the list through its optimistic update or its rollback, which clears the list's error, so its note hides until the next refresh fails. Its cases check fetching and the notes while the browser reports no network, a first load that fails with its load error and no refresh note, the Details note for its own list only, the Past runs note and its clearing, and a return refetch of all four lists and the runs. A test commit then watches both organization lists in the no-network case and opens Details on a personal and an organization recurring job whose list then fails. The round 4 fix commit sets `networkMode: "always"` on `useManageRecurringJob`, `useManageAutomation`, and `useRunAutomationNow`, so with no network a change is sent at once instead of waiting for the connection while the list refresh undoes its optimistic value. It sets `refetchOnReconnect: true` on the three query hooks, because `networkMode: "always"` turns that refetch off. Its cases send a pause of a job and of an automation and a Run now with no network, refetch stale lists and runs when the network returns, fail each list's first load in turn, and place the Past runs note under its heading. The round 5 fix commit keeps a list that never loaded on its load error while the 30 second refresh retries it. React Query clears the list's error for each retry, so the tab counts a list with no data and an earlier failure (`errorUpdateCount`) as failed, and does not show "Loading…" for that retry. Its cases hold a timed retry of a never-loaded list in flight and check the load error and no "Loading…" during and after it, and refuse a resume with no network and check the rollback and the error line. The README now says Run now has nothing to roll back and shows its error in its dialog and the page's error line. The round 6 fix commit gives Past runs the same rule. The two helpers move to `use-jobs.js`, which the tab and the Details dialog both import, so a run history that never loaded keeps "Could not load run history." through each retry and shows no "Loading…". Its case holds a timed retry of the runs with Details open and checks the load error and no "Loading…" during and after it. The README's limit sentence now names an edit, which can show the old cron expression and timezone in Details while it saves. The round 7 fix commit makes the two helpers count only a fetch that finished since the query's observer mounted (`isFetchedAfterMount`), because React Query keeps a query and its failures for five minutes after Details closes or the tab is left. A list or Past runs reopened after a failed load now shows "Loading…" during its own fetch instead of the old load error, and a retry within one mount still keeps the load error. Its cases reopen the tab and Details after a failed load, hold the reopen's fetch, and check "Loading…" and no load error during it, the load error when it fails, and the rows or the run when a later fetch succeeds. The README, the desktop guide, and this entry now say that with a refresh note shown the values are the last ones Settings received, and the server may be down, unreachable, or failing, instead of saying the scheduler still runs. The same commit answers a review comment on the pull request. With `networkMode: "always"` on the three change hooks, a page opened from another device through browser access sent a change while that device was offline, failed it, and rolled it back, where React Query would have held it and sent it on reconnect. The change hooks now set `networkMode: "always"` only on a page whose hostname is `localhost`, `127.0.0.1`, or `[::1]`, and keep React Query's default elsewhere. The query hooks keep it on every page, because a failed read shows the refresh note. Its cases send an offline pause at once from each loopback hostname, and on a page from another device hold an offline pause of a job and of an automation and a Run now until the network returns. The file passes 32 of 32, the nine `automation-*` test files pass 162 of 162, and the workbench type check passes. Each of 80 mutations, one rule of the fix reverted or broken alone in the installed Core, fails a named case. They cover the snapshot, the key's makeup, each opener, the list each opener refetches and that it refetches no other, closing, Past runs stopping after Close, the key clearing on departure, each interval and its length, the refetch on return, the refetch on reconnect, fetching in both scopes and sending each change hook's request while the browser reports no network on a page from this computer, each loopback hostname, each change hook waiting with no network on a page from another device, the rollback and error line of a change refused with no network, both failed-refresh rules, the load error staying and Loading staying off while a list or Past runs that never loaded retries, Loading and no old load error when a list or Past runs is reopened after a failed load, the section note for each list and only in its own section, the Details note for its own list only, a job's as well as an automation's, the Past runs note for its runs only and under its heading, the section note reading `isRefetchError` and not `isError` for each list, the Past runs note doing the same, and each note clearing on the next successful refresh. The Settings page still polls and receives no pushed scheduler change, and the server is unchanged, so the descriptions above still hold. The patch README section "Settings automation status", the desktop guide, and the acceptance register describe the change. After #178 merged into dev, the branch merged dev. #178 changed the documentation site, `docs/RELEASE-WORKFLOW.md`, and this file. Its only overlap with this change is the top of this Last change review and the two site mirrors of this file, and the merge kept both entries.
 
 The documentation site removes the affected `http-cache-semantics` implementation
-for GHSA-ch52-4w7c-c8xp. Astro 7.3.3 is pinned and resolves its cache-policy import
+for GHSA-ch52-4w7c-c8xp. Astro 7.3.5 is pinned and resolves its cache-policy import
 to the independently written private `@vivary/astro-no-cache-policy` module.
 The two-method adapter assigns zero freshness to new or revalidated remote
 images; Astro still owns image storage, conditional requests, and stale fallback.
@@ -585,12 +2027,15 @@ The acceptance register records the issue #157 packaged result on the `15063405`
 Issue #157. A new owner session now needs an owner proof in every local access mode. `local-access.ts` derives the proof from the resolved configuration: desktop admission or a one-time sign-in store. A non-desktop launch without a data folder does not start. The desktop path already met the issue through the #30 capability and is unchanged. Standalone local and private-proxy launches gain the one-time sign-in address. `readVivarySessionTokens` now also accepts `X-Vivary-Session` on same-origin reads in private-proxy mode, because a probe behind the real Zo proxy received no `Cookie` header after a response set two cookies. An independent review then found that Native's MCP endpoint skipped the session guard and admitted a raw loopback caller that sent `X-Agent-Native-Owner-Email`. A run against the built app confirmed it, so `server/plugins/agent-chat.ts` turns the MCP server off whenever a local access mode is configured. The owner proof is now a required value that one function pairs with the configuration, and the private-proxy sign-in page checks browser storage before it spends an address. A second review round confirmed those fixes. It led Settings to hide the MCP tab for the local owner, moved the MCP decision into one function tested through Native's option resolver, and left hosted MCP for a separate decision. A third round turned Native's MCP connect and OAuth routes off with the endpoint through an app core-routes plugin, replaced the MCP settings guides with a note for the local owner, and restored test checks the second round had dropped. Native's Bearer, `_session`, and embed-token fallbacks still accept a valid existing token without Vivary's request checks. They need a credential first, so they are outside this issue. Before this change every proxied read minted a fresh owner session, which is the gap the issue names. Review covered the resolver and sign-in source, a regression for a loopback request with the expected Host, no Origin, and no secret (a session before the change, none after), the focused and built-app tests, a Chromium journey on Zo, the proxy probe log, a sign-in and replay check through the real Zo proxy, and the MCP reproduction before and after the fix.
 
 CI runs the workbench tests in two jobs apart from `tests + checks`. `workbench
-tests` installs the workbench dependencies and runs state transport, and
-`maintained workbench checks` installs them and runs the maintained checks.
+tests` installs the workbench dependencies and runs state transport, Python
+coverage and typecheck. `maintained workbench checks` installs them and runs the
+26-file Node regression batch in its own step, then the maintained checks. The
+batch moved there for issue #108 (see Last change review, 2026-10-08 CI grouping).
 Serializing the runtime tests raised the state transport step from 137 to 255
 seconds, and `tests + checks`, which took 9m44s on a passing run, was cancelled
 at its 10-minute limit. One combined workbench job would take about 8 minutes,
-and each change adds state transport tests, so the maintained checks run alone.
+and each change adds state transport tests, so the Node regression batch and the
+maintained checks run apart from state transport.
 The split restores the 10-minute limit for `tests + checks`, superseding the
 temporary 30-minute allowance from PR #154. Both workbench jobs also use a
 10-minute limit. Every job keeps the changed-path guard and every test command
@@ -1121,9 +2566,10 @@ register records it and the `0697293f` packaged check. Documentation only, so th
 
 Issue #103, Native usage cost. The maintained Core patch records the cost that a provider reports for a Native model
 call and never guesses one. The AI SDK engine reads OpenRouter's reported cost from the step's `finish-step` part and
-puts it on its usage event. `createTurnUsage` sums a turn's usage over its model calls and internal continuations. A
-retry replaces the attempt it retries, and the turn passes the sum as a reported cost only when every counted call
-reported one. Otherwise the usage store prices the tokens from its table, which has a Sonnet entry and no catch-all
+puts it on its usage event. `createTurnUsage` sums a turn's usage over its model calls and internal continuations. It
+counts every attempt, retries included. An attempt the provider refused before the model produced output (a rate
+limit, an overload, or a context overflow) counts as a known $0 call. The turn passes the sum as a reported cost only
+when every counted call reported one. Otherwise the usage store prices the tokens from its table, which has a Sonnet entry and no catch-all
 price, or it records the cost as unknown. The table setup marks the old estimates for unpriced models unknown once.
 The Settings Usage tab, the usage metrics, and cost alerts show an unknown cost as Unknown, add only known costs, and
 count the calls of unknown cost. An integration run sums its usage the same way, and the webhook handler writes the

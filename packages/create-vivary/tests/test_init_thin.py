@@ -852,10 +852,10 @@ class ThinInitTests(unittest.TestCase):
                 swap_destination_parent()
             return real_link(src, dst, *args, **kwargs)
 
-        def attempt_windows_parent_swap(file_handle, parent_handle, name, **kwargs):
+        def attempt_windows_parent_swap(file_handle, name, **kwargs):
             if not attack["attempted"] and name == "context.md":
                 swap_destination_parent()
-            return real_windows_rename(file_handle, parent_handle, name, **kwargs)
+            return real_windows_rename(file_handle, name, **kwargs)
 
         failed_closed = False
         try:

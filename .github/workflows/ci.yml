@@ -158,7 +158,7 @@ jobs:
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: mcp read-only adapter
         run: |
-          python -m pip install "mcp==2.0.0"
+          python -m pip install "mcp==2.2.0"
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
@@ -391,7 +391,7 @@ jobs:
           mcp_venv="$smoke/mcp-venv"
           python -m venv "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
-          "$mcp_python" -m pip install "mcp==2.0.0"
+          "$mcp_python" -m pip install "mcp==2.2.0"
           "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
           "$mcp_python" -m pip check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
@@ -399,14 +399,14 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.3"
+          assert version("vivary-mcp") == "0.1.4"
           assert version("vivary-tropo") == "0.5.5"
           assert version("vivary-core") == "0.2.7"
-          assert version("mcp") == "2.0.0"
-          assert version("mcp-types") == "2.0.0"
+          assert version("mcp") == "2.2.0"
+          assert version("mcp-types") == "2.2.0"
           mcp_requirements = requires("vivary-mcp") or []
           assert "vivary-tropo>=0.5.3" in mcp_requirements
-          assert "mcp==2.0.0" in mcp_requirements
+          assert "mcp==2.2.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
               for requirement in mcp_requirements
@@ -419,7 +419,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")
@@ -708,18 +708,18 @@ jobs:
       - name: workbench state transport
         run: |
           pnpm --dir packages/workbench exec tsx --test tests/local-access.test.ts tests/owner-sign-in.test.ts tests/native-state.test.ts tests/native-actions.test.ts tests/desktop-host.test.ts tests/chat-scope.test.ts tests/native-chat-project.test.ts
-          pnpm --dir packages/workbench exec tsx --test --test-concurrency=1 tests/local-code-agent.test.ts tests/code-state-snapshot.test.mjs tests/codex-models.test.ts tests/codex-executor.test.mjs tests/codex-app-server.test.ts tests/codex-transcript.test.mjs tests/codex-active-state.test.mjs tests/core-message-parent.test.mjs tests/local-root-provider.test.mjs tests/native-registry-scope.test.mjs tests/codex-approval.test.ts tests/code-execution-host.test.ts tests/local-runtime-setup.test.ts tests/local-code-approval-restart.test.ts tests/local-code-cleanup-refusal.test.ts tests/code-host-lifecycle.test.ts tests/desktop-server-shutdown.test.mjs tests/managed-projects.test.mjs tests/managed-project-reconnection.test.mjs tests/creator-runner.test.ts tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs tests/project-files.test.ts tests/project-memory.test.ts tests/file-draft-state.test.ts tests/original-runtime.test.ts tests/original-runtime-shutdown.test.ts tests/original-runtime-control-shutdown.test.ts tests/project-search.test.ts tests/project-file-location.test.ts tests/project-search-state.test.ts tests/project-read.test.ts tests/project-evaluate.test.ts tests/project-evaluate-form.test.ts tests/documentation-links.test.mjs tests/project-adoption.test.ts tests/project-adoption-service.test.mjs tests/project-preview.test.ts tests/preview-isolation.test.ts
+          pnpm --dir packages/workbench exec tsx --test --test-concurrency=1 tests/local-code-agent.test.ts tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts tests/code-state-snapshot.test.mjs tests/codex-models.test.ts tests/codex-executor.test.mjs tests/codex-app-server.test.ts tests/codex-transcript.test.mjs tests/codex-active-state.test.mjs tests/core-message-parent.test.mjs tests/local-root-provider.test.mjs tests/native-registry-scope.test.mjs tests/codex-approval.test.ts tests/code-execution-host.test.ts tests/local-runtime-setup.test.ts tests/local-code-approval-restart.test.ts tests/local-code-cleanup-refusal.test.ts tests/code-host-lifecycle.test.ts tests/desktop-server-shutdown.test.mjs tests/managed-projects.test.mjs tests/managed-project-reconnection.test.mjs tests/creator-runner.test.ts tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs tests/project-files.test.ts tests/project-memory.test.ts tests/file-draft-state.test.ts tests/original-runtime.test.ts tests/original-runtime-shutdown.test.ts tests/original-runtime-control-shutdown.test.ts tests/project-search.test.ts tests/project-file-location.test.ts tests/project-search-state.test.ts tests/project-read.test.ts tests/project-evaluate.test.ts tests/project-evaluate-form.test.ts tests/documentation-links.test.mjs tests/project-adoption.test.ts tests/project-adoption-service.test.mjs tests/project-preview.test.ts tests/preview-isolation.test.ts
           node --test packages/desktop/tests/main.test.mjs packages/desktop/tests/original-runtime.test.mjs packages/desktop/tests/package-snapshot.test.mjs packages/workbench/tests/startup.test.mjs
-          node --test packages/workbench/tests/usage-metrics-cold-start.test.mjs packages/workbench/tests/native-thread-save.test.mjs packages/workbench/tests/native-thread-save-queue.test.mjs packages/workbench/tests/native-thread-save-store.test.mjs packages/workbench/tests/native-engine-packages.test.mjs packages/workbench/tests/chat-model-groups.test.mjs packages/workbench/tests/replay-tool-call-ids.test.mjs packages/workbench/tests/automation-run-now.test.mjs packages/workbench/tests/automation-local-only.test.mjs packages/workbench/tests/cli-bridge-arguments.test.mjs packages/workbench/tests/sql-inspection.test.mjs packages/workbench/tests/sql-postgres-inspection.test.mjs packages/workbench/tests/automation-webhook.test.mjs packages/workbench/tests/automation-event-condition.test.mjs packages/workbench/tests/automation-event-loop.test.mjs packages/workbench/tests/automation-status.test.mjs packages/workbench/tests/automation-quit.test.mjs packages/workbench/tests/automation-file-review.test.mjs packages/workbench/tests/automation-file-review-component.test.mjs packages/workbench/tests/builder-offers.test.mjs packages/workbench/tests/builder-offers-component.test.mjs packages/workbench/tests/code-run-control-cleanup-component.test.mjs packages/workbench/tests/mcp-settings-component.test.mjs
           python packages/workbench/tests/managed-projects-python.test.py
           pnpm --dir packages/workbench typecheck
+          pnpm --dir packages/workbench run doctor
 
   workbench-maintained:
     name: maintained workbench checks
     needs: changes
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: require changed-path and dispatch validation
         if: needs.changes.result != 'success'
@@ -734,6 +734,8 @@ jobs:
         run: |
           npm install --global pnpm@10.33.2
           pnpm --dir packages/workbench install --frozen-lockfile
+      - name: automation lifecycle regression batch
+        run: node --test packages/workbench/tests/usage-metrics-cold-start.test.mjs packages/workbench/tests/native-thread-save.test.mjs packages/workbench/tests/native-thread-fold.test.mjs packages/workbench/tests/native-thread-save-queue.test.mjs packages/workbench/tests/native-thread-save-store.test.mjs packages/workbench/tests/native-engine-packages.test.mjs packages/workbench/tests/chat-model-groups.test.mjs packages/workbench/tests/replay-tool-call-ids.test.mjs packages/workbench/tests/automation-run-now.test.mjs packages/workbench/tests/automation-local-only.test.mjs packages/workbench/tests/automation-approval.test.mjs packages/workbench/tests/automation-approval-owner-scope.test.mjs packages/workbench/tests/cli-bridge-arguments.test.mjs packages/workbench/tests/sql-inspection.test.mjs packages/workbench/tests/sql-postgres-inspection.test.mjs packages/workbench/tests/automation-webhook.test.mjs packages/workbench/tests/automation-event-condition.test.mjs packages/workbench/tests/automation-event-loop.test.mjs packages/workbench/tests/automation-status.test.mjs packages/workbench/tests/automation-quit.test.mjs packages/workbench/tests/automation-file-review.test.mjs packages/workbench/tests/automation-file-review-component.test.mjs packages/workbench/tests/builder-offers.test.mjs packages/workbench/tests/builder-offers-component.test.mjs packages/workbench/tests/code-run-control-cleanup-component.test.mjs packages/workbench/tests/mcp-settings-component.test.mjs packages/workbench/tests/dependency-advisories.test.mjs packages/workbench/tests/pdf-ingestion.test.mjs packages/workbench/tests/xlsx-codepages.test.mjs packages/workbench/tests/markdown-reader.test.mjs
       - name: maintained workbench checks
         run: pnpm --dir packages/workbench test:maintained
 
@@ -911,7 +913,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
-          & $mcpPython -m pip install "mcp==2.0.0"
+          & $mcpPython -m pip install "mcp==2.2.0"
           if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
           & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
@@ -923,14 +925,14 @@ jobs:
           from importlib.metadata import PackageNotFoundError, requires, version
           import create_vivary
 
-          assert version("vivary-mcp") == "0.1.3"
+          assert version("vivary-mcp") == "0.1.4"
           assert version("vivary-tropo") == "0.5.5"
           assert version("vivary-core") == "0.2.7"
-          assert version("mcp") == "2.0.0"
-          assert version("mcp-types") == "2.0.0"
+          assert version("mcp") == "2.2.0"
+          assert version("mcp-types") == "2.2.0"
           mcp_requirements = requires("vivary-mcp") or []
           assert "vivary-tropo>=0.5.3" in mcp_requirements
-          assert "mcp==2.0.0" in mcp_requirements
+          assert "mcp==2.2.0" in mcp_requirements
           assert not any(
               requirement.startswith("vivary-core")
               for requirement in mcp_requirements
@@ -943,7 +945,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")

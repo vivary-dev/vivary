@@ -20,8 +20,11 @@ stored outside the user's project and visible through safe app references.
 Read [the desktop release target](../desktop-release.md),
 [ENGINEERING.md](../../../../ENGINEERING.md), and [Native owners](../native-owners.md).
 Native Code already saves run JSON and transcript JSONL in private app data.
-Its pinned Claude executor currently omits session options, causing the participant
-to disable native session persistence. Do not mistake Native replay for provider resume.
+The maintained pinned Claude executor now passes the participant persistence
+option, records the init-event UUID on the existing Native run, and requests
+resume from that reference. Legacy runs without a validated provider ID still
+reconstruct bounded transcript context. A requested resume is distinguished from
+a provider-confirmed resume. Do not mistake Native replay for provider resume.
 
 ## Owned files
 
@@ -60,6 +63,41 @@ git diff --check
 
 Do not patch node_modules, install another executor, duplicate credentials, or
 claim provider continuity from a matching title. Escalate a missing supported Native seam.
+
+## Implemented source boundary and remaining acceptance
+
+The owner-only `vivary-code-state` details action authorizes owner, organization
+and project/run before reading. It accepts no filesystem path. Native transcript
+reads remain bounded to 64 KiB and 20,000 redacted output characters. Provider ID,
+last-turn continuity and logical references survive missing logs.
+
+Native's public Claude reader derives only the documented short default path
+from retained canonical cwd/UUID. It refuses links, hardlinks, changed files and
+identity mismatch, bounds the whole input before JSON parsing, and uses the
+official SDK's read-only SessionStore semantics. Custom/hashed locations are
+unsupported. The worker limits resources and clears its environment but is not
+an OS sandbox. Workbench redacts user/assistant text before truncation and labels
+provider/Native sources separately. Credentials and provider storage stay in place.
+
+The [reader receipt](../receipts/10-claude-log-reader.md) records passing installed
+regressions, typecheck/build, desktop/narrow browser and actual isolated production
+output. Retained real-log inspection preserved file bytes and made no provider
+call. The unchanged executor retains PR #197's real four-turn, 137-second Claude
+Stop/restart/resume acceptance. Init/result UUID validation and ID-less ordinary
+content behavior remain covered by the maintained continuity tests.
+
+PR #198's Claude increment merged at `df354d0` with passing postmerge CI.
+Issue #10 remains open. Native's read-only Codex stored-thread reader and the
+existing scoped details integration are now implemented in source; the
+[Codex receipt](../receipts/10-codex-stored-thread-reader.md) records the supported
+summary API, limits and validation. The initial unsupported-status tracer failed
+before implementation. Corrected lifecycle/detail regressions, actual retained-thread
+read, guarded build and desktop/narrow built-browser checks pass; independent Spec
+and Standards source reviews pass. The local maintained suite timed out at its
+wrapper limit and remains incomplete. Private packaged Windows acceptance,
+commit-bound publisher review, exact-head CI, Entire verification and owner approval
+remain required. Existing real provider journeys are reused without another model
+turn; no release or main promotion is accepted.
 
 ## Log
 

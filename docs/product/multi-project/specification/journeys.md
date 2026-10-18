@@ -213,6 +213,33 @@ flowchart LR
 
 Factory and heartbeat use existing Native scheduling/task owners. Preserve one task identity, bounded retries and no-progress stops. A periodic trigger is not new authority. These later features remain unavailable until their integration and activation gates pass.
 
+### Automation approval waits
+
+An automation run that reaches a tool needing approval keeps one history, conversation and turn while it waits. The wait survives an app restart, and Settings shows it for inspection and a decision. Update this diagram in the same change as any change to these states, the decision authority, deletion or settlement (issue #108).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  state "Waiting for approval" as Waiting
+  state "Resuming" as Resuming
+  [*] --> Running: schedule, Run now, event or webhook
+  Running --> Waiting: tool needs approval
+  Running --> Completed: observed success
+  Running --> Failed: observed error
+  Running --> Interrupted: Stop, quit or lost run
+  Waiting --> Resuming: owner approves exact unexpired request
+  Waiting --> Declined: owner declines
+  Waiting --> Declined: Settings Delete declines after owner lost access
+  Waiting --> Declined: request expired
+  Resuming --> Waiting: approved step never started
+  Resuming --> Declined: request was already declined
+  Resuming --> Interrupted: approved step outcome unconfirmed
+  Resuming --> Completed: continuation succeeds
+  Resuming --> Failed: continuation fails
+```
+
+Only the run's owner can approve, and only before the request expires. Declining executes nothing. A request expires after an hour. An expired request can only be declined, so the next settlement pass declines it, which releases the job even when nobody acts. A wait saved just before a crash expires the same way once its run has ended. A personal job made while an organization was active runs under that organization and keeps its run history there. Its wait would block other members' jobs of the same name and stay hidden from its owner, so such a job cannot use connected tools and is refused at start, whether Run now or its schedule starts it. If an organization run's owner leaves or loses access, the automation's creator or an organization admin (whoever may delete it) can decline the wait, never approve it. Deleting the job in Settings declines that wait first, then deletes the job. A job that runs as the shared or organization identity cannot use connected tools, because no person can approve for it, so it is refused at start. After a waited run ends, settlement records its outcome on the automation, moves a scheduled job to its next run (Run now does not move the schedule), and releases the next queued webhook delivery. The webhook delivery that started a waited run stays held until settlement records that run's outcome, even when the run fails on the delivery's last retry. Deleting or moving a job is refused while a wait, a resume or an unsettled outcome is bound to it. History cleanup removes ordinary runs, including one still in flight, and never removes a wait.
+
 ## J11: Host, preview and platform acceptance
 
 The live preview is isolated from privileged app state. Supported agent browser tools inspect its errors through the same project conversation. Remote access explicitly connects an authenticated browser to the chosen host and can be revoked. Reconnection restores authorized references rather than starting another run.

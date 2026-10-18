@@ -8,6 +8,7 @@ import {
   VIVARY_CODE_ENGINES,
 } from "../server/local-code-agent.ts";
 import { projectMemory } from "../server/project-memory.ts";
+import { linkedConversations } from "../server/linked-conversations";
 
 export default defineAction({
   description: "Start or continue the local workspace owner's local Vivary code run.",
@@ -26,6 +27,7 @@ export default defineAction({
   toolCallable: false,
   run: async ({ message, model, engine, runId, projectId, draftSubmitId, draftThreadId }, ctx?: ActionRunContext) => {
     const workspace = await resolveVivaryCodeProject(ctx, projectId);
+    const loadLinkedContext = linkedConversations.codeSendLinkedContext(ctx, projectId ?? null, runId);
     return sendVivaryCodeMessage({
       ownerEmail: requireVivaryCodeUser(ctx),
       orgId: ctx?.orgId ?? undefined,
@@ -35,6 +37,7 @@ export default defineAction({
       projectContext: workspace ? await projectMemory.renderForRun(workspace, "code") : undefined,
       recordProjectContext: workspace ? load => projectMemory.recordLoad(workspace, load, "code") : undefined,
       message,
+      loadLinkedContext,
       model,
       engine,
       runId,

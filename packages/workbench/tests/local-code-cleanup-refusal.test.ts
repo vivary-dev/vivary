@@ -53,11 +53,17 @@ await mkdir(projectRoot);
 await mkdir(bin);
 await mkdir(scanner, { recursive: true });
 await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
-process.stdout.write('{"loggedIn":true}');
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
 // The runtime lookup adds `.exe` while the platform reads as Windows.
 await copyFile(path.join(bin, "claude"), path.join(bin, "claude.exe"));
+await writeFile(path.join(bin, "codex"), "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o755 });
+await copyFile(path.join(bin, "codex"), path.join(bin, "codex.exe"));
 // A run whose prompt asks for it exits after it receives its run, like a worker that died on its own.
 await writeFile(path.join(fixture, ".output", "server", "vivary-code-worker.mjs"), `
 import { writeFileSync } from "node:fs";
@@ -976,20 +982,23 @@ test("a refusal whose group may hold a process Vivary cannot read says so beside
   const slots = hostSlots();
   const before = slots.cleanup;
   const refusedAt = new Date().toISOString();
-  const sleep = { pid: 4321, name: "sleep", start: 700 };
-  const node = { pid: 4322, name: "node", start: 800 };
-  const unread = "Process group 4321 may also hold a process that Vivary cannot read or end. ";
+  // Synthetic targets must never alias the real host, which cleanup deliberately refuses to end.
+  const sleepPid = process.pid + 4_321;
+  const nodePid = process.pid + 4_322;
+  const sleep = { pid: sleepPid, name: "sleep", start: 700 };
+  const node = { pid: nodePid, name: "node", start: 800 };
+  const unread = `Process group ${sleepPid} may also hold a process that Vivary cannot read or end. `;
   const cases: [traced: (typeof sleep)[], remaining: (typeof sleep)[], instruction: string][] = [
     [[sleep], [sleep], "Choose End them to stop these processes. Vivary ends only listed processes it can confirm "
       + "came from that run, then checks again."],
     [[], [sleep], "Vivary cannot confirm that these came from that run, so it does not end them. If they did, stop "
-      + "them with `kill -KILL -- -4321`, then choose Continue anyway."],
+      + `them with \`kill -KILL -- -${sleepPid}\`, then choose Continue anyway.`],
     [[sleep], [sleep, node], "Choose End them to stop the processes confirmed from that run, then Vivary checks "
-      + "again. It does not end the others. If they came from that run, stop them with `kill -KILL -- -4321`."],
+      + `again. It does not end the others. If they came from that run, stop them with \`kill -KILL -- -${sleepPid}\`.`],
   ];
   try {
     for (const [traced, remaining, instruction] of cases) {
-      slots.cleanup = { runId: "hidden-beside", target: { platform: "linux", groupId: 4321, bootId: null,
+      slots.cleanup = { runId: "hidden-beside", target: { platform: "linux", groupId: sleepPid, bootId: null,
         traced: traced.map(({ pid, start }) => ({ pid, start })) }, remaining, total: remaining.length,
       fingerprint: null, hidden: true, scan: "done", step: "group", refusedAt, checkedAt: refusedAt, ends: [] };
       assert.equal((await agent.getVivaryCodeHostState(OWNER)).cleanup?.instruction, unread + instruction);

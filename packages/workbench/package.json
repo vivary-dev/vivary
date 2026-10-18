@@ -10,6 +10,9 @@
   "dependencies": {
     "@agent-native/core": "0.176.5",
     "@agent-native/toolkit": "0.19.3",
+    "@anthropic-ai/claude-agent-sdk": "0.3.288",
+    "@anthropic-ai/sdk": "0.93.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@ai-sdk/cohere": "3.0.60",
     "@ai-sdk/google": "3.0.121",
     "@ai-sdk/groq": "3.0.64",
@@ -26,7 +29,8 @@
     "react-router": "8.3.1",
     "h3": "2.0.1-rc.31",
     "zod": "4.5.4",
-    "next-themes": "0.4.6"
+    "next-themes": "0.4.6",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "scripts": {
     "test:registry": "node --test tests/registry-store.test.mjs",
@@ -36,14 +40,17 @@
     "test:mutation-quarantine": "node --max-old-space-size=192 --test tests/mutation-quarantine.test.mjs",
     "test:chat-title": "node --max-old-space-size=192 --test tests/chat-title.test.mjs",
     "test:chat-draft": "node --import tsx --test tests/chat-draft.test.mjs tests/native-archive.test.mjs tests/conversation-surface.test.mjs tests/native-chat-selection.test.mjs tests/row-focus.test.mjs",
+    "test:shared-ui": "node --import tsx --test --test-concurrency=1 --test-force-exit tests/shared-editor-preservation.test.mjs tests/command-menu-focus.test.mjs",
     "test:chat-draft-adapter": "node --test-force-exit --import tsx --test tests/local-code-chat-adapter.test.mjs",
     "test:settings-chat-handoff": "node --test tests/settings-chat-handoff-component.test.mjs",
     "test:email": "node --test tests/email-bcc.test.mjs",
     "test:chat-search": "node --import tsx --test --test-concurrency=1 --test-timeout=60000 tests/chat-content-search.test.ts tests/chat-search-client.test.ts tests/chat-search-navigation.test.ts tests/code-transcript-page.test.ts tests/chat-search-code-replay.test.mjs tests/chat-search-components.test.mjs",
-    "test:native-chat": "node --import tsx --test --test-concurrency=1 --test-force-exit tests/native-stream-errors.test.ts tests/native-usage-cost.test.ts tests/native-stop.test.ts tests/native-chat-components.test.mjs tests/native-chat-route-errors.test.ts tests/native-thread-meta.test.mjs",
-    "test:credential-redaction": "node --import tsx --test --test-concurrency=1 tests/credential-redaction.test.ts tests/native-redaction.test.ts tests/code-run-redaction.test.ts tests/code-run-worker.test.ts",
+    "test:native-chat": "node --import tsx --test --test-concurrency=1 --test-force-exit tests/native-action-schema.test.ts tests/native-stream-errors.test.ts tests/native-usage-cost.test.ts tests/native-anthropic-models.test.ts tests/native-stop.test.ts tests/native-chat-components.test.mjs tests/native-chat-route-errors.test.ts tests/native-thread-meta.test.mjs tests/native-claude-environment.test.mjs tests/native-claude-errors.test.mjs tests/code-route-selection.test.mjs tests/code-composer-placeholder.test.mjs tests/code-conversation-model-choices.test.mjs",
+    "test:credential-redaction": "node --import tsx --test --test-concurrency=1 tests/credential-redaction.test.ts tests/native-redaction.test.ts tests/code-run-redaction.test.ts tests/code-run-worker.test.ts tests/code-run-worker-redaction.test.ts tests/code-run-worker-legacy-model.test.ts",
+    "test:linked-conversations": "node --import tsx --test --test-concurrency=1 --test-timeout=60000 tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs",
+    "test:handoff": "node --import tsx --test --test-concurrency=1 --test-timeout=120000 tests/handoff.test.ts tests/handoff-components.test.mjs tests/files-handoff-components.test.mjs",
     "test:conversation-perf": "node --test tests/perf/intl-formatters.test.mjs tests/perf/user-message-expandability.test.mjs tests/perf/responsiveness-budget.test.mjs",
-    "test:maintained": "pnpm run test:registry-actions && pnpm run test:registry && pnpm run test:registry-http && pnpm run test:project-services && pnpm run test:shell && pnpm run test:mutation-admission && pnpm run test:mutation-quarantine && pnpm run test:chat-title && pnpm run test:chat-draft && pnpm run test:chat-draft-adapter && pnpm run test:settings-chat-handoff && pnpm run test:native-chat && pnpm run test:conversation-perf && pnpm run test:chat-search && pnpm run test:email && pnpm run test:credential-redaction && pnpm run test:browser-access",
+    "test:maintained": "pnpm run test:registry-actions && pnpm run test:registry && pnpm run test:registry-http && pnpm run test:project-services && pnpm run test:shell && pnpm run test:mutation-admission && pnpm run test:mutation-quarantine && pnpm run test:chat-title && pnpm run test:chat-draft && pnpm run test:chat-draft-adapter && pnpm run test:shared-ui && pnpm run test:settings-chat-handoff && pnpm run test:native-chat && pnpm run test:conversation-perf && pnpm run test:chat-search && pnpm run test:linked-conversations && pnpm run test:handoff && pnpm run test:email && pnpm run test:credential-redaction && pnpm run test:browser-access && pnpm run test:mcp-oauth",
     "build": "agent-native build",
     "dev": "agent-native dev",
     "start": "node bin/start.mjs",
@@ -54,7 +61,9 @@
     "test:browser-access": "node --import tsx --test tests/browser-access.test.mjs tests/preview-socket-owner.test.ts ../desktop/tests/browser-capability.test.mjs",
     "test:browser-access-app": "node --test tests/browser-access-app.test.mjs",
     "test:owner-sign-in-app": "node --test tests/owner-sign-in-app.test.mjs",
-    "test:hosted-mcp-app": "node --test tests/hosted-mcp-app.test.mjs"
+    "test:hosted-mcp-app": "node --test tests/hosted-mcp-app.test.mjs",
+    "test:mcp-oauth": "node --import tsx --test --test-concurrency=1 tests/mcp-oauth-issuer.test.mjs tests/mcp-oauth-desktop.test.mjs tests/mcp-oauth-desktop-components.test.mjs",
+    "test:mcp-oauth-app": "node --test tests/mcp-oauth-app.test.mjs"
   },
   "devDependencies": {
     "@react-router/dev": "8.3.1",

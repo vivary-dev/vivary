@@ -5,6 +5,7 @@ import {
 } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, callAction } from "@agent-native/core/client/hooks";
 import type { NativeActionCaller } from "./native-actions";
+import { codeConversationModelChoices } from "./code-conversation-model-choices";
 import type {
   VivaryCodeState,
 } from "../../server/local-code-agent";
@@ -15,6 +16,7 @@ const PRE_APPEND_CODE_REJECTIONS = new Set([
   "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_run_active",
   "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
   "vivary_code_cleanup_required",
+  "vivary_linked_history_unavailable",
 ]);
 
 function isPreAppendCodeRejection(error: unknown): boolean {
@@ -64,7 +66,7 @@ export function createLocalCodeChatAdapter(
       }
       const engine = options.engines().find(item => item.engine === options.context.engineRef.current);
       const model = options.context.modelRef.current;
-      if (!engine || !model || !engine.models.includes(model)) {
+      if (!engine || !model || !codeConversationModelChoices(engine, options.runIdRef.current !== null, model).includes(model)) {
         throw await rejectLocal("Choose an available runtime and model.");
       }
       if (input.abortSignal.aborted) {
@@ -74,9 +76,14 @@ export function createLocalCodeChatAdapter(
 
       const send = async (params: Record<string, unknown>) => {
         try {
-          return await options.call<VivaryCodeState>("vivary-code-send", params);
+          const state = await options.call<VivaryCodeState>("vivary-code-send", params);
+          if (state.run && !state.error && typeof window !== "undefined") window.dispatchEvent(new Event("agent-chat:threads-updated"));
+          return state;
         } catch (error) {
           if (draftSubmitId && isPreAppendCodeRejection(error)) await options.onKnownRejected(draftSubmitId);
+          // A late project or host refusal can follow linked preparation, which the server already recorded.
+          // Refresh only the linked-history notice. The request was not accepted, so no thread update is sent.
+          if (typeof window !== "undefined") window.dispatchEvent(new Event("vivary:linked-history-updated"));
           throw error;
         }
       };

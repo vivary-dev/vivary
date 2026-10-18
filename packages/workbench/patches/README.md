@@ -43,18 +43,6 @@ includes these socket-free regressions. Remove these hunks and the shared helper
 when pinned upstream Core preserves the same formatting, bounded constructor
 reuse, and deferred collapse behavior and passes these tests without the patch.
 
-## Usage record ID collisions
-
-Issue #188's maintained CI exposed two rapid usage writes selecting the same
-millisecond/random-suffix ID. The Core usage store now uses its existing database
-conflict-targeted insert pattern, trying at most sixteen consecutive safe-integer
-IDs. Existing usage rows are never replaced. Other database errors propagate;
-exhaustion rejects. Each insert disables connection replay so an ambiguous
-transport failure cannot turn an already committed charge into another row.
-Alerts enqueue only after an insertion succeeds. The public usage regressions
-cover concurrent store instances, costs/IDs, bounded exhaustion and a refused
-insert. Remove this hunk when upstream preserves those behaviors.
-
 ## Responsiveness baseline overlay
 
 `responsiveness-baseline.patch` is applied only to the fixed pre-E1 checkout by
@@ -62,6 +50,310 @@ the paired CI guard. It adds the pinned Playwright importer and built-app helper
 metadata/idempotent shutdown. It is not a pnpm package patch and contains no E1
 runtime change. The baseline also receives the current harness and opt-in metrics
 plugin. The guard’s recorded dirty-source hash binds this exact overlay.
+
+## Claude launcher and provider errors
+
+The optional `claudeCli` executor options preserve the resolved executable,
+launcher prefix, and filtered environment through authentication, execution,
+and queued follow-ups. Windows SystemRoot survives case variants so Node can
+initialize crypto. The existing credential allowlist remains in place.
+
+Claude uses its ordinary text-input protocol. Vivary does not request account
+usage controls or attach a funding admission callback. Rejected rate-limit
+events and error result envelopes become errored turns with provider details.
+The registered redactor runs before Claude error normalization and truncation,
+then the existing Native transcript owner retains the safe details. Worker setup errors
+cross IPC as bounded, redacted messages. No provider failure selects another
+runtime, model, or API route. Offline worker fixtures cover new and resumed
+execution. The Codex app-server reads its current account and provider
+configuration before starting a thread. API-key sign-in and custom providers
+refuse without a turn or fallback. This check does not read funding controls.
+Live provider and packaged Windows checks remain separate.
+
+## Native API Claude catalog
+
+Issue #38. The maintained Core patch updates direct Anthropic and AI-SDK Anthropic
+model metadata to Sonnet 5.5, Haiku 5.5, Opus 5.5, and Fable 5.1. The direct default
+is `claude-sonnet-5-5`. Existing older IDs stay listed, saved Settings and composer
+choices remain selected, and no conversation model is migrated. To upgrade an
+existing choice, select the exact new model intentionally. Builder and OpenRouter
+keep their separate model IDs and defaults. The optional AI-SDK Anthropic adapter
+remains hidden by Workbench. The pinned dependency graph includes its SDK. Catalog metadata does not establish account availability.
+
+Rendered acceptance also found that `list-agent-engines` returned Anthropic with
+the global Builder model when no engine was configured. Its no-entry fallback now
+uses the reported engine's registered default, keeping `chosen: false`. A fresh
+Custom keys form therefore starts with `claude-sonnet-5-5`. Stored/app model
+candidates and custom model normalization remain unchanged. The offline action
+fixture checks the fresh result and saved legacy/custom choices with a disposable
+SQLite store and no outbound transport. Explicit provider selection continues to
+use that provider's catalog default.
+
+`agent/model-config.js` owns exact IDs, 1M context and 128K output limits, and direct
+API rate metadata. The definitions were verified on 2026-10-13 against official
+[Sonnet](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
+[Haiku](https://platform.claude.com/docs/en/models/haiku-5-5/overview),
+[Opus](https://platform.claude.com/docs/en/models/opus-5-5/overview),
+[Fable](https://platform.claude.com/docs/en/models/fable-5-1/overview), and
+[pricing](https://platform.claude.com/docs/en/about-claude/pricing) documentation.
+Rates below are USD per million tokens for standard global inference.
+
+| Direct model | Input | Output | Cache read | 5m write | 1h write |
+|---|---:|---:|---:|---:|---:|
+| `claude-sonnet-5-5` | 2 | 10 | 0.10 | 2.50 | 4 |
+| `claude-haiku-5-5`, prompt through 100K | 0.10 | 0.50 | 0.01 | 0.125 | 0.20 |
+| `claude-haiku-5-5`, prompt above 100K | 0.50 | 2.50 | 0.05 | 0.625 | 1 |
+| `claude-opus-5-5` | 4 | 20 | 0.20 | 5 | 8 |
+| `claude-fable-5-1` | 10 | 50 | 0.25 | 12.50 | 20 |
+
+`usage/store.js` estimates these rates only with an actual `anthropic` or
+`ai-sdk:anthropic` engine identity. A routed ID or an unknown engine does not inherit
+the direct rate. Haiku's tier uses each request's entire prompt, including cached
+tokens. `createTurnUsage` sums request estimates before aggregation. Cache writes
+need their observed 1-hour subset, emitted by the direct engine from SDK usage.
+An aggregate with no Haiku request lengths, a write with no duration breakdown,
+or a call with no route evidence remains unknown. Provider-reported cost wins,
+including zero. Integration budgets retain their existing reservation fallback for
+unknown costs. Traces omit an unverified generation estimate and retain their
+existing zero placeholder for an unknown run estimate. Historical estimates for
+these model IDs remain unchanged. Batch, fast mode, regional routing, server-tool
+fees, negotiated prices, and subscriptions are not established by this table.
+
+The installed SDK 0.93.0 accepts string model IDs and adaptive thinking. Native's
+reasoning helpers recognize exact new Opus and Haiku IDs and omit withdrawn
+sampling parameters. The engine validates explicit thinking options before
+transport. Haiku accepts disabled thinking through high effort. Sonnet's
+`between_tools` setting accepts low through high on the direct engine. The pinned
+AI SDK lacks this mode, so its hidden adapter refuses it locally. Manual budgets are refused for
+these new models, and Opus/Fable cannot disable thinking. Saved settings are not
+rewritten. See the official [effort guide](https://platform.claude.com/docs/en/build-with-claude/effort)
+and [migration guides](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
+Native retains signed thinking blocks. Fake transport can check replay shape,
+but it cannot establish the provider's signature checks when earlier history,
+system instructions, tools, model, or account changes.
+
+Focused checks use `native-anthropic-models.test.ts`, its intercepted-transport
+fixture, `native-usage-cost.test.ts`, and `chat-model-groups.test.mjs`. They exercise
+the actual installed model owners and SDK without contacting a provider. API
+catalog metadata does not change the selected provider route. API prices do not establish account entitlement.
+Both installed SDK adapters are checked through intercepted transport. Live API
+acceptance remains unrun.
+
+## Native action JSON values
+
+Offline Windows acceptance found that a Native `vivary-project-evaluate` Decide
+call with numeric `turns_used: 0` and `actions_used: 0` reached the adapter with
+strings. Core's discovery discarded the action's Standard Schema. The agent
+loop then validated its advertised JSON schema with coercion enabled. A JSON
+record's first union branch accepts strings, so valid numbers, booleans and nulls
+could change before the action's strict validator ran. This affected other
+record-valued actions and manually declared JSON-schema tools too.
+
+The maintained patch retains the declared schema through static, filesystem,
+and development action discovery. The action's wrapped validator remains the
+validation owner. For manually declared JSON-schema tools, Native first checks
+the original input without coercion. Already valid JSON keeps its types. Only
+an input that fails that check enters the existing coercing compatibility path.
+Malformed inputs still fail, and authorization still runs after validation.
+
+The patch changes `dist/server/action-discovery.js`,
+`dist/server/agent-chat-plugin.js`, and `dist/agent/production-agent.js`.
+`tests/native-action-schema.test.ts` invokes Native's actual agent loop with an
+injected deterministic engine. It checks both static export forms, JSON scalars,
+nested records and arrays, raw-schema compatibility and rejection, numeric Decide
+budgets, and actor, evidence, owner-only and foreign-path refusals before a runner.
+The maintained Native test command includes this regression. The existing
+project-evaluate tests cover the broader governed adapter contract.
+
+The frozen Windows acceptance package remains unchanged. Acceptance of a new
+package is a separate gate. The original review/control tool contract belongs
+to [issue #20](https://github.com/vivary-dev/Vivary-New/issues/20).
+Remove these hunks when a pinned upstream Core release preserves action schemas
+through discovery and passes the JSON-value regressions without this patch.
+
+## Claude provider session continuity
+
+Issue [#10](https://github.com/vivary-dev/vivary/issues/10) connects the pinned
+Core Claude participant's existing session options to the Native Code executor.
+The executor enables persistence and records a validated UUID from the init event
+on the existing Native run, before Stop can interrupt it. Later turns request
+resume with that UUID. A different or invalid event session stops the turn and
+leaves the recorded reference intact. Init and result records require a valid
+UUID even when their identity is missing, numeric, null or empty. Ordinary
+content/tool events may omit it; any explicitly supplied identity is checked
+before its output is attached. A failed request remains `resume-requested` until
+a matching valid init confirms the same session. Rejecting a later result does
+not erase that earlier confirmation; transcript replay never confirms resume.
+Codex retains its app-server owner and thread validation and records the same
+continuity vocabulary.
+
+Runs without a validated provider ID reconstruct bounded Native transcript
+context. Valid IDs support later native resume. Provider files and credentials
+retain their runtime owner and location. The scoped Workbench details action adds
+a separately labeled Claude excerpt through Native's public
+`readClaudeCodeSessionLog`. The [reader receipt](../../../docs/product/multi-project/receipts/10-claude-log-reader.md)
+records passing installed checks, browser acceptance and isolated copied-output
+acceptance without a provider call.
+
+Only the documented short default cwd/UUID location is supported, without scans
+or client paths. SDK-compatible provider key and cwd metadata normalization is
+NFC on Darwin only; filesystem canonical-path/link checks retain their original
+spelling and Linux NFC/NFD identities remain distinct. The public Unicode
+regression passes installed Linux checks; native macOS acceptance remains unrun.
+Input caps are 256 KiB, 2,048 complete lines, 32 KiB per line and
+nesting depth 32 before JSON parsing. Links, hardlinks, changed snapshots, identity
+mismatch and cyclic parents fail safely. The official SDK interprets opaque
+entries via a read-only store in a terminable worker with a three-second deadline
+and bounded heap. A bounded FIFO admits one active inspection and four waiters,
+with a 15-second wait limit and unavailable status for overload/expiry; every
+outcome releases admission. Workbench redacts allowlisted user/assistant text
+before per-message limits and keeps the newest 20,000 aggregate characters.
+The worker clears its environment but retains OS filesystem,
+subprocess and network rights; it is not an OS sandbox. Missing canonical project
+folders permit retained history; existing linked project paths remain refused.
+Session details polls only its selected active run, refreshes once when that run
+settles while open, and offers manual Refresh. Parent host/status queries are
+unchanged. New concurrent-read, overload, queued-origin and newest-excerpt
+regressions pass after the updated frozen install. The reader receipt records
+the affected built-browser polling and held-response acceptance, with synthetic
+activity transitions distinguished from real provider execution.
+
+`packageExtensions` declares Agent SDK 0.3.288 as a Native peer. Workbench pins
+that SDK, API SDK 0.93.0 and MCP SDK 1.31.0. Core retains API 0.90.0 and root Zod
+4.5.4 satisfies its reader peer. Exactly eight optional SDK executors are excluded
+through `ignoredOptionalDependencies`. The frozen install and dependency audit
+passed; installed package files are not edited.
+
+The production `nitro.config.ts` seeds the resolved SDK worker entry through
+Nitro's supported `traceOpts.hooks.traceStart` and traces only its full package
+through `traceDeps`, retaining resources and notices. This covers the opaque
+worker import while preserving Core/app peer bundling; full peer tracing can mix
+installed versions. Existing worker chunk emission is preserved and no custom
+copier is used. The isolated server's readiness, scoped action and browser passed,
+with the SDK notice present and no optional executors.
+
+Preserve the proprietary SDK license and notices. The
+[official README](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/README.md#license-and-terms)
+and [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) cover
+normal customer-product integration; no additional vendor approval gate has been
+established. This grants no MIT or unrestricted relicensing rights. Existing
+release acceptance and publication approval remain required.
+
+Run `pnpm --dir packages/workbench exec tsx --test --test-concurrency=1
+tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts
+tests/local-code-agent.test.ts tests/codex-executor.test.mjs`. The Claude fixture
+uses the public executor, real participant and Native store with an inert CLI on
+its PATH, including malformed init/result identities, explicit invalid content
+identities and compatible ID-less content/tool events. Its executable fixture is
+POSIX-only. These checks make no provider calls and do not replace real provider
+or packaged Windows acceptance. Remove the
+executor hunks when a pinned upstream Core version preserves and validates
+Claude session references and passes these regressions without the patch.
+
+## Codex stored-thread details
+
+Issue #10 adds Native's public `readCodexCodeSessionLog`, separate from the
+executing app-server entry. It uses the pinned provider's metadata read and one
+bounded descending summary page, with canonical identity/store guards and raw
+byte/UTF-8/depth/time/queue limits. Workbench retains launch and verified tree
+cleanup through a narrow lifecycle callback and shares the Claude redaction path.
+No dependency or provider turn is added. The [Codex receipt](../../../docs/product/multi-project/receipts/10-codex-stored-thread-reader.md)
+records the API, summary semantics, runtime limits and pending installed/browser/
+private Windows validation. Preserve all previous patch hunks; regenerate the
+Core patch hash through supported pnpm resolution before frozen install. Installed
+regressions must use the resulting patched dependency, not a source-only import.
+
+## MCP OAuth issuer binding
+
+Issue [#214](https://github.com/vivary-dev/vivary/issues/214) raises Workbench's
+MCP SDK to 1.31.0 and overrides Native's SDK to match. Native's client, core and
+server dependencies move together to 2.2.0. These versions fix
+[GHSA-6qxp-vccf-f47h](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h).
+The unrelated WebMCP types dependency retains its server and core 2.0.0 packages.
+The advisory excludes server-only use, and no affected SDK or client remains.
+
+The managed-client catalog pins HubSpot's issuer to `https://mcp.hubspot.com`
+and Google's to `https://accounts.google.com`. Configured client information
+returns that trusted issuer with its credentials. Discovery cannot choose their
+binding. Native's existing SDK provider preserves saved issuers, filters reads
+for another issuer and keeps the PKCE callback's recorded registration binding.
+Its direct refresh path retains the same nonempty issuer check across discovery,
+client information and tokens before sending a request.
+
+Revocation now applies that check too. Missing or different bindings return
+`unsupported` without a request, then retain Native's local revision comparison
+and deletion. A concurrent replacement remains saved. This lets an old unbound
+grant be disconnected or replaced safely. An unexpired legacy bearer can still
+serve its exact canonical MCP resource without an authorization-server request.
+The generic credential validator and incoming MCP route policy are unchanged.
+
+Run `pnpm --dir packages/workbench test:mcp-oauth` and
+`node --test packages/workbench/tests/dependency-advisories.test.mjs`.
+The installed-owner tests use synthetic credentials, a disposable SQLite store
+and a fake fetch transport. They cover static-client PKCE, changed discovery,
+issuer persistence, refresh rotation, refused credential requests, local unlink
+and replacement custody. They make no provider or account calls.
+
+After `pnpm --dir packages/workbench build`, run
+`pnpm --dir packages/workbench test:mcp-oauth-app`. This starts the normal built
+local server with a disposable owner profile, a loopback OAuth and MCP fixture,
+and a child-only fetch guard that refuses destinations outside loopback.
+The existing configured-origin setting supplies the exact HTTP app origin.
+The route-level journey connects through PKCE, verifies tool discovery, restarts
+with the same stored connection and disconnects with bound revocation. Incoming
+Native MCP server, connect and OAuth routes remain refused before and after it.
+This verifies production handlers without a real provider or account. It does
+not establish a browser redirect journey or packaged Windows acceptance.
+
+Remove these OAuth hunks when a pinned Native release supplies trusted managed
+issuers and refuses unbound revocation while preserving local unlink and revision
+custody, and the installed-owner regressions pass without the patch.
+
+## Desktop outgoing OAuth availability
+
+The desktop app cannot complete Native's browser sign-in journey under its
+current callback and navigation controls. Workbench supplies an outgoing OAuth
+availability policy from the listener-owned desktop request identity. Core
+checks that policy before interactive OAuth discovery or registration and
+returns `mcp_oauth_interactive_unavailable`. The connection list carries the
+same availability and reason. Custom, catalog and first-run OAuth Connect
+controls show that reason and do not start sign-in. Other launches retain their
+existing OAuth flow. Browser headers and user-agent text cannot establish this
+desktop identity.
+
+Saved OAuth Test stays available. An unexpired bearer or a successful bound
+server-to-server refresh can still connect. The desktop saved-connection action
+retries that grant through the existing POST reconnect route. Only when token
+resolution returns no usable token do Test and retry return
+`mcp_oauth_reauthorization_unavailable`, without an anonymous connection attempt
+or an extra refresh. The saved connection is retained. Non-OAuth Test, retry and
+tool calls keep their existing owners. Manager initialization and background
+credential work remain unchanged, so refusal of a new interactive request is
+not a promise that no earlier startup request occurred.
+
+This treatment does not loosen issuer binding, incoming MCP refusal, desktop
+capabilities, callback authentication, cookies, origin checks or navigation.
+It does not claim to implement desktop OAuth setup or browser reauthorization.
+The existing built loopback OAuth fixture supplies an explicit HTTP origin and
+manually delivers callback cookies. Its passing result does not prove the
+desktop browser journey.
+
+`mcp-oauth-desktop.test.mjs` exercises the installed handlers, the Workbench
+policy, synthetic encrypted grants and intercepted transport. It covers refusal
+before new setup requests, saved grants, one refresh, unavailable authorization
+and non-OAuth controls. `mcp-oauth-desktop-components.test.mjs` renders the actual
+Native components with presentation and query fixtures. It checks custom,
+catalog, first-run, saved retry and saved Test controls. Existing issuer and
+desktop capability tests remain required. These checks make no account or
+provider calls and do not replace packaged Windows acceptance.
+
+## Custom hourly schedule summary
+
+The Custom schedule preview now includes its hourly interval and minute. An
+interval of 2 at minute 15 reads "Runs every 2 hours at minute 15." and still
+generates `15 */2 * * *`. The installed-component regression checks singular and
+plural intervals and compares the preview with Native's existing cron generator.
+Cron storage, execution and timezone handling are unchanged.
 
 ## Email BCC delivery
 
@@ -418,6 +710,17 @@ an upstream Toolkit release names the button and passes the same test.
 
 ## Native usage cost
 
+`usage/store.js` also retries numeric primary-key collisions across concurrent
+writers. Its insert ignores only an occupied `id`, tries up to 16 consecutive
+candidates, and rejects exhaustion. When an insert affects no row, the store first
+reads the row at that ID. A row whose every stored value matches the record is
+this call's own committed write, which a database client resends after a lost
+reply, so the store records nothing more. Other database failures propagate. Existing
+usage rows, costs, and the schema stay intact. Alert evaluation runs only after
+the new row is inserted. `tests/native-usage-cost.test.ts` forces two independent
+writers to collide, replays a committed insert as a lost reply, and covers
+exhaustion without replacing stored records.
+
 Issue #103. Core priced every Native turn from its own table. A model the table
 did not know matched a catch-all entry and was priced at Sonnet's $3 input and
 $15 output per million tokens. In the packaged run for #50,
@@ -435,10 +738,12 @@ The patch changes these files:
   declares the field.
 - `agent/production-agent.js` passes `costUsd` from the agent loop to
   `onUsage`, and the loop calls the new `onModelCall` as each model call
-  starts, with `retry` set when the call retries a failed attempt. The new
-  `createTurnUsage` sums a turn's usage over its model calls and internal
-  continuations. A retry replaces the attempt it retries, so a rate-limited
-  attempt adds no call. The turn records the sum as a reported cost, in
+  starts, retries included. When an attempt fails before the model produced
+  output and the provider refused it (a rate limit, an overload, or a context
+  overflow), the loop also calls `onModelCallRefused`. A usage report with no
+  tokens and no cost does not count as output. The new `createTurnUsage` sums
+  a turn's usage over its model calls and internal continuations, and settles
+  a refused attempt as a known $0 call. The turn records the sum as a reported cost, in
   centicents rounded as `calculateCost` rounds, only when every call it counts
   reported a cost. Otherwise the turn passes no cost and the store decides.
 - `usage/store.js` gives Sonnet ids their own price entry and removes the
@@ -499,9 +804,9 @@ These limits remain:
   off by Stop, by a dropped connection, or by an in-stream provider error
   after text reports none, and so does a call whose stream ends with no usage
   chunk. The table prices that turn, or it shows as Unknown.
-- A retry replaces the attempt it retries. OpenRouter can bill output that an
-  attempt streamed before it failed, and a turn whose retry reports a cost
-  leaves that output out.
+- A retried attempt that was not refused has an unknown cost, because
+  OpenRouter can bill output that an attempt streamed before it failed. Its
+  turn shows Unknown even when the retry reports a cost.
 - An integration run of an unpriced model whose provider reports no cost,
   such as a model reached through a provider other than OpenRouter, fills a
   budget cap at the $5 reservation per run, however little it cost.
@@ -1169,7 +1474,8 @@ With the switch off:
   and authentication rows, and hides Browser Automation and Background Agent,
   which hold only that card. The LLM summary reads "Add your own provider
   keys." Voice settings drop the Builder Gemini option and the Builder wording.
-- First-run onboarding goes from the intro to the key form.
+- First-run onboarding goes from the intro to the key form, and both Back
+  controls on that form return to the intro.
 - The code-access panel drops its "Use Builder" link. The code-required
   dialog drops its Builder.io agent and connect options and keeps Desktop.
 - The remaining Builder wording goes too: the `FeatureNotConfiguredError`
@@ -1211,8 +1517,9 @@ offers the same option and passes the same tests.
 ## Local-only automation runs
 
 The owner decided on 2026-09-26 (issue #51) that unattended automation runs are
-local-only. That covers scheduled runs, event and webhook triggers, and Run now.
-Interactive chats do not change.
+local by default. That covers scheduled runs, event and webhook triggers, and Run now.
+Issue #108 adds exact owner approval for explicitly declared configured MCP calls.
+Interactive chats keep their existing registry. Automation threads cannot enter it.
 
 Before this change, every run got the background surface that
 `getBackgroundActionEntries` in `dist/server/agent-chat-plugin.js` builds. It
@@ -1275,17 +1582,14 @@ bridge's declared-name check refuses an unsafe name with its own text.
 `manage-progress` and `get-framework-context` have no limit beyond the run
 surface's argument checks.
 
-An automation that lists `mcpTools` fails before any model call. Its history
-row reads "This automation lists MCP tools (names). Automation runs cannot call
-MCP tools. Nothing ran. No delivery was confirmed." with the error code
-`automation_mcp_tools_refused`. The run is refused rather than sent through
-approval because approval cannot be granted after the fact in an unattended
-run. The runner passes no approval callbacks, the approval stop reaches the
-model as text, the run manager marks the run completed, and history recorded a
-success for a step that never ran. `getJobMcpActionEntries` is gone, and the
-`backgroundMcpTools` plugin option no longer has an effect. The runner's
-`assertRequestedMcpToolsAvailable` is gone too, because the refusal fires
-first for every automation that lists MCP tools.
+An automation may list exact configured `mcpTools`. Each declared tool must be
+available in the current Native MCP registry and visible to this owner and org.
+An unavailable or hidden declaration refuses the run before model work, with
+`automation_mcp_tools_refused`. The plugin adds only those entries to the default
+twelve. Each MCP entry has mandatory approval and `allowPersistentApproval: false`.
+The existing local refusal checks stay in place. There is no interactive registry
+fallback or tool search. The legacy surface without a configured manager still
+refuses every MCP declaration. `backgroundMcpTools` does not grant a capability.
 
 A review of the first version found a bypass. The CLI bridge in
 `server/agent-chat/script-entries.js` turned each argument into a
@@ -1304,23 +1608,18 @@ tool action that reuses a kept name cannot replace Core's checked entry.
 
 A run's system prompt is the framework prompt filtered by
 `filterFrameworkPromptToSurface` to the 12 tools, plus a two-line note that the
-run is local-only. It no longer carries the template action list, so the model
+run has restricted local tools and gates every declared MCP call. It no longer
+carries the template action list, so the model
 is not told about tools it lacks. Its resources block also leaves out the
 workspace apps list, which tells the model to use `call-agent`. Both dependency
 blocks drop
 `getInitialToolNames`, so all 12 tools load up front and no `tool-search` is
 attached.
 
-The user-visible text now says what a run can do. The Run now confirmation,
-the Automations settings summary, and the MCP tools label in automation details
-changed in `localization/default-messages.js` and in the matching
-`defaultValue` strings in the client components. The other locale files do not
-carry these keys. The `manage-automations` description says that Run now uses
-the same local-only tools and that `define` cannot promise email, web, MCP,
-settings, or automation steps. `mcpTools` is no longer listed among the
-`define` options. It stays in the tool schema and in the app, where the label
-warns that runs cannot use it. The `manage-jobs` description says that
-recurring jobs cannot call MCP tools.
+The Run now confirmation, Automations summary, tool labels and the automation
+and recurring-job tool descriptions explain the same restricted surface.
+`mcpTools` accepts exact configured names. Listing a tool does not approve a call.
+Settings automation history owns inspection and the decision described below.
 
 Two outward paths stay, and the owner configures both:
 
@@ -1333,7 +1632,7 @@ Two outward paths stay, and the owner configures both:
 Only an interactive chat or the app can set either field, and a run can no
 longer change automations. An inbox notification still emits
 `notification.sent`, which can fire an event automation the owner defined.
-That run is local-only too.
+That run keeps the same restrictions too.
 
 Run `node --test packages/workbench/tests/automation-local-only.test.mjs`. It
 uses a disposable SQLite database. It checks the exact 12 keys against stand-ins
@@ -2226,6 +2525,178 @@ changes no schema. Remove this part of the patch when an upstream release names
 no next run the scheduler cannot meet while a lease or a running mark blocks it,
 and passes the same tests.
 
+Listed run inspection is an advisory server capability derived from the existing
+read-only inspection binding checks. It requires the actual app, retained thread
+owner, organization and current membership. Shared organization members retain
+history visibility without another execution owner's transcript access. Details
+requires canInspect to be true before showing Inspect and preserves NULL-app
+older-run wording. Missing capability fails closed. Inspection and decisions
+always revalidate rather than treating the flag as a grant. Listing performs no
+continuation, action discovery or outcome reconciliation. New maintained HTTP
+and rendered capability controls remain pending controller runtime validation.
+
+The current approval custody correction keeps Settings discovery separate from
+ordinary bounded history reads. Settings opts into scoped retained approvals and
+the history store deduplicates recent and retained rows. Pre-execution webhook
+contention is retry, with payload and attempts preserved, rather than custody of
+another execution's wait. Ask creation and wait persistence lock the exact live
+resource in the existing database transaction. Modern and legacy deletion recheck
+persisted custody in that transaction before token, secret and definition mutation.
+PostgreSQL uses FOR UPDATE and local SQLite uses BEGIN IMMEDIATE. Resource deletion
+events follow commit. The authenticated resources plugin's DELETE route now
+uses this custody guard inside resourceDeleteIfCurrent for jobs/*.md. Public
+database resourceDelete and resourceDeleteByPath delegate job snapshots to that
+owner, protecting the actual personal resources script and legacy Settings ID
+delete. Legacy Settings checks the deletion result before cleaning history.
+The local workspace branches and ordinary resource deletion stay unchanged.
+Webhook token-setup compensation uses the same guard and retains the original
+setup error. Custody internals keep direct SQL without recursive helper calls
+or nested transactions. These tool and helper runtime controls remain unrun. It warms
+the history schema before custody, then validates the locked definition's exact
+persisted history scope with the supplied transaction executor. Its full mutable
+row snapshot comparison remains unchanged. Waiting, resuming and terminal
+unreconciled approval custody refuse deletion with HTTP 409. Missing or replaced
+resources and stale snapshots cannot delete a newer row. This path retains
+history, preserves non-job deletion and does not change handler authorization or
+admin cleanup without custody. Maintained controls use the actual auth and
+resource plugins, assert session hits and a route positive, and exercise the
+snapshot DELETE versus approval-publication boundary. Successor runtime controls
+remain pending coordinator execution. A missing or replaced definition cannot receive an ask.
+Deletion cleanup removes ordinary unfinished history with the definition. Unfinished approval
+history stays until it settles.
+The maintained PostgreSQL adapter controls are static query contracts, not database
+execution proof. New source still requires controller runtime, review and UI checks.
+
+## Durable automation approvals
+
+Issue #108 keeps continuation in Native's existing owners. The background runner
+saves `waiting_approval` on the existing `automation_runs` row before yielding.
+It retains the Native thread, logical turn, exact pending ask and restricted
+registry digest. The worker saves the retained turn in Native's completion callback,
+then awaits Native's terminal finalization outside that callback before marking the
+wait ready or returning. A 30-second finalization bound fails closed. Active chunk
+ownership remains held when finalization cannot be confirmed. Waiting does not finish history, deliver a reply, emit
+`automation.run.finished` or advance the schedule. Scheduler, Run now, event
+and webhook paths propagate it and refuse another execution of that definition.
+Waiting publication uses the same resource conditional update as other outcomes,
+with an atomic SQL condition on the exact history ID, current Native chunk,
+ready waiting status and unfinished history. A late original caller cannot overwrite
+a terminal outcome or the wait of a newer chunk, even when it reads the latest
+resource after the owner decision. A separate history read would leave a race. PostgreSQL locks the matched
+history row through that write to serialize against the decision claim. SQLite
+serializes its writers.
+A webhook's existing `integration_pending_tasks` row also becomes
+`waiting_approval`. The retry sweep does not select it, including after restart.
+
+Run now can create a durable request while an earlier execution awaits approval.
+Its worker still refuses admission. That refused history cannot supersede the
+actual owner of the wait. Native history records `admitted_at` on initial thread
+attachment, preserves it across fresh continuation chunks and leaves queue/refusal
+rows unadmitted. History creation and conditional attachment are mandatory before
+Native insertion or start. Attachment failure records an admission error and
+executes no model or tool. Attached legacy histories use their recorded start
+time even when a later continuation fills a missing admission marker. One
+shared SQL predicate orders admitted owners by admission time and history ID,
+including equal times, within the same owner, path, app and organization. Both the
+history precheck and atomic resource CAS use it. Resource identity, definition
+edits and fresh-running marks retain their existing protections.
+
+After approval settles its retained webhook task and reconciles the resource,
+the runner selects only the next queued task on that validated external thread.
+It rechecks owner, organization, resource and app binding before the existing
+claim-safe dispatch. The resource must have left waiting/running first. Duplicate
+or recovered bookkeeping can redispatch a pending follower, but its existing FIFO
+claim permits one execution. Dispatch failure keeps the original history's terminal
+bookkeeping unreconciled for recovery. It never repeats the original consumed action.
+
+
+Settings > Agent > Automations > Details > Past runs > Inspect run reads the
+retained Native thread through `inspect-automation-run`. It shows prior tools,
+results and the exact pending input. `decide-automation-approval` accepts only
+history ID, expected ask ID and approve or decline. Authorization follows the
+persisted run and retained execution binding. The normal HTTP transport's active
+organization does not replace a personal run's null organization. Organization
+runs require the same persisted organization, matching thread and continuation,
+and current owner membership for inspection and decisions. Both are owner actions,
+not model tools. Production chat POST rejects every automation-owned thread
+before preparation, including a forged internal continuation. Native thread
+scope and its retained history marker preserve that custody after history deletion.
+
+`run-history.js` owns the conditional `waiting_approval` to `resuming` claim.
+Only one concurrent decision wins. Approve rechecks owner, org, app, thread,
+logical turn, exact Native ask, expiry, automation definition revision and the
+restricted registry fingerprint. It invokes the current validated entry through
+`executeAgentToolCall`, including Native schema validation, journal, mutation
+ordering and redaction. The approval store consumes the exact ask ID once.
+The approved result remains durably saved before the follow-up model response.
+Automation saves pass the Native journal sequence to `foldAssistantTurn`.
+Its automation-only mode retains chunk snapshots in the same assistant message's
+custom metadata and replaces the latest chunk at a higher sequence, including
+shorter authoritative text. Earlier chunks and the waiting sentence remain.
+Equivalent or stale snapshots do not append text or cards again. Consumed ask
+cards are removed from both visible parts and retained snapshots. Completed
+prior chunks stay sealed. Legacy accumulated content is retained as a prefix
+until a fresh chunk records its boundary. This adds metadata inside the existing
+thread row, not another transcript or execution owner. Chat and team callers
+keep the default fold mode. Broader merge/replay and installed automation checks
+remain required for the new source.
+The runner rechecks identity and fingerprints before consumption and immediately
+before the current entry runs. A replaced MCP endpoint, changed schema, hidden
+tool or changed definition refuses approval. Fingerprints contain digests,
+never stored MCP headers, tokens or raw connection configuration. Owner-wide
+always-allow policy cannot grant an unattended call. The policy setter binds
+SQLite's enabled INTEGER as 1 or 0 and retains JavaScript booleans for PostgreSQL's
+BOOLEAN. Tests exercise actual enable and disable calls on both backend paths.
+
+Continuation uses the same history ID, thread and logical turn with a fresh
+Native chunk ID. Native's thread fold and `threadDataToEngineMessages` with
+tool calls included retain earlier results. Prior completed tools stay journaled.
+A later gate can return that same history row to waiting. Decline consumes the
+pending ask as declined and ends history clearly without the pending side effect.
+An expired or changed wait can still be declined by its exact owner.
+
+Waiting persists across restart. If a crash interrupted its turn save, the
+next owner decision may recover the fold from Native events only after Native
+proves the chunk terminal, the turn was not stopped and the exact ask is still
+pending. Inspection only reads that readiness. A claimed continuation stays
+blocked while its Native chunk may be live. A terminal chunk with a pending,
+unconsumed ask may return to waiting through a conditional claim. If no chunk
+was inserted, recovery waits for the existing full run liveness ceiling.
+After consumption an unconfirmed crash becomes interrupted and that ask is
+never automatically dispatched again. A persisted decline recovers as declined.
+This gives no exactly-once external-effect promise. Stop and shutdown can leave
+an approved action unconfirmed. The runner retains that explicit interrupted
+classification through Native completion instead of replacing it with generic error. Shutdown preserves an idle approval wait.
+Durable gate storage failure aborts the run and cannot become success. Its
+`automation_approval_storage_failed` classification takes precedence over the
+resulting generic abort. Pre-write Stop and validation refusals stay outside the
+persistence catch. Stop is checked again after validation, and a genuine failed
+write retains its failure flag without re-aborting an already stopped chunk.
+That typed gate-storage failure propagates to the existing webhook worker.
+A persisted terminal error with retained approval context also propagates its
+original exception after exact resource, history, execution owner, organization,
+app, thread and task custody validation. The worker returns failed and preserves
+the pending or waiting payload for the existing bound terminal reconciliation,
+which settles task and resource without model redispatch or configured effects.
+Generic event and no-context webhook errors and shutdown retry semantics are unchanged.
+
+`tests/automation-approval.test.mjs` uses installed Core, disposable SQLite and
+fake engines and tools. It covers same-run approval, decline, concurrent and
+duplicate decisions, identity and ask mismatch, expiry, definition and connector
+changes, current-entry revalidation, crash refusal, gate storage failure, event
+and webhook waiting, Run now, Stop and fresh-process restart. The existing
+`automation-status.test.mjs` renders the real Settings component with a fake
+owner transport to check retained inspection and exact decision payloads.
+`automation-local-only.test.mjs` keeps the default twelve and their refusals.
+The same suite retains the immediate process-exit restart test and adds a held
+Native terminal-write barrier. Scheduler and trigger regressions cover approve and
+decline in normal order, after a delayed latest-resource read and after a delayed
+conditional update. Each checks terminal history and metadata, no unresolved wait,
+exact configured side-effect counts and admission of fresh gated work. The local
+surface test executes all three plugin dependency expressions with the real Native
+restriction and MCP adapter, checking their local registry, gated declarations and
+confined prompt loading. CI registers the lifecycle test beside those suites. On 2026-10-08, controller validation of the uncommitted Native 0.176.5 candidate passed the ordinary 26-file regression batch (417/417) and configured workbench typecheck. The focused completion-callback gate passed 7/7 and its cases are already included in the ordinary count. The retained 4a01d31 CI/build predates these bytes. This does not establish acceptance: a new-head build and built UI journey and the required published exact-head review remain pending. Live PostgreSQL execution and packaged Windows acceptance are separate gates. Earlier source-only statements in this section describe their dated checkpoints.
+
 ## Automation-written instruction files
 
 Issues #109 and #144. The owner decided on 2026-09-28 that instruction and
@@ -2656,3 +3127,189 @@ would change how Core saves messages.
 `appendAgentChatContextToMessage` and checks the title and preview. It is part
 of `test:native-chat`. On a loopback build the saved thread list showed a clean
 preview; on `dev` the same send saved a preview holding the context block.
+
+## Approval lifecycle retention and convergence
+
+The Native run-store pruner exempts terminal chunks referenced by unfinished
+waiting or resuming automation history. Ordinary terminal pruning and outcome
+rollups remain active. A ready wait therefore keeps the SQL terminal evidence and
+events required by the existing decision guard.
+
+Migration 7 adds an approval outcome reconciliation marker to the existing history
+owner. Terminal approval context retains its original task, resource and identity
+binding. Unreconciled terminal rows survive history retention. The scheduler and
+pending-task recovery sweeps finish recorded bookkeeping only. Task settlement
+checks its retained platform, owner, organization, external thread and payload
+binding. Resource writes combine their CAS with exact terminal history and chunk
+identity and exclude newer history. Schedule calculation uses recorded completion
+time, so retrying bookkeeping does not create another completion or delivery.
+Repeated decisions may reconcile a terminal row but still refuse another decision.
+
+The supported delete service refuses unfinished waiting or resuming history and
+finished approval history whose outcome remains unreconciled before any resource,
+token or history mutation. The existing resource custody transaction checks exact
+persisted history scope, including conflicting bindings. This deletion-specific
+guard does not broaden execution activity checks. After settlement, supported
+deletion removes eligible finished history before a reusable name is recreated.
+A maintained installed-owner completion control reaches a real terminal approval
+error, records safe deletion observations before assertions, verifies refusal with
+resource and token custody intact, then reconciles, deletes and starts a same-name
+replacement with a different resource ID. Later recovery cannot change that
+replacement's history or metadata. Runtime validation of this correction is pending. Declared configured MCP tools await the
+existing lazy initializer before entry construction. Local-only runs skip it.
+Initializer failure remains a refusal and its existing rejected-promise reset
+allows the next attempt to retry. Exact-call approval and current-entry validation
+remain mandatory.
+
+Installed-Core controls cover aged waits after real cleanup with ordinary pruning
+as a positive control, deletion refusal and settled deletion, history-to-task and
+task-to-resource storage failures, fresh-process terminal recovery, duplicate
+decisions and exact configured-effect counts. Plugin expression controls exercise
+held cold initialization, warm reuse, settings or discovery failure and retry,
+plus all three restricted prompt paths with actual planted-file confinement.
+These newly authored controls remain unrun until the controller refreshes the
+maintained package after exact-source review.
+
+### Approval recovery across durable owners
+
+Pending-task custody repair matches the exact approval history, app, projected
+owner, organization, thread, ask and webhook payload before a retry or settlement.
+A processing or pending task can return to waiting after hard loss between the
+two wait writes. No tool or model is redispatched during that repair. Native
+liveness and consumed-ask checks still control the owner decision. Terminal task
+and resource bookkeeping precede the existing claim-safe FIFO wake.
+
+The pruning owner retains approval_context.runId as well as run_id and
+resume_run_id while waiting or resuming. SQLite uses json_extract. PostgreSQL uses
+a jsonb field selector. Both bind the original retained chunk, and ordinary
+pruning resumes after settlement. Legacy manage-jobs deletion projects the
+resolved execution identity through automationHistoryOwner before checking the
+unfinished wait. Existing creator/admin authority and unattended mutation refusal
+remain. Maintained tests distinguish selected SQL faults followed by SIGKILL from
+ordinary thrown errors and cover normal owner recovery, attachment, pruning and
+legacy deletion. Candidate runtime validation remains a controller gate.
+
+The legacy deletion guard projects stored history scope independently of current
+creator membership. Existing mutation authority permits org-admin cleanup of an
+ordinary job after its creator leaves. Exact resource-bound unfinished histories
+remain protected even if their scope conflicts with the current job metadata.
+An unknown creator or organization scope refuses deletion only when unfinished
+or unreconciled history is bound to that exact resource by ID or by owner and
+path. Without such history the snapshot delete proceeds. No execution
+eligibility changes. Maintained controls use normal ORG/BetterAuth
+initialization and the actual manage-jobs action with real membership removal.
+PostgreSQL pruning coverage is a static driver adapter and query-contract
+control. It does not establish real PostgreSQL database execution.
+
+Required-review corrections for `012fd0a6`. The runner stores the resolved
+`advanceSchedule` value in the approval context, so a scheduled run that waits
+moves `nextRun` forward when its outcome settles. The scheduler sweep omits the
+option, which means advance, and Run now stores false. Reconciliation reads older
+contexts with the same default. A decline-only path opens when an organization
+run's retained owner fails current identity validation: the decider must hold
+deletion authority over the same automation resource through
+`canUpdateAutomationResource`. That path never approves and executes nothing. Settings Delete (the automation service and the
+manage-recurring-job action) calls it first through `declineDepartedOwnerWaits`, so an admin can
+clean up without inspecting the transcript. The legacy identity resolver refuses a job that runs
+as the shared or organization pseudo-owner and declares connected tools, because nobody can
+approve for that identity. `reconcileAutomationApprovalOutcomes`, which the scheduler tick and
+pending-task sweep already run, first declines ready waits whose ask passed its expiry
+(`listExpiredApprovalWaits`, error code `automation_approval_expired`) through the same claim,
+decline, finish and settle steps as an owner's Decline. A wait not yet marked ready is first
+recovered through `canRecoverWaitingTurn` and `recoverWaitingTurn`, as an owner's decision
+recovers it, and is skipped while its run can still save it. `automationRunBindingMatches`
+compares a history row's owner and organization with the run's custody binding. `executeJob`
+refuses a queued Run now of a job that declares connected tools when they differ, and the
+approval gate refuses to create a wait on such a row, with error code
+`automation_run_binding_mismatch`. `list-recurring-jobs` passes the request app ID to
+`authorizeJobMutation`, as `manage-recurring-job` does, so Settings offers Delete, Edit, Run now
+and the switch for an organization job that records an app ID. `isAutomationRunThread` treats a
+malformed legacy snapshot as an ordinary thread unless its scope marks an automation run, so
+the custody check on each chat send does not fail that chat. `markTaskCompleted` lets the worker
+that ran a webhook call complete it over a `pending` row with the same identifiers and payload,
+which a retry sweep or a refused redelivery leaves, and still never replaces a settled row or
+another worker's `processing` claim. `retainedAutomationOptions` keeps `actionCaller` and the
+integration request context's identifiers, with empty inbound text, so an approved continuation
+runs in the same context as its first half. `resourceMove` of a `jobs/*.md` file runs
+`assertLegacyJobApprovalDeletionAllowed` inside `withAutomationResourceCustody`, as deletion does.
+The legacy identity resolver also refuses a personal job whose identity carries an organization
+and that declares connected tools, because its history shares the organization owner and path
+key with other members' jobs.
+`markTaskFailed` takes `onlyPendingOrProcessing` and returns whether it changed the row. The
+webhook worker uses it, so a failure after the dispatcher returned a terminal approval error's
+task to `waiting_approval` keeps that custody and adds no exhausted-attempts history row. The
+approval expiry sweep also settles its own claim (a resume ID that starts with
+`automation-expire-`) when a write after the claim failed and the claim lease has passed. The
+run inspection renders a message whose content is a string as text. `deleteAutomation` reads the
+definition again after it declines a departed owner's wait, because settling that wait rewrites
+the definition, and it refuses a definition that was replaced.
+History cleanup after deletion also removes ordinary unfinished rows without
+approval context, so a run that finishes after its definition is deleted leaves
+no history for a reused name. Approval custody is never removed. A removed member
+listing organization history gets a 403 refusal instead of a 500. The threads PUT
+route refuses a `threadData` rewrite of an automation run thread with the chat
+route's `automation_thread_interactive_refused` code, because an approved
+continuation reloads that transcript. Title-only saves are unchanged. Maintained
+controls cover the real scheduler sweep for approve and decline, departed-owner
+decline by an organization admin with approve and member refusals, deletion of
+unresolvable-scope jobs without history, in-flight history cleanup and the exact
+403 refusal. The predicate-stop control now also guards writes on the custody
+transaction executor.
+
+Local SQLite transaction ownership queues ordinary execute calls and subsequent transactions behind the current transaction. Its callback must use the supplied tx.execute. Ownership is released after commit or rollback, including thrown callbacks. Organization history discovery queries exact org_id and caller email and treats missing membership as unavailable. Personal NULL-org history does not require membership in an unrelated active organization. The new SQLite controls are maintained runtime targets and have not run in this source allocation.
+
+Webhook deletion initializes the existing webhook-token and app-secret schema owners before taking resource custody. It does not pre-delete token or secret data. Actual deletion stays on the transaction executor, together with history custody and resource mutation. Fresh-process controls seed the webhook in one process and delete or refuse it in another. Public closeDbExec uses the queued SQLite close owner before clearing the singleton. Close is memoized to avoid a second handle close. An old closed executor rejects later operations, while a new singleton can initialize normally. These new runtime controls remain unrun in the source sandbox.
+
+Every thrown automation completion callback error rejects the background runner promise and is rethrown to Native's completion handler. The callback-wide boundary covers persistence, durable stop-marker reads and response collection while preserving existing primary and typed errors. Native finalization remains outside the callback. On 2026-10-08, the focused controller gate passed 7/7 and the ordinary 26-file batch passed 417/417 with those focused cases included. Configured workbench typecheck passed. Faulted approval completion is an inspectable terminal error with an unconsumed ask that cannot resume or dispatch, not a recovered waiting result. The results cover the uncommitted Native 0.176.5 candidate. A new-head build and built UI journey, required published exact-head review, live PostgreSQL execution and packaged Windows acceptance remain pending.
+
+The webhook completion custody successor adds installed-owner child controls for a selected stop-marker read fault after assistant persistence and durable history/task waiting, the identical healthy wait and an ordinary no-context webhook error. The fault control observes actual worker, Native, history, task and payload fields before assertions. It then checks a delivery before any decision or explicit reconciliation, failed task/resource convergence, duplicate reconciliation and delivery, and an unconsumed non-executable ask with no model or tool replay. Additional real-worker barriers let reconciliation finish before the dispatcher lookup and let a task settle or acquire a newer claim before the actual completion write. Webhook completion uses the pending-task owner to atomically compare the processing status, platform, external thread, owner, organization, payload, creation time, claim timestamp and attempt. Only one affected row permits a completed result or follower dispatch. A lost comparison leaves current custody untouched and reports failure. Existing one-argument completion callers retain their contracts. These new controls have only source syntax checks in this allocation. Passing b80cfa4 CI/build/UI evidence predates this dispatcher correction and does not establish its acceptance.
+
+### Known continuation outcomes and legacy inspection
+
+Approval continuation completion records its exact known outcome in the existing
+approval context independently of terminal-history persistence. Two rejected
+writes return a typed bookkeeping error carrying the same result to completion.
+Completion retries only history persistence before reconciliation. Exhaustion is
+reported separately from the execution outcome. Inspectable automatic recovery
+depends on successfully stored outcome evidence in the existing approval history
+context. The existing sweep can settle that evidence only after confirming the
+exact terminal Native chunk, history, thread and turn. If every evidence write
+fails, completion reports the known outcome as unsettled without a durable
+automatic-recovery guarantee. It does not infer outcomes from age or liveness. Models, consumed tools and delivery are never repeated. Ordinary
+non-approval bookkeeping remains best effort. Maintained real webhook controls
+cover healthy outcomes, one and two selected pre-commit rejections, exhausted
+writes with durable known success/error, storage restoration and the live chunk
+negative. Controller runtime validation remains pending.
+
+NULL-app legacy history stays in the normal scoped list. Settings labels its
+inspection unavailable instead of offering Inspect. The shared inspection and
+approval authorizer still requires exact app, owner and organization binding.
+Listing and component controls cover unavailable legacy rows and current Inspect
+positives. These successor controls are source-checked and await controller
+runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
+preceding bytes.
+
+## Command menu return focus
+
+The maintained Native command menu is a controlled Radix dialog without a
+registered trigger. `client/command-menu-focus.js` captures the current focused
+opener before dialog autofocus and restores it after close only if it is still
+connected, the route is unchanged, and another control has not taken focus.
+`CommandMenu.js` owns the dialog callback wiring. Existing keyboard opening and
+menu navigation remain unchanged. The focused tests exercise the installed focus
+owner with DOM elements. They do not establish real-dialog or Windows acceptance.
+
+## Resource editor preservation and height
+
+Toolkit's `SharedRichEditor` rejects updates whose transaction did not change the
+document before reading or emitting saved content. Its editability effect also
+uses TipTap's supported no-update option. This prevents mount and editability
+events from sending a normalized snapshot into a host's autosave callback.
+Real document edits keep the existing reconciliation and collaboration guards.
+Core's Settings resource section gives `ResourcesPanel` a definite responsive
+height in its otherwise normal document flow. Existing editor flex sizing,
+internal scrolling, and the outer Settings scroll remain responsible for layout.
+The resource schema and one-second autosave contract are unchanged. Code remains
+the source editor for syntax outside the Visual schema. Focused installed-component
+checks cover non-content updates, real edits, view switching, and height ownership.
+They do not establish Markdown display fidelity or native pixel acceptance.
