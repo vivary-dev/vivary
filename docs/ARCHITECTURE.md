@@ -638,6 +638,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 MCP package verification wording. The package README scopes its
+August 15 installation verification to published 0.1.3 and links staged 0.1.4's
+source-check evidence and final-candidate verification limits to the canonical
+changelog. No new verification or publication is claimed. Package boundaries and
+runtime behavior retain their existing contract.
+
 2026-10-18 Approval ownership fixture isolation. The HTTP ownership test disables
 Native's default integrations plugin through its supported process configuration.
 That plugin's retry timer could otherwise reconcile the deliberately unreconciled

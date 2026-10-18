@@ -10,7 +10,9 @@ Optional Python 3.11+ read-only MCP adapter for Vivary context.
   caller-directed processes
 - Status: published `0.1.3` (pins `mcp==2.0.0`). Source `0.1.4` is staged and
   unpublished. Optional, disabled by default, external conformance unproven. Requires `vivary-tropo>=0.5.3`.
-  Source: [`pyproject.toml`](pyproject.toml); verified: 2026-08-15.
+  Source: [`pyproject.toml`](pyproject.toml). Historical installation verification
+  for published `0.1.3`: 2026-08-15. Staged `0.1.4` source-check evidence and
+  final-candidate verification limits are recorded in the [changelog](../../CHANGELOG.md).
 
 The read-only ceiling belongs to MCP, not to the whole Vivary workspace lifecycle.
 The adapter may return a complete public capsule envelope. Save that complete object:
