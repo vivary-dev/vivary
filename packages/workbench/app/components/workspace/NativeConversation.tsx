@@ -1,4 +1,5 @@
-import { AgentChatSurface, AssistantChat, clearChatStorage } from "@agent-native/core/client/agent-chat";
+import { AgentChatSurface, AssistantChat, clearChatStorage, sendToAgentChatAndConfirm } from "@agent-native/core/client/agent-chat";
+import { agentNativePath } from "@agent-native/core/client/api-path";
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -16,8 +17,17 @@ import { nativeMatchRepository } from "@/lib/native-match-repository";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { ConversationMatch } from "./ConversationMatch";
 import { LinkedHistoryNotice, NativeLinkOptions, sourceDraftSaver, useLinkSourceEligibility } from "./LinkedConversation";
+import { HandoffControl } from "./HandoffControl";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
+
+/** The active-run read the Native composer makes when it mounts a thread. */
+async function nativeRunActive(threadId: string): Promise<boolean> {
+  const response = await fetch(`${agentNativePath("/_agent-native/agent-chat")}/runs/active?threadId=${encodeURIComponent(threadId)}`);
+  if (!response.ok) return false;
+  const info = await response.json() as { active?: unknown; status?: unknown };
+  return info.active === true && info.status === "running";
+}
 
 export default function NativeConversation() {
   const [params] = useSearchParams();
@@ -210,6 +220,11 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
     void saveLatestThread().catch(() => {});
   }, [selectedThread, requestedMessage, saveLatestThread]);
   const draft = useNativeChatDraft({ kind: identity.kind, projectId: identity.projectId }, ownerKey);
+  // Core routes a same-window submit to the active Native tab and sends it
+  // without touching the composer, so an unsent draft stays. Save handoff finds
+  // the request in the selected thread or refuses.
+  const submitToSelectedThread = useCallback(async (message: string) =>
+    (await sendToAgentChatAndConfirm({ message, chatTarget: "local", submit: true, openSidebar: false })).delivered, []);
   const [restoreReview, setRestoreReview] = useState<string | null>(null);
   useEffect(() => { setRestoreReview(null); }, [selectedThread]);
   const error = selectedThread ? draft.statusForThread(selectedThread) : null;
@@ -235,6 +250,9 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       <LinkedHistoryNotice key={selectedThread} projectId={identity.projectId} target={{ kind: "native", id: selectedThread }} />
       <NativeLinkOptions key={"link:" + selectedThread} projectId={identity.projectId} threadId={selectedThread}
         source={linkSource} engines={linkEngines} saveDraft={sourceDraftSaver(draft, selectedThread)} />
+      {identity.projectId && <HandoffControl key={"handoff:" + selectedThread} projectId={identity.projectId}
+        conversation={{ kind: "native", id: selectedThread }} disabled={!workspaceAvailable}
+        submit={submitToSelectedThread} runActive={() => nativeRunActive(selectedThread)} />}
     </>}
     <ConversationMatch key={selectedThread} container={matchContainer} messageId={requestedMessage}
       canReturnToLatest={currentMatch !== null && !matchArchived} archived={matchArchived}
