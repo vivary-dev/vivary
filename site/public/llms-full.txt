@@ -6463,15 +6463,19 @@ container resize.
 
 # Install the Windows prerelease
 
-Verified 2026-09-22. This is an unsigned Windows x64 portable preview of Vivary.
-It includes PR #78's desktop browser-link fix and the preceding application changes. It is available
-from the [GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22). The repository and download are public.
-The complete desktop and self-hosted web acceptance journey remains unfinished.
+This guide covers the unsigned Windows x64 desktop release of Vivary. This release
+adds a per-user installer, `Vivary-Setup-<commit>.exe`, as the main download and
+keeps the portable ZIP as an option.
 
-Releases after this prerelease add a Windows installer, `Vivary-Setup-<commit>.exe`,
-as the main download. The 2026-09-22 prerelease has only the portable ZIP. The
-installer has not yet passed acceptance on Windows. See
-[Verification and known limits](#verification-and-known-limits).
+Installer acceptance is pending. The installer steps below describe how setup is
+designed to behave, and they stay unverified until this release records its Windows
+results. See [Verification and known limits](#verification-and-known-limits).
+
+The portable ZIP facts were verified on 2026-09-22 for the published
+[GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22),
+which includes PR #78's desktop browser-link fix and the preceding application
+changes. That prerelease has only the portable ZIP. The repository and download are
+public. The complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
@@ -6509,7 +6513,7 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
 
 ## Install and launch
 
-### With the installer
+### With the installer (acceptance pending)
 
 1. Run `Vivary-Setup-<commit>.exe` after its checksum matches. The installer is
    not code signed, so Windows can show **Windows protected your PC** with an
@@ -6579,9 +6583,11 @@ Use disposable projects for preview testing.
 2. Copy `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary` to a private backup location.
 3. Back up registered external project folders separately if you need a complete recovery copy.
 4. Verify the new download. With the installer, run the new `Vivary-Setup-<commit>.exe`.
-   It replaces the application files in `%LOCALAPPDATA%\Programs\Vivary` and keeps
-   your data. If Vivary is still running, setup asks you to close it and offers
-   **Retry** or **Cancel**. With the ZIP, extract it into a separate versioned folder.
+   It removes the files the previous setup installed in
+   `%LOCALAPPDATA%\Programs\Vivary`, then copies the new ones. Your data and any
+   files you added to that folder stay. If Vivary is still running, setup asks you
+   to close it and offers **Retry** or **Cancel**. With the ZIP, extract it into a
+   separate versioned folder.
 5. Launch Vivary. Confirm your projects and saved conversations remain available.
 6. With the ZIP, keep the previous package until you accept the replacement. The
    installer keeps one version. To return to an earlier one, run that version's
@@ -6605,11 +6611,19 @@ To remove an installed Vivary, close it. Then open **Settings** > **Apps** >
 choose **Uninstall**. You can also run `Uninstall Vivary.exe` in
 `%LOCALAPPDATA%\Programs\Vivary`.
 
-The uninstaller removes the application folder, the Start menu shortcut, the
-desktop shortcut when setup created it, and the Installed apps entry. It keeps
-`%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, and every project folder, so your
-projects, conversations, and settings remain. Delete those folders yourself only
-if you also want to remove your data.
+Setup records every file and folder it installs in `install-files.txt` in that
+folder. The uninstaller removes only those files and folders, then the Start menu
+shortcut, the desktop shortcut when setup created it, and last the Installed apps
+entry and the uninstaller itself. Nothing is deleted recursively. Files you added
+to `%LOCALAPPDATA%\Programs\Vivary` stay, and so does the folder when it still
+holds them.
+
+The uninstaller keeps `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, and every
+project folder, so your projects, conversations, and settings remain. Delete those
+folders yourself only if you also want to remove your data.
+
+When another program holds a Vivary file, the uninstaller removes the rest and
+keeps its Installed apps entry. Close that program, then uninstall again.
 
 To uninstall without any window, run
 `"%LOCALAPPDATA%\Programs\Vivary\Uninstall Vivary.exe" /S`. It starts a copy of
@@ -6897,9 +6911,12 @@ your firewall.
 | --- | --- |
 | Checksum differs | Do not run that download. Download both assets again and compare. |
 | Windows protected your PC | The installer is not code signed. Confirm the checksum matches, then choose **More info** and **Run anyway**. |
-| Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** leaves the installed files unchanged. |
+| Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** stops before any file is removed. |
+| Setup or the uninstaller says some Vivary files are in use | Another program, such as a terminal open in a Vivary folder, holds a file. Setup removed the files it could and kept its file list, uninstaller, and Installed apps entry. Close that program, then run setup or the uninstaller again. It continues from where it stopped. |
+| The uninstaller says `install-files.txt` is missing | The uninstaller removes only listed files, so it removed nothing. Run setup again to repair the install, then uninstall. |
+| Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |
 | Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
-| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files. Move them elsewhere, then run setup again. |
+| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary. Move them elsewhere, then run setup again. |
 | No window after launching from a terminal | Try File Explorer. An inherited `ELECTRON_RUN_AS_NODE=1` can make Electron run as Node. Remove that variable only from the launch shell and retry. |
 | Windows asks which app should open a file | Cancel. Recheck that you launched the extracted `.exe`. Do not change file associations. |
 | Folder selection times out | Close the chooser, then choose Open folder again. |
@@ -6925,12 +6942,15 @@ installer nor the ZIP publishes your laptop to the internet. Consult the
 
 ## Verification and known limits
 
-The installer is newer than this prerelease. Its script has source checks for the
-per-user folder, the exact-folder guard before every removal, the kept user data,
-and the current-user registry entry. Its build checks that every application file
-went into the installer. Installation, launch, upgrade, profile preservation, and
-uninstallation have not yet passed acceptance on Windows. The installer is not code
-signed. The rest of this section describes the 2026-09-22 portable prerelease.
+The installer is part of this release. Its script has source checks for the
+per-user folder, the exact-folder guard, removal limited to listed files with no
+recursive delete, the kept user data, and the current-user registry entry. Its
+build verifies every payload file against the package's file manifest, checks that
+every file went into the installer, and records the payload and installer commits
+in the installer's file properties and a build receipt. Installation, launch,
+upgrade, profile preservation, and uninstallation are pending acceptance on
+Windows. The installer is not code signed. The rest of this section describes the
+2026-09-22 portable prerelease.
 
 The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.
 This is the merged PR #78 source commit.
@@ -8132,27 +8152,41 @@ that wraps the packaged `Vivary-win32-x64` folder in a per-user setup program, a
 `packages/desktop/build-installer.mjs` builds it with `makensis`. The script runs at
 the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\Vivary`.
 `.onInit` resets that folder, so the `/D=` option cannot move it. Setup adds a Start
-menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU. Its
-only recursive delete removes that folder after an exact-path and not-a-link check,
-in both the upgrade step and the uninstaller. Neither program reads or changes
-`%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or project folders. Neither stops a
-process. A running Vivary or bundled Node or Python makes setup ask the user to close
-it, with Retry or Cancel. The build script reads the version and commit from the
-payload's `build.json`, refuses a modified-checkout or linked payload, compares the
-files `makensis` reports adding with the payload, and writes a `.sha256` companion.
+menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU.
+`AllowSkipFiles off` makes a file that cannot be written stop setup with an error.
+Setup writes `install-files.txt`, every payload file and then every payload folder
+deepest first, as its last step. Nothing is deleted recursively. Upgrade and
+uninstall read the previous list behind an exact-path and not-a-link check on the
+install folder, check every line (no drive, leading backslash, `.` or `..` part,
+wildcard, or line over 240 characters) and every listed folder for a link before
+deleting anything, delete the listed files, and remove listed folders only when
+empty. Files a user added stay, and no delete follows a junction out of the folder.
+An existing folder counts as a previous install when its uninstall entry points
+there or it holds the list, `vivary.exe`, or the uninstaller, so a partly removed
+install can be repaired by running setup again. The uninstaller keeps its entry,
+the list, and itself while listed files remain, and removes them last otherwise.
+Neither program reads or changes `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or
+project folders, and neither stops a process. A running Vivary or bundled Node or
+Python makes setup ask the user to close it, with Retry or Cancel. The build script
+reads the version and payload commit from the payload's `build.json`, refuses a
+modified-checkout or linked payload, checks every payload path and SHA-256 against
+the package's file manifest when given one, refuses uncommitted installer sources,
+and compares the files `makensis` reports adding with the payload. It records the
+payload and installer commits as `PayloadCommit` and `InstallerCommit` in the
+installer's file properties and in a `.receipt.json` beside a `.sha256` companion.
 The Electron process, the packager, and the user data layout are unchanged. The
 installer is one more distribution step around the same packaged folder, so the
 system description above still holds. `tests/installer-script.test.mjs` checks the
 safety rules in the script source. `tests/installer-build.test.mjs` checks argument
-validation and builds a fixture installer when `makensis` is available. Both join
+validation, path rules, the manifest check, the installer commit check, and the
+list order, and builds a fixture installer when `makensis` is available. Both join
 the desktop Node test list in CI, where the fixture build skips. The desktop guide
-makes the installer the main install path, keeps the portable ZIP optional, adds an
-Uninstall section, and records that Windows acceptance is still open. From a review
-thread on PR #251, it also says that runtime detection skips a `codex.cmd` or
-`claude.cmd` that names no recognized package entry and has no npm package beside it.
-Evidence: 25 of 25 installer tests pass with `makensis` 3.10 present and 24 pass with
-one skip without it, and a real installer built from the `2aaf04f` package added all
-3,150 payload files.
+makes the installer the main install path with its acceptance pending, keeps the
+portable ZIP optional, adds an Uninstall section, and says that files added to the
+install folder are kept. From a review thread on PR #251, it also says that runtime
+detection skips a `codex.cmd` or `claude.cmd` that names no recognized package entry
+and has no npm package beside it. Evidence: 45 of 45 installer tests pass with `makensis` 3.10 and 44 pass with one skip
+without it, and each of 42 single-rule changes to the script fails the static tests.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

@@ -1,15 +1,16 @@
 ; Vivary per-user Windows installer.
 ;
 ; build-installer.mjs supplies every define below. Build with it rather than
-; calling makensis directly, because it also validates the payload and checks
-; that every payload file went into the installer.
+; calling makensis directly, because it also verifies the payload, writes the
+; installed-file list and records which commits built the installer.
 ;
 ; Safety contract, enforced by tests/installer-script.test.mjs:
 ; - Runs as the current user and writes only HKCU, the per-user Start menu,
 ;   the desktop (when asked) and $LOCALAPPDATA\Programs\Vivary.
 ; - The install folder is fixed. .onInit resets it, so /D= cannot move it.
-; - The only recursive delete is RemoveApplicationFolder, and it runs only
-;   after RequireFixedInstallDir confirms the exact folder.
+; - Nothing is deleted recursively. Upgrade and uninstall remove only the
+;   files and folders that setup listed in install-files.txt, after
+;   RequireFixedInstallDir confirms the exact folder. Files a user added stay.
 ; - Nothing here reads, writes or deletes Vivary's user data or projects.
 ; - No process is ever stopped. A running Vivary makes setup ask the user.
 
@@ -18,6 +19,8 @@ ManifestDPIAware true
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 RequestExecutionLevel user
+; A file that cannot be written stops setup instead of being skipped.
+AllowSkipFiles off
 
 !macro REQUIRE_DEFINE NAME
   !ifndef ${NAME}
@@ -25,17 +28,22 @@ RequestExecutionLevel user
   !endif
 !macroend
 !insertmacro REQUIRE_DEFINE PAYLOAD_DIR
+!insertmacro REQUIRE_DEFINE INSTALL_LIST_FILE
 !insertmacro REQUIRE_DEFINE OUTFILE
 !insertmacro REQUIRE_DEFINE LICENSE_FILE
 !insertmacro REQUIRE_DEFINE ICON_FILE
 !insertmacro REQUIRE_DEFINE APP_VERSION
-!insertmacro REQUIRE_DEFINE SOURCE_COMMIT
-!insertmacro REQUIRE_DEFINE SOURCE_COMMIT_SHORT
+!insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT
+!insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT_SHORT
+!insertmacro REQUIRE_DEFINE INSTALLER_COMMIT
 !insertmacro REQUIRE_DEFINE ESTIMATED_KB
 
-!define DISPLAY_VERSION "${APP_VERSION}+${SOURCE_COMMIT_SHORT}"
+!define DISPLAY_VERSION "${APP_VERSION}+${PAYLOAD_COMMIT_SHORT}"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary"
 !define UNINSTALLER "Uninstall Vivary.exe"
+!define INSTALL_LIST "install-files.txt"
+; build-installer.mjs refuses payload paths longer than this.
+!define MAX_LIST_LINE 240
 !define KEPT_DATA_TEXT "Your projects, conversations and settings in %USERPROFILE%\.vivary and %APPDATA%\Vivary were kept. Project folders you opened in Vivary were not changed."
 
 Name "Vivary"
@@ -54,7 +62,8 @@ VIAddVersionKey "FileDescription" "Vivary Setup"
 VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Jeff Kazzee"
 VIAddVersionKey "ProductVersion" "${DISPLAY_VERSION}"
 VIAddVersionKey "FileVersion" "${DISPLAY_VERSION}"
-VIAddVersionKey "SourceCommit" "${SOURCE_COMMIT}"
+VIAddVersionKey "PayloadCommit" "${PAYLOAD_COMMIT}"
+VIAddVersionKey "InstallerCommit" "${INSTALLER_COMMIT}"
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -144,14 +153,145 @@ Function ${PREFIX}RequireVivaryClosed
   Abort "Vivary is running. Nothing was changed."
 FunctionEnd
 
-; Removes the application folder. This is the only recursive delete in setup.
-Function ${PREFIX}RemoveApplicationFolder
+; Reads the next line of the open list $R3 into $R4 without its line break.
+; Sets $R9 to "line", to "eof", or to "truncated" when a line has no line
+; break, which means it was too long to read whole.
+Function ${PREFIX}ReadListLine
+  ClearErrors
+  FileRead $R3 $R4
+  IfErrors end_of_list
+  StrCpy $2 $R4 1 -1
+  StrCmp $2 "$\n" 0 truncated
+  StrCpy $R4 $R4 -1
+  StrCpy $2 $R4 1 -1
+  StrCmp $2 "$\r" 0 read
+  StrCpy $R4 $R4 -1
+  read:
+  StrCpy $R9 "line"
+  Return
+  truncated:
+  StrCpy $R9 "truncated"
+  Return
+  end_of_list:
+  StrCpy $R9 "eof"
+FunctionEnd
+
+; Sets $R5 to "" when the list line in $R4 is a safe relative path inside
+; $INSTDIR, or to the reason it is not. A folder line ends with a backslash.
+; Wildcards are refused because Delete would expand them.
+Function ${PREFIX}CheckListLine
+  StrCpy $R5 ""
+  StrLen $2 $R4
+  IntCmp $2 0 bad_length bad_length
+  IntCmp $2 ${MAX_LIST_LINE} 0 0 bad_length
+  StrCpy $3 $R4 1
+  StrCmp $3 "\" bad_path
+  StrCpy $4 0
+  next_char:
+  IntCmp $4 $2 components
+  StrCpy $3 $R4 1 $4
+  StrCmp $3 ":" bad_path
+  StrCmp $3 "/" bad_path
+  StrCmp $3 "*" bad_path
+  StrCmp $3 "?" bad_path
+  StrCmp $3 '"' bad_path
+  StrCmp $3 "<" bad_path
+  StrCmp $3 ">" bad_path
+  StrCmp $3 "|" bad_path
+  IntOp $4 $4 + 1
+  Goto next_char
+  ; "." and ".." are refused as whole path parts, so names such as
+  ; "a..b.mjs" stay valid. Wrapping the line in backslashes lets one
+  ; comparison find a part at the start, middle or end.
+  components:
+  StrCpy $5 "\$R4\"
+  StrLen $2 $5
+  StrCpy $4 0
+  next_part:
+  IntCmp $4 $2 done
+  StrCpy $3 $5 4 $4
+  StrCmp $3 "\..\" bad_path
+  StrCpy $3 $5 3 $4
+  StrCmp $3 "\.\" bad_path
+  StrCpy $3 $5 2 $4
+  StrCmp $3 "\\" 0 next_index
+  ; A folder line ends in one backslash, which the wrapping doubles.
+  IntOp $3 $2 - 2
+  IntCmp $4 $3 next_index bad_path bad_path
+  next_index:
+  IntOp $4 $4 + 1
+  Goto next_part
+  bad_length:
+  StrCpy $R5 "an empty or too long line"
+  Return
+  bad_path:
+  StrCpy $R5 "a path outside the Vivary folder"
+  done:
+FunctionEnd
+
+; Removes what the previous setup listed in install-files.txt: the files,
+; then the folders deepest first, in list order. Nothing is deleted
+; recursively, so files a user added stay. Every line is checked before
+; anything is deleted. A listed folder that became a link stops the
+; removal, so no delete reaches outside $INSTDIR. Sets $R7 to the number of
+; listed files that remain and $R8 to 1 when there is no list.
+Function ${PREFIX}RemoveInstalledFiles
   Call ${PREFIX}RequireFixedInstallDir
-  RMDir /r "$INSTDIR"
-  IfFileExists "$INSTDIR\*.*" 0 removed
-  MessageBox MB_OK|MB_ICONSTOP "Some files in $INSTDIR are in use. Close Vivary and any program using those files, then run setup again." /SD IDOK
-  Abort "Some Vivary files are in use."
+  StrCpy $R7 0
+  StrCpy $R8 0
+  IfFileExists "$INSTDIR\${INSTALL_LIST}" 0 no_list
+  ClearErrors
+  FileOpen $R3 "$INSTDIR\${INSTALL_LIST}" r
+  IfErrors unreadable
+  check_line:
+  Call ${PREFIX}ReadListLine
+  StrCmp $R9 "eof" checked
+  StrCmp $R9 "truncated" bad_line
+  Call ${PREFIX}CheckListLine
+  StrCmp $R5 "" 0 bad_line
+  StrCpy $2 $R4 1 -1
+  StrCmp $2 "\" 0 check_line
+  ; Read the folder's own attributes. A trailing backslash would follow a link.
+  StrCpy $6 $R4 -1
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\$6") i .r3'
+  IntCmp $3 -1 check_line
+  IntOp $3 $3 & 0x400
+  IntCmp $3 0 check_line linked linked
+  checked:
+  FileClose $R3
+  FileOpen $R3 "$INSTDIR\${INSTALL_LIST}" r
+  remove_line:
+  Call ${PREFIX}ReadListLine
+  StrCmp $R9 "line" 0 removed
+  StrCpy $2 $R4 1 -1
+  StrCmp $2 "\" remove_folder
+  Delete "$INSTDIR\$R4"
+  IfFileExists "$INSTDIR\$R4" 0 remove_line
+  DetailPrint "Could not remove $INSTDIR\$R4"
+  IntOp $R7 $R7 + 1
+  Goto remove_line
+  remove_folder:
+  ; Not recursive: the folder goes only when it is empty.
+  StrCpy $6 $R4 -1
+  RMDir "$INSTDIR\$6"
+  Goto remove_line
   removed:
+  FileClose $R3
+  Return
+  no_list:
+  StrCpy $R8 1
+  Return
+  unreadable:
+  MessageBox MB_OK|MB_ICONSTOP "Setup could not read $INSTDIR\${INSTALL_LIST}, so nothing was removed." /SD IDOK
+  Abort "Setup could not read the installed-file list. Nothing was removed."
+  bad_line:
+  FileClose $R3
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\${INSTALL_LIST} names a path outside the Vivary folder, so nothing was removed." /SD IDOK
+  Abort "The installed-file list is not valid. Nothing was removed."
+  linked:
+  FileClose $R3
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$6 is a link to another folder, so nothing was removed. Remove that link, then try again." /SD IDOK
+  Abort "A Vivary folder is a link. Nothing was removed."
 FunctionEnd
 
 !macroend
@@ -163,8 +303,13 @@ Function .onInit
   StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Vivary"
 FunctionEnd
 
-; An existing folder is replaced only when it holds a previous Vivary.
+; An existing folder is changed only when it holds a previous Vivary: its
+; uninstall entry points here, or it has the file list, vivary.exe or the
+; uninstaller. A partly removed install still matches, so setup can repair it.
 Function RequirePreviousVivary
+  ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "InstallLocation"
+  StrCmp $0 $INSTDIR found
+  IfFileExists "$INSTDIR\${INSTALL_LIST}" found
   IfFileExists "$INSTDIR\vivary.exe" found
   IfFileExists "$INSTDIR\${UNINSTALLER}" found
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR already exists and does not contain Vivary, so setup did not change it." /SD IDOK
@@ -181,8 +326,12 @@ Section "Vivary"
   IfFileExists "$INSTDIR\*.*" 0 copy_files
   Call RequirePreviousVivary
   DetailPrint "Removing the previous Vivary application files."
-  Call RemoveApplicationFolder
+  Call RemoveInstalledFiles
+  IntCmp $R7 0 copy_files
+  MessageBox MB_OK|MB_ICONSTOP "Some files of the previous Vivary in $INSTDIR are in use. Close Vivary and any program using those files, then run setup again." /SD IDOK
+  Abort "Some previous Vivary files are in use. Run setup again after closing them."
   copy_files:
+  ClearErrors
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}/*"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
@@ -197,6 +346,14 @@ Section "Vivary"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" ${ESTIMATED_KB}
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+  IfErrors write_failed
+  ; The list goes last, so it exists only after every file was written.
+  File "/oname=${INSTALL_LIST}" "${INSTALL_LIST_FILE}"
+  IfErrors write_failed
+  Return
+  write_failed:
+  MessageBox MB_OK|MB_ICONSTOP "Setup could not write every Vivary file to $INSTDIR. Run setup again." /SD IDOK
+  Abort "Setup could not write every Vivary file."
 SectionEnd
 
 Function LaunchVivary
@@ -215,15 +372,33 @@ Function un.onInit
   Call un.RequireFixedInstallDir
 FunctionEnd
 
+; The uninstall entry, the file list and the uninstaller go last, and only
+; when every listed file is gone. Otherwise they stay, so the uninstaller
+; can run again.
 Section "Uninstall"
   Call un.RequireFixedInstallDir
   Call un.RequireVivaryClosed
-  Call un.RemoveApplicationFolder
+  Call un.RemoveInstalledFiles
+  IntCmp $R8 1 no_list
+  IntCmp $R7 0 remove_entry
+  MessageBox MB_OK|MB_ICONSTOP "Some Vivary files in $INSTDIR are in use and were not removed. Close the programs using them, then run the uninstaller again." /SD IDOK
+  Abort "Some Vivary files are in use. Run the uninstaller again after closing them."
+  no_list:
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR has no ${INSTALL_LIST}, so nothing was removed. Run Vivary setup to repair the install, then uninstall again." /SD IDOK
+  Abort "The installed-file list is missing. Nothing was removed."
+  remove_entry:
   Delete "$SMPROGRAMS\Vivary.lnk"
   ReadRegDWORD $0 HKCU "${UNINSTALL_KEY}" "VivaryDesktopShortcut"
   ${If} $0 = 1
     Delete "$DESKTOP\Vivary.lnk"
   ${EndIf}
+  Delete "$INSTDIR\${INSTALL_LIST}"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
+  Delete "$INSTDIR\${UNINSTALLER}"
+  ; Removes the folder only when it is empty. Files a user added stay.
+  RMDir "$INSTDIR"
+  IfFileExists "$INSTDIR\*.*" 0 kept_data
+  DetailPrint "Files you added to $INSTDIR were kept."
+  kept_data:
   DetailPrint "${KEPT_DATA_TEXT}"
 SectionEnd

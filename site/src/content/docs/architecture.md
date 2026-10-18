@@ -716,27 +716,41 @@ that wraps the packaged `Vivary-win32-x64` folder in a per-user setup program, a
 `packages/desktop/build-installer.mjs` builds it with `makensis`. The script runs at
 the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\Vivary`.
 `.onInit` resets that folder, so the `/D=` option cannot move it. Setup adds a Start
-menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU. Its
-only recursive delete removes that folder after an exact-path and not-a-link check,
-in both the upgrade step and the uninstaller. Neither program reads or changes
-`%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or project folders. Neither stops a
-process. A running Vivary or bundled Node or Python makes setup ask the user to close
-it, with Retry or Cancel. The build script reads the version and commit from the
-payload's `build.json`, refuses a modified-checkout or linked payload, compares the
-files `makensis` reports adding with the payload, and writes a `.sha256` companion.
+menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU.
+`AllowSkipFiles off` makes a file that cannot be written stop setup with an error.
+Setup writes `install-files.txt`, every payload file and then every payload folder
+deepest first, as its last step. Nothing is deleted recursively. Upgrade and
+uninstall read the previous list behind an exact-path and not-a-link check on the
+install folder, check every line (no drive, leading backslash, `.` or `..` part,
+wildcard, or line over 240 characters) and every listed folder for a link before
+deleting anything, delete the listed files, and remove listed folders only when
+empty. Files a user added stay, and no delete follows a junction out of the folder.
+An existing folder counts as a previous install when its uninstall entry points
+there or it holds the list, `vivary.exe`, or the uninstaller, so a partly removed
+install can be repaired by running setup again. The uninstaller keeps its entry,
+the list, and itself while listed files remain, and removes them last otherwise.
+Neither program reads or changes `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or
+project folders, and neither stops a process. A running Vivary or bundled Node or
+Python makes setup ask the user to close it, with Retry or Cancel. The build script
+reads the version and payload commit from the payload's `build.json`, refuses a
+modified-checkout or linked payload, checks every payload path and SHA-256 against
+the package's file manifest when given one, refuses uncommitted installer sources,
+and compares the files `makensis` reports adding with the payload. It records the
+payload and installer commits as `PayloadCommit` and `InstallerCommit` in the
+installer's file properties and in a `.receipt.json` beside a `.sha256` companion.
 The Electron process, the packager, and the user data layout are unchanged. The
 installer is one more distribution step around the same packaged folder, so the
 system description above still holds. `tests/installer-script.test.mjs` checks the
 safety rules in the script source. `tests/installer-build.test.mjs` checks argument
-validation and builds a fixture installer when `makensis` is available. Both join
+validation, path rules, the manifest check, the installer commit check, and the
+list order, and builds a fixture installer when `makensis` is available. Both join
 the desktop Node test list in CI, where the fixture build skips. The desktop guide
-makes the installer the main install path, keeps the portable ZIP optional, adds an
-Uninstall section, and records that Windows acceptance is still open. From a review
-thread on PR #251, it also says that runtime detection skips a `codex.cmd` or
-`claude.cmd` that names no recognized package entry and has no npm package beside it.
-Evidence: 25 of 25 installer tests pass with `makensis` 3.10 present and 24 pass with
-one skip without it, and a real installer built from the `2aaf04f` package added all
-3,150 payload files.
+makes the installer the main install path with its acceptance pending, keeps the
+portable ZIP optional, adds an Uninstall section, and says that files added to the
+install folder are kept. From a review thread on PR #251, it also says that runtime
+detection skips a `codex.cmd` or `claude.cmd` that names no recognized package entry
+and has no npm package beside it. Evidence: 45 of 45 installer tests pass with `makensis` 3.10 and 44 pass with one skip
+without it, and each of 42 single-rule changes to the script fails the static tests.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

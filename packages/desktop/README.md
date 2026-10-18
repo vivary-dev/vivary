@@ -294,15 +294,26 @@ It stops when neither has it. When `makensis` was extracted rather than installe
 set `NSISDIR` to its data folder (the one holding `Include`, `Plugins`, and `Stubs`).
 
 ```console
-npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe
+npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <package-file-manifest.json>
 ```
 
-The script reads the version and source commit from the payload's
+The script reads the version and payload commit from the payload's
 `resources/workbench/build.json`. It refuses a payload built from a modified
-checkout, a payload with links, and an existing output file. After `makensis`
-finishes, it counts the files `makensis` reported adding. It deletes the installer
-when that count differs from the payload. It writes `<output>.sha256` beside the
-installer in the same format as the ZIP companion.
+checkout, a payload with links, a path the installer cannot list, and an existing
+output file. With `--manifest`, it checks every payload file's relative path and
+SHA-256 against the package's file manifest and refuses missing, extra, or changed
+files. Release builds pass the manifest. It also refuses uncommitted changes to
+`installer/` or `build-installer.mjs`, so the installer commit it records holds the
+script that built the installer.
+
+The script writes `install-files.txt`: every payload file, then every payload folder
+deepest first, with a trailing backslash on folder lines. After `makensis` finishes,
+it counts the files `makensis` reported adding and deletes the installer when that
+count differs from the payload plus the list. It writes `<output>.sha256` in the
+same format as the ZIP companion, and `<output>.receipt.json` with the installer's
+size and SHA-256, the payload and installer commits, the `makensis` version, the
+payload file count, and whether a manifest verified the payload. The installer's
+file properties carry the same two commits as `PayloadCommit` and `InstallerCommit`.
 
 The installer script is `installer/vivary.nsi`. Its rules:
 
@@ -315,18 +326,29 @@ The installer script is `installer/vivary.nsi`. Its rules:
   with version `<version>+<short commit>`, for example `0.0.0+2aaf04f`.
 - When Vivary or its bundled Node or Python is running, it asks the user to close
   Vivary and offers Retry or Cancel. It never stops a process.
-- An upgrade replaces the previous application folder. It does so only after it
-  confirms that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`, is not a
-  link, and holds `vivary.exe` or the uninstaller.
-- The uninstaller makes the same exact-folder check before it removes that folder.
-  It removes the Start menu shortcut, the desktop shortcut only when setup made it,
-  and the uninstall entry.
+- A file that cannot be written stops setup (`AllowSkipFiles off`), and setup exits
+  with an error. `install-files.txt` is written last, after every other file.
+- Nothing is deleted recursively. Upgrade and uninstall read the previous
+  `install-files.txt`, check every line before deleting anything, delete the listed
+  files, then remove each listed folder only when it is empty. A line with a drive,
+  a leading backslash, a `.` or `..` part, a wildcard, or more than 240 characters
+  stops the removal, and so does a listed folder that became a link. Files a user
+  added stay.
+- Both first confirm that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`
+  and is not a link. An upgrade changes an existing folder only when its uninstall
+  entry points there or it holds `install-files.txt`, `vivary.exe`, or the
+  uninstaller, so setup can repair a partly removed install.
+- When listed files remain, setup stops before copying, and the uninstaller keeps
+  its entry, list, and itself so it can run again. Otherwise the uninstaller removes
+  the shortcuts (the desktop one only when setup made it), then the list, the
+  uninstall entry, and itself last.
 - Neither program reads, writes, or deletes `%USERPROFILE%\.vivary`,
   `%APPDATA%\Vivary`, or any project folder.
 - `/S` runs the installer or the uninstaller silently. A running Vivary then
   cancels the change instead of waiting.
 
 `tests/installer-script.test.mjs` checks these rules in the script source.
-`tests/installer-build.test.mjs` checks the argument validation, and builds a small
-fixture installer when `makensis` is available. It skips that build otherwise.
+`tests/installer-build.test.mjs` checks the argument validation, the path rules,
+the manifest check, the installer commit check, and the list order. It builds a
+small fixture installer when `makensis` is available and skips that build otherwise.
 The installer is not code signed.
