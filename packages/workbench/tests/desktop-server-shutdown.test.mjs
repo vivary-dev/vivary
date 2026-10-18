@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const role = process.argv[2];
 const nativeWindows = process.platform === "win32";
+// Ancestry fields only. A cold CI CIM provider may need more than five seconds.
+const ANCESTRY_QUERY = "$ErrorActionPreference = 'Stop'; Get-CimInstance -Query 'SELECT ProcessId,ParentProcessId,Name FROM Win32_Process' | ConvertTo-Json -Compress";
 const lifecycle = new URL("../server/plugins/02-local-code-lifecycle.ts", import.meta.url).href;
 const desktop = new URL("../bin/desktop-server.mjs", import.meta.url).href;
 
@@ -581,6 +583,14 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
     }
   }
 } else {
+  // The first CIM query on a cold hosted runner has taken longer than an ancestry check's whole
+  // timeout. Warm the provider once in its own untimed test, so each check measures its own case.
+  test("warm the Windows process query before the timed checks", { skip: !nativeWindows, timeout: 70000 }, t => {
+    const started = Date.now();
+    const warm = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ANCESTRY_QUERY],
+      { encoding: "utf8", timeout: 60000, windowsHide: true });
+    t.diagnostic(`first process query: status ${warm.status}, ${Date.now() - started} ms`);
+  });
   for (const ending of ["server death", "Stop", "command exit"]) {
   test("Windows preview chain cleanup after " + ending, { skip: !nativeWindows, timeout: 50000 }, async t => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-preview-server-exit-"));
@@ -628,10 +638,10 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       await until(() => ready || exited, "preview service starts the real package command: " + stderr, 15000);
       assert.equal(exited, false, stderr);
       owned = JSON.parse(await readFile(receipt, "utf8"));
-      // Query only ancestry fields. A cold CI CIM provider may need more than five seconds.
-      const ancestry = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; Get-CimInstance -Query 'SELECT ProcessId,ParentProcessId,Name FROM Win32_Process' | ConvertTo-Json -Compress",
-      ], { encoding: "utf8", timeout: 15000, windowsHide: true });
+      const queried = Date.now();
+      const ancestry = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ANCESTRY_QUERY],
+        { encoding: "utf8", timeout: 15000, windowsHide: true });
+      t.diagnostic(`ancestry query: status ${ancestry.status}, ${Date.now() - queried} ms`);
       assert.equal(ancestry.status, 0, ancestry.error?.message || ancestry.stderr);
       const rows = new Map(JSON.parse(ancestry.stdout).map(row => [row.ProcessId, row]));
       managerPid = rows.get(owned.shell)?.ParentProcessId;
