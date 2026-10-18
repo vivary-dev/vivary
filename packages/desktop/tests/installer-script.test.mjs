@@ -95,6 +95,48 @@ test("a new folder gets setup's marker before any payload file, and a rerun acce
   assert.ok(functionBody("RequirePreviousVivary").includes('IfFileExists "$INSTDIR\\${SETUP_MARKER}" found'), "a rerun recognizes the marker");
 });
 
+test("setup checks the real install path against the payload's longest paths before changing anything", () => {
+  assert.ok(lines.includes("!insertmacro REQUIRE_DEFINE LONGEST_FILE"));
+  assert.ok(lines.includes("!insertmacro REQUIRE_DEFINE LONGEST_FOLDER"));
+  assert.deepEqual(functionBody("RequirePathRoom").slice(0, 7), [
+    'StrLen $0 "$INSTDIR\\"',
+    "IntOp $1 $0 + ${LONGEST_FILE}",
+    "IntCmp $1 259 0 0 too_long",
+    "IntOp $1 $0 + ${LONGEST_FOLDER}",
+    "IntCmp $1 247 0 0 too_long",
+    "Return",
+    "too_long:",
+  ]);
+  const room = functionBody("RequirePathRoom");
+  assert.ok(room.includes("SetErrorLevel 2") && room.some(line => line.startsWith("Abort ")), "exits with code 2");
+  const install = sectionBody("Vivary");
+  const check = position(install, "Call RequirePathRoom");
+  for (const step of ['RMDir "$INSTDIR"', "Call RemoveInstalledFiles", 'File /r "${PAYLOAD_DIR}/*"',
+    'FileOpen $0 "$INSTDIR\\${SETUP_MARKER}" a']) {
+    assert.ok(check < position(install, step), `the path check precedes ${step}`);
+  }
+});
+
+test("a second read of the list that fails removes nothing", () => {
+  const remove = functionBody("${PREFIX}RemoveInstalledFiles");
+  const checked = position(remove, "checked:");
+  assert.deepEqual(remove.slice(checked + 1, checked + 5), [
+    "FileClose $R3",
+    "ClearErrors",
+    'FileOpen $R3 "$INSTDIR\\${INSTALL_LIST}" r',
+    "IfErrors unreadable",
+  ]);
+});
+
+test("the desktop shortcut is recorded only when it was created", () => {
+  const shortcut = functionBody("CreateDesktopShortcut");
+  const create = position(shortcut, 'CreateShortcut "$DESKTOP\\Vivary.lnk" "$INSTDIR\\vivary.exe" "" "$INSTDIR\\vivary.exe" 0');
+  assert.equal(shortcut[create - 1], "ClearErrors");
+  assert.equal(shortcut[create + 1], "IfErrors done");
+  assert.ok(create + 1 < position(shortcut, 'WriteRegDWORD HKCU "${UNINSTALL_KEY}" "VivaryDesktopShortcut" 1'));
+  assert.ok(position(shortcut, 'WriteRegDWORD HKCU "${UNINSTALL_KEY}" "VivaryDesktopShortcut" 1') < position(shortcut, "done:"));
+});
+
 test("nothing is deleted recursively", () => {
   assert.doesNotMatch(code, /^RMDir\s+(\/\w+\s+)*\/r\b/im);
   assert.doesNotMatch(code, /\/REBOOTOK|\bReboot\b|SetRebootFlag/i);

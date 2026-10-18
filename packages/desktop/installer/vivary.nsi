@@ -37,6 +37,8 @@ AllowSkipFiles off
 !insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT_SHORT
 !insertmacro REQUIRE_DEFINE INSTALLER_COMMIT
 !insertmacro REQUIRE_DEFINE ESTIMATED_KB
+!insertmacro REQUIRE_DEFINE LONGEST_FILE
+!insertmacro REQUIRE_DEFINE LONGEST_FOLDER
 
 !define DISPLAY_VERSION "${APP_VERSION}+${PAYLOAD_COMMIT_SHORT}"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vivary"
@@ -49,10 +51,14 @@ AllowSkipFiles off
 !define SETUP_MUTEX "Local\VivarySetup"
 !define NO_LIST_TEXT "has no ${INSTALL_LIST}, so Vivary cannot tell which files it installed and removed nothing. Remove that folder by hand. Your projects, conversations and settings are stored elsewhere and are not affected."
 !define UNFINISHED_TEXT "holds a Vivary install that did not finish, so nothing was removed. Run Vivary setup again to finish it, then uninstall."
-; The longest relative path a list line may hold. Windows paths stop at 259
-; characters (MAX_PATH 260 with its terminator). The install root for a profile
-; folder name of up to 40 characters, C:\Users\<name>\AppData\Local\Programs\Vivary\,
-; takes 80 of them, which leaves 179. build-installer.mjs uses the same budget.
+; The longest relative path a list line may hold. Windows file paths stop at
+; 259 characters (MAX_PATH 260 with its terminator). The install root for a
+; profile folder name of up to 40 characters,
+; C:\Users\<name>\AppData\Local\Programs\Vivary\, takes 80 of them, which
+; leaves 179 for a file. CreateDirectory stops at 247 characters (248 with its
+; terminator), so build-installer.mjs holds folder paths to 167 and folder lines,
+; with their trailing backslash, to 168. RequirePathRoom checks the real install
+; root against the payload's own longest paths before setup changes anything.
 !define MAX_LIST_LINE 179
 !define KEPT_DATA_TEXT "Your projects, conversations and settings in %USERPROFILE%\.vivary and %APPDATA%\Vivary were kept. Project folders you opened in Vivary were not changed."
 
@@ -274,7 +280,9 @@ Function ${PREFIX}RemoveInstalledFiles
   IntCmp $3 0 check_line linked linked
   checked:
   FileClose $R3
+  ClearErrors
   FileOpen $R3 "$INSTDIR\${INSTALL_LIST}" r
+  IfErrors unreadable
   remove_line:
   Call ${PREFIX}ReadListLine
   StrCmp $R9 "line" 0 removed
@@ -339,6 +347,23 @@ Function .onInit
   StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Vivary"
 FunctionEnd
 
+; Stops setup, before it removes or extracts anything, when the payload's
+; longest file or folder path would not fit under this install root. Windows
+; limits a file path to 259 characters and a folder path to 247. The builder
+; passes the payload's longest relative paths as LONGEST_FILE and LONGEST_FOLDER.
+Function RequirePathRoom
+  StrLen $0 "$INSTDIR\"
+  IntOp $1 $0 + ${LONGEST_FILE}
+  IntCmp $1 259 0 0 too_long
+  IntOp $1 $0 + ${LONGEST_FOLDER}
+  IntCmp $1 247 0 0 too_long
+  Return
+  too_long:
+  MessageBox MB_OK|MB_ICONSTOP "The Vivary folder path, $INSTDIR, is too long for Vivary's files under the Windows path limit, so setup changed nothing." /SD IDOK
+  SetErrorLevel 2
+  Abort "The Vivary folder path is too long. Nothing was changed."
+FunctionEnd
+
 ; An existing folder is changed only when it holds a previous Vivary: its
 ; uninstall entry points here, or it has the file list, vivary.exe or the
 ; uninstaller. A partly removed install still has its list, so setup can
@@ -358,6 +383,7 @@ FunctionEnd
 Section "Vivary"
   SectionIn RO
   Call RequireFixedInstallDir
+  Call RequirePathRoom
   Call RequireVivaryClosed
   ; Removes only an empty folder. A folder with files is checked first.
   RMDir "$INSTDIR"
@@ -420,8 +446,12 @@ FunctionEnd
 ; Records the shortcut so the uninstaller removes only one that setup made.
 Function CreateDesktopShortcut
   SetOutPath "$INSTDIR"
+  ClearErrors
   CreateShortcut "$DESKTOP\Vivary.lnk" "$INSTDIR\vivary.exe" "" "$INSTDIR\vivary.exe" 0
+  ; Record only a shortcut that exists, so the uninstaller never deletes another.
+  IfErrors done
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "VivaryDesktopShortcut" 1
+  done:
 FunctionEnd
 
 Function un.onInit

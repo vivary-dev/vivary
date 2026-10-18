@@ -7,8 +7,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPath,
-  maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
+  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPaths,
+  maxFolderPath, maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 import { writePackageFileManifest } from "../package.mjs";
 
@@ -167,15 +167,19 @@ test("the packager's file manifest refuses links", { skip: process.platform === 
   }));
 
 test("the path budget leaves room for a 40-character profile folder", () => {
-  // 259 usable characters minus C:\Users\<40 characters>\AppData\Local\Programs\Vivary\ (80).
+  // Files: 259 usable characters minus C:\Users\<40 characters>\AppData\Local\Programs\Vivary\ (80).
   assert.equal(maxPayloadPath, 179);
-  const atLimit = `${"a".repeat(173)}/b.txt`;
-  assert.deepEqual({ ...longestPayloadPath([atLimit, "x"], ["a"]) },
-    { path: atLimit.replaceAll("/", "\\"), length: 179, limit: 179 });
-  assert.throws(() => longestPayloadPath([`${"a".repeat(179)}x`], []), /has 180 characters/);
-  // A folder line counts its trailing backslash.
-  assert.throws(() => longestPayloadPath([], ["a".repeat(179)]), /has 180 characters/);
-  assert.equal(longestPayloadPath(["vivary.exe"], ["resources/workbench"]).path, "resources\\workbench\\");
+  // Folders: CreateDirectory allows 247 characters (MAX_PATH - 12 with its terminator), minus the same 80.
+  assert.equal(maxFolderPath, 167);
+  const fileAtLimit = `${"a".repeat(173)}/b.txt`;
+  const folderAtLimit = `${"a".repeat(160)}/folder`;
+  const longest = longestPayloadPaths([fileAtLimit, "x"], [folderAtLimit, "a"]);
+  assert.deepEqual({ ...longest.file }, { path: fileAtLimit.replaceAll("/", "\\"), length: 179, limit: 179 });
+  assert.deepEqual({ ...longest.folder }, { path: folderAtLimit.replaceAll("/", "\\"), length: 167, limit: 167 });
+  assert.throws(() => longestPayloadPaths([`${"a".repeat(179)}x`], []), /payload file path .* has 180 characters/);
+  assert.throws(() => longestPayloadPaths([], [`${"a".repeat(167)}x`]), /payload folder path .* has 168 characters.*at most 167/);
+  // A file may sit in a folder of up to 167 characters and still reach 179.
+  assert.equal(longestPayloadPaths([`${"a".repeat(167)}/0123456789a`], ["a".repeat(167)]).file.length, 179);
 });
 
 test("payload, output and manifest are all required", async () => {
@@ -310,10 +314,27 @@ async function writeFakeMakensis(directory) {
     'if [ "$1" = "-VERSION" ]; then echo v3.10-fake; exit 0; fi',
     'for argument in "$@"; do case "$argument" in -DOUTFILE=*) printf MZfake > "${argument#-DOUTFILE=}";; esac; done',
     'i=0; while [ "$i" -lt "$FAKE_FILES" ]; do echo "File: \\"f$i\\" 1 bytes"; i=$((i + 1)); done',
+    // Echo the arguments so a test can read the defines the build passed.
+    'for argument in "$@"; do echo "argument $argument"; done',
   ].join("\n"));
   await chmod(program, 0o755);
   return program;
 }
+
+test("the build passes the payload's longest file and folder lengths to setup",
+  { skip: process.platform === "win32" && "the stand-in makensis is a shell script" },
+  () => withFixture(async ({ directory, payload, output, manifest }) => {
+    const inputs = await resolveInstallerInputs({ payload, output, manifest });
+    process.env.FAKE_FILES = "7";
+    let built;
+    try { built = await buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }); }
+    finally { delete process.env.FAKE_FILES; }
+    // resources\workbench\.output\server\index.mjs and resources\workbench\.output\server.
+    assert.ok(built.log.includes("argument -DLONGEST_FILE=44\n"), built.log);
+    assert.ok(built.log.includes("argument -DLONGEST_FOLDER=34\n"), built.log);
+    assert.equal(built.receipt.longestPayloadFile.length, 44);
+    assert.equal(built.receipt.longestPayloadFolder.length, 34);
+  }));
 
 test("a failed build leaves no installer, checksum or receipt", { skip: process.platform === "win32" && "the stand-in makensis is a shell script" },
   async t => {
@@ -356,7 +377,8 @@ test("makensis builds an installer and receipt from a fixture payload", { skip: 
       installer: path.basename(output), bytes: built.size, sha256: built.sha256,
       version: "0.0.0", displayVersion: "0.0.0+2aaf04f", payloadCommit: commit, installerCommit,
       makensisVersion: undefined, payloadFiles: 6, payloadFolders: 4, payloadBytes: inputs.totalBytes,
-      longestPayloadPath: { path: "resources\\workbench\\.output\\server\\index.mjs", length: 44, limit: 179 },
+      longestPayloadFile: { path: "resources\\workbench\\.output\\server\\index.mjs", length: 44, limit: 179 },
+      longestPayloadFolder: { path: "resources\\workbench\\.output\\server", length: 34, limit: 167 },
       payloadManifest: { verified: true, files: 6, sha256: inputs.manifest.sha256 }, filesAdded: 7,
     });
     assert.match(receipt.makensisVersion, /^v3\./);

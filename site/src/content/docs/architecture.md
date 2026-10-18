@@ -723,12 +723,14 @@ deepest first, as its last step. In a folder it creates, it first writes the mar
 `vivary-setup.txt`, before any payload file. Nothing is deleted recursively. Upgrade and
 uninstall read the previous list behind an exact-path and not-a-link check on the
 install folder, check every line (no drive, leading backslash, `.` or `..` part,
-wildcard, or line over 240 characters) and every listed folder for a link before
+wildcard, or line over 179 characters) and every listed folder for a link before
 deleting anything, delete the listed files, and remove listed folders only when
 empty. Files a user added stay, and no delete follows a junction out of the folder.
 An existing folder counts as a previous install when its uninstall entry points
-there or it holds the list, `vivary.exe`, or the uninstaller, so a partly removed
-install can be repaired by running setup again. The uninstaller keeps its entry,
+there or it holds the list, the marker, `vivary.exe`, or the uninstaller. Repair by
+running setup again needs `install-files.txt` or the `vivary-setup.txt` marker in the
+folder. Without either, setup and the uninstaller change nothing and ask the user to
+remove the folder by hand. The uninstaller keeps its entry,
 the list, and itself while listed files remain, and removes them last otherwise.
 Neither program reads or changes `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or
 project folders, and neither stops a process. A running Vivary or bundled Node or
@@ -770,11 +772,12 @@ recognizes the marker and copies over a folder that has it but no list, and the
 uninstaller asks for that rerun and removes the marker with the list. Setup never
 writes the marker into a folder that already held files, so a pre-existing folder
 without a marker is still refused. The list check also refuses a path part that
-ends in a dot or space. Payload paths and list lines are capped at 179 characters,
-because Windows paths stop at 259 and the install root for a 40-character profile
-folder name takes 80. The builder records the longest payload path in the receipt,
-refuses a payload path past that cap, and refuses payload files named like setup's
-own.
+ends in a dot or space. Payload file paths and list lines are capped at 179
+characters, because Windows file paths stop at 259 and the install root for a
+40-character profile folder name takes 80. Folder paths are capped at 167 (168 for a
+folder line with its trailing backslash), because `CreateDirectory` stops at 247.
+The builder records the longest file and folder paths in the receipt, refuses a
+payload past either cap, and refuses payload files named like setup's own.
 Review round 4: `package.mjs --windows-x64` writes `package-file-manifest.json`
 beside the packaged `Vivary-win32-x64` folder, mapping each file's path relative to
 that folder, with forward slashes, to its lowercase SHA-256. The package contents
@@ -782,11 +785,19 @@ are unchanged. That file is the one the installer build's `--manifest` takes, so
 documented package-to-installer path works from the repository alone. The builder
 also refuses a payload file or folder at the root whose name matches
 `install-files.txt`, `vivary-setup.txt`, or `Uninstall Vivary.exe` in any case.
-Evidence: 82 of 82 installer tests pass with `makensis` 3.10
-and 81 pass with one skip without it, each of 64 single-rule changes to the script
-fails the static tests, and the new manifest writer reproduces the 2aaf04f package
-manifest exactly (3,150 entries). The 70957d1 installer passed install, reinstall, locked-file
-upgrade, recovery rerun, and uninstall on Windows.
+Review round 5: the builder passes the payload's longest file and folder path
+lengths to the script as `LONGEST_FILE` and `LONGEST_FOLDER`. Before setup removes or
+extracts anything, `RequirePathRoom` adds each to the length of the real install root
+and stops with exit code 2 when a file path would pass 259 characters or a folder
+path 247, so a long or relocated profile folder never leaves a removed install that
+cannot be extracted again. The second read of `install-files.txt` now checks for an
+open error and removes nothing on failure, and setup records the desktop shortcut
+only when `CreateShortcut` succeeded. Evidence: 86 of 86 installer tests pass with
+`makensis` 3.10 and 85 pass with one skip without it, each of 74 single-rule changes
+to the script fails the static tests, and the 2aaf04f payload's longest file path has
+103 characters and its longest folder path 90. The 70957d1 installer
+passed install, reinstall, locked-file upgrade, recovery rerun, and uninstall on
+Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed

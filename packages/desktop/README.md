@@ -313,9 +313,12 @@ Windows cannot hold: non-ASCII, a wildcard or drive character, a part ending in 
 or space, a reserved device name such as `CON` or `nul.txt`, two paths that differ
 only in case, or a file or folder at the payload root named like a file setup
 writes there (`install-files.txt`, `vivary-setup.txt`, `Uninstall Vivary.exe`, in
-any case). It refuses a path longer than 179
-characters: Windows paths stop at 259, and the install root for a 40-character
-profile folder name takes 80 of them. The receipt records the longest path.
+any case). It refuses a file path longer than 179 characters and a folder path
+longer than 167 (168 with the list line's trailing backslash). Windows file paths
+stop at 259 characters and `CreateDirectory` stops at 247, and the install root for
+a 40-character profile folder name takes 80 of them. The receipt records the
+longest file and folder paths, and the script passes their lengths to setup as
+`LONGEST_FILE` and `LONGEST_FOLDER`.
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
@@ -356,6 +359,10 @@ The installer script is `installer/vivary.nsi`. Its rules:
   a leading backslash, a `.` or `..` part, a part ending in a dot or space, a
   wildcard, or more than 179 characters stops the removal, and so does a listed
   folder that became a link. Files a user added stay.
+- Before it removes or extracts anything, setup adds the payload's longest file and
+  folder lengths to the length of its real install root. It stops with exit code 2
+  and changes nothing when the file path would pass 259 characters or the folder
+  path 247, as can happen under a long or relocated profile folder.
 - When the folder does not exist or is empty, setup writes its marker
   `vivary-setup.txt` there before copying any payload file. Setup never writes the
   marker into a folder that already held files.

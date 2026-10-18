@@ -22,13 +22,18 @@ const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 direc
 // Windows reserves these device names in any path part, with or without an extension.
 const reservedNames = new Set(["CON", "PRN", "AUX", "NUL",
   ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`), ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)]);
-// Windows paths stop at 259 characters (MAX_PATH 260 with its terminator). The
-// install root for a profile folder name of up to 40 characters takes 80 of them.
-// Windows limits account names to 20 characters, and the profile folder adds at
-// most a domain or machine suffix, so 40 leaves room. The remaining 179 bound
-// every payload path, and MAX_LIST_LINE in installer/vivary.nsi must equal it.
+// Windows file paths stop at 259 characters (MAX_PATH 260 with its terminator),
+// and CreateDirectory stops at 247 (MAX_PATH - 12 = 248 with its terminator).
+// The install root for a profile folder name of up to 40 characters,
+// C:\Users\<name>\AppData\Local\Programs\Vivary\, takes 80 of them. Windows
+// limits account names to 20 characters, and the profile folder adds at most a
+// domain or machine suffix, so 40 leaves room. That leaves 179 for a file path,
+// which MAX_LIST_LINE in installer/vivary.nsi must equal, and 167 for a folder
+// path (168 for its list line with the trailing backslash). Setup also checks the
+// real install root against the payload's own longest paths (RequirePathRoom).
 const longestInstallRoot = "C:\\Users\\".length + 40 + "\\AppData\\Local\\Programs\\Vivary\\".length;
 export const maxPayloadPath = 259 - longestInstallRoot;
+export const maxFolderPath = 247 - longestInstallRoot;
 // Setup writes these into the install folder root, so no payload file or folder
 // there may share a name with them, in any case. installer/vivary.nsi writes
 // nothing else into the install folder besides the payload.
@@ -75,18 +80,24 @@ function requireListablePath(relative, isDirectory) {
 }
 
 /**
- * Returns the longest list line, a file path or a folder path with its trailing
- * backslash, and refuses the payload when it exceeds the path budget.
+ * Returns the longest payload file path and folder path, with Windows
+ * separators and no trailing backslash, and refuses either past its budget.
+ * Setup takes both lengths as LONGEST_FILE and LONGEST_FOLDER.
  */
-export function longestPayloadPath(files, directories) {
-  const lines = files.map(file => file.replaceAll("/", "\\"))
-    .concat(directories.map(folder => `${folder.replaceAll("/", "\\")}\\`));
-  const longest = lines.reduce((best, line) => (line.length > best.length ? line : best), "");
-  if (longest.length > maxPayloadPath) {
-    throw new Error(`The payload path ${longest} has ${longest.length} characters. Under a long profile folder `
-      + `it would pass the Windows path limit, so payload paths may have at most ${maxPayloadPath}.`);
-  }
-  return Object.freeze({ path: longest, length: longest.length, limit: maxPayloadPath });
+export function longestPayloadPaths(files, directories) {
+  const longest = (paths, limit, kind) => {
+    const found = paths.map(name => name.replaceAll("/", "\\"))
+      .reduce((best, name) => (name.length > best.length ? name : best), "");
+    if (found.length > limit) {
+      throw new Error(`The payload ${kind} path ${found} has ${found.length} characters. Under a long profile folder `
+        + `it would pass the Windows path limit, so payload ${kind} paths may have at most ${limit}.`);
+    }
+    return Object.freeze({ path: found, length: found.length, limit });
+  };
+  return Object.freeze({
+    file: longest(files, maxPayloadPath, "file"),
+    folder: longest(directories, maxFolderPath, "folder"),
+  });
 }
 
 /** Refuses two payload paths that name the same file on Windows, which ignores case. */
@@ -165,7 +176,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   for (const file of files) requireListablePath(file, false);
   for (const directory of directories) requireListablePath(directory, true);
   requireDistinctOnWindows([...files, ...directories]);
-  const longestPath = longestPayloadPath(files, directories);
+  const longestPaths = longestPayloadPaths(files, directories);
   const buildFile = path.join(payloadDir, "resources", "workbench", "build.json");
   const build = JSON.parse(await readFile(buildFile, "utf8").catch(() => {
     throw new Error("The payload has no resources/workbench/build.json.");
@@ -183,7 +194,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   if (build.sourceDirty !== false) throw new Error("The payload was built from a modified checkout.");
   const manifestCheck = await verifyPayloadManifest(payloadDir, files, path.resolve(manifest));
   return Object.freeze({
-    payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck, longestPath,
+    payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck, longestPaths,
     version: build.version, payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
   });
 }
@@ -266,6 +277,8 @@ export async function buildInstaller(inputs, makensis, { installerCommit }) {
       `-DPAYLOAD_COMMIT_SHORT=${inputs.payloadCommitShort}`,
       `-DINSTALLER_COMMIT=${installerCommit}`,
       `-DESTIMATED_KB=${Math.ceil(inputs.totalBytes / 1024)}`,
+      `-DLONGEST_FILE=${inputs.longestPaths.file.length}`,
+      `-DLONGEST_FOLDER=${inputs.longestPaths.folder.length}`,
       installerScript,
     ], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
     if (result.error) throw result.error;
@@ -287,7 +300,8 @@ export async function buildInstaller(inputs, makensis, { installerCommit }) {
       version: inputs.version, displayVersion: `${inputs.version}+${inputs.payloadCommitShort}`,
       payloadCommit: inputs.payloadCommit, installerCommit, makensisVersion: version.stdout.trim(),
       payloadFiles: inputs.fileCount, payloadFolders: inputs.directories.length, payloadBytes: inputs.totalBytes,
-      longestPayloadPath: { ...inputs.longestPath },
+      longestPayloadFile: { ...inputs.longestPaths.file },
+      longestPayloadFolder: { ...inputs.longestPaths.folder },
       payloadManifest: { verified: true, files: inputs.manifest.files, sha256: inputs.manifest.sha256 },
       filesAdded: added,
     };
