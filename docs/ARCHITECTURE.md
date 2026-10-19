@@ -927,8 +927,11 @@ It reads the same scoped `useChatThreads` list as the history and refreshes on
 store. No server, action or storage contract changed. Evidence:
 `tests/native-chat-components.test.mjs` drives the picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
 opens a linked conversation from the header action, and a headless Chrome run of
-the built app on the server measured 74 layouts. The B1 whole-window scroll the
-owner reported did not reproduce in those runs, so this change makes no layout fix.
+the built app on the server measured 90 layouts (three window sizes, three zooms,
+short and long conversations, no panel and each work panel) plus the work panel
+split at 1536x767 and 1280x720, grown from 700, 853 and 1426 px. The B1 whole-window
+scroll the owner reported did not reproduce in those runs, so this change makes no
+layout fix.
 
 2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
 three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape

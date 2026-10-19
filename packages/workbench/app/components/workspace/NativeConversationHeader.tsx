@@ -5,7 +5,7 @@ import "../../local-agent.css";
 /**
  * The API chat's compact header, matching the Code conversation header: the thread title over a muted line. The title
  * is Core's own thread title, which already prefers a manual rename (`_titleOverride`). It refreshes on the same events
- * the history list uses, so a rename or a newly generated title shows here too.
+ * the history list uses (thread updates, run changes and window focus), so a rename or a newly generated title shows here too.
  */
 export function NativeConversationHeader({ storageKey, scope, threadId, detail }: {
   storageKey: string; scope: ChatThreadScope | null; threadId: string | null; detail: string;
@@ -17,9 +17,12 @@ export function NativeConversationHeader({ storageKey, scope, threadId, detail }
   useEffect(() => {
     window.addEventListener("agent-chat:threads-updated", refreshThreads);
     window.addEventListener("agentNative.chatRunning", refreshThreads);
+    // A rename in another window reaches this one when it regains focus, as in the history list.
+    window.addEventListener("focus", refreshThreads);
     return () => {
       window.removeEventListener("agent-chat:threads-updated", refreshThreads);
       window.removeEventListener("agentNative.chatRunning", refreshThreads);
+      window.removeEventListener("focus", refreshThreads);
     };
   }, [refreshThreads]);
   const thread = threadId ? native.threads.find(item => item.id === threadId) : undefined;

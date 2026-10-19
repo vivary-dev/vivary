@@ -78,3 +78,16 @@ test("switching threads changes the title, an untitled thread shows its preview,
   await render("unsaved-thread");
   assert.equal(heading().textContent, "New conversation");
 });
+
+test("a rename in another window shows when this window regains focus, and an unmounted header stops listening", async () => {
+  await render("tide");
+  globalThis.headerFixture.threads = [{ ...globalThis.headerFixture.threads[0], title: "Renamed elsewhere" },
+    globalThis.headerFixture.threads[1]];
+  await act(async () => window.dispatchEvent(new window.Event("focus")));
+  assert.equal(heading().textContent, "Renamed elsewhere");
+  const refreshes = globalThis.headerFixture.calls.length;
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await act(async () => window.dispatchEvent(new window.Event("focus")));
+  assert.equal(globalThis.headerFixture.calls.length, refreshes, "no render after the header unmounts");
+});
