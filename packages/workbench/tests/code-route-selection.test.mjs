@@ -28,7 +28,7 @@ const fail = (message, options) => { throw Object.assign(new Error(message), opt
 // vivary-code-switch, its refusals, its model check, and the record change, as written.
 const switchCode = await slice("export async function switchVivaryCodeRuntime(", "\nexport async function getVivaryCodeFiles(");
 const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
-const pendingCode = await slice("function pendingSwitchFromRun(", "\nfunction engineLabelFromRun(");
+const pendingCode = await slice("function pendingSwitchFromRun(", "\nexport function engineLabelFromRun(");
 const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
   ["VIVARY_CODE_DEFAULT_MODEL", "VIVARY_CODE_MODELS", "CLAUDE_CODE_LEGACY_ALIASES", "fail"])(
   CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_MODELS.map(model => model.id), CLAUDE_CODE_LEGACY_ALIASES, fail);
