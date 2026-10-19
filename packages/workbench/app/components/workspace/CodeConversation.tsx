@@ -682,10 +682,6 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   [props.state.engines, props.selection.runId, choice.engine, choice.model]);
   const selectedEngine = props.state.engines.find(engine => engine.engine === choice.engine);
   const modelChoices = availableModels.find(engine => engine.engine === choice.engine)?.models ?? [];
-  // The selectors show a pending switch's target. A switch target lists only what that runtime supports now.
-  const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
-  const shownModelChoices = !pendingSwitch ? modelChoices
-    : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
   // Keep a saved choice even when the catalog changes. Only a deliberate selection replaces it.
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
@@ -696,10 +692,16 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
+  // The selectors show a pending switch's target. A switch target lists only what that runtime supports now.
+  const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
+  const shownModelChoices = !pendingSwitch ? modelChoices
+    : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
   // A retained conversation switches in place (vivary-code-switch). Another conversation's run never locks either kind.
   const retained = !!props.selection.runId;
+  // A Stop and switch the host recorded on the run. It survives a reload and applies when the run stops.
+  const serverPending = props.run?.pendingSwitch ?? null;
   const selectorsDisabled = retained
-    ? props.viewingMatch || !props.workspaceAvailable || !props.run
+    ? props.viewingMatch || !props.workspaceAvailable || !props.run || !!serverPending
       || (!!pendingSwitch && ["stopping", "switching"].includes(pendingSwitch.step))
     : !props.workspaceAvailable || props.active || props.streaming;
   const switchPanelId = useId();
@@ -726,7 +728,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
     || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable
-    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || sharedFolderHeld;
+    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || !!serverPending || sharedFolderHeld;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -775,26 +777,26 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     }
   }
 
-  // Stop and switch. Stop moves the run to stopping, then paused. The switch waits for that in the effect below.
+  // Stop and switch. The host records the target on the run, stops it, and applies the switch when the run leaves the
+  // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
   async function stopThenSwitch({ engine, model }: ModelChoice) {
     const runId = props.run?.id;
     if (!runId) return;
     setPendingSwitch({ engine, model, step: "stopping" });
     try {
-      const state = await call<VivaryCodeState>("vivary-code-stop", { projectId: props.projectId ?? undefined, runId });
+      const state = await call<VivaryCodeState>("vivary-code-switch", {
+        projectId: props.projectId ?? undefined, runId, engine, model, stop: true });
       if (state.error) throw new Error(state.error);
+      setPendingSwitch(null);
+      props.onSettled();
     } catch (failure) {
-      // A turn that ended on its own before Stop arrived is already what the switch needs.
-      if (!(failure && typeof failure === "object" && "errorCode" in failure && failure.errorCode === "vivary_code_run_not_active")) {
-        setPendingSwitch(null);
-        setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The agent could not stop."));
-      }
+      setPendingSwitch(null);
+      setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
     }
   }
 
   const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
   useEffect(() => {
-    if (pendingSwitch?.step === "stopping" && runStopped) void completeSwitch(pendingSwitch);
     // A turn that finished while the owner was choosing needs only the plain confirm now.
     if (pendingSwitch?.step === "working" && runStopped) setPendingSwitch({ ...pendingSwitch, step: "confirm" });
   }, [pendingSwitch?.step, runStopped]);
@@ -914,6 +916,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         {pendingSwitch.step === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
         {pendingSwitch.step === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
       </div>}
+      {!pendingSwitch && serverPending && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
+        role="status" aria-label="Switch runtime or model">
+        <span>Stopping the current request. This conversation then switches to {routeLabel(serverPending)}.</span>
+      </div>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
         ? selectedEngine.modelCatalog.message : runtime?.message ?? "Choose a local runtime in Settings."}</p></div>
@@ -924,7 +930,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <label className="local-agent-composer-runtime">
           Runtime
           <select aria-label="Conversation runtime" value={shown.engine}
-            aria-describedby={pendingSwitch ? switchPanelId : undefined}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
             className="local-agent-composer-select"
             disabled={selectorsDisabled}
             onChange={event => chooseRuntime(event.target.value)}>
@@ -937,7 +943,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <label className="local-agent-composer-model">
           Model
           <select aria-label="Conversation model" value={shown.model}
-            aria-describedby={pendingSwitch ? switchPanelId : undefined}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
             className="local-agent-composer-select"
             disabled={selectorsDisabled || !shownModelChoices.length}
             onChange={event => {

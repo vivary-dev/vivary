@@ -6698,7 +6698,8 @@ conversation can switch to another runtime or model from the same selectors
 after a confirm. The new session gets the visible conversation text, up to the
 last 24 messages. Tool output and the previous runtime's private session do not
 transfer. While a request runs, the switch waits, or Stop and switch cancels the
-request first and keeps completed work.
+request first and keeps completed work. Vivary keeps a Stop and switch request
+if you leave or reload the conversation before the request stops.
 
 Several Code conversations can work at once, in one project or in different
 projects, with Claude Code and Codex side by side. The strip at the top lists
@@ -7634,10 +7635,29 @@ block it, because a switch only edits this run's record. The target runtime must
 be ready, and the target model must be one that runtime lists now: a Claude Code
 catalog ID the installed version supports, or a model from Codex's live
 `model/list`. Legacy aliases, retained historical IDs, and Codex's `default` are
-refused. After those awaited checks the owner reads the run again and refuses if
+refused. After those awaited checks the owner resolves the project grant again
+and refuses a changed or missing project (`vivary_code_project_changed`). Then,
+with no await before the write, it refuses while a project reconnection is
+pending (`vivary_code_project_reconnecting`) and reads the run again, refusing if
 it started, stopped, or changed route meanwhile. A send that awaited its own
-checks while a switch landed reads the record again before it claims the host
-and refuses with `vivary_code_engine_changed`, so it never launches the old route.
+checks while a switch landed reads the record again before it claims this
+conversation's slot. It
+refuses with `vivary_code_engine_changed` when the route changed, so it never
+launches the old route. It builds the prompt from that fresh record, so a switch
+away and back during the send, which keeps the route but clears the sessions,
+still gives the new session the quoted conversation.
+
+Stop and switch is owned by the host. The action's `stop` flag admits an active or
+stopping run. After the same checks, the switch records the target as
+`metadata.pendingSwitch` and requests Stop for the run. Run summaries carry it as
+`pendingSwitch`, so a reloaded or reopened view shows it. When the run leaves the
+host, the execution owner applies the target in the same turn that frees the run,
+so no send can claim the run on the old route first. Runs in other conversations
+keep working and neither delay nor apply it. A host that ended while the
+run was stopping applies the target when the next host start marks the run
+interrupted. A run that ends under a cleanup refusal keeps its route, and a
+transcript note says the switch did not happen. A run that already ended when
+the request arrives switches at once.
 
 Every switch, including a model change inside one runtime, starts a new provider
 session. Codex refuses to resume a thread under another model, Claude Code's
@@ -7670,8 +7690,9 @@ conversation shows a short confirm that states what transfers. Switch calls the
 action, and the selectors then show the new route. While this conversation's run
 works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
 switch asks again and says the current request will be cancelled and completed
-work stays. Confirming calls Stop for this run, waits until the run leaves
-`stopping`, and then switches. If the turn finishes during the choice, the plain
+work stays. Confirming sends one `vivary-code-switch` request with `stop`, and the
+composer then shows the recorded target until the host applies it. Leaving or
+reloading the view does not cancel the switch. If the turn finishes during the choice, the plain
 confirm replaces it. A refused switch keeps the route and shows the server's
 reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
 draws these states. A linked conversation, described next, remains the way to
@@ -8340,6 +8361,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Merge of PR #258's review fixes into the concurrency branch. Both
+behaviors hold together. A switch refuses only for the switched conversation's
+own active or stopping run, and Stop and switch records `pendingSwitch` on that
+run. The host applies it when that run leaves `activeRuns`, in the same turn, so
+no send into that conversation starts on the old route first. Runs in other
+conversations neither block the switch nor apply it. A send checks its own
+conversation, then the shared folder, then builds its prompt from the record it
+reads at that point.
+
 2026-10-19 Concurrent Code conversations, stacked on PR #258 (issue #228). The
 owner required several conversations at once in one project, including Claude
 Code and Codex together, with a warning before a send beside another agent and
@@ -8354,6 +8384,16 @@ points to the new section. The 2026-10-16 entry below records the earlier
 release-scope choice, and its host-wide single run guard no longer exists.
 Evidence: the tests named in the new section, the workbench type check, and the
 targeted test files listed in the pull request.
+
+2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
+its prompt from the record it reads before claiming the host, not the one read
+before its awaits. The switch resolves the project grant again and refuses while
+a reconnection is pending, right before its write. Stop and switch moved from the
+composer to the host, which records `pendingSwitch` on the run and applies it when
+the run leaves the host or at the next host start. The composer test slice that
+`code-conversation-model-choices.test.mjs` evaluates no longer holds switch state.
+The section "Switching a Code conversation in place" and the J03 chart describe
+the result.
 
 2026-10-19 Runtime and model switch inside a Code conversation, stacked on PR #257.
 The owner rejected #257's explanation of locked selectors as the answer and asked

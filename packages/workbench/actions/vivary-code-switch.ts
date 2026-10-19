@@ -15,18 +15,22 @@ export default defineAction({
     runId: z.string().trim().min(1).max(128),
     engine: z.enum(VIVARY_CODE_ENGINES),
     model: z.string().trim().min(1).max(128),
+    /** Stop and switch: stop this conversation's active run, then apply the switch when it leaves the host. */
+    stop: z.boolean().optional(),
   }).strict(),
   requiresAuth: true,
   agentTool: false,
   mcpTool: false,
   toolCallable: false,
-  run: async ({ runId, engine, model, projectId }, ctx?: ActionRunContext) => switchVivaryCodeRuntime({
+  run: async ({ runId, engine, model, projectId, stop }, ctx?: ActionRunContext) => switchVivaryCodeRuntime({
     ownerEmail: requireVivaryCodeUser(ctx),
     orgId: ctx?.orgId ?? undefined,
     // Codex lists its models for the project folder, so a switch needs the folder, as a send does.
     workspace: await resolveVivaryCodeProject(ctx, projectId),
+    revalidateWorkspace: projectId ? () => resolveVivaryCodeProject(ctx, projectId) : undefined,
     runId,
     engine,
     model,
+    stop,
   }),
 });

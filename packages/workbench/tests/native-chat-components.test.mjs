@@ -115,7 +115,7 @@ const FOLDER_ISOLATION = { available: false, choosing: false, error: undefined, 
 // A retained conversation with both runtimes ready, driven through its selectors, switch panel, and shared-folder warning.
 // folderRuns lists other conversations working in its folder.
 export async function renderCodeSwitch({ running = false, folderRuns = [], viewingMatch = false, events = [], refuse,
-  folderPicker = false } = {}) {
+  folderPicker = false, pendingSwitch = null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const version = "2.1.300";
   const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
@@ -130,7 +130,7 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
   const calls = [], choices = [];
   let settled = 0;
   let run = { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
-    status: running ? "running" : "completed", phase: running ? "running" : "complete" };
+    status: running ? "running" : "completed", phase: running ? "running" : "complete", pendingSwitch };
   globalThis.codeActionFixture = async (name, params) => {
     // Linked history and handoff controls read their own actions on mount. They stay refused, as in the other cases.
     if (name !== "vivary-code-switch" && name !== "vivary-code-stop") throw new Error("No Code action expected");
@@ -851,7 +851,7 @@ test("Native chat controls", async t => {
     } finally { await view.unmount(); server(); }
   });
 
-  await t.test("while this conversation works, Wait does nothing and Stop and switch confirms, stops, then switches", async () => {
+  await t.test("while this conversation works, Wait does nothing and Stop and switch confirms, then hands the switch to the host", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
     try {
@@ -867,16 +867,27 @@ test("Native chat controls", async t => {
         + "Completed work stays in this conversation and the workspace. " + transfer + "Stop and switchKeep working");
       assert.deepEqual(view.calls, []);
       await view.click("Stop and switch");
-      assert.deepEqual(view.calls, [{ name: "vivary-code-stop", params: { projectId: undefined, runId: "retained-run" } }]);
-      assert.equal(view.panel(), "Stopping the current request. The switch follows once it stops.");
+      // One request. The host records the target, stops the run, and applies the switch when the run leaves it.
+      assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
+        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true } }]);
+      assert.equal(view.settled, 1, "the parent reloads the run, which now carries the recorded target");
+      await view.update({ status: "running", phase: "stopping", pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5" } });
+      assert.equal(view.panel(), "Stopping the current request. This conversation then switches to Claude Code Opus 5.5.");
       assert.deepEqual(view.disabled(), [true, true]);
-      await view.update({ status: "running", phase: "stopping" });
-      assert.equal(view.calls.length, 1, "the switch waits while the run is stopping");
-      await view.update({ status: "paused", phase: "paused" });
-      assert.deepEqual(view.calls.map(call => call.name), ["vivary-code-stop", "vivary-code-switch"]);
-      assert.deepEqual(view.calls[1].params, { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5" });
-      assert.deepEqual(view.choices, [{ engine: "claude-cli", model: "claude-opus-5-5" }]);
+      await view.update({ status: "paused", phase: "paused", model: "claude-opus-5-5", pendingSwitch: null });
       assert.equal(view.panel(), null);
+      assert.deepEqual(view.disabled(), [false, false]);
+      assert.equal(view.calls.length, 1, "the view sends nothing more after the stop");
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("a recorded Stop and switch shows again after a reload, before the run stops", async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch({ running: true, pendingSwitch: { engine: "codex-cli", model: "gpt-other" } });
+    try {
+      assert.equal(view.panel(), "Stopping the current request. This conversation then switches to Codex GPT Other.");
+      assert.deepEqual(view.disabled(), [true, true]);
+      assert.deepEqual(view.calls, []);
     } finally { await view.unmount(); server(); }
   });
 
