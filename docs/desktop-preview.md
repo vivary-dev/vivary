@@ -1,31 +1,48 @@
 # Install the Windows prerelease
 
-Verified 2026-09-22. This is an unsigned Windows x64 portable preview of Vivary.
-It includes PR #78's desktop browser-link fix and the preceding application changes. It is available
-from the [GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22). The repository and download are public.
-The complete desktop and self-hosted web acceptance journey remains unfinished.
+This guide covers the unsigned Windows x64 desktop release of Vivary. This release
+adds a per-user installer, `Vivary-Setup-<commit>.exe`, as the main download and
+keeps the portable ZIP as an option.
+
+Installer acceptance is pending. The installer steps below describe how setup is
+designed to behave, and they stay unverified until this release records its Windows
+results. See [Verification and known limits](#verification-and-known-limits).
+
+The portable ZIP facts were verified on 2026-09-22 for the published
+[GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22),
+which includes PR #78's desktop browser-link fix and the preceding application
+changes. That prerelease has only the portable ZIP. The repository and download are
+public. The complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
-Download `Vivary-windows-x64-9884670.zip` and its `.zip.sha256` companion from
-the release Assets list. The automatic Source code archives do not contain a
-ready-to-run desktop application.
+A release's Assets list holds the desktop downloads. Choose one:
 
-The ZIP is 236,072,825 bytes. Its SHA-256 must be:
+- `Vivary-Setup-<commit>.exe` is the installer. Use it unless you need a portable copy.
+- `Vivary-windows-x64-<commit>.zip` is the optional portable ZIP.
+
+Each download has a `.sha256` companion. Download both files. The automatic Source
+code archives hold the source only. They do not contain a ready-to-run desktop
+application.
+
+In PowerShell, from the download folder, compare the file with its companion.
+Replace the file name with the one you downloaded:
+
+```powershell
+$file = '.\Vivary-Setup-<commit>.exe'
+$expected = (Get-Content "$file.sha256").Split(' ')[0].Trim()
+$actual = (Get-FileHash $file -Algorithm SHA256).Hash
+if ($actual -ne $expected) { throw 'Vivary download checksum mismatch' }
+```
+
+The 2026-09-22 prerelease's ZIP is `Vivary-windows-x64-9884670.zip`.
+It is 236,072,825 bytes. Its SHA-256 must be:
 
 ```text
 e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0
 ```
 
-In PowerShell, from the download folder:
-
-```powershell
-$expected = (Get-Content .\Vivary-windows-x64-9884670.zip.sha256).Split(' ')[0].Trim()
-$actual = (Get-FileHash .\Vivary-windows-x64-9884670.zip -Algorithm SHA256).Hash
-if ($actual -ne $expected) { throw 'Vivary archive checksum mismatch' }
-```
-
-If you already use GitHub CLI, download the pinned assets with:
+If you already use GitHub CLI, download that prerelease's pinned assets with:
 
 ```console
 gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --pattern Vivary-windows-x64-9884670.zip --pattern Vivary-windows-x64-9884670.zip.sha256
@@ -33,15 +50,39 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
 
 ## Install and launch
 
+### With the installer (acceptance pending)
+
+1. Run `Vivary-Setup-<commit>.exe` after its checksum matches. The installer is
+   not code signed, so Windows can show **Windows protected your PC** with an
+   unknown publisher. Choose **More info**, then **Run anyway**.
+2. Setup needs 64-bit Windows and no administrator rights. It installs Vivary for
+   your Windows account only, in `%LOCALAPPDATA%\Programs\Vivary`. You cannot
+   choose another folder. Only one setup or uninstaller runs at a time.
+3. Accept the license and wait for the files to copy.
+4. On the last page, **Launch Vivary** is selected. Select **Create a desktop
+   shortcut** if you want one. Then choose **Finish**.
+5. Open Vivary later from **Vivary** in the Start menu.
+
+To install without any window, run `Vivary-Setup-<commit>.exe /S`. A silent
+install does not start Vivary or create a desktop shortcut.
+
+### With the portable ZIP (optional)
+
 1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\9884670`.
 2. Keep all extracted files together. Do not move `Vivary.exe` out of `Vivary-win32-x64`.
 3. Open `Vivary-win32-x64\Vivary.exe` in File Explorer.
-4. Choose a project, use **Open folder**, or create a disposable project with **New project**.
-5. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
 
-There is no MSI or setup wizard in this release. Extraction is the installation
-step. The application bundles Node, Python, and the original Vivary runtime.
-It does not require a source checkout or a separate global Node or Python install.
+Extraction is the installation step for the ZIP. Use a short folder path, because
+Windows Explorer can reject a deeply nested destination before the application starts.
+
+### First launch
+
+1. Choose a project, use **Open folder**, or create a disposable project with **New project**.
+2. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
+
+Both downloads hold the same application. It bundles Node, Python, and the
+original Vivary runtime. It does not require a source checkout or a separate
+global Node or Python install.
 Clean-profile first-run acceptance remains open, so report missing-runtime errors.
 
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
@@ -49,16 +90,17 @@ provider access require their own supported installation and authentication.
 Vivary finds Codex and Claude Code when they are installed as an executable, or
 globally with npm or pnpm, in a directory on `PATH`. On Windows it prefers a copy
 with a launcher (`codex.exe` or `codex.cmd`) in PATH order, as a terminal does. It does
-not read `.com` or `.bat` wrappers, so a custom wrapper can lead it to a different copy
-than your terminal runs.
+not read `.com` or `.bat` wrappers. It also skips a `codex.cmd` or `claude.cmd` that
+names no recognized package entry and has no npm package beside it. So a custom
+wrapper can lead it to a different copy than your terminal runs.
 Use your existing runtime subscription, tools, skills, and configured connections.
 Bundling Vivary does not include model-provider credentials or paid service access.
 Later builds offer no Builder.io account or credits. To use Native chat, add your own
 provider key when the chat asks you to connect AI, or in Settings > Agent > LLM.
 
-The executable is unsigned. Windows may display an unknown-publisher warning.
-Verify the download before deciding whether to run it. Keep Defender enabled.
-No exclusion or file-association change is part of installation.
+The installer and the executable are not code signed. Windows may display an
+unknown-publisher warning. Verify the download before deciding whether to run it.
+Keep Defender enabled. No exclusion or file-association change is part of installation.
 
 ## Your data
 
@@ -67,6 +109,7 @@ This includes the database, run history, and managed projects. Electron stores
 window and browser state separately under `%APPDATA%\Vivary` on Windows.
 Existing folders registered with **Open folder** remain at their original paths.
 Coding runtimes keep credentials and their own session data in their supported locations.
+The installer and the uninstaller never read, change, or remove these locations.
 
 The desktop does not honor a caller-supplied `VIVARY_DATA_DIR` as a separate test
 profile. Do not use that variable to claim isolation from your existing profile.
@@ -77,9 +120,16 @@ Use disposable projects for preview testing.
 1. Finish or stop active work, then close Vivary normally.
 2. Copy `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary` to a private backup location.
 3. Back up registered external project folders separately if you need a complete recovery copy.
-4. Verify and extract the new ZIP into a separate versioned folder.
-5. Launch the new executable. Confirm your projects and saved conversations remain available.
-6. Keep the previous package until you accept the replacement.
+4. Verify the new download. With the installer, run the new `Vivary-Setup-<commit>.exe`.
+   It removes the files the previous setup installed in
+   `%LOCALAPPDATA%\Programs\Vivary`, then copies the new ones. Your data and any
+   files you added to that folder stay. If Vivary is still running, setup asks you
+   to close it and offers **Retry** or **Cancel**. With the ZIP, extract it into a
+   separate versioned folder.
+5. Launch Vivary. Confirm your projects and saved conversations remain available.
+6. With the ZIP, keep the previous package until you accept the replacement. The
+   installer keeps one version. To return to an earlier one, run that version's
+   installer, within the rollback limits below.
 
 Backups can contain credentials, private conversations, and project content.
 Keep them private. Never attach them to a GitHub issue or upload them as release assets.
@@ -90,9 +140,37 @@ the current profile before attempting recovery, and use a matching pre-upgrade
 backup when returning to an older package. Changes since that backup require
 separate preservation. This preview does not provide an automatic migration rollback.
 
-To remove only the portable application, close it and remove its extracted
-version folder. Keep the profile and registered project folders to preserve data.
-There is no uninstaller or automatic update mechanism in this artifact.
+Neither download updates itself. Run a newer installer or extract a newer ZIP to upgrade.
+
+## Uninstall
+
+To remove an installed Vivary, close it. Then open **Settings** > **Apps** >
+**Installed apps** (on Windows 10, **Apps & features**), find **Vivary**, and
+choose **Uninstall**. You can also run `Uninstall Vivary.exe` in
+`%LOCALAPPDATA%\Programs\Vivary`.
+
+Setup records every file and folder it installs in `install-files.txt` in that
+folder. The uninstaller removes only those files and folders, then the Start menu
+shortcut, the desktop shortcut when setup created it, the uninstaller itself, the
+Installed apps entry, setup's `vivary-setup.txt` marker, and last the file list.
+Nothing is deleted recursively. Files you added
+to `%LOCALAPPDATA%\Programs\Vivary` stay, and so does the folder when it still
+holds them. The uninstaller then leaves `vivary-setup.txt` there, so a later setup
+installs beside your files without deleting any.
+
+The uninstaller keeps `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, and every
+project folder, so your projects, conversations, and settings remain. Delete those
+folders yourself only if you also want to remove your data.
+
+When another program holds a Vivary file, the uninstaller removes the rest and
+keeps its Installed apps entry. Close that program, then uninstall again.
+
+To uninstall without any window, run
+`"%LOCALAPPDATA%\Programs\Vivary\Uninstall Vivary.exe" /S`. It starts a copy of
+itself and returns before the removal finishes.
+
+To remove a portable copy, close it and remove its extracted version folder. The
+ZIP has no uninstaller. Keep the profile and registered project folders to preserve data.
 
 ## Try the changed experience
 
@@ -371,7 +449,22 @@ your firewall.
 
 | Symptom | Action |
 | --- | --- |
-| Checksum differs | Do not run that archive. Download both assets again and compare. |
+| Checksum differs | Do not run that download. Download both assets again and compare. |
+| Windows protected your PC | The installer is not code signed. Confirm the checksum matches, then choose **More info** and **Run anyway**. |
+| Setup or the uninstaller says Vivary is running | Close every Vivary window and wait a few seconds for it to finish, then choose **Retry**. Setup never ends Vivary for you. **Cancel** stops before any file is removed. |
+| Setup or the uninstaller says some Vivary files are in use | Another program, such as a terminal open in a Vivary folder, holds a file. Setup removed the files it could and kept its file list, uninstaller, and Installed apps entry. Close that program, then run setup or the uninstaller again. It continues from where it stopped. |
+| A first install stopped partway, for example on a full disk | Run setup again. Setup marks a folder it creates with `vivary-setup.txt` before copying any file, so a rerun recognizes the folder and finishes the install. The uninstaller asks for that rerun instead of removing anything. |
+| The uninstaller says it could not remove itself | A program, often a virus scanner, is holding `Uninstall Vivary.exe`. The uninstaller kept its Installed apps entry and file list. Wait for the scan to finish or close that program, then run the uninstaller again. |
+| The uninstaller says the Installed apps entry could not be removed | The uninstaller kept setup's file list and marker. Run Vivary setup to repair the install, then uninstall again. |
+| Setup or the uninstaller says `install-files.txt` is damaged, or the uninstaller says the file list is damaged | The list was damaged, for example by a power loss. The message gives the reason, such as a cut-off line or a path outside the Vivary folder. When the folder also holds `vivary-setup.txt`, run setup again. It copies Vivary over the folder and writes a new list, then the uninstaller works again. Without that marker, setup and the uninstaller stop and change nothing. Close Vivary, delete `%LOCALAPPDATA%\Programs\Vivary` by hand, and run setup again. Your projects, conversations, and settings are stored elsewhere and are not affected. |
+| Setup or the uninstaller says the folder has no `install-files.txt` | The folder holds an earlier Vivary without its file list or setup's marker, so neither can tell which files it installed. Both stop and change nothing. Close Vivary, then delete `%LOCALAPPDATA%\Programs\Vivary` by hand. Your projects, conversations, and settings are stored elsewhere and are not affected. Then run setup again. |
+| Setup says Vivary needs 64-bit Windows | Vivary runs only on 64-bit Windows. Setup installed nothing. |
+| Setup says the Vivary folder path is too long | Your profile folder's path is so long that some Vivary files would pass the Windows path limit under `%LOCALAPPDATA%\Programs\Vivary`. Setup checked this before changing anything, so an installed Vivary still works. Use the portable ZIP extracted to a short folder such as `C:\Vivary` instead. |
+| Setup or the uninstaller says it is already running | Another setup or uninstaller is open for your account. Finish or close it, then try again. |
+| Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |
+| Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
+| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary: no file list, no `vivary-setup.txt`, no `vivary.exe`, and no uninstaller. An uninstall that keeps files you added leaves `vivary-setup.txt`, so this happens only for files placed there some other way. Move them elsewhere, then run setup again. |
+| An upgrade stopped partway, for example on a full disk | Run setup again to finish it. You can also uninstall first: setup writes the new file list before it copies any file, so the uninstaller removes every Vivary file, keeps files you added, and a later setup installs normally. |
 | No window after launching from a terminal | Try File Explorer. An inherited `ELECTRON_RUN_AS_NODE=1` can make Electron run as Node. Remove that variable only from the launch shell and retry. |
 | Windows asks which app should open a file | Cancel. Recheck that you launched the extracted `.exe`. Do not change file associations. |
 | Folder selection times out | Close the chooser, then choose Open folder again. |
@@ -391,11 +484,30 @@ your firewall.
 | A webhook call gets 429 | The automation has 20 calls waiting. Wait for them to run, then send the call again. |
 | A webhook or event automation with a condition never runs | Conditions need an Anthropic API key. Open **Manage** > **Details** for the reason, then add an Anthropic key or remove the condition. |
 
-Remote access is a separate authenticated self-hosting configuration. This ZIP
-does not publish your laptop to the internet. Consult the
+Remote access is a separate authenticated self-hosting configuration. Neither the
+installer nor the ZIP publishes your laptop to the internet. Consult the
 [Workbench setup](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/README.md) before enabling remote access.
 
 ## Verification and known limits
+
+The installer is part of this release. Its script has source checks for the
+per-user folder, the exact-folder guard, removal limited to listed files with no
+recursive delete, the kept user data, and the current-user registry entry. Its
+build verifies every payload file against the package's file manifest, checks that
+every file went into the installer, and records the payload and installer commits
+in the installer's file properties and a build receipt. Installation, launch,
+upgrade, profile preservation, and uninstallation are pending acceptance on
+Windows. The installer is not code signed.
+
+To build the installer from source, run
+`npm --prefix packages/desktop run package -- --windows-x64`. It writes the
+`Vivary-win32-x64` folder and `package-file-manifest.json` into a dated `dist/`
+folder. Then run `npm --prefix packages/desktop run installer` with `--payload` set
+to that `Vivary-win32-x64` folder, `--manifest` set to that
+`package-file-manifest.json`, and `--output` set to `Vivary-Setup-<commit>.exe`.
+The [desktop package README](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#windows-installer)
+covers the tools it needs. The rest of this section describes the
+2026-09-22 portable prerelease.
 
 The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.
 This is the merged PR #78 source commit.

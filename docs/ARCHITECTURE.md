@@ -706,6 +706,119 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-18 Windows installer. The owner asked for a Windows installer as the
+website's main download. `packages/desktop/installer/vivary.nsi` is an NSIS 3 script
+that wraps the packaged `Vivary-win32-x64` folder in a per-user setup program, and
+`packages/desktop/build-installer.mjs` builds it with `makensis`. The script runs at
+the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\Vivary`.
+`.onInit` resets that folder, so the `/D=` option cannot move it. Setup adds a Start
+menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU.
+`AllowSkipFiles off` makes a file that cannot be written stop setup with an error.
+Setup writes `install-files.txt`, every payload file and then every payload folder
+deepest first, after it removes the previous version's files and before it extracts
+any payload file, so the list on disk names every Vivary file there. In a folder it creates, it first writes the marker
+`vivary-setup.txt`, before any payload file. Nothing is deleted recursively. Upgrade and
+uninstall read the previous list behind an exact-path and not-a-link check on the
+install folder, check every line (no drive, leading backslash, `.` or `..` part,
+wildcard, or line over 179 characters) and every listed folder for a link before
+deleting anything, delete the listed files, and remove listed folders only when
+empty. Files a user added stay, and no delete follows a junction out of the folder.
+An existing folder counts as a previous install when its uninstall entry points
+there or it holds the list, the marker, `vivary.exe`, or the uninstaller. Repair by
+running setup again needs `install-files.txt` or the `vivary-setup.txt` marker in the
+folder. Without either, setup and the uninstaller change nothing and ask the user to
+remove the folder by hand. The uninstaller keeps its entry,
+the list, and itself while listed files remain, and removes them last otherwise.
+Neither program reads or changes `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, or
+project folders, and neither stops a process. A running Vivary or bundled Node or
+Python makes setup ask the user to close it, with Retry or Cancel. The build script
+reads the version and payload commit from the payload's `build.json`, refuses a
+modified-checkout or linked payload, checks every payload path and SHA-256 against
+the package's file manifest, which `--manifest` must name, and refuses uncommitted
+installer sources. It counts the `File:` lines in the `makensis -V4` log and
+requires that number to equal the payload file count plus one for the list. It
+compares only that count, not names or contents. The manifest check covers the
+names and contents of the payload files on disk. It records the
+payload and installer commits as `PayloadCommit` and `InstallerCommit` in the
+installer's file properties and in a `.receipt.json` beside a `.sha256` companion.
+The Electron process, the packager, and the user data layout are unchanged. The
+installer is one more distribution step around the same packaged folder, so the
+system description above still holds. `tests/installer-script.test.mjs` checks the
+safety rules in the script source. `tests/installer-build.test.mjs` checks argument
+validation, path rules, the manifest check, the installer commit check, and the
+list order, and builds a fixture installer when `makensis` is available. Both join
+the desktop Node test list in CI, where the fixture build skips. The desktop guide
+makes the installer the main install path with its acceptance pending, keeps the
+portable ZIP optional, adds an Uninstall section, and says that files added to the
+install folder are kept. From a review thread on PR #251, it also says that runtime
+detection skips a `codex.cmd` or `claude.cmd` that names no recognized package entry
+and has no npm package beside it. Review round 3: `.onInit` refuses 32-bit Windows before any other check, and setup and
+the uninstaller take the per-user mutex `Local\VivarySetup`, so a second instance
+exits non-zero. A recognized previous install without `install-files.txt` is no
+longer overwritten in place. Setup and the uninstaller change nothing and ask the
+user to remove the folder by hand. `build-installer.mjs` requires `--manifest`,
+counts `LICENSE` and `assets/vivary.ico` among the sources that must be committed,
+refuses payload paths that Windows would merge or reserve (case-only differences, a
+trailing dot or space, `CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`),
+refuses an existing checksum or receipt, removes every file it wrote when a step
+after `makensis` starts fails, and compares the output and payload paths
+case-insensitively on Windows. After the re-review of 70957d1, a first install that fails before `vivary.exe`
+lands no longer needs manual cleanup. When the folder does not exist or is empty,
+setup writes the marker `vivary-setup.txt` before any payload file. A rerun
+recognizes the marker and copies over a folder that has it but no list, and the
+uninstaller asks for that rerun and removes the marker with the list. Setup never
+writes the marker into a folder that already held files, so a pre-existing folder
+without a marker is still refused. The uninstaller writes it again when files the
+user added keep the folder. The list check also refuses a path part that
+ends in a dot or space. Payload file paths and list lines are capped at 179
+characters, because Windows file paths stop at 259 and the install root for a
+40-character profile folder name takes 80. Folder paths are capped at 167 (168 for a
+folder line with its trailing backslash), because `CreateDirectory` stops at 247.
+The builder records the longest file and folder paths in the receipt, refuses a
+payload past either cap, and refuses payload files named like setup's own.
+Review round 4: `package.mjs --windows-x64` writes `package-file-manifest.json`
+beside the packaged `Vivary-win32-x64` folder, mapping each file's path relative to
+that folder, with forward slashes, to its lowercase SHA-256. The package contents
+are unchanged. That file is the one the installer build's `--manifest` takes, so the
+documented package-to-installer path works from the repository alone. The builder
+also refuses a payload file or folder at the root whose name matches
+`install-files.txt`, `vivary-setup.txt`, or `Uninstall Vivary.exe` in any case.
+Review round 5: the builder passes the payload's longest file and folder path
+lengths to the script as `LONGEST_FILE` and `LONGEST_FOLDER`. Before setup removes or
+extracts anything, `RequirePathRoom` adds each to the length of the real install root
+and stops with exit code 2 when a file path would pass 259 characters or a folder
+path 247, so a long or relocated profile folder never leaves a removed install that
+cannot be extracted again. The second read of `install-files.txt` now checks for an
+open error and removes nothing on failure, and setup records the desktop shortcut
+only when `CreateShortcut` succeeded. Two states that no rerun could repair are
+closed. The uninstaller now removes itself, its entry, the marker, and then
+`install-files.txt` last, so an interrupted uninstall leaves either the list, which
+setup recognizes and repairs, or nothing setup made. Setup writes the list as
+`install-files.tmp` and moves it over the old one with `MoveFileExW` (replace and
+write-through), so an interrupted write cannot leave a cut-off list. A damaged list
+with the marker present no longer stops for good: setup copies over it, which
+rewrites the list, and the uninstaller asks for that setup rerun. Without the marker
+both still stop and change nothing. Review round 6: the uninstaller checks that its own file is
+gone after deleting it, and that the uninstall entry no longer opens after
+`DeleteRegKey` fails, before it deletes the marker and the list. Either failure keeps
+the entry, marker, and list and stops with a message, so the uninstaller or setup can
+run again. A damaged list without the marker now stops with "install-files.txt is
+damaged" and the reason: a cut-off line, a path outside the Vivary folder, or an
+empty or too long line. Review round 7: an upgrade that stopped during extraction,
+then an uninstall, then setup, left new-version files that the old list on disk did
+not name, and the next setup refused the folder. Setup now writes the new list
+before `File /r`, after the old files are removed, so the list on disk always names
+every Vivary file present, and the uninstaller treats a listed file that never
+arrived as removed. When files the user added keep the folder after an uninstall,
+the uninstaller writes `vivary-setup.txt` again, so the next setup takes its
+marker-without-list path and installs beside those files without deleting any. A
+script test models that sequence with the script's own step order and fails on the
+74f8885 order. Evidence: 91 of 91 installer tests pass with `makensis` 3.10 and 90
+pass with one skip without it, each of 98 single-rule changes to the script fails
+the static tests, and the 2aaf04f payload's longest file path has 103 characters and
+its longest folder path 90. The 70957d1 installer passed install,
+reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
+
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
 Codex or Claude Code package that no terminal would run, or miss one installed
 globally with pnpm. A package directory left behind without a launcher, earlier on
