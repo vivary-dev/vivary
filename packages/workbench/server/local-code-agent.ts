@@ -85,6 +85,8 @@ export type VivaryCodeRunSummary = Pick<
   engineLabel: string;
   model: string;
   draftThreadId: string | null;
+  /** A Stop and switch target the host applies when this run leaves it. */
+  pendingSwitch: { engine: VivaryCodeEngine; model: string } | null;
 };
 
 export type VivaryCodeRunState = VivaryCodeRunSummary & {
@@ -328,6 +330,7 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
           percent: 0,
         },
       });
+      applyPendingSwitch(run.id);
     }
     // Issue #121. The oldest persisted refusal is in force before any send. The check that may lift it runs behind it.
     reloadCleanup();
@@ -1043,17 +1046,17 @@ export async function sendVivaryCodeMessage(input: {
 
   // Claim the host slot synchronously after all runtime and project checks.
   assertCodeHostAvailable();
-  // A switch can land while this send awaits its checks. Launch only the route the record still names.
-  if (existing) {
-    const current = getCodeAgentRunRecord(existing.id);
-    if (!current || metadataString(current, "engine") !== metadataString(existing, "engine")
-      || modelFromRun(current) !== modelFromRun(existing)) {
-      fail("This conversation's runtime or model changed. Check the selectors and send again.", {
-        errorCode: "vivary_code_engine_changed", statusCode: 409,
-      });
-    }
+  // A switch can land while this send awaits its checks. Launch only the route the record still names, and build the
+  // prompt from the record as it is now. A switch away and back keeps the route but clears the provider sessions, so
+  // the new session must get the quoted conversation.
+  const latest = existing ? getCodeAgentRunRecord(existing.id) : null;
+  if (existing && (!latest || metadataString(latest, "engine") !== metadataString(existing, "engine")
+    || modelFromRun(latest) !== modelFromRun(existing))) {
+    fail("This conversation's runtime or model changed. Check the selectors and send again.", {
+      errorCode: "vivary_code_engine_changed", statusCode: 409,
+    });
   }
-  const run = existing ?? createCodeAgentRunRecord({
+  const run = latest ?? createCodeAgentRunRecord({
     goalId: VIVARY_CODE_GOAL_ID,
     title: titleFromMessage(input.message),
     status: "queued",
@@ -1079,7 +1082,7 @@ export async function sendVivaryCodeMessage(input: {
     },
   });
 
-  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine,
+  const executionMessage = buildVivaryCodeExecutionPrompt(latest, selectedEngine,
     linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
     input.projectContext?.block);
   appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
@@ -1355,6 +1358,11 @@ async function executeVivaryCodeRun(input: {
     if (stopRefusedAt !== null) clearStopRefusal(input.runId);
     input.activeRun.requests.clear();
     activeRuns.delete(input.runId);
+    // In the same turn as the delete, so no send can claim the host on the old route first.
+    try { applyPendingSwitch(input.runId); }
+    catch (error) {
+      console.error(`[vivary-code-host] pending-switch-failed run=${input.runId} ${error instanceof Error ? error.name : "unknown"}`);
+    }
   }
 }
 
@@ -1388,19 +1396,17 @@ export async function stopVivaryCodeRun(input: {
     });
   }
 
+  requestUserStop(input.runId, activeRun);
+  return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
+}
+
+function requestUserStop(runId: string, activeRun: ActiveRun): void {
   // Issue #121. A run whose failed stop is still checking is already ending, and a Stop then would record the worker's
   // failure as the owner's stop.
-  if (activeRun.stopReason === null && hostState.cleanup?.runId !== input.runId) {
-    activeRun.stopReason = "user";
-    recordStoppingRun(
-      input.runId,
-      "Stop requested from the Vivary workbench.",
-      "user",
-    );
-    activeRun.controller.abort();
-  }
-
-  return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
+  if (activeRun.stopReason !== null || hostState.cleanup?.runId === runId) return;
+  activeRun.stopReason = "user";
+  recordStoppingRun(runId, "Stop requested from the Vivary workbench.", "user");
+  activeRun.controller.abort();
 }
 
 /**
@@ -1409,6 +1415,8 @@ export async function stopVivaryCodeRun(input: {
  * runtime, and Codex refuses to resume a thread under another model, so every switch clears both stored session IDs.
  * The next send then starts a new provider session and quotes the visible conversation (buildVivaryCodeFollowUpPrompt).
  * The refusals here look only at this conversation's run. Another conversation's active run does not block a switch.
+ * With `stop`, an active run records the target as `metadata.pendingSwitch` and stops. The host applies it when the run
+ * leaves, or at the next host start, so a closed or reloaded window does not lose a confirmed switch.
  */
 export async function switchVivaryCodeRuntime(input: {
   ownerEmail: string;
@@ -1417,16 +1425,20 @@ export async function switchVivaryCodeRuntime(input: {
   engine: VivaryCodeEngine;
   model: string;
   workspace?: VivaryCodeWorkspace;
+  /** Reads the project grant again after the runtime checks, as a send does. */
+  revalidateWorkspace?: () => Promise<VivaryCodeWorkspace | undefined>;
+  stop?: boolean;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
+  assertNoReconnection();
   const run = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
   if (run.metadata?.linkedCreationPending) {
     fail("The linked history could not be verified. Retry from the original conversation.", {
       errorCode: "vivary_linked_history_unavailable", statusCode: 409,
     });
   }
-  assertRunCanSwitch(run);
+  assertRunCanSwitch(run, input.stop === true);
   const fromEngine = metadataString(run, "engine");
   const fromModel = modelFromRun(run);
   if (fromEngine === input.engine && fromModel === input.model) {
@@ -1437,21 +1449,44 @@ export async function switchVivaryCodeRuntime(input: {
     fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
   }
   const target = await switchTargetModel(input.engine, input.model, runtime, workspace);
-  // The checks above awaited. Read the run again in the same turn as the write, so no send or other switch lands
-  // between the last refusal and the update.
+  if (input.revalidateWorkspace) {
+    const current = await input.revalidateWorkspace();
+    if (!current || !sameWorkspace(current, workspace)) {
+      fail("The selected project changed. Select it again.", { errorCode: "vivary_code_project_changed", statusCode: 409 });
+    }
+  }
+  // The checks above awaited. Check reconnection and read the run again in the same turn as the write, so no send,
+  // reconnection, or other switch lands between the last refusal and the update.
+  assertNoReconnection();
   const current = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
-  assertRunCanSwitch(current);
+  assertRunCanSwitch(current, input.stop === true);
   if (metadataString(current, "engine") !== fromEngine || modelFromRun(current) !== fromModel) {
     fail("This conversation changed while its runtime was checked. Choose again.", {
       errorCode: "vivary_code_switch_conflict", statusCode: 409,
     });
   }
-  applyVivaryCodeRuntimeSwitch(current, { engine: input.engine, model: target.id, label: target.label });
+  const to = { engine: input.engine, model: target.id, label: target.label };
+  const active = activeRuns.get(current.id);
+  if (active) {
+    updateCodeAgentRunRecord(current.id, { metadata: { pendingSwitch: { ...to, requestedAt: new Date().toISOString() } } });
+    requestUserStop(current.id, active);
+  } else {
+    applyVivaryCodeRuntimeSwitch(current, to);
+  }
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
 }
 
-function assertRunCanSwitch(run: CodeAgentRunRecord): void {
-  const active = activeRuns.get(run.id);
+function assertNoReconnection(): void {
+  if (projectReconnectionPending()) {
+    fail("Project reconnection is in progress. Switch after it finishes.", {
+      errorCode: "vivary_code_project_reconnecting", statusCode: 409,
+    });
+  }
+}
+
+/** `stopFirst` admits an active or stopping run for Stop and switch. A cleanup refusal still holds every switch. */
+function assertRunCanSwitch(run: CodeAgentRunRecord, stopFirst = false): void {
+  const active = stopFirst ? undefined : activeRuns.get(run.id);
   if (active?.stopReason) {
     fail("This conversation is still stopping. Switch after it stops.", {
       errorCode: "vivary_code_switch_run_stopping", statusCode: 409,
@@ -1492,6 +1527,27 @@ async function switchTargetModel(engine: VivaryCodeEngine, requested: string, ru
   fail("Choose a model supported by the selected coding runtime.", {
     errorCode: "vivary_code_model_unsupported", statusCode: 400,
   });
+}
+
+/**
+ * Applies a recorded Stop and switch target once its run has left the host. A run that ended with a cleanup refusal
+ * keeps its route, and the transcript says why.
+ */
+function applyPendingSwitch(runId: string): void {
+  const run = getCodeAgentRunRecord(runId);
+  if (!run?.metadata?.pendingSwitch) return;
+  const pending = run.metadata.pendingSwitch as { label?: unknown };
+  const target = pendingSwitchFromRun(run);
+  updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
+  if (!target || hostState.cleanup?.runId === runId || run.metadata.cleanupRefusal) {
+    appendCodeAgentTranscriptEvent({ runId, kind: "note",
+      message: "The runtime switch did not happen, because Vivary could not confirm that this conversation's coding "
+        + "processes stopped. Choose it again after they stop.",
+      metadata: { source: `${VIVARY_CODE_SWITCH_SOURCE}-dropped`, to: target } });
+    return;
+  }
+  applyVivaryCodeRuntimeSwitch(getCodeAgentRunRecord(runId)!, { ...target,
+    label: typeof pending.label === "string" ? pending.label : target.model });
 }
 
 /**
@@ -1708,7 +1764,14 @@ function toRunSummary(run: CodeAgentRunRecord): VivaryCodeRunSummary {
     engineLabel: engineLabelFromRun(run),
     model: modelFromRun(run),
     draftThreadId: runDraftThreadId(run),
+    pendingSwitch: pendingSwitchFromRun(run),
   };
+}
+
+function pendingSwitchFromRun(run: CodeAgentRunRecord): VivaryCodeRunSummary["pendingSwitch"] {
+  const pending = run.metadata?.pendingSwitch as { engine?: unknown; model?: unknown } | undefined;
+  return pending && (pending.engine === "claude-cli" || pending.engine === "codex-cli") && typeof pending.model === "string"
+    ? { engine: pending.engine, model: pending.model } : null;
 }
 
 function engineLabelFromRun(run: CodeAgentRunRecord): string {

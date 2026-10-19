@@ -239,7 +239,8 @@ conversation can switch to another runtime or model from the same selectors
 after a confirm. The new session gets the visible conversation text, up to the
 last 24 messages. Tool output and the previous runtime's private session do not
 transfer. While a request runs, the switch waits, or Stop and switch cancels the
-request first and keeps completed work. This prerelease artifact predates the
+request first and keeps completed work. Vivary keeps a Stop and switch request
+if you leave or reload the conversation before the request stops. This prerelease artifact predates the
 switch. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
 follow-ups, progress, and Stop. Earlier Windows candidates exercised real Codex

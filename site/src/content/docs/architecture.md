@@ -164,10 +164,27 @@ block it, because a switch only edits this run's record. The target runtime must
 be ready, and the target model must be one that runtime lists now: a Claude Code
 catalog ID the installed version supports, or a model from Codex's live
 `model/list`. Legacy aliases, retained historical IDs, and Codex's `default` are
-refused. After those awaited checks the owner reads the run again and refuses if
+refused. After those awaited checks the owner resolves the project grant again
+and refuses a changed or missing project (`vivary_code_project_changed`). Then,
+with no await before the write, it refuses while a project reconnection is
+pending (`vivary_code_project_reconnecting`) and reads the run again, refusing if
 it started, stopped, or changed route meanwhile. A send that awaited its own
-checks while a switch landed reads the record again before it claims the host
-and refuses with `vivary_code_engine_changed`, so it never launches the old route.
+checks while a switch landed reads the record again before it claims the host. It
+refuses with `vivary_code_engine_changed` when the route changed, so it never
+launches the old route. It builds the prompt from that fresh record, so a switch
+away and back during the send, which keeps the route but clears the sessions,
+still gives the new session the quoted conversation.
+
+Stop and switch is owned by the host. The action's `stop` flag admits an active or
+stopping run. After the same checks, the switch records the target as
+`metadata.pendingSwitch` and requests Stop for the run. Run summaries carry it as
+`pendingSwitch`, so a reloaded or reopened view shows it. When the run leaves the
+host, the execution owner applies the target in the same turn that frees the run,
+so no send can claim the run on the old route first. A host that ended while the
+run was stopping applies the target when the next host start marks the run
+interrupted. A run that ends under a cleanup refusal keeps its route, and a
+transcript note says the switch did not happen. A run that already ended when
+the request arrives switches at once.
 
 Every switch, including a model change inside one runtime, starts a new provider
 session. Codex refuses to resume a thread under another model, Claude Code's
@@ -200,8 +217,9 @@ conversation shows a short confirm that states what transfers. Switch calls the
 action, and the selectors then show the new route. While this conversation's run
 works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
 switch asks again and says the current request will be cancelled and completed
-work stays. Confirming calls Stop for this run, waits until the run leaves
-`stopping`, and then switches. If the turn finishes during the choice, the plain
+work stays. Confirming sends one `vivary-code-switch` request with `stop`, and the
+composer then shows the recorded target until the host applies it. Leaving or
+reloading the view does not cancel the switch. If the turn finishes during the choice, the plain
 confirm replaces it. A refused switch keeps the route and shows the server's
 reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
 draws these states. A linked conversation, described next, remains the way to
@@ -786,6 +804,16 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
+its prompt from the record it reads before claiming the host, not the one read
+before its awaits. The switch resolves the project grant again and refuses while
+a reconnection is pending, right before its write. Stop and switch moved from the
+composer to the host, which records `pendingSwitch` on the run and applies it when
+the run leaves the host or at the next host start. The composer test slice that
+`code-conversation-model-choices.test.mjs` evaluates no longer holds switch state.
+The section "Switching a Code conversation in place" and the J03 chart describe
+the result.
 
 2026-10-19 Runtime and model switch inside a Code conversation, stacked on PR #257.
 The owner rejected #257's explanation of locked selectors as the answer and asked

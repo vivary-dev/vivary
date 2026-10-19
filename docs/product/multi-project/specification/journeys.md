@@ -63,9 +63,10 @@ stateDiagram-v2
   Choice --> Confirm: turn finishes
   Choice --> ConfirmStop: Stop and switch
   ConfirmStop --> Working: Keep working
-  ConfirmStop --> Stopping: confirm cancellation
-  Stopping --> Switching: run leaves stopping
-  Stopping --> Idle: Stop refused, reason shown
+  ConfirmStop --> Stopping: confirm, host records the target and stops the run
+  ConfirmStop --> Working: refused, route kept, reason shown
+  Stopping --> Switching: run leaves the host, or the next host start marks it interrupted
+  Stopping --> Idle: cleanup refusal, route kept, note shown
   Switching --> Idle: new route recorded, sessions cleared, divider shown
   Switching --> Idle: refused, route kept, reason shown
   Idle --> Working: send, new provider session with quoted context
