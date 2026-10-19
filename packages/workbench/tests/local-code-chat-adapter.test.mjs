@@ -38,7 +38,7 @@ test("a shared-folder refusal restores the draft and asks the warning again", as
   await assert.rejects(async () => {
     for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Edit the parser" }] }],
       runConfig: { custom: { agentNativeQueuedMessageId: "submit-shared" } }, abortSignal: new AbortController().signal })) {}
-  }, { errorCode: "vivary_code_shared_folder_active" });
+  }, /Other agents are working in this folder/);
   assert.equal(actions.length, 1);
   assert.equal(actions[0][1].acknowledgeSharedFolder, false);
   assert.deepEqual(rejections, ["submit-shared"], "the draft is restored");
