@@ -121,7 +121,9 @@ const bundle = await build({ stdin: { contents: `
 const module = { exports: {} };
 compileFunction(bundle.outputFiles[0].text, ["require", "module", "exports"])(require, module, module.exports);
 
-const catalog = { scopeKey: "scope", projects: [{ projectId: "alpha", displayName: "Alpha" }, { projectId: "beta", displayName: "Beta" }] };
+const catalog = { scopeKey: "scope", projects: [{ projectId: "alpha", displayName: "Alpha", status: "available" },
+  { projectId: "beta", displayName: "Beta", status: "available" }] };
+const FILTER = "vivary-conversation-filter-v1";
 const row = (id, projectId, title, createdAt, extra = {}) => ({ id, kind: id.split(":")[0], projectId,
   projectLabel: projectId === "alpha" ? "Alpha" : projectId === "beta" ? "Beta" : "Personal workspace", title, createdAt,
   updatedAt: createdAt, runtime: id.startsWith("code:") ? "Claude Code" : null, model: null, pinned: false, archived: false,
@@ -160,6 +162,8 @@ test.beforeEach(() => {
     },
     call: async (name, input) => { inboxFixture.calls.push({ name, input }); return { changed: true }; },
   };
+  // Most tests read the selected project's rows. The filter tests start from All projects.
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "alpha" });
 });
 test.afterEach(async () => { await act(async () => root.unmount()); inboxFixture.client?.clear(); host.remove(); focused = null; });
 const settle = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 10)); });
@@ -184,29 +188,67 @@ async function chooseFilter(value) {
   await settle();
 }
 
-test("the filter lists the selected project by default, every project in All projects, and saves the choice", async () => {
-  await render();
-  assert.deepEqual(titles(), ["Old pinned plan", "Fix table wrapping", "Write launch notes"]);
-  assert.equal(host.querySelector(".conversation-inbox__detail")?.textContent, "Claude Code", "runtime shows on Code rows only");
-  await chooseFilter("all");
-  assert.deepEqual(titles(), ["Old pinned plan", "Fix table wrapping", "Review onboarding", "Write launch notes", "Personal question"]);
-  assert.match(host.textContent, /Beta/);
-  assert.deepEqual(inboxFixture.state.get("vivary-conversation-filter-v1"), { scopeKey: "scope", mode: "all" });
+test("the filter only scopes the list: it keeps the open conversation and the selected project, and is saved", async () => {
+  inboxFixture.state.delete(FILTER);
+  await render("/?run=a1");
+  assert.deepEqual(titles(), ["Old pinned plan", "Fix table wrapping", "Review onboarding", "Write launch notes", "Personal question"],
+    "All projects is the default");
+  assert.match(host.querySelector('[data-row-id="code:b1"]').textContent, /Beta/);
   await chooseFilter("beta");
-  assert.deepEqual(inboxFixture.calls.filter(call => call.name === "selectProject"), [{ name: "selectProject", projectId: "beta" }]);
   assert.deepEqual(titles(), ["Review onboarding"]);
-  assert.deepEqual(inboxFixture.state.get("vivary-conversation-filter-v1"), { scopeKey: "scope", mode: "project" });
+  assert.deepEqual(inboxFixture.state.get(FILTER), { scopeKey: "scope", filter: "beta" });
+  assert.equal(inboxFixture.calls.some(call => call.name === "selectProject"), false, "the filter never selects a project");
+  assert.equal(inboxFixture.active, "alpha");
+  assert.equal(host.querySelector("#route").textContent, "?run=a1", "the open conversation stays open");
+  assert.equal(host.querySelector(".conversation-inbox__detail")?.textContent, "Claude Code", "runtime shows on Code rows only");
   await chooseFilter("personal");
-  assert.equal(inboxFixture.active, null);
   assert.deepEqual(titles(), ["Personal question"]);
+  await chooseFilter("all");
+  assert.equal(titles().length, 5);
+  assert.equal(host.querySelector("#route").textContent, "?run=a1");
 });
 
-test("a saved All projects filter is restored after a restart", async () => {
-  inboxFixture.state.set("vivary-conversation-filter-v1", { scopeKey: "scope", mode: "all" });
+test("New conversation starts in the filtered project, shown with its folder before anything is created", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
+  await render("/?run=a1");
+  const destination = host.querySelector(".conversation-inbox__destination");
+  assert.match(destination.textContent, /New conversations start in Beta/);
+  assert.match(destination.textContent, /beta-folder, folder \/work\/beta-folder/);
+  assert.equal(inboxFixture.calls.length, 0, "showing the destination creates nothing");
+  await act(async () => button("New conversation").click());
+  await settle();
+  assert.deepEqual(inboxFixture.calls.filter(call => call.name === "selectProject"), [{ name: "selectProject", projectId: "beta" }]);
+  assert.match(host.querySelector("#route").textContent, /^\?run=new&draft=[0-9a-f-]{36}$/);
+  await chooseFilter("all");
+  assert.match(host.querySelector(".conversation-inbox__destination").textContent, /start in Beta/,
+    "with All projects, the open conversation's project is the destination");
+});
+
+test("an API chat for another project is created in that project after it is selected", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  await act(async () => button("API chat (separate billing)").click());
+  await settle();
+  assert.equal(inboxFixture.active, null);
+  const draft = inboxFixture.calls.find(call => call.name === "vivary-chat-draft");
+  assert.equal(draft.input.projectId, null, "the draft is recorded in the destination's scope");
+  assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=new-native");
+});
+
+test("a saved project filter is restored after a restart, and a project that left the catalog lists everything", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
   await render("/?run=b1");
-  assert.equal(host.querySelector(".conversation-inbox__filter select").getAttribute("value") ?? host.querySelector("option[selected]")?.value ?? "all", "all");
-  assert.equal(titles().length, 5);
+  assert.deepEqual(titles(), ["Review onboarding"]);
   assert.equal(host.querySelector('[aria-current="true"]')?.dataset.rowId, "code:b1");
+  await act(async () => root.unmount());
+  inboxFixture.client.clear();
+  root = createRoot(host);
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "gone" });
+  await render();
+  assert.equal(titles().length, 5);
 });
 
 test("search filters by title and archived conversations stay in a collapsed section", async () => {
@@ -312,7 +354,7 @@ test("rename edits the title in place and returns focus to the row", async () =>
 });
 
 for (const restores of [false, true]) test(`a row in another project opens exactly that conversation after the project changes${restores ? ", over a restored saved conversation" : ""}`, async () => {
-  inboxFixture.state.set("vivary-conversation-filter-v1", { scopeKey: "scope", mode: "all" });
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
   // Each project can restore its own saved conversation onto a bare route. The click must still land on its row.
   if (restores) inboxFixture.savedRoutes = { alpha: "run=a3", beta: "run=b-saved", personal: "runtime=native&history=project&thread=saved" };
   await render("/?run=a1");
@@ -350,7 +392,7 @@ test("unsent drafts of the selected project are listed and labeled", async () =>
 test("the destination shows the selected project and its folder, and the add menu keeps creating and opening distinct", async () => {
   await render();
   const destination = host.querySelector(".conversation-inbox__destination");
-  assert.match(destination.textContent, /New conversations start in Alpha/);
+  assert.match(destination.textContent, /New conversations start in Alpha/, "the filter names alpha");
   assert.equal(destination.querySelector(".conversation-inbox__folder").getAttribute("tabindex"), "0");
   assert.match(destination.textContent, /alpha-folder, folder \/work\/alpha-folder/);
   await act(async () => host.querySelector('[aria-label="Add project"]').click());

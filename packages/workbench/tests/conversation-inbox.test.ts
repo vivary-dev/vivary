@@ -48,9 +48,11 @@ async function nativeThread(id: string, scope: { type: string; id: string }, cre
   await getDbExec().execute({ sql: "UPDATE chat_threads SET created_at = ?, source_url = ? WHERE id = ?",
     args: [createdAt, options.sourceUrl ?? null, id] });
 }
-async function nativeRun(id: string, threadId: string, status: string, startedAt: number) {
-  await getDbExec().execute({ sql: "INSERT INTO agent_runs (id, thread_id, status, started_at) VALUES (?, ?, ?, ?)",
-    args: [id, threadId, status, startedAt] });
+const HOUR = 60 * 60 * 1000;
+const loadedAt = Date.now();
+async function nativeRun(id: string, threadId: string, status: string, startedAt: number, completedAt: number | null = null) {
+  await getDbExec().execute({ sql: "INSERT INTO agent_runs (id, thread_id, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?)",
+    args: [id, threadId, status, startedAt, completedAt] });
 }
 // The host keeps active runs in process memory. The fixture adds one the way a started turn does.
 type HostRun = { ownerEmail: string; orgId?: string; stopReason: string | null; workspace: { label: string };
@@ -79,11 +81,12 @@ test.before(async () => {
   await nativeThread("native-foreign-org", nativeScope("alpha"), 6_000, { org: "org-b" });
   await nativeThread("native-gamma", nativeScope("gamma"), 6_000);
   await nativeThread("native-unassigned", createVivaryChatIdentity(owner, orgId, { kind: "unassigned" }).scope, 6_000);
-  await nativeRun("run-1", "native-alpha", "completed", 10);
-  await nativeRun("run-2", "native-alpha", "running", 20);
-  await nativeRun("run-3", "native-beta", "errored", 10);
-  await nativeRun("run-4", "native-personal", "aborted", 10);
-  await nativeRun("run-5", "native-foreign-owner", "running", 10);
+  await nativeRun("run-1", "native-alpha", "completed", loadedAt - 3 * HOUR, loadedAt - 2 * HOUR);
+  await nativeRun("run-2", "native-alpha", "running", loadedAt - HOUR);
+  await nativeRun("run-3", "native-beta", "errored", loadedAt - 2 * HOUR, loadedAt - HOUR);
+  await nativeRun("run-4", "native-personal", "aborted", loadedAt - 2 * HOUR, loadedAt - HOUR);
+  await nativeRun("run-5", "native-foreign-owner", "running", loadedAt - HOUR);
+  await nativeRun("run-6", "native-linked-target", "completed", loadedAt - 30 * HOUR, loadedAt - 25 * HOUR);
 });
 test.after(async () => { host?.activeRuns.clear(); await closeDbExec(); await rm(temporary, { recursive: true, force: true }); });
 
@@ -124,20 +127,23 @@ test("a project without resolvable Code history keeps its API chats and is repor
 
 test("state precedence: approval, stopping, running, failed, completed, idle", async () => {
   const active = (pending: number, stopping: boolean) => ({ id: "x", pendingApprovals: Array(pending).fill({}), stopping }) as never;
-  assert.equal(inbox.codeAttention({ status: "errored" }, active(1, true)), "needs-approval");
-  assert.equal(inbox.codeAttention({ status: "running" }, active(0, true)), "stopping");
-  assert.equal(inbox.codeAttention({ status: "completed" }, active(0, false)), "running");
-  assert.equal(inbox.codeAttention({ status: "errored" }, undefined), "failed");
-  assert.equal(inbox.codeAttention({ status: "completed" }, undefined), "completed");
+  const recent = new Date(loadedAt - HOUR).toISOString();
+  assert.equal(inbox.codeAttention({ status: "errored", updatedAt: recent }, active(1, true)), "needs-approval");
+  assert.equal(inbox.codeAttention({ status: "running", updatedAt: recent }, active(0, true)), "stopping");
+  assert.equal(inbox.codeAttention({ status: "completed", updatedAt: recent }, active(0, false)), "running");
+  assert.equal(inbox.codeAttention({ status: "errored", updatedAt: recent }, undefined), "failed");
+  assert.equal(inbox.codeAttention({ status: "completed", updatedAt: recent }, undefined), "completed");
   for (const status of ["running", "queued", "paused", "needs-approval", "unknown"] as const) {
-    assert.equal(inbox.codeAttention({ status }, undefined), "idle", `${status} without a host run`);
+    assert.equal(inbox.codeAttention({ status, updatedAt: recent }, undefined), "idle", `${status} without a host run`);
   }
-  assert.deepEqual(["running", "errored", "truncated", "completed", "aborted", null].map(inbox.nativeAttention),
+  const native = (status: string | null) => inbox.nativeAttention(status ? { status, endedAt: loadedAt - HOUR } : undefined);
+  assert.deepEqual(["running", "errored", "truncated", "completed", "aborted", null].map(native),
     ["running", "failed", "failed", "completed", "idle", "idle"]);
   const rows = new Map((await load()).rows.map(row => [row.id, row.attention]));
   assert.equal(rows.get("native:native-alpha"), "running", "the newest Native turn decides");
   assert.equal(rows.get("native:native-beta"), "failed");
   assert.equal(rows.get("native:native-personal"), "idle");
+  assert.equal(rows.get("native:native-linked-target"), "idle", "a result older than 24 hours shows nothing");
   assert.equal(rows.get("code:alpha-failed"), "failed");
   activate("alpha-old", { requests: new Map([["r1", { request: { requestId: "r1", kind: "command" } }]]) });
   activate("beta-one", { stopReason: "user" });
@@ -148,6 +154,19 @@ test("state precedence: approval, stopping, running, failed, completed, idle", a
     assert.equal(live.get("code:beta-one"), "stopping");
     assert.equal(live.get("code:personal-one"), "running");
   } finally { host.activeRuns.clear(); }
+});
+
+test("Failed and Completed show for 24 hours after the run ended, for Code and API chat alike", async () => {
+  const at = async (offset: number) => new Map((await load({ now: loadedAt + offset })).rows.map(row => [row.id, row.attention]));
+  const soon = await at(20 * HOUR);
+  assert.deepEqual([soon.get("code:alpha-failed"), soon.get("code:beta-one"), soon.get("native:native-beta")],
+    ["failed", "completed", "failed"]);
+  const later = await at(26 * HOUR);
+  assert.deepEqual([later.get("code:alpha-failed"), later.get("code:beta-one"), later.get("native:native-beta")],
+    ["idle", "idle", "idle"]);
+  assert.equal(later.get("native:native-alpha"), "running", "running work shows however long it takes");
+  const result = inbox.codeAttention({ status: "completed", updatedAt: "not a date" }, undefined);
+  assert.equal(result, "idle", "a run with no known end shows nothing");
 });
 
 test("rows are ordered pinned first, then newest created, and live updates never move them", async () => {
@@ -163,14 +182,16 @@ test("rename, pin and archive keep the conversation's identity, updatedAt and or
   const order = (await load()).rows.filter(row => !row.pinned).map(row => row.id);
   const ctx = { userEmail: owner, orgId };
   await metaAction.run({ operation: "rename", runId: "alpha-old", projectId: "alpha", title: "  Release plan  " }, ctx as never);
+  await metaAction.run({ operation: "rename", runId: "alpha-old", projectId: "alpha", title: "Release plan v2" }, ctx as never);
   await metaAction.run({ operation: "archive", runId: "alpha-old", projectId: "alpha" }, ctx as never);
   let after = getCodeAgentRunRecord("alpha-old")!;
   assert.equal(after.updatedAt, before.updatedAt);
-  assert.equal(after.title, before.title, "the generated title stays as history");
+  assert.equal(after.title, "Release plan v2", "the header, Agent work and search read the record's title");
+  assert.equal(after.metadata?.generatedTitle, before.title, "the first generated title is kept, not the first rename");
   assert.equal(after.cwd, before.cwd);
   assert.equal(after.status, before.status);
   let row = (await load()).rows.find(item => item.id === "code:alpha-old")!;
-  assert.equal(row.title, "Release plan");
+  assert.equal(row.title, "Release plan v2");
   assert.equal(row.archived, true);
   assert.deepEqual((await load()).rows.filter(item => !item.pinned).map(item => item.id), order, "archive changes no order");
   await metaAction.run({ operation: "restore", runId: "alpha-old", projectId: "alpha" }, ctx as never);

@@ -344,7 +344,13 @@ reads the newest `agent_runs` row per thread through a join that repeats those
 predicates. Empty Native conversations have no row, as in `listThreads`, except
 an empty linked target. It probes no runtime. A project whose registry binding
 cannot resolve keeps its API chats and is reported in `unavailableProjects`.
-Unassigned history stays in its own section.
+Unassigned history stays in its own section. The action reads the project catalog
+on every call as its access check, and caches each project's history scope by
+owner and catalog revision, so a two-second poll does not repeat one registry read
+per project. The list polls only while the window is visible. Measured on the
+build server on 2026-10-19 with 20 projects, 100 Code and 100 API chat
+conversations of 40 messages each: the read after the catalog took 8.9 ms and
+9.4 ms median over two runs of 50 calls (p90 10.0 ms).
 
 Each row has a stable identity, `code:<runId>` or `native:<threadId>`, the same
 identity the routes and saved selections use, plus its project, title, creation
@@ -352,18 +358,26 @@ and update times, runtime and model for Code, pinned and archived flags, and one
 attention state chosen in this order: needs approval, stopping, running,
 failed, completed, idle. Code takes the first three from the host's
 `activeRuns`, so a record an ended host left `running` reads idle. Native has no
-approval or stopping state, and its pruned `agent_runs` rows read idle. Rows
-sort pinned first, then newest created, so background updates never move them.
+approval or stopping state, and its pruned `agent_runs` rows read idle. Failed and
+Completed show for 24 hours after the run ended (`updatedAt` for Code, which has
+no end time, and `completed_at` for Native), then the row reads idle. This keeps
+both kinds consistent and the list quiet without unread tracking. Rows sort
+pinned first, then newest created, so background updates never move them.
 
 [`ConversationInbox.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/ConversationInbox.tsx)
 renders the header (New conversation with its Code conversation or API chat
 choice, an Add project menu with "New project (creates a folder)" and "Open
-existing folder", the selected project with its folder name and full path on
+existing folder", the destination project with its folder name and full path on
 hover and focus, the filter, and title search), then compact rows, then a
-collapsed Archived section. The filter offers All projects, Personal workspace
-and each project. Choosing a project selects it, so the project shown is always
-where New conversation starts. The All projects choice is saved in the
-`vivary-conversation-filter-v1` application state key. A row shows its title,
+collapsed Archived section. The filter offers All projects (the default),
+Personal workspace and each project, and is saved in the
+`vivary-conversation-filter-v1` application state key. It only scopes the list:
+it never changes the open conversation or the selected project. New conversation
+starts in the filtered project, or with All projects in the open conversation's
+project, and the header names that destination and its folder before anything
+is created. New conversation for another project is the explicit action that
+selects it. An API chat there is created once that project's Native scope has
+mounted. A row shows its title,
 one state as text with an icon, its project in All projects, and its runtime for
 Code. The selected row is `aria-current` and holds the list's one Tab stop.
 Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
@@ -377,29 +391,32 @@ the old conversation route when the project changes, and the new project then
 restores its saved conversation onto the bare route. The inbox navigates once the
 old route is gone, navigates again with replace if a restore lands after it, and
 releases the target once it has held for 750 ms or the owner presses a key or the
-pointer. Native rename, pin and archive use Native's own thread
+pointer. New conversation in another project uses the same hold. Native rename, pin and archive use Native's own thread
 routes with the row's scope. Restore uses `vivary-native-archive`.
 
 Code rename, archive and pin go through the owner action
 [`vivary-code-conversation-meta`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-code-conversation-meta.ts).
-It writes only `metadata.title`, `metadata.archivedAt` and `metadata.pinnedAt`
-on the owner's run record in the named project, under Core's file lock, and
-keeps `updatedAt`. The generated title stays in the record. Archive refuses a
+Rename writes the record's `title`, which the Code header, Agent work and search
+read, and keeps the first generated title as `metadata.generatedTitle`. Archive
+and pin write `metadata.archivedAt` and `metadata.pinnedAt`. Every change runs on
+the owner's run record in the named project, under Core's file lock, and keeps
+`updatedAt`, so no list reorders. Archive refuses a
 working conversation with `vivary_code_archive_active` (409), because archive
 must never stop work or hide its approvals. Every change is reversible and no
 migration runs.
 
 The owner action [`vivary-project-location`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-project-location.ts)
-returns the selected project's folder, or Personal workspace's, for the owner's
+returns a project's folder, or Personal workspace's, for the owner's
 own screen. The shared project catalog stays without paths, because Remote
 access browsers also read it.
 
 Offline evidence: `tests/conversation-inbox.test.ts` covers rows across two
 projects and Personal workspace for Code and Native, owner and organization
-isolation, state precedence, stable order, rename, pin, archive and restore
-keeping identity and `updatedAt`, and the archive refusal while running.
-`tests/conversation-inbox-components.test.mjs` renders the filter, its saved
-choice, search, selection, keyboard movement, the row menu, rename, state
+isolation, state precedence, the 24-hour result window, stable order, rename,
+pin, archive and restore keeping identity and `updatedAt`, and the archive
+refusal while running. `tests/conversation-inbox-components.test.mjs` renders
+the filter keeping the open conversation, its saved choice, the destination and
+New conversation in another project for Code and API chat, search, selection, keyboard movement, the row menu, rename, state
 labels, drafts, the folder, and a cross-project open that lands on the clicked
 row with and without a restored saved conversation. Until the sidebar integration lands, the inbox is not mounted in the app.
 
@@ -974,6 +991,13 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Conversation inbox follow-up (W5). The Conversation inbox section now
+says the filter only scopes the list and names the New conversation destination,
+rename writes the record's `title` and keeps `metadata.generatedTitle`, Failed and
+Completed show for 24 hours, and the action caches project history scopes by
+catalog revision, with a measured read cost. Evidence inspected: the updated
+server and component tests and the 20-project, 200-conversation measurement.
 
 2026-10-19 Conversation inbox (W5, stacked on PR #261). New section
 Conversation inbox under System structure, and the Conversations row under Data

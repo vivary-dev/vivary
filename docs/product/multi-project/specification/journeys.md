@@ -185,7 +185,7 @@ A cleanup refusal after a failed stop still holds every Code send on the host, a
 
 ### Conversation inbox rows
 
-Implemented as a component, not yet mounted in the sidebar ([HLDD](../../../ARCHITECTURE.md#conversation-inbox)). Each row shows one state, the first that applies in this order: Needs approval, Stopping, Running, Failed, Completed, then no label. Archive and pin are list properties beside that state, so changing them never changes the run.
+Implemented as a component, not yet mounted in the sidebar ([HLDD](../../../ARCHITECTURE.md#conversation-inbox)). Each row shows one state, the first that applies in this order: Needs approval, Stopping, Running, Failed, Completed, then no label. Failed and Completed show for 24 hours after the run ended. Archive and pin are list properties beside that state, so changing them never changes the run.
 
 ```mermaid
 stateDiagram-v2
@@ -201,6 +201,8 @@ stateDiagram-v2
   Running --> Failed: turn fails
   Completed --> Running: next turn
   Failed --> Running: next turn
+  Completed --> Idle: 24 hours after the run ended
+  Failed --> Idle: 24 hours after the run ended
 ```
 
 ```mermaid
@@ -213,7 +215,7 @@ stateDiagram-v2
   Archived --> Listed: Restore, or open an archived API chat
 ```
 
-Rename keeps the row's identity, place and update time. A row sorts pinned first, then by creation time, so no state change moves it. Opening a row in another project selects that project, then opens exactly that conversation.
+Rename keeps the row's identity, place and update time. A row sorts pinned first, then by creation time, so no state change moves it. The project filter only scopes the list. Opening a row in another project, or starting a new conversation there, selects that project, then opens exactly that conversation.
 
 This is a user-visible normalized state model, not a replacement Native lifecycle table. Map existing owner states without fabricating transitions. Approval shows the request, project, harness and effect scope. Denial starts nothing. Each follow-up follows its actual approval policy. Runtime completion and workflow acceptance remain separate. A terminal denied outcome belongs in its conversation rather than a permanent banner over unrelated work.
 

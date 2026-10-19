@@ -31,14 +31,19 @@ export type InboxListRow = Pick<InboxRow, "id" | "projectId" | "projectLabel" | 
   | "archived" | "attention" | "runtime"> & { kind: InboxRow["kind"] | "draft"; draftLabel?: string;
   nativeScopeId: string | null };
 
-/** `all` lists every project. `project` follows the selected project, including Personal workspace. */
-export type InboxFilterMode = "all" | "project";
+/**
+ * `all`, `personal`, or a project ID. The filter only scopes the list and names where New conversation starts. It never
+ * changes the open conversation or the selected project.
+ */
+export type InboxFilter = string;
 const FILTER_KEY = "vivary-conversation-filter-v1";
 const ALL_PROJECTS = "all";
 const PERSONAL = "personal";
+const filterProjectId = (filter: InboxFilter) => filter === PERSONAL ? null : filter;
 /** How long an opened conversation's route must hold before a later restore may replace it. */
 const OPEN_SETTLE_MS = 750;
-type PendingOpen = { projectId: string | null; href: string; from: string; landed: boolean };
+/** `from` is the route the click left. Until it goes, Workspace would clear a target that lands first. */
+type PendingOpen = { projectId: string | null; href: string; from: string | null; landed: boolean };
 /** The route keys `Workspace.tsx` clears when the selected project changes. */
 const WORKSPACE_ROUTE_KEYS = ["panel", "path", "project", "runtime", "thread", "history", "run", "draft", "line", "message",
   "event", "eventOffset"];
@@ -85,10 +90,10 @@ export function sortInboxRows<Row extends Pick<InboxListRow, "id" | "pinned" | "
 }
 
 /** Applies the project filter and the title search, and splits archived conversations out. */
-export function visibleInboxRows(rows: readonly InboxListRow[], filter: { mode: InboxFilterMode; projectId: string | null },
+export function visibleInboxRows(rows: readonly InboxListRow[], filter: InboxFilter,
   search: string): { active: InboxListRow[]; archived: InboxListRow[] } {
   const needle = search.trim().toLocaleLowerCase();
-  const shown = rows.filter(row => (filter.mode === "all" || row.projectId === filter.projectId)
+  const shown = rows.filter(row => (filter === ALL_PROJECTS || row.projectId === filterProjectId(filter))
     && (!needle || row.title.toLocaleLowerCase().includes(needle)));
   return { active: sortInboxRows(shown.filter(row => !row.archived)), archived: sortInboxRows(shown.filter(row => row.archived)) };
 }
@@ -114,23 +119,26 @@ export function inboxDraftRows(input: { projectId: string | null; projectLabel: 
   return [...native, ...code];
 }
 
-function useInboxFilter(scopeKey: string | null) {
+function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) {
   const queryClient = useQueryClient();
   const { writeAppState, ready } = useAppStateWriter();
   const saved = useQuery({
     queryKey: [FILTER_KEY, scopeKey], enabled: scopeKey !== null, retry: false, staleTime: Infinity,
     queryFn: async ({ signal }) => {
-      const value = await readClientAppState(FILTER_KEY, { signal }) as { scopeKey?: unknown; mode?: unknown } | null;
-      return value?.scopeKey === scopeKey && (value?.mode === "all" || value?.mode === "project") ? value.mode : "project";
+      const value = await readClientAppState(FILTER_KEY, { signal }) as { scopeKey?: unknown; filter?: unknown } | null;
+      return value?.scopeKey === scopeKey && typeof value?.filter === "string" ? value.filter : ALL_PROJECTS;
     },
   });
-  const mode: InboxFilterMode = saved.data ?? "project";
-  async function setMode(next: InboxFilterMode) {
+  // A saved project that has left the catalog lists every project rather than nothing.
+  const stored = saved.data ?? ALL_PROJECTS;
+  const filter: InboxFilter = stored === ALL_PROJECTS || stored === PERSONAL || projectIds.includes(stored)
+    ? stored : ALL_PROJECTS;
+  async function setFilter(next: InboxFilter) {
     queryClient.setQueryData([FILTER_KEY, scopeKey], next);
     // The filter is a view preference. A failed save keeps the shown filter and retries on the next change.
-    if (ready && scopeKey) await writeAppState(FILTER_KEY, { scopeKey, mode: next }).catch(() => {});
+    if (ready && scopeKey) await writeAppState(FILTER_KEY, { scopeKey, filter: next }).catch(() => {});
   }
-  return { mode, setMode, ready: saved.isSuccess };
+  return { filter, setFilter };
 }
 
 async function changeNativeThread(row: InboxListRow, operation: "rename" | "pin" | "archive", body: unknown) {
@@ -158,7 +166,13 @@ type Shared = {
   setNotice: (value: string | undefined) => void;
   openRow: (row: InboxListRow, scope: NativeScope | null) => Promise<void>;
   change: (row: InboxListRow, operation: RowOperation, title?: string) => Promise<void>;
-  chooseFilter: (value: string) => Promise<void>;
+  /** Opens a route in the selected project, held against the route restores that follow a project change. */
+  hold: (href: string) => void;
+  /** Starts a conversation in another project: selects it, then creates the conversation there. */
+  startIn: (projectId: string | null, kind: "code" | "native") => Promise<void>;
+  /** A Native conversation waiting for its project's Native scope. */
+  pendingNative: string | null | undefined;
+  clearPendingNative: () => void;
   refetchInbox: () => unknown;
 };
 
@@ -171,11 +185,12 @@ export function ConversationInbox() {
   const activeProjectId = activeProject?.projectId ?? null;
   const navigate = useNavigate();
   const { call } = useNativeActionCaller();
-  const filter = useInboxFilter(catalog?.scopeKey ?? null);
+  const filter = useInboxFilter(catalog?.scopeKey ?? null, catalog?.projects.map(project => project.projectId) ?? []);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string>();
   const inbox = useActionQuery<InboxData>("vivary-conversation-inbox", {}, {
-    enabled: catalog !== null, refetchInterval: 2000, retry: false,
+    // React Query pauses the interval while the window is hidden, so a background window reads nothing.
+    enabled: catalog !== null, refetchInterval: 2000, refetchIntervalInBackground: false, retry: false,
   });
   const refetchInbox = inbox.refetch;
   useEffect(() => {
@@ -203,8 +218,8 @@ export function ConversationInbox() {
         OPEN_SETTLE_MS);
       return () => clearTimeout(release);
     }
-    // Workspace would clear a target that lands before the old route, so wait for the old route to go.
-    if (!pendingOpen.landed && route === pendingOpen.from && hasWorkspaceRoute(location.pathname, location.search)) return;
+    if (!pendingOpen.landed && pendingOpen.from !== null && route === pendingOpen.from
+      && hasWorkspaceRoute(location.pathname, location.search)) return;
     navigate(pendingOpen.href, { replace: pendingOpen.landed });
   }, [pendingOpen, checking, activeProjectId, route, location.pathname, location.search, navigate]);
   useEffect(() => {
@@ -269,14 +284,24 @@ export function ConversationInbox() {
     }
   }
 
-  async function chooseFilter(value: string) {
-    if (value === ALL_PROJECTS) return filter.setMode("all");
-    await filter.setMode("project");
-    const projectId = value === PERSONAL ? null : value;
-    if (projectId !== activeProjectId) await selectProject(projectId);
+  function hold(href: string) {
+    setPendingOpen({ projectId: activeProjectId, href, from: null, landed: false });
+  }
+  // New conversation in another project is the explicit action that selects it.
+  const [pendingNative, setPendingNative] = useState<string | null>();
+  async function startIn(projectId: string | null, kind: "code" | "native") {
+    setNotice(undefined);
+    if (kind === "code") setPendingOpen({ projectId, href: "/?run=new&draft=" + crypto.randomUUID(), from: route, landed: false });
+    else setPendingNative(projectId);
+    if (!await selectProject(projectId)) {
+      setPendingOpen(undefined);
+      setPendingNative(undefined);
+      setNotice("That project is unavailable. Choose another destination.");
+    }
   }
 
-  const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, chooseFilter, refetchInbox };
+  const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, hold, startIn,
+    pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox };
   return <ScopedInbox shared={shared} />;
 }
 
@@ -303,28 +328,46 @@ function NativeScoped({ identity, shared }: { identity: VivaryChatIdentity; shar
 
 function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | null }) {
   const { catalog, activeProject, checking, workspaceAvailable, selecting, selectProject, refresh } = useProjects();
-  const { inbox, filter, search, setSearch, notice, setNotice } = shared;
+  const { inbox, search, setSearch, notice, setNotice } = shared;
+  const { filter } = shared.filter;
   const activeProjectId = activeProject?.projectId ?? null;
+  // New conversation starts in the filtered project, or with All projects in the open conversation's project.
+  const destinationId = filter === ALL_PROJECTS ? activeProjectId : filterProjectId(filter);
+  const destinationProject = destinationId === null ? null
+    : catalog?.projects.find(project => project.projectId === destinationId) ?? null;
+  const destinationLabel = destinationProject?.displayName ?? "Personal workspace";
+  const elsewhere = destinationId !== activeProjectId;
   const location = useLocation();
   const navigate = useNavigate();
   const { call } = useNativeActionCaller();
   const [creatingProject, setCreatingProject] = useState(false);
   const folderPicker = useOpenProjectFolder();
   const folder = useActionQuery<{ folderName: string; path: string }>("vivary-project-location",
-    activeProjectId ? { projectId: activeProjectId } : {}, { enabled: workspaceAvailable, retry: false, staleTime: 30_000 });
+    destinationId ? { projectId: destinationId } : {}, {
+      enabled: elsewhere ? destinationProject?.status === "available" || destinationId === null : workspaceAvailable,
+      retry: false, staleTime: 30_000 });
   const projectLabel = activeProject?.displayName ?? "Personal workspace";
   const saved: InboxListRow[] = inbox.data?.rows ?? [];
   const rows = [...saved, ...inboxDraftRows({ projectId: activeProjectId, projectLabel,
     savedIds: new Set(saved.map(row => row.id)), nativeDrafts: scope?.nativeDrafts ?? [],
     codeDrafts: scope?.codeDrafts ?? [] })];
-  const visible = visibleInboxRows(rows, { mode: filter.mode, projectId: activeProjectId }, search);
+  const visible = visibleInboxRows(rows, filter, search);
   const selectedId = selectedInboxRowId(location.search);
 
   const creatingNative = useRef(false);
   function newCode() {
+    if (elsewhere) return void shared.startIn(destinationId, "code");
     navigate("/?run=new&draft=" + crypto.randomUUID());
   }
-  async function newNative() {
+  // A Native conversation for another project is created once that project's Native scope has mounted.
+  useEffect(() => {
+    if (shared.pendingNative === undefined || checking || !scope || activeProjectId !== shared.pendingNative
+      || scope.identity.projectId !== shared.pendingNative) return;
+    shared.clearPendingNative();
+    void newNative(true);
+  }, [shared.pendingNative, checking, scope?.identity.projectId, activeProjectId]);
+  async function newNative(afterProjectChange = false) {
+    if (!afterProjectChange && elsewhere) return void shared.startIn(destinationId, "native");
     if (creatingNative.current || !scope) return;
     creatingNative.current = true;
     setNotice(undefined);
@@ -336,7 +379,9 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
         operation: "change", kind: scope.identity.kind, projectId: scope.identity.projectId, threadId, expected: null,
         next: { status: "cleared", text: "", submitId: null } });
       if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
-      navigate(`/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`);
+      const href = `/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`;
+      if (afterProjectChange) shared.hold(href);
+      else navigate(href);
     } catch {
       setNotice("The conversation could not be saved. Try again.");
     } finally {
@@ -347,25 +392,25 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const startDefault = () => params.get("runtime") === "native" && params.get("history") !== "unassigned"
     ? void newNative() : newCode();
 
-  const filterValue = filter.mode === "all" ? ALL_PROJECTS : activeProjectId ?? PERSONAL;
   const loading = checking || inbox.isPending;
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
-  const listProps = { selectedId, showProject: filter.mode === "all",
+  const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
+  const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
     onOpen: (row: InboxListRow) => void shared.openRow(row, scope),
     onChange: (row: InboxListRow, operation: RowOperation, title?: string) => void shared.change(row, operation, title) };
   return <section className="conversation-inbox" aria-label="Conversations">
     <div className="conversation-inbox__header">
       <div className="conversation-inbox__new">
-        <Button size="sm" className="conversation-inbox__new-button" disabled={!workspaceAvailable} onClick={startDefault}>
+        <Button size="sm" className="conversation-inbox__new-button" disabled={!canStart} onClick={startDefault}>
           <IconPlus size={14} aria-hidden />New conversation</Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="ghost" aria-label="Choose conversation type" disabled={!workspaceAvailable}>
+            <Button size="sm" variant="ghost" aria-label="Choose conversation type" disabled={!canStart}>
               <IconChevronDown size={14} aria-hidden /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={newCode}>Code conversation</DropdownMenuItem>
-            <DropdownMenuItem disabled={!scope} onSelect={() => void newNative()}>API chat (separate billing)</DropdownMenuItem>
+            <DropdownMenuItem disabled={!elsewhere && !scope} onSelect={() => void newNative()}>API chat (separate billing)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <DropdownMenu>
@@ -382,7 +427,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       </div>
       <p className="conversation-inbox__destination">
         <span className="sr-only">New conversations start in </span>
-        <span className="conversation-inbox__project">{projectLabel}</span>
+        <span className="conversation-inbox__project">{destinationLabel}</span>
         {folder.data && <TooltipProvider><Tooltip>
           <TooltipTrigger asChild>
             <span className="conversation-inbox__folder" tabIndex={0}>
@@ -398,8 +443,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
         onCreated={async projectId => { await refresh(); return selectProject(projectId); }} />}
       <label className="conversation-inbox__filter">
         <span>Show</span>
-        <select value={filterValue} disabled={!catalog || selecting}
-          onChange={event => void shared.chooseFilter(event.target.value)}>
+        <select value={filter} disabled={!catalog} onChange={event => void shared.filter.setFilter(event.target.value)}>
           <option value={ALL_PROJECTS}>All projects</option>
           <option value={PERSONAL}>Personal workspace</option>
           {catalog?.projects.map(project => <option key={project.projectId} value={project.projectId}>

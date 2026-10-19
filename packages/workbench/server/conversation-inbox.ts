@@ -11,7 +11,9 @@ import {
 
 /**
  * The one state a row shows, chosen in this order. Execution, archive and pin stay separate fields, so a row can be
- * archived and failed at once. Native conversations have no approval or stopping state, so they show the rest.
+ * archived and failed at once. Native conversations have no approval or stopping state, so they show the rest. Failed
+ * and Completed describe the last run for `RESULT_SHOWN_MS` after it ended, then the row reads idle, so the list stays
+ * quiet without unread tracking.
  */
 export const INBOX_ATTENTION = ["needs-approval", "stopping", "running", "failed", "completed", "idle"] as const;
 export type InboxAttention = typeof INBOX_ATTENTION[number];
@@ -50,6 +52,12 @@ export type InboxProject = { projectId: string; label: string; code: VivaryCodeP
 export const PERSONAL_LABEL = "Personal workspace";
 const NATIVE_SCOPE_TYPE = "workspace-app";
 const MAX_NATIVE_ROWS = 1_000;
+export const RESULT_SHOWN_MS = 24 * 60 * 60 * 1000;
+
+/** A finished run's result shows while it is recent. A run with no known end shows nothing. */
+function recentResult(result: "failed" | "completed", endedAt: number, now: number): InboxAttention {
+  return endedAt > 0 && now - endedAt < RESULT_SHOWN_MS ? result : "idle";
+}
 
 /** The row order: pinned first, then newest created. The id breaks ties so the order never depends on read order. */
 export function compareInboxRows(left: InboxRow, right: InboxRow): number {
@@ -57,26 +65,24 @@ export function compareInboxRows(left: InboxRow, right: InboxRow): number {
     || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }
 
-export function codeAttention(run: Pick<CodeAgentRunRecord, "status">, active: VivaryCodeActiveRun | undefined): InboxAttention {
-  // The host's active map decides whether a run works. A record left `running` by an ended host is not running.
+/**
+ * The host's active map decides whether a run works. A record left `running` by an ended host is not running. A Code
+ * record has no end time, so its `updatedAt` stands for it. List changes keep `updatedAt`, so they never revive a label.
+ */
+export function codeAttention(run: Pick<CodeAgentRunRecord, "status" | "updatedAt">, active: VivaryCodeActiveRun | undefined,
+  now = Date.now()): InboxAttention {
   if (active) return active.pendingApprovals.length ? "needs-approval" : active.stopping ? "stopping" : "running";
-  if (run.status === "errored") return "failed";
-  if (run.status === "completed") return "completed";
+  if (run.status === "errored") return recentResult("failed", timestamp(run.updatedAt), now);
+  if (run.status === "completed") return recentResult("completed", timestamp(run.updatedAt), now);
   return "idle";
 }
 
 /** Native keeps one `agent_runs` row per turn. Only the newest decides. Pruned history reads as idle. */
-export function nativeAttention(latestRunStatus: string | null | undefined): InboxAttention {
-  if (latestRunStatus === "running") return "running";
-  if (latestRunStatus === "errored" || latestRunStatus === "truncated") return "failed";
-  if (latestRunStatus === "completed") return "completed";
+export function nativeAttention(latest: { status: string; endedAt: number } | undefined, now = Date.now()): InboxAttention {
+  if (latest?.status === "running") return "running";
+  if (latest?.status === "errored" || latest?.status === "truncated") return recentResult("failed", latest.endedAt, now);
+  if (latest?.status === "completed") return recentResult("completed", latest.endedAt, now);
   return "idle";
-}
-
-/** The owner's title wins over the title generated from the first message. */
-export function codeTitle(run: Pick<CodeAgentRunRecord, "title" | "metadata">): string {
-  const edited = run.metadata?.title;
-  return (typeof edited === "string" && edited.trim()) || run.title || "Untitled conversation";
 }
 
 function timestamp(value: unknown): number {
@@ -90,7 +96,7 @@ function timestamp(value: unknown): number {
  */
 export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; ownerEmail: string; orgId?: string;
   projects: readonly InboxProject[]; personal: VivaryCodeWorkspace | null;
-  activeRuns: readonly VivaryCodeActiveRun[] }): InboxRow[] {
+  activeRuns: readonly VivaryCodeActiveRun[]; now?: number }): InboxRow[] {
   const active = new Map(input.activeRuns.map(run => [run.id, run]));
   const projects = new Map(input.projects.map(project => [project.projectId, project]));
   return input.runs.flatMap(run => {
@@ -100,10 +106,10 @@ export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; owne
     if (!scope || !isOwnedRun(run, input.ownerEmail, input.orgId, scope)) return [];
     return [{
       id: `code:${run.id}`, kind: "code" as const, projectId, projectLabel: project?.label ?? PERSONAL_LABEL,
-      title: codeTitle(run), createdAt: timestamp(run.createdAt), updatedAt: timestamp(run.updatedAt),
+      title: run.title || "Untitled conversation", createdAt: timestamp(run.createdAt), updatedAt: timestamp(run.updatedAt),
       runtime: engineLabelFromRun(run), model: modelFromRun(run),
       pinned: typeof run.metadata?.pinnedAt === "string", archived: typeof run.metadata?.archivedAt === "string",
-      attention: codeAttention(run, active.get(run.id)), nativeScopeId: null,
+      attention: codeAttention(run, active.get(run.id), input.now), nativeScopeId: null,
     }];
   });
 }
@@ -116,7 +122,7 @@ type NativeRow = { id: unknown; title: unknown; preview: unknown; scope_id: unkn
  * source filters as Native's own listing and the content search. Empty conversations have no row, as in `listThreads`,
  * except an empty linked target, which `nativeHistoryRows` also lists so it can be found again.
  */
-export async function readNativeRows(input: { ownerEmail: string; orgId: string;
+export async function readNativeRows(input: { ownerEmail: string; orgId: string; now?: number;
   scopes: ReadonlyMap<string, { projectId: string | null; label: string }> }): Promise<{ rows: InboxRow[]; limited: boolean }> {
   const scopeIds = [...input.scopes.keys()];
   if (!scopeIds.length) return { rows: [], limited: false };
@@ -133,12 +139,12 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
   args: [...args, MAX_NATIVE_ROWS + 1] });
   const limited = threads.rows.length > MAX_NATIVE_ROWS;
   // The join repeats the owner filter, so a run row can only describe one of these conversations.
-  const runs = await db.execute({ sql: `SELECT r.thread_id, r.status FROM agent_runs r
-    JOIN chat_threads t ON t.id = r.thread_id WHERE ${where} ORDER BY r.started_at DESC`, args });
-  const latest = new Map<string, string>();
+  const runs = await db.execute({ sql: `SELECT r.thread_id, r.status, COALESCE(r.completed_at, r.started_at) AS ended_at
+    FROM agent_runs r JOIN chat_threads t ON t.id = r.thread_id WHERE ${where} ORDER BY r.started_at DESC`, args });
+  const latest = new Map<string, { status: string; endedAt: number }>();
   for (const run of runs.rows) {
     const threadId = String(run.thread_id);
-    if (!latest.has(threadId)) latest.set(threadId, String(run.status));
+    if (!latest.has(threadId)) latest.set(threadId, { status: String(run.status), endedAt: timestamp(run.ended_at) });
   }
   const rows = (threads.rows.slice(0, MAX_NATIVE_ROWS) as NativeRow[]).flatMap(thread => {
     const scope = input.scopes.get(String(thread.scope_id));
@@ -148,7 +154,7 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
       id: `native:${id}`, kind: "native" as const, projectId: scope.projectId, projectLabel: scope.label,
       title: String(thread.title || thread.preview || "") || "Untitled conversation",
       createdAt: timestamp(thread.created_at), updatedAt: timestamp(thread.updated_at), runtime: null, model: null,
-      pinned: thread.pinned_at != null, archived: thread.archived_at != null, attention: nativeAttention(latest.get(id)),
+      pinned: thread.pinned_at != null, archived: thread.archived_at != null, attention: nativeAttention(latest.get(id), input.now),
       nativeScopeId: String(thread.scope_id),
     }];
   });
@@ -160,16 +166,17 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
  * Native read, and the host's live state for approvals, Stop and running work. It probes no runtime.
  */
 export async function loadConversationInbox(input: { ownerEmail: string; orgId: string;
-  projects: readonly InboxProject[]; personal: VivaryCodeWorkspace | null }): Promise<ConversationInbox> {
+  projects: readonly InboxProject[]; personal: VivaryCodeWorkspace | null; now?: number }): Promise<ConversationInbox> {
+  const now = input.now ?? Date.now();
   const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
   const code = buildCodeRows({ runs: listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId), ownerEmail: input.ownerEmail,
-    orgId: input.orgId, projects: input.projects, personal: input.personal, activeRuns: host.activeRuns });
+    orgId: input.orgId, projects: input.projects, personal: input.personal, activeRuns: host.activeRuns, now });
   const scopes = new Map<string, { projectId: string | null; label: string }>([
     [projectChatScopeId(input.ownerEmail, input.orgId, null), { projectId: null, label: PERSONAL_LABEL }],
     ...input.projects.map(project => [projectChatScopeId(input.ownerEmail, input.orgId, project.projectId),
       { projectId: project.projectId, label: project.label }] as const),
   ]);
-  const native = await readNativeRows({ ownerEmail: input.ownerEmail, orgId: input.orgId, scopes });
+  const native = await readNativeRows({ ownerEmail: input.ownerEmail, orgId: input.orgId, scopes, now });
   return {
     rows: [...code, ...native.rows].sort(compareInboxRows),
     unavailableProjects: input.projects.filter(project => !project.code).map(project => project.projectId),
@@ -183,9 +190,11 @@ export type CodeConversationChange =
   | { operation: "archive" | "restore" | "pin" | "unpin" };
 
 /**
- * Changes how the owner's Code conversation is listed. It writes only `metadata.title`, `metadata.archivedAt` and
- * `metadata.pinnedAt`, keeps `updatedAt`, and never touches the run, its transcript, or its folder. Archive refuses a
- * working conversation, because archive must not stop work and a hidden run would keep its approvals out of sight.
+ * Changes the owner's Code conversation without touching its run, transcript or folder. Rename writes the record's
+ * `title`, which the header, Agent work and search read, and keeps the first generated title as
+ * `metadata.generatedTitle`. Archive and pin write `metadata.archivedAt` and `metadata.pinnedAt`. Every change keeps
+ * `updatedAt`, so no list reorders. Archive refuses a working conversation, because archive must not stop work and a
+ * hidden run would keep its approvals out of sight.
  */
 export async function changeCodeConversation(input: { ownerEmail: string; orgId?: string; runId: string;
   projectId: string | null; change: CodeConversationChange }): Promise<{ changed: true }> {
@@ -200,12 +209,13 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
     }
   }
   const now = new Date().toISOString();
-  const metadata = input.change.operation === "rename" ? { title: input.change.title.trim() }
-    : input.change.operation === "archive" ? { archivedAt: now }
-      : input.change.operation === "restore" ? { archivedAt: null }
-        : { pinnedAt: input.change.operation === "pin" ? now : null };
+  const change = input.change;
   // The updater reads the record under Core's file lock, so a concurrent worker write keeps its own updatedAt.
-  const updated = updateCodeAgentRunRecord(input.runId, record => ({ metadata, updatedAt: record.updatedAt }));
+  const updated = updateCodeAgentRunRecord(input.runId, record => change.operation === "rename"
+    ? { title: change.title.trim(), updatedAt: record.updatedAt,
+      metadata: typeof record.metadata?.generatedTitle === "string" ? {} : { generatedTitle: record.title } }
+    : { updatedAt: record.updatedAt, metadata: change.operation === "archive" ? { archivedAt: now }
+      : change.operation === "restore" ? { archivedAt: null } : { pinnedAt: change.operation === "pin" ? now : null } });
   if (!updated) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   return { changed: true };
 }
