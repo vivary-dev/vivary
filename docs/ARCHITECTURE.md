@@ -281,7 +281,15 @@ same `vivary_code_run_not_found` (404) as any unknown ID.
 
 [`CodeRunControl.tsx`](../packages/workbench/app/components/layout/CodeRunControl.tsx)
 lists each running conversation with Open conversation, its own Stop, and its
-own request cards, so an answer or a Stop acts on that run only. In
+own request cards, so an answer or a Stop acts on that run only. Open
+conversation in another project goes through `useConversationRouteHold` in
+[`conversation-route-hold.ts`](../packages/workbench/app/lib/conversation-route-hold.ts).
+Workspace clears the conversation route when the project changes, and the new
+project then restores its saved Code conversation or Native chat onto the bare
+route, so a plain navigation could open the restored view instead of the clicked
+run. The hook applies the target once the project is selected and the old route
+is gone, applies it again with replace if a restore replaces it, and releases it
+after 750 ms or when the owner presses a key or the pointer. In
 [`CodeConversation.tsx`](../packages/workbench/app/components/workspace/CodeConversation.tsx)
 the composer locks only while this conversation's run works, New conversation
 and history stay available, and Stop targets the selected conversation's run.
@@ -1004,6 +1012,14 @@ not mounted yet, so the existing project history, Native archive and concurrency
 sections still describe the running sidebar. Evidence inspected: the new server
 and component tests, `isOwnedRun`, `listOwnedVivaryCodeRuns`, the content search
 predicates, and the route reset in `Workspace.tsx`.
+2026-10-19 Shared route hold for opening a conversation in another project, on PR
+#261. `CodeRunControl.openConversation` selected the project and then navigated,
+so Workspace's route reset and the new project's saved-view restore opened the
+restored conversation instead of the clicked run. The hold that the conversation
+inbox introduced moves to `app/lib/conversation-route-hold.ts`, and the strip uses
+it. `tests/conversation-route-hold.test.mjs` covers the hook and the strip over no
+saved view, a saved Code conversation, and a saved Native chat, and runs in
+`test:native-chat`.
 
 2026-10-19 Exports for the Code conversation inbox, on PR #261.
 `local-code-agent.ts` exports `listOwnedVivaryCodeRuns`, which returns every

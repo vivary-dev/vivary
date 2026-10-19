@@ -39,7 +39,8 @@ const stubs = new Map([
     }`],
   ["../projects/ProjectContext", `
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
-  ["react-router", `export function useNavigate() { return () => {}; }`],
+  ["react-router", `export function useNavigate() { return () => {}; }
+    export function useLocation() { return { pathname: "/", search: "" }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
