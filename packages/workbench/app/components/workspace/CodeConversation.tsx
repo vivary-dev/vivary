@@ -515,17 +515,25 @@ function worktreeCommand(folderLabel: string): string {
  * The owner's warning before sending in a folder where other conversations' agents work. Proceed sends here anyway.
  * Use another folder opens a separate folder or a Git worktree the owner made. Vivary does not manage worktrees.
  */
-function SharedFolderNotice({ runs, acknowledged, folderLabel, isolation, onProceed, onOpen }: {
+function SharedFolderNotice({ runs, acknowledged, folderLabel, isolation, onProceed, onCancel, onOpen }: {
   runs: FolderRun[];
   acknowledged: boolean;
   folderLabel: string;
   isolation: ReturnType<typeof useOpenProjectFolder>;
   onProceed: () => void;
+  /** Closes the warning without sending. The draft stays and focus returns to the composer. */
+  onCancel: () => void;
   onOpen: (target: RunTarget) => void;
 }) {
   const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
   const command = worktreeCommand(folderLabel);
-  return <div className="local-agent-notice local-agent-shared-folder" role="group" aria-label="Shared folder">
+  return <div className="local-agent-notice local-agent-shared-folder" role="group" aria-label="Shared folder"
+    onKeyDown={event => {
+      if (event.key !== "Escape" || acknowledged) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    }}>
     <p role={acknowledged ? undefined : "alert"}>{SHARED_FOLDER_WARNING}</p>
     <ul>
       {runs.map(item => <li key={item.id}>
@@ -538,6 +546,7 @@ function SharedFolderNotice({ runs, acknowledged, folderLabel, isolation, onProc
         : <Button size="sm" onClick={onProceed}>Proceed</Button>}
       {isolation.available && <Button size="sm" variant="outline" disabled={isolation.choosing}
         onClick={() => void isolation.openFolder()}>{isolation.choosing ? "Choosing folder…" : "Use another folder"}</Button>}
+      {!acknowledged && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
     </div>
     <p className="local-agent-shared-folder-hint">To work in a Git worktree, run this in the project folder, then {isolation.available
       ? "choose Use another folder and pick the new folder" : "connect the new folder as a project"}:</p>
@@ -649,7 +658,12 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // Proceed acknowledges the conversations working in this folder now. One that starts later asks again.
   const [acknowledgedRuns, setAcknowledgedRuns] = useState<ReadonlySet<string>>(() => new Set());
   const unacknowledged = props.folderRuns.filter(item => !acknowledgedRuns.has(item.id));
-  const sharedFolderHeld = unacknowledged.length > 0 && !runWorking;
+  // Cancel and Escape close the warning for these conversations without acknowledging it. Nothing is sent and the draft
+  // stays. A later send meets the server's shared-folder refusal, which opens the warning again.
+  const [cancelledRuns, setCancelledRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const undecided = unacknowledged.filter(item => !cancelledRuns.has(item.id));
+  const sharedFolderHeld = undecided.length > 0 && !runWorking;
+  const focusComposerAfterCancel = useRef(false);
   const sharedFolderAcknowledged = useRef(false);
   sharedFolderAcknowledged.current = props.folderRuns.length > 0 && unacknowledged.length === 0;
 
@@ -659,6 +673,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       onKnownRejected: submitId => draft.rejectKnownSubmission(draftThreadId, submitId),
       engines: () => latest.current.state.engines,
       acknowledgeSharedFolder: () => sharedFolderAcknowledged.current,
+      onSharedFolderRefused: () => setCancelledRuns(new Set()),
       onStarted: runId => latest.current.onStarted(runId),
       onStreaming: value => {
         if (value) adapterOwnsMessages.current = true;
@@ -795,6 +810,17 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     }
   }
 
+  function cancelSharedFolder() {
+    setCancelledRuns(new Set(unacknowledged.map(item => item.id)));
+    focusComposerAfterCancel.current = true;
+  }
+  // The composer is disabled while the warning asks, so focus moves once Cancel has enabled it.
+  useEffect(() => {
+    if (!focusComposerAfterCancel.current || sharedFolderHeld) return;
+    focusComposerAfterCancel.current = false;
+    chatRef.current?.focusComposer();
+  }, [sharedFolderHeld]);
+
   const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
   useEffect(() => {
     // A turn that finished while the owner was choosing needs only the plain confirm now.
@@ -842,7 +868,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     </div>}
     composerSlot={<div className="min-h-0 overflow-auto">
       {props.notices}
-      {props.folderRuns.length > 0 && !runWorking && !props.viewingMatch && <SharedFolderNotice runs={props.folderRuns}
+      {props.folderRuns.length > 0 && !runWorking && !props.viewingMatch && (undecided.length > 0 || !unacknowledged.length)
+        && <SharedFolderNotice runs={props.folderRuns} onCancel={cancelSharedFolder}
         acknowledged={!sharedFolderHeld} folderLabel={props.state.workspaceLabel} isolation={props.folderIsolation}
         onProceed={() => setAcknowledgedRuns(new Set(props.folderRuns.map(item => item.id)))} onOpen={props.onOpenRun} />}
       {!props.viewingMatch && props.run && <>

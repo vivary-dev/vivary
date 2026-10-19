@@ -298,7 +298,7 @@ after 750 ms or when the owner presses a key or the pointer. In
 the composer locks only while this conversation's run works, New conversation
 and history stay available, and Stop targets the selected conversation's run.
 When other conversations work in this folder, the composer slot shows the
-warning, those conversations with Open, Proceed, Use another folder, and a
+warning, those conversations with Open, Proceed, Use another folder, Cancel, and a
 copyable `git worktree add ../<folder>-worktree` command. Use another folder is
 the existing Open folder flow, now in
 [`open-project-folder.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/open-project-folder.ts),
@@ -1053,6 +1053,17 @@ not mounted yet, so the existing project history, Native archive and concurrency
 sections still describe the running sidebar. Evidence inspected: the new server
 and component tests, `isOwnedRun`, `listOwnedVivaryCodeRuns`, the content search
 predicates, and the route reset in `Workspace.tsx`.
+2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
+three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape
+close the warning without acknowledging it, send nothing, keep the draft, and
+return focus to the composer. A later send meets the server's
+`vivary_code_shared_folder_active` refusal, which restores the draft and opens
+the warning again through the adapter's `onSharedFolderRefused`. Isolation stays
+optional. `VIVARY_OWNER_ACTIONS` also names `vivary-conversation-archive` for the
+conversation inbox. Tests: the warning case in `native-chat-components.test.mjs`,
+the refusal case in `local-code-chat-adapter.test.mjs`, and a second send into a
+working conversation in `code-concurrency.test.ts`.
+
 2026-10-19 Shared route hold for opening a conversation in another project, on PR
 #261. `CodeRunControl.openConversation` selected the project and then navigated,
 so Workspace's route reset and the new project's saved-view restore opened the
