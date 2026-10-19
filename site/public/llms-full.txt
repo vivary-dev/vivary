@@ -7822,7 +7822,10 @@ the linked conversation service: a linked target's own link is checked as every
 linked read checks it, and retained history the linked reader cannot parse is
 refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
 block, another request ID, an unknown key, or a passed or failed check without a
-completed evidence event. It fills every fact itself, redacts held credentials,
+completed evidence event. A check the agent runs while writing the reply cites
+`tool:` and its tool call ID, because that turn has no completed event ID yet. Save
+accepts it only when a completed tool call with that ID belongs to the reply turn,
+and records the completed event that holds it. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state
 document through `projectFileService.save` with the prepared version and
 binding. An update moves the block back to the end when text was added after
@@ -8176,6 +8179,25 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Handoff checks from the reply turn. In an API chat, Save handoff refused
+a reply whose passed check came from a `vivary-project-read` call the agent made
+while writing it. The request listed only earlier completed events, and the reply's
+own tool call had a tool call ID but no completed event ID until the turn ended, so
+the agent cited none. The request now says to cite such a check as `tool:` plus its
+tool call ID. `nativeHistoryItems` and `codeHistoryItems` in `linked-history.ts`
+attach the IDs of completed tool calls to their items: a Native tool-call part's
+`toolCallId`, and the `toolCallId` that Claude Code and both Codex routes record
+on a Code `tool_done` event.
+History digests are taken over the stored entries and events, so existing links
+keep their bindings. `proposalFrom` in `server/handoff.ts` resolves a `tool:` citation
+only against tool calls in the reply turn, after the request and before any later
+user message, and records the completed event that holds it. A completed event ID
+is still checked first and kept as cited. A made-up ID, or a
+call from an earlier turn, is refused with a problem that names it. Every other
+validation rule is unchanged. `tests/handoff.test.ts` covers Native and Code saves
+with a fresh tool check, refuses an earlier turn's call in both, and refuses a
+made-up ID in Native.
 
 2026-10-19 Readable handoff request and reply. After Prepare handoff, an API chat
 showed the whole request prompt and the agent's `vivary-handoff` JSON block as raw

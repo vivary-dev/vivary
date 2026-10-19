@@ -104,6 +104,9 @@ export function versionLine(project: ProjectVersion, file: string): string {
   return `${where} Dirty working tree: ${project.dirtyCount} ${project.dirtyCount === 1 ? "entry" : "entries"} besides ${file}.`;
 }
 
+/** Prefix for a check that cites a tool call made in the reply turn, before that turn has a completed event ID. */
+const TOOL_EVIDENCE = "tool:";
+
 function requestMessage(requestId: string, file: string, project: ProjectVersion, history: HistoryItem[]): string {
   const evidence = history.filter(item => item.role !== "User").slice(-OFFERED_EVIDENCE)
     .map(item => `- ${item.id}: ${String(redactCredentialsInValue(clean(item.text))).slice(0, 100)}`);
@@ -115,6 +118,7 @@ function requestMessage(requestId: string, file: string, project: ProjectVersion
     "- goal: one sentence.",
     "- decisions, changes, unfinished, risks: non-empty arrays of short strings. Write \"None\" when there is nothing to report.",
     "- checks: a non-empty array of objects with name, outcome and evidenceEventId. outcome is passed, failed or not-run. A passed or failed check names the ID of the completed conversation event that shows its result. A not-run check uses null.",
+    `- A check you run while writing this reply has no event ID yet. Name it as ${TOOL_EVIDENCE} followed by that tool call's ID, for example ${TOOL_EVIDENCE}call_1. Vivary records the completed event that holds it when the owner saves.`,
     "- nextAction: the next concrete action.",
     "",
     `Do not edit ${file} yourself, and do not clean, stash, commit or discard anything. Vivary writes the handoff at the end of ${file} when the owner clicks Save handoff, and adds the facts it records:`,
@@ -130,19 +134,20 @@ function requestMessage(requestId: string, file: string, project: ProjectVersion
  * `continued` means a later user message follows, so the completed history
  * already holds work the reply does not describe.
  */
-function replyTo(history: HistoryItem[], requestId: string): { text: string; continued: boolean } | null {
+function replyTo(history: HistoryItem[], requestId: string): { text: string; continued: boolean; items: HistoryItem[] } | null {
   const index = history.findIndex(item => item.role === "User" && item.text.includes(REQUEST_MARKER + requestId));
   if (index < 0) return null;
-  const reply: string[] = [];
+  const reply: string[] = [], items: HistoryItem[] = [];
   let continued = false;
   for (const item of history.slice(index + 1)) {
     if (item.role === "User") { continued = true; break; }
+    items.push(item);
     if (item.role === "Assistant") reply.push(item.text);
   }
-  return reply.length ? { text: reply.join("\n\n"), continued } : null;
+  return reply.length ? { text: reply.join("\n\n"), continued, items } : null;
 }
 
-function proposalFrom(reply: string, requestId: string, history: HistoryItem[]): { proposal: HandoffProposal } | { problems: string[] } {
+function proposalFrom(reply: string, requestId: string, history: HistoryItem[], replyItems: HistoryItem[]): { proposal: HandoffProposal } | { problems: string[] } {
   const blocks = [...reply.matchAll(/```vivary-handoff[^\S\n]*\n([\s\S]*?)\n```/g)];
   if (blocks.length !== 1) return { problems: [blocks.length
     ? "The reply has more than one vivary-handoff block. It must have exactly one."
@@ -154,14 +159,23 @@ function proposalFrom(reply: string, requestId: string, history: HistoryItem[]):
   const problems: string[] = [];
   if (parsed.data.requestId !== requestId) problems.push(`requestId: The block names a different request. Use ${requestId}.`);
   const events = new Set(history.map(item => item.id));
-  parsed.data.checks.forEach((check: HandoffCheck, index) => {
+  // A tool call made while writing this reply resolves to the completed event that holds its result.
+  const replyCalls = new Map(replyItems.flatMap(item => (item.toolCallIds ?? []).map(id => [id, item.id] as const)));
+  const checks = parsed.data.checks.map((check: HandoffCheck, index) => {
     const at = `checks.${index}.evidenceEventId`;
     if (check.outcome === "not-run") {
       if (check.evidenceEventId !== null) problems.push(`${at}: A not-run check names no evidence. Use null.`);
     } else if (!check.evidenceEventId) problems.push(`${at}: A ${check.outcome} check names the completed event that shows its result.`);
-    else if (!events.has(check.evidenceEventId)) problems.push(`${at}: Event ${check.evidenceEventId} is not a completed event in this conversation.`);
+    else if (events.has(check.evidenceEventId)) return check;
+    else if (check.evidenceEventId.startsWith(TOOL_EVIDENCE)) {
+      const callId = check.evidenceEventId.slice(TOOL_EVIDENCE.length);
+      const eventId = replyCalls.get(callId);
+      if (eventId) return { ...check, evidenceEventId: eventId };
+      problems.push(`${at}: Tool call ${callId} is not a completed tool call in this handoff reply.`);
+    } else problems.push(`${at}: Event ${check.evidenceEventId} is not a completed event in this conversation.`);
+    return check;
   });
-  return problems.length ? { problems } : { proposal: parsed.data };
+  return problems.length ? { problems } : { proposal: { ...parsed.data, checks } };
 }
 
 function renderBlock(record: HandoffRecord): string {
@@ -321,7 +335,7 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       if (reply === null) return { code: "refused", problems: ["The agent has not finished replying to this handoff request in this conversation. Wait for its reply, then click Save handoff."] };
       // Completed history excludes trailing stopped, failed and active turns. Their user requests still count.
       if (reply.continued || progression.continued) return { code: "refused", problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
-      const validated = proposalFrom(reply.text, request.requestId, prefix.items);
+      const validated = proposalFrom(reply.text, request.requestId, prefix.items, reply.items);
       if ("problems" in validated) return { code: "refused", problems: validated.problems };
       const failed = async <T extends HandoffSaveResult & { message: string }>(result: T, retryable = false): Promise<T> => {
         await writeRow({ ...row, request: { ...request, state: "failed", message: result.message, retryable } });

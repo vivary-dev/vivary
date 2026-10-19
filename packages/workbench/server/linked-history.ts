@@ -13,7 +13,7 @@ export const LINK_EXCERPT_CHARS = 12_000;
 const HISTORY_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 export const isHistoryId = (value: unknown): value is string => typeof value === "string" && HISTORY_ID.test(value);
 const ENTRY_SHORTENED = " [Entry shortened. The original conversation has the full text.]";
-export type HistoryItem = { id: string; role: string; text: string };
+export type HistoryItem = { id: string; role: string; text: string; toolCallIds?: string[] };
 export type NativeEntry = { parentId?: string | null; message: {
   id: string; role: string; content: Array<Record<string, unknown>>; attachments?: Array<Record<string, unknown>>;
   status?: { type?: string; reason?: string };
@@ -183,8 +183,11 @@ export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryIte
     if (event.metadata?.tool && (event.metadata.type === "tool_done"
       || (event.metadata.type === undefined && event.metadata.result !== undefined))) {
       const result = event.metadata.result;
+      // Claude Code, the Codex CLI and the Codex app-server each record the runtime's tool call ID as toolCallId.
+      const callId = event.metadata.toolCallId;
       return [{ id: event.id, role: "Recorded tool output", text: [event.message,
-        ...(result === undefined ? [] : [typeof result === "string" ? result : JSON.stringify(result)])].join("\n") }];
+        ...(result === undefined ? [] : [typeof result === "string" ? result : JSON.stringify(result)])].join("\n"),
+        ...(typeof callId === "string" && callId ? { toolCallIds: [callId] } : {}) }];
     }
     // Runtime bookkeeping and private reasoning are not conversation text.
     return [];
@@ -207,12 +210,16 @@ function nativePartText(part: Record<string, unknown>): string[] {
 
 /** Every stopped or failed reply in the prefix is excluded, not only one at the boundary. The requests stay. */
 export function nativeHistoryItems(entries: NativeEntry[]): HistoryItem[] {
-  return entries.filter(entry => entry.message.role !== "system" && !isStoppedOrFailedNativeReply(entry)).map(({ message }) => ({
-    id: message.id, role: message.role === "user" ? "User" : "Assistant",
-    text: [...message.content.flatMap(nativePartText),
-      ...(message.attachments ?? []).map(attachment =>
-        `[Attachment not included: ${label(attachment.name, "unnamed")} (${label(attachment.type, "file")})]`)].join("\n"),
-  }));
+  return entries.filter(entry => entry.message.role !== "system" && !isStoppedOrFailedNativeReply(entry)).map(({ message }) => {
+    const toolCallIds = message.content.flatMap(part => part.type === "tool-call" && part.result !== undefined
+      && typeof part.toolCallId === "string" && part.toolCallId ? [part.toolCallId] : []);
+    return {
+      id: message.id, role: message.role === "user" ? "User" : "Assistant", ...(toolCallIds.length ? { toolCallIds } : {}),
+      text: [...message.content.flatMap(nativePartText),
+        ...(message.attachments ?? []).map(attachment =>
+          `[Attachment not included: ${label(attachment.name, "unnamed")} (${label(attachment.type, "file")})]`)].join("\n"),
+    };
+  });
 }
 
 /** A cursor is bound to one frozen source. It is not an authority or a byte offset. */

@@ -704,6 +704,79 @@ test("handoffs are written through the file owner and go stale without a model c
     assert.deepEqual(await row(), before);
   });
 
+  await t.test("a check run while writing the handoff reply cites its tool call and saves", async () => {
+    const { createThread } = await import("@agent-native/core/server");
+    const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
+    const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: workspace.projectId, label: "Alpha" });
+    const thread = await createThread(owner, { id: "fresh-check-native", orgId, scope: identity.scope });
+    const native = { projectId: input.projectId, conversation: { kind: "native" as const, id: thread.id } };
+    const store = (data: string) => db.execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?", args: [data, thread.id] });
+    const check = (cited: string) => ({ checks: [{ name: "state document read", outcome: "passed", evidenceEventId: cited }] });
+    // Native: the reply's own tool call has a toolCallId and no completed event ID until the turn ends.
+    for (const [cited, saved] of [["tool:call_made_up", false], ["tool:call_earlier", false], ["tool:call_fresh_1", true]] as const) {
+      await store("{}");
+      const request = await handoff.prepare(actor, native);
+      if (!("requestId" in request)) throw new Error("Prepare refused");
+      assert.match(request.message, /tool:call_1/);
+      const messages = [
+        { parentId: null, message: { id: "earlier-ask", role: "user", content: [{ type: "text", text: "Read the state document" }] } },
+        { parentId: "earlier-ask", message: { id: "earlier-answer", role: "assistant", status: { type: "complete", reason: "stop" },
+          content: [{ type: "tool-call", toolCallId: "call_earlier", toolName: "vivary-project-read", args: {}, result: "STATE.md read" },
+            { type: "text", text: "Read it." }] } },
+        { parentId: "earlier-answer", message: { id: "fresh-ask", role: "user", content: [{ type: "text", text: request.message }] } },
+        { parentId: "fresh-ask", message: { id: "fresh-answer", role: "assistant", status: { type: "complete", reason: "stop" },
+          content: [{ type: "tool-call", toolCallId: "call_fresh_1", toolName: "vivary-project-read", args: {}, result: "STATE.md read" },
+            { type: "text", text: fenced(proposal(request.requestId, check(cited))) }] } },
+      ];
+      await store(JSON.stringify({ headId: "fresh-answer", messages }));
+      const before = await readFile(statePath);
+      const result = await handoff.save(actor, { ...native, requestId: request.requestId });
+      if (!saved) {
+        // A made-up call, or one from an earlier turn, is not evidence produced by this reply.
+        assert.equal(result.code, "refused", cited);
+        assert.match(JSON.stringify(result), new RegExp(`Tool call ${cited.slice(5)} is not a completed tool call in this handoff reply`));
+        assert.deepEqual(await readFile(statePath), before);
+        continue;
+      }
+      assert.equal(result.code, "saved");
+      if (result.code !== "saved") return;
+      assert.equal(result.record.checks[0].evidenceEventId, "fresh-answer");
+      assert.match(await readFile(statePath, "utf8"), /passed: state document read \(event fresh-answer\)/);
+    }
+    // Code: the tool result is its own completed event, recorded with the runtime's tool call ID.
+    const fresh = createCodeAgentRunRecord({ id: "fresh-check-code", goalId: "vivary-local-code", title: "Fresh check", cwd: projectRoot,
+      status: "completed", phase: "completed", needsApproval: false,
+      metadata: { app: "vivary-workbench-local-code", ...history(), workspaceRoot: projectRoot, ownerEmail: owner, orgId,
+        engine: "claude-cli", model: "sonnet" } });
+    const code = { projectId: input.projectId, conversation: { kind: "code" as const, id: fresh.id } };
+    const completed = () => appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "status", message: "Completed",
+      metadata: { status: "completed", phase: "complete" } });
+    appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "user", message: "Read the state document" });
+    appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "status", message: "Finished Read.",
+      metadata: { type: "tool_done", tool: "Read", result: "STATE.md read", toolCallId: "toolu_earlier", source: "claude-cli" } });
+    appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "system", message: "Read it.", metadata: { role: "assistant" } });
+    completed();
+    // A reply that cites the earlier turn's call is refused, and one that cites its own call saves.
+    for (const [own, cited, saves] of [["toolu_other", "toolu_earlier", false], ["toolu_fresh", "toolu_fresh", true]] as const) {
+      const request = await handoff.prepare(actor, code);
+      if (!("requestId" in request)) throw new Error("Prepare refused");
+      appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "user", message: request.message });
+      appendCodeAgentTranscriptEvent({ runId: fresh.id, id: `${own}-event`, kind: "status", message: "Finished Read.",
+        metadata: { type: "tool_done", tool: "Read", result: "STATE.md read", toolCallId: own, source: "claude-cli" } });
+      appendCodeAgentTranscriptEvent({ runId: fresh.id, kind: "system", message: fenced(proposal(request.requestId, check(`tool:${cited}`))),
+        metadata: { role: "assistant" } });
+      completed();
+      const saved = await handoff.save(actor, { ...code, requestId: request.requestId });
+      if (!saves) {
+        assert.equal(saved.code, "refused");
+        assert.match(JSON.stringify(saved), /Tool call toolu_earlier is not a completed tool call in this handoff reply/);
+        continue;
+      }
+      assert.equal(saved.code, "saved");
+      if (saved.code === "saved") assert.equal(saved.record.checks[0].evidenceEventId, "toolu_fresh-event");
+    }
+  });
+
   await t.test("a foreign actor or project cannot prepare or inspect", async () => {
     await db.execute({ sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES (?, ?, ?, ?, ?)",
       args: ["foreign-member", orgId, "foreign@example.test", "member", Date.now()] });
