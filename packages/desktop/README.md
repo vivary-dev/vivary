@@ -262,7 +262,9 @@ artifact, not Windows runtime acceptance.
 `vivary.exe` carries the Vivary name and icon. The icon is
 `assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`
 (256 x 256) with PNG entries at 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256
-pixels. Replace both together if the mark changes. Its file properties show
+pixels. The Workbench sidebar header shows a byte-identical copy,
+`packages/workbench/app/assets/vivary-mark.png`. Replace all three together if
+the mark changes. Its file properties show
 "Copyright (C) 2026 Jeff Kazzee", set through the packager's `appCopyright`.
 
 The folder must stay together: `vivary.exe` uses its sibling `resources` files.

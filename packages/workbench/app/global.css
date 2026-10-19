@@ -195,7 +195,7 @@ button, a, input, summary { outline-offset: 3px; }
 .vivary-sidebar.is-collapsed { width: 56px; }
 .vivary-sidebar-brand { height: 60px; padding: 0 16px; display: flex; align-items: center; color: hsl(var(--sidebar-accent-foreground)); }
 .vivary-sidebar.is-collapsed .vivary-sidebar-brand { padding: 0; justify-content: center; }
-.vivary-mark { display: grid; place-items: center; width: 27px; height: 27px; flex-shrink: 0; border-radius: 7px; background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); font-size: 16px; font-weight: 700; letter-spacing: -.07em; }
+.vivary-mark { display: block; width: 27px; height: 27px; flex-shrink: 0; padding: 3px; border-radius: 7px; background: hsl(var(--sidebar-accent)); object-fit: contain; }
 .vivary-primary-navigation, .vivary-settings-navigation { display: grid; gap: 3px; padding: 4px 10px 10px; }
 .vivary-sidebar.is-collapsed .vivary-primary-navigation, .vivary-sidebar.is-collapsed .vivary-settings-navigation { padding-inline: 6px; }
 .vivary-nav-link { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-size: 13px; line-height: 20px; color: hsl(var(--sidebar-foreground)); transition: background-color 120ms, color 120ms; }

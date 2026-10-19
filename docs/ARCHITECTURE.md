@@ -725,6 +725,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Sidebar mark (owner request of the same date). The sidebar header's
+letter tile now shows the approved Vivary mark from a byte-identical copy of
+`site/src/assets/vivary-mark.png`, which `packages/desktop/README.md` names as the
+source of `vivary.ico`. The two site SVGs are different, unreferenced artwork and
+were not used. This is a presentational change inside the existing Workbench
+client, so the system structure, data owners, and trust boundaries described
+here still hold. Evidence: `tests/sidebar-mark-component.test.mjs` checks the
+image, its alt text, the link's accessible name, and that the bundled bytes match
+the site mark.
+
 2026-10-19 Project kind (owner decision of the same date). New project and Open
 folder now ask Coding or Personal. System structure describes the new owner:
 registry migration 7, the owner-only `vivary-set-project-kind` action, the catalog

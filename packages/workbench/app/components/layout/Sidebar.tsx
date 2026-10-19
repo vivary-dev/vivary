@@ -6,6 +6,8 @@ import { ProjectNavigation } from "../projects/ProjectNavigation";
 import { ProjectHistory } from "./ProjectHistory";
 import { ChatHistory } from "./ChatHistory";
 import { useVivaryChatIdentity } from "./use-vivary-chat-identity";
+// The approved Vivary mark: a byte-identical copy of site/src/assets/vivary-mark.png, the source of the Windows icon.
+import vivaryMarkUrl from "../../assets/vivary-mark.png";
 
 type SidebarProps = {
   collapsed?: boolean;
@@ -19,7 +21,8 @@ export function Sidebar({ collapsible = true, onCollapsedChange }: SidebarProps)
   return <aside className="vivary-sidebar flex h-full min-w-0 flex-col overflow-hidden" aria-label="Projects and conversations">
     <div className="vivary-sidebar-brand">
       <Link to="/" className="flex min-w-0 flex-1 items-center gap-3" aria-label="Vivary home">
-        <span className="vivary-mark" aria-hidden>V</span><span className="text-sm font-semibold">Vivary</span>
+        <img className="vivary-mark" src={vivaryMarkUrl} width={27} height={27} alt="Vivary" />
+        <span className="text-sm font-semibold">Vivary</span>
       </Link>
       {collapsible && <button className="vivary-sidebar-utility" onClick={() => onCollapsedChange?.(true)} aria-label="Close project navigation">
         <IconLayoutSidebarLeftCollapse size={18} aria-hidden />
