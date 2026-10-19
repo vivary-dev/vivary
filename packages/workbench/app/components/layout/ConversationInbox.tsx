@@ -15,7 +15,10 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { useLocation, useNavigate } from "react-router";
 import type { ConversationInbox as InboxData, InboxAttention, InboxDraft, InboxRow } from "../../../server/conversation-inbox";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
-import { useNativeActionCaller } from "@/lib/native-actions";
+import { useNativeActionCaller, useNativeActionReader } from "@/lib/native-actions";
+import { chatSearchHref } from "@/lib/chat-search-location";
+import { highlightedExcerpt } from "@/lib/chat-search-excerpt";
+import type { ChatSearchHit, ChatSearchPage } from "@/lib/chat-search-schema";
 import { focusAfterRemoval } from "@/lib/row-focus";
 import { hasWorkspaceRoute, useConversationRouteHold } from "@/lib/conversation-route-hold";
 import { useAppStateWriter } from "@/lib/native-state";
@@ -141,6 +144,8 @@ type Shared = {
   change: (row: InboxListRow, operation: RowOperation, title?: string) => Promise<void>;
   /** Opens a route in the selected project, held against the route restores that follow a project change. */
   hold: (href: string) => void;
+  /** Opens a route in any project, selecting that project first when it is not the selected one. */
+  openHref: (projectId: string | null, href: string) => Promise<void>;
   /** Starts a conversation in another project: selects it, then creates the conversation there. */
   startIn: (projectId: string | null, kind: "code" | "native") => Promise<void>;
   /** A Native conversation waiting for its project's Native scope. */
@@ -198,14 +203,17 @@ export function ConversationInbox() {
         return;
       }
     }
-    const href = inboxRowHref(row);
-    if (row.projectId === activeProjectId) {
-      if (row.id.startsWith("native:")) scope?.switchThread(row.id.slice("native:".length));
+    if (row.projectId === activeProjectId && row.id.startsWith("native:")) scope?.switchThread(row.id.slice("native:".length));
+    await openHref(row.projectId, inboxRowHref(row));
+  }
+
+  async function openHref(projectId: string | null, href: string) {
+    if (projectId === activeProjectId) {
       navigate(href);
       return;
     }
-    routeHold.hold(row.projectId, href);
-    if (!await selectProject(row.projectId)) {
+    routeHold.hold(projectId, href);
+    if (!await selectProject(projectId)) {
       routeHold.release();
       setNotice("That project is unavailable. Its conversations are retained.");
     }
@@ -262,7 +270,7 @@ export function ConversationInbox() {
     }
   }
 
-  const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, hold, startIn,
+  const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, hold, openHref, startIn,
     pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox };
   return <ScopedInbox shared={shared} />;
 }
@@ -426,10 +434,101 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       <summary>Archived ({visible.archived.length})</summary>
       <InboxList label="Archived conversations" rows={visible.archived} {...listProps} emptyLabel="" />
     </details>}
+    <InboxMessageSearch term={search.trim()} {...messageSearchScopes(filter, catalog?.projects ?? [], inbox.data?.rows ?? [])}
+      onOpen={hit => void shared.openHref(hit.projectId, chatSearchHref(hit, false, ""))} />
   </section>;
 }
 
 type RowOperation = "rename" | "archive" | "restore" | "pin" | "unpin";
+
+/** At most this many projects are searched for messages at once. A project filter searches exactly one. */
+export const MAX_MESSAGE_SEARCH_SCOPES = 6;
+type SearchScope = { projectId: string | null; label: string };
+
+/**
+ * The scopes message search reads. A project filter names one. All projects takes Personal workspace and the projects,
+ * those with the newest conversations first, up to MAX_MESSAGE_SEARCH_SCOPES, and reports how many were left out.
+ */
+export function messageSearchScopes(filter: InboxFilter, projects: readonly { projectId: string; displayName: string }[],
+  rows: readonly Pick<InboxRow, "projectId" | "createdAt">[]): { scopes: SearchScope[]; total: number } {
+  const label = (projectId: string | null) => projectId === null ? "Personal workspace"
+    : projects.find(project => project.projectId === projectId)?.displayName ?? projectId;
+  if (filter !== ALL_PROJECTS) return { scopes: [{ projectId: filterProjectId(filter), label: label(filterProjectId(filter)) }], total: 1 };
+  const newest = new Map<string | null, number>();
+  for (const row of rows) newest.set(row.projectId, Math.max(newest.get(row.projectId) ?? 0, row.createdAt));
+  const all = [null, ...projects.map(project => project.projectId)];
+  const ordered = [...all].sort((left, right) => (newest.get(right) ?? -1) - (newest.get(left) ?? -1));
+  return { scopes: ordered.slice(0, MAX_MESSAGE_SEARCH_SCOPES).map(projectId => ({ projectId, label: label(projectId) })),
+    total: all.length };
+}
+
+type MessageSearchState = { key: string; status: "loading" | "ready" | "unavailable"; hits: ChatSearchHit[];
+  failed: number };
+
+/**
+ * Searches user messages and agent replies through the existing `vivary-chat-search` owner action, one first page per
+ * scope. The title filter above stays instant. Selection and the list stay as they are while results load.
+ */
+function InboxMessageSearch({ term, scopes, total, onOpen }: { term: string; scopes: SearchScope[]; total: number;
+  onOpen: (hit: ChatSearchHit) => void }) {
+  const readAction = useNativeActionReader();
+  const headingId = useId();
+  const [retry, setRetry] = useState(0);
+  const key = JSON.stringify([term, scopes.map(scope => scope.projectId), retry]);
+  const [state, setState] = useState<MessageSearchState>();
+  useEffect(() => {
+    if (term.length < 2) return;
+    const abort = new AbortController();
+    setState({ key, status: "loading", hits: [], failed: 0 });
+    const timer = setTimeout(async () => {
+      const pages = await Promise.allSettled(scopes.map(async scope => {
+        const params = new URLSearchParams({ query: term, unassigned: "false", includeArchived: "false" });
+        if (scope.projectId) params.set("projectId", scope.projectId);
+        const response = await readAction("vivary-chat-search", params, abort.signal);
+        if (!response.ok) throw new Error("Search could not finish.");
+        return await response.json() as ChatSearchPage;
+      }));
+      if (abort.signal.aborted) return;
+      const found = new Map<string, ChatSearchHit>();
+      for (const page of pages) {
+        if (page.status !== "fulfilled") continue;
+        for (const hit of page.value.results) found.set(JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]), hit);
+      }
+      const failed = pages.filter(page => page.status === "rejected").length;
+      setState({ key, status: failed === pages.length ? "unavailable" : "ready", failed,
+        hits: [...found.values()].sort((a, b) => (b.sessionUpdatedAt ?? 0) - (a.sessionUpdatedAt ?? 0)) });
+    }, 300);
+    return () => { clearTimeout(timer); abort.abort(); };
+  }, [key, readAction]);
+  if (term.length < 2) return null;
+  const current = state?.key === key ? state : undefined;
+  const status = current?.status ?? "loading";
+  const hits = current?.hits ?? [];
+  return <section className="conversation-inbox__messages" aria-labelledby={headingId}>
+    <h3 id={headingId}>Messages</h3>
+    <p role="status" className="conversation-inbox__notice">
+      {status === "loading" ? "Searching messages…"
+        : status === "unavailable" ? "Message search is unavailable. Titles are still filtered."
+          : hits.length ? `${hits.length} matching message${hits.length === 1 ? "" : "s"}.` : "No messages match."}
+    </p>
+    {status === "unavailable" && <Button size="sm" variant="ghost" onClick={() => setRetry(value => value + 1)}>Retry search</Button>}
+    {current?.status === "ready" && current.failed > 0 && <p className="conversation-inbox__notice">
+      {current.failed === 1 ? "One project" : `${current.failed} projects`} could not be searched.</p>}
+    {total > scopes.length && <p className="conversation-inbox__notice">
+      Messages were searched in {scopes.length} of {total} projects. Choose a project in Show to search the rest.</p>}
+    {hits.length > 0 && <ul className="conversation-inbox__list">{hits.map(hit =>
+      <li key={JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId])} className="conversation-inbox__row">
+        <button type="button" className="conversation-inbox__row-button conversation-inbox__hit" onClick={() => onOpen(hit)}>
+          <span className="conversation-inbox__title">{hit.title}</span>
+          <span className="conversation-inbox__excerpt">{highlightedExcerpt(hit.excerpt, term)}</span>
+          <span className="conversation-inbox__meta">
+            <span className="conversation-inbox__detail">{hit.projectLabel}</span>
+            <span className="conversation-inbox__detail">{hit.runtime === "native" ? "API chat" : "Code"}</span>
+          </span>
+        </button>
+      </li>)}</ul>}
+  </section>;
+}
 
 /**
  * The rows. One row takes Tab focus, the selected one or else the first. Arrow keys move between rows, Home and End

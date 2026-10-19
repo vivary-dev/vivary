@@ -7868,6 +7868,14 @@ Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
 Shift+F10 or the row's button opens Rename, Pin or Unpin, and Archive or
 Restore. No row state is a live region and no duration is shown. Drafts of every
 project in the filter scope are listed first, labeled Draft or Review send.
+Search filters titles at once. From two characters it also searches user messages
+and agent replies through the existing `vivary-chat-search` owner action and
+`chat-content-search.ts`, one first page per scope: the filtered project, or with
+All projects Personal workspace and the projects with the newest conversations, at
+most six, with a note naming how many were searched. The results show the matched
+text and open the exact message, in another project through the route hold. The
+list says when nothing matches, and separately when search is unavailable, and the
+selection stays while results load.
 
 Opening a row in the selected project navigates to its route. A row in another
 project selects the project and holds the target route. `Workspace.tsx` clears
@@ -8479,6 +8487,11 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Inbox message search (W5). The Conversation inbox section now describes
+message search through the existing search action, its six-scope cap, and its
+states. No second search engine was added. Evidence inspected: the component
+search tests and `chat-content-search.ts`.
 
 2026-10-19 Inbox drafts (W5). The inbox read lists saved drafts in every listed
 project, and the Conversation inbox section says so, with the measured read cost.

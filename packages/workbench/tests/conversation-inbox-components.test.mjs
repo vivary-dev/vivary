@@ -29,7 +29,9 @@ const stubs = new Map([
       useSyncExternalStore(${fixture}.subscribe, () => ${fixture}.version);
       return ${fixture}.projects();
     }`],
-  ["@/lib/native-actions", `export const useNativeActionCaller = () => ({ ready: true, call: (...args) => ${fixture}.call(...args) });`],
+  ["@/lib/native-actions", `export const useNativeActionCaller = () => ({ ready: true, call: (...args) => ${fixture}.call(...args) });
+    const reader = (name, params) => ${fixture}.search(name, Object.fromEntries(params));
+    export const useNativeActionReader = () => reader;`],
   ["@/lib/native-state", `export const useAppStateWriter = () => ({ ready: true,
     writeAppState: async (key, value) => { ${fixture}.state.set(key, value); return value; } });`],
   ["@/lib/chat-draft", `export const useChatDraftList = scope => ({ data: { drafts: ${fixture}.drafts[scope.kind] ?? [] } });`],
@@ -80,7 +82,7 @@ const bundle = await build({ stdin: { contents: `
   import { MemoryRouter, useLocation, useSearchParams } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { ConversationInbox } from "./app/components/layout/ConversationInbox";
-  export { visibleInboxRows, inboxRowHref, selectedInboxRowId, sortInboxRows } from "./app/components/layout/ConversationInbox";
+  export { visibleInboxRows, inboxRowHref, selectedInboxRowId, sortInboxRows, messageSearchScopes } from "./app/components/layout/ConversationInbox";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   // The route reset Workspace.tsx applies when the project changes, copied so the inbox's open sequence meets it.
   function ProjectRouteReset() {
@@ -162,6 +164,14 @@ test.beforeEach(() => {
       throw new Error("Unexpected read " + name);
     },
     call: async (name, input) => { inboxFixture.calls.push({ name, input }); return { changed: true }; },
+    searches: [],
+    search: async (name, params) => {
+      inboxFixture.searches.push({ name, params });
+      if (inboxFixture.searchFails) return new Response("{}", { status: 503 });
+      const hits = (inboxFixture.hits ?? []).filter(hit => hit.projectId === (params.projectId ?? null));
+      return Response.json({ results: hits, continueAfter: null, scannedSessions: 1, scannedMessages: 1, searchedSessions: 1,
+        readBytes: 0, limited: false, limits: { sessions: 25, messages: 500, bytes: 1, results: 25 } });
+    },
   };
   // Most tests read the selected project's rows. The filter tests start from All projects.
   inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "alpha" });
@@ -418,6 +428,70 @@ test("the destination shows the selected project and its folder, and the add men
   assert.ok(button("Code conversation") && button("API chat (separate billing)"));
   await act(async () => button("Code conversation").click());
   assert.match(host.querySelector("#route").textContent, /^\?run=new&draft=[0-9a-f-]{36}$/);
+});
+
+const hit = (projectId, sessionId, excerpt, runtime = "code") => ({ projectId, projectLabel: projectId ?? "Personal workspace",
+  sessionId, title: `Session ${sessionId}`, runtime, referenceId: `ref-${sessionId}`, eventOffset: 3, excerpt, match: "content",
+  archived: false, sessionUpdatedAt: 10 });
+const searchFor = async text => {
+  await type(host.querySelector(".conversation-inbox__search"), text);
+  await act(async () => new Promise(resolve => setTimeout(resolve, 400)));
+  await settle();
+};
+
+test("search filters titles at once and also searches messages in the filtered project, with match context", async () => {
+  inboxFixture.hits = [hit("alpha", "a1", "the table wraps inside each cell"), hit("beta", "b1", "table in beta")];
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.deepEqual(titles(), ["Fix table wrapping"], "the title filter is instant");
+  assert.deepEqual(inboxFixture.searches.map(search => [search.name, search.params.projectId, search.params.query]),
+    [["vivary-chat-search", "alpha", "table"]], "one search in the filtered project, reusing the existing action");
+  const messages = host.querySelector(".conversation-inbox__messages");
+  assert.match(messages.textContent, /1 matching message\./);
+  assert.equal(messages.querySelector("mark").textContent, "table");
+  assert.equal(host.querySelector('[aria-current="true"]').dataset.rowId, "code:a1", "selection stays while searching");
+  await act(async () => messages.querySelector(".conversation-inbox__hit").click());
+  assert.equal(host.querySelector("#route").textContent, "?history=project&run=a1&event=ref-a1&eventOffset=3");
+});
+
+test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {
+  inboxFixture.hits = [];
+  await render("/?run=a1");
+  await searchFor("nothing here");
+  assert.match(host.querySelector(".conversation-inbox__messages").textContent, /No messages match\./);
+  inboxFixture.searchFails = true;
+  await searchFor("table");
+  assert.match(host.querySelector(".conversation-inbox__messages").textContent,
+    /Message search is unavailable\. Titles are still filtered\./);
+  assert.ok(button("Retry search"));
+  assert.deepEqual(titles(), ["Fix table wrapping"]);
+  assert.equal(host.querySelector('[aria-current="true"]').dataset.rowId, "code:a1");
+  await type(host.querySelector(".conversation-inbox__search"), "t");
+  assert.equal(host.querySelector(".conversation-inbox__messages"), null, "one character searches titles only");
+});
+
+test("All projects searches messages across projects and opens a hit in another project", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.hits = [hit("beta", "b1", "table in beta"), hit(null, "p1", "personal table", "native")];
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.deepEqual(inboxFixture.searches.map(search => search.params.projectId ?? null).sort(), ["alpha", "beta", null].sort());
+  assert.equal(host.querySelector(".conversation-inbox__messages").textContent.includes("searched in"), false, "no cap below six");
+  await act(async () => [...host.querySelectorAll(".conversation-inbox__hit")].find(item => /beta/.test(item.textContent)).click());
+  await settle();
+  assert.equal(inboxFixture.active, "beta");
+  assert.equal(host.querySelector("#route").textContent, "?history=project&run=b1&event=ref-b1&eventOffset=3");
+});
+
+test("All projects message search is capped at six scopes, newest projects first, and says so", () => {
+  const { messageSearchScopes } = module.exports;
+  const projects = Array.from({ length: 8 }, (_, i) => ({ projectId: `p${i}`, displayName: `P${i}` }));
+  const rows = [{ projectId: "p7", createdAt: 90 }, { projectId: "p3", createdAt: 80 }, { projectId: null, createdAt: 5 }];
+  const { scopes, total } = messageSearchScopes("all", projects, rows);
+  assert.equal(total, 9);
+  assert.equal(scopes.length, 6);
+  assert.deepEqual(scopes.slice(0, 3).map(scope => scope.projectId), ["p7", "p3", null]);
+  assert.deepEqual(messageSearchScopes("p2", projects, rows), { scopes: [{ projectId: "p2", label: "P2" }], total: 1 });
 });
 
 test("route helpers name exactly one row", () => {
