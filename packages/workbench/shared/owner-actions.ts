@@ -6,7 +6,7 @@ export const VIVARY_OWNER_ACTIONS = [
   "vivary-handoff-prepare", "vivary-handoff-save", "vivary-handoff-freshness",
   "vivary-code-send", "vivary-code-stop", "vivary-code-approve", "vivary-code-deny",
   "vivary-code-cleanup",
-  "vivary-register-project", "vivary-connect-project-folder",
+  "vivary-register-project", "vivary-connect-project-folder", "vivary-set-project-kind",
   "vivary-project-file-save", "vivary-project-file-rename",
   "vivary-preview-new-project", "vivary-create-new-project", "vivary-workspace-pattern-catalog",
   "vivary-preview-managed-project-reconnection", "vivary-confirm-managed-project-reconnection",

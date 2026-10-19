@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workspaceKind } from "../../shared/workspace-kind.ts";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 const revision = (minimum: number) => z.number().int().min(minimum).max(Number.MAX_SAFE_INTEGER);
@@ -15,7 +16,8 @@ export const catalogSchema = z.union([
       status: availability })).max(16),
     projects: z.array(z.strictObject({ projectId: identifier, displayName: label,
       bindingRevision: revision(1), status: availability,
-      reconnectEligible: z.boolean().default(false) })).max(128),
+      reconnectEligible: z.boolean().default(false),
+      workspaceKind: workspaceKind.nullable().default(null) })).max(128),
   }),
 ]);
 

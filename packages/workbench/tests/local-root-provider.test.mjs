@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, open, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import filesystem from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -16,7 +16,7 @@ const { ORG_MIGRATIONS, organizations, orgMembers, setAppMemberRole, listAppMemb
 const { deleteSettingIfValue, getSetting, mutateSetting } = await import("@agent-native/core/settings");
 const { getDb } = await import("../server/db/index.mjs");
 const { migrateRegistry } = await import("../server/db/migrations.mjs");
-const { bindings, projects } = await import("../server/db/schema.mjs");
+const { bindings, projects, revisions } = await import("../server/db/schema.mjs");
 const { createLocalRootProvider, LOCAL_ROOT_VERIFICATION } = await import("../server/local-root-provider.mjs");
 const { createNativeRegistry } = await import("../server/native-registry.mjs");
 const { createProjectCatalog } = await import("../server/project-catalog.mjs");
@@ -26,6 +26,7 @@ const {
   connectLocalProjectFolder,
   resolveLocalProjectHistory,
   resolveLocalProjectWorkspace,
+  setLocalProjectKind,
 } = await import("../server/project-services.mjs");
 const { evaluateRegistryOperation, deriveMutationKeys } = await import("../../../scripts/registry_contract_model.mjs");
 const { projectChatScopeId } = await import("../server/chat-project-scope.mjs");
@@ -232,6 +233,37 @@ test("local project grants register real folders and reopen without content snap
       assert.ok(current.policyRevision > before.policyRevision);
       assert.ok(current.projects.every(project => project.status === "available"));
       await assert.rejects(provider.addGrantedFolder(context, directory), /outside/);
+    });
+    await suite.test("Open folder writes no files and the owner's kind is saved only on the project row", async () => {
+      const actionContext = { ...context, appId: "vivary" };
+      // Beta was created empty, then registered through the Open folder service above.
+      assert.deepEqual(await readdir(beta), [], "registration created nothing in the folder");
+      const before = await catalog.run({}, context);
+      assert.deepEqual(before.projects.map(project => project.workspaceKind), [null, null], "new registrations are Not set");
+      const records = async () => ({ bindings: await getDb().select().from(bindings),
+        revisions: await getDb().select().from(revisions) });
+      const recordsBefore = await records();
+      assert.deepEqual(await setLocalProjectKind(actionContext, betaResult.projectId, "personal"),
+        { projectId: betaResult.projectId, workspaceKind: "personal" });
+      const after = await catalog.run({}, context);
+      assert.deepEqual(after.projects.map(project => [project.projectId, project.workspaceKind]),
+        before.projects.map(project => [project.projectId, project.projectId === betaResult.projectId ? "personal" : null]));
+      assert.equal(after.registryRevision, before.registryRevision, "a preference is not a registry change");
+      assert.deepEqual(await records(), recordsBefore);
+      assert.deepEqual(await readdir(beta), [], "choosing a kind wrote no files");
+      await setLocalProjectKind(actionContext, betaResult.projectId, "coding");
+      assert.equal((await catalog.run({}, context)).projects.find(project =>
+        project.projectId === betaResult.projectId).workspaceKind, "coding");
+
+      await assert.rejects(setLocalProjectKind(actionContext, betaResult.projectId, "work"), TypeError);
+      await assert.rejects(setLocalProjectKind(actionContext, "project-unknown", "coding"), { statusCode: 409 });
+      await assert.rejects(setLocalProjectKind({ ...actionContext, orgId: "foreign" }, betaResult.projectId, "coding"));
+      await assert.rejects(setLocalProjectKind({ ...actionContext, caller: "tool" }, betaResult.projectId, "personal"),
+        { statusCode: 403 });
+      await assert.rejects(setLocalProjectKind({ ...actionContext, caller: "agent" }, betaResult.projectId, "personal"),
+        { statusCode: 403 });
+      const [row] = (await getDb().select().from(projects)).filter(value => value.projectId === betaResult.projectId);
+      assert.equal(row.workspaceKind, "coding", "refused changes left the saved kind");
     });
     await suite.test("reopening preserves project and root identifiers with fresh metadata checks", async () => {
       const before = await catalog.run({}, context);

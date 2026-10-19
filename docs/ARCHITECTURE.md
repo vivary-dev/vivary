@@ -43,6 +43,25 @@ The Electron process starts a local Workbench server, opens its loopback origin,
 
 Workbench composes Agent-Native's application, chat, run, action, and storage owners. Native keeps transcripts and run lifecycle. Workbench keeps project identity and authorized root bindings, then resolves those bindings for actions and sends. The registry uses Native's database with Workbench project, binding, revision, receipt, and mutation tables. See the [project registry](product/multi-project/source-map/modules/project-registry/index.md), [`project-services.mjs`](../packages/workbench/server/project-services.mjs), and [`db/schema.mjs`](../packages/workbench/server/db/schema.mjs). An observed path is not by itself a project identity or a write grant.
 
+Each registered project has an owner-chosen kind, Coding or Personal, or null for
+Not set. Registry migration 7 adds the nullable `workspace_kind` column with a
+check on those two values, so existing projects stay Not set. The kind is a
+preference beside the registry contract: the registration decision engine, the
+portable project record, bindings, receipts, and the registry revision do not
+carry it. `vivary-set-project-kind` is an owner-only action (no agent, MCP, or
+chat tool route). [`setLocalProjectKind`](../packages/workbench/server/project-services.mjs)
+admits the owner's project scope and writes only that row, never project files.
+The catalog returns the kind. New project asks for it in
+[`WorkspaceKindDialog`](../packages/workbench/app/components/projects/WorkspaceKindDialog.tsx)
+before the form, which fills the matching preset, and saves it after
+registration. Open folder registers the folder unchanged, asks, then selects the
+project. The [conversation surface owner](../packages/workbench/app/lib/conversation-surface.ts)
+maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
+when no surface is requested or saved. New conversation follows a chosen kind.
+Both conversation kinds remain available in every project. The
+[J06 state chart](product/multi-project/specification/journeys.md#project-kind-coding-or-personal)
+owns the journey.
+
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](product/multi-project/specification/harness-adapters.md), [Native owner map](product/multi-project/native-owners.md), and [runtime source map](product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
 ### Coding model selection and provider routes
@@ -705,6 +724,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Project kind (owner decision of the same date). New project and Open
+folder now ask Coding or Personal. System structure describes the new owner:
+registry migration 7, the owner-only `vivary-set-project-kind` action, the catalog
+field, the dialog, and the default conversation surface. The registry decision
+engine, portable record, bindings, receipts, and revision are unchanged, so the
+registration and custody descriptions still hold. Open folder still writes no
+project files. Evidence: the migration upgrade and storage cases in
+`tests/registry-store.test.mjs`, the folder and scope cases in
+`tests/local-root-provider.test.mjs`, `tests/managed-projects.test.mjs`,
+`tests/conversation-surface.test.mjs`, and
+`tests/workspace-kind-dialog-component.test.mjs`.
 
 2026-10-19 Installer file collision (issue #254 item 7). Extraction with `File /r`
 replaced whatever sat at a payload path, so a file the user added at the exact

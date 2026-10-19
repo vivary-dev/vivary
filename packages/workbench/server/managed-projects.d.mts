@@ -32,7 +32,8 @@ export function previewManagedProject(
 export function createManagedProject(
   context: ActionRunContext | undefined,
   input: { name: string; displayName?: string; acceptedPlanSha256: string;
-    patternChoices?: WorkspacePatternChoice[]; preset?: WorkspacePreset },
+    patternChoices?: WorkspacePatternChoice[]; preset?: WorkspacePreset;
+    workspaceKind?: import("../shared/workspace-kind").WorkspaceKind },
   dependencies?: Record<string, unknown>,
 ): Promise<
   | { code: "plan-changed" }

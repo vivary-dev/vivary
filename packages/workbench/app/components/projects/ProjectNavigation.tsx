@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { folderConnectionErrorMessage, useNativeActionCaller } from "@/lib/native-actions";
 import { CreateProjectForm } from "./CreateProjectForm";
 import { ReconnectProjectForm } from "./ReconnectProjectForm";
+import { WorkspaceKindDialog, useSaveProjectKind } from "./WorkspaceKindDialog";
+import type { WorkspaceKind } from "../../../shared/workspace-kind.ts";
 import { useProjects } from "./ProjectContext";
 import type { ProjectCatalog, RegistrationAttempt, RegistrationResult } from "@/lib/project-catalog-schema";
 
@@ -113,6 +115,12 @@ export function ProjectNavigation() {
   }
   const [registering, setRegistering] = useState(false);
   const [creating, setCreating] = useState(false);
+  // New project asks for the kind before its form. Open folder asks after registration, before selecting the project,
+  // so the first conversation already follows the choice. Cancel there leaves the kind Not set.
+  const [kindPrompt, setKindPrompt] = useState<{ purpose: "new" }
+    | { purpose: "open"; projectId: string; displayName: string } | null>(null);
+  const [newProjectKind, setNewProjectKind] = useState<WorkspaceKind | null>(null);
+  const saveProjectKind = useSaveProjectKind();
   const { call } = useNativeActionCaller();
   const [choosing, setChoosing] = useState(false);
   const [folderError, setFolderError] = useState<string>();
@@ -123,12 +131,14 @@ export function ProjectNavigation() {
     setChoosing(true);
     setFolderError(undefined);
     try {
-      const result = await call<RegistrationResult | { code: "cancelled" }>(
+      const result = await call<(RegistrationResult & { displayName?: string }) | { code: "cancelled" }>(
         "vivary-connect-project-folder", {},
       );
       if (result.code === "cancelled") return;
       await refresh();
-      if (result.code === "registered" || result.code === "already-registered") {
+      if (result.code === "registered") {
+        setKindPrompt({ purpose: "open", projectId: result.projectId, displayName: result.displayName ?? "This folder" });
+      } else if (result.code === "already-registered") {
         if (!await selectProject(result.projectId)) setFolderError("Folder connected. Select it from Projects.");
       } else {
         setFolderError(registrationMessage(result.code));
@@ -138,6 +148,9 @@ export function ProjectNavigation() {
     } finally {
       setChoosing(false);
     }
+  }
+  async function selectOpenedFolder(projectId: string) {
+    if (!await selectProject(projectId)) setFolderError("Folder connected. Select it from Projects.");
   }
   const lastCatalog = useRef<ProjectCatalog | null>(null);
   if (catalog) lastCatalog.current = catalog;
@@ -177,7 +190,7 @@ export function ProjectNavigation() {
         </li>)}</ul>}
       {!creating && <Button size="sm" className="register-project-button" onClick={() => {
         setRegistering(false);
-        setCreating(true);
+        setKindPrompt({ purpose: "new" });
       }}>New project</Button>}
       {!desktop.data?.folderPicker && !registering
         && catalog.locations.some(location => location.status === "available")
@@ -190,7 +203,8 @@ export function ProjectNavigation() {
           ? "Select an unavailable project to review its connection. You can also create a project here."
           : "No connected folders are available. You can create a managed project here."}</p>}
     </>}
-    {creating && <CreateProjectForm disabled={checking || selecting}
+    {creating && newProjectKind && <CreateProjectForm disabled={checking || selecting}
+      workspaceKind={newProjectKind} onChangeKind={() => setKindPrompt({ purpose: "new" })}
       onClose={() => setCreating(false)}
       onCreated={async projectId => {
         await refresh();
@@ -200,6 +214,28 @@ export function ProjectNavigation() {
       <RegistrationForm key={lastCatalog.current.scopeKey}
         catalog={lastCatalog.current} disabled={checking || !catalog} onClose={() => setRegistering(false)} />
     </div>}
+    <WorkspaceKindDialog open={kindPrompt !== null}
+      current={kindPrompt?.purpose === "new" ? newProjectKind : null}
+      description={kindPrompt?.purpose === "open"
+        ? `${kindPrompt.displayName} is registered. Your choice is saved in Vivary. No files in the folder change.`
+        : "This sets the defaults for the new project. Name it and review its files next."}
+      onChoose={async kind => {
+        const prompt = kindPrompt;
+        if (prompt?.purpose === "open") {
+          await saveProjectKind(prompt.projectId, kind);
+          setKindPrompt(null);
+          await selectOpenedFolder(prompt.projectId);
+          return;
+        }
+        setNewProjectKind(kind);
+        setCreating(true);
+        setKindPrompt(null);
+      }}
+      onCancel={() => {
+        const prompt = kindPrompt;
+        setKindPrompt(null);
+        if (prompt?.purpose === "open") void selectOpenedFolder(prompt.projectId);
+      }} />
     {error && <div className="flex items-center gap-2" role="status">
       <span className="min-w-0 flex-1">{error}</span>
       {retrySelection && <Button size="sm" variant="ghost" disabled={selecting}

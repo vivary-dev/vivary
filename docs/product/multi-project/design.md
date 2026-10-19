@@ -343,6 +343,15 @@ questions clearly. Preserve existing files and let the user review additions.
 The external catalog and transport remain under the separate
 [held template program](tickets/19-integrate-template-program.md).
 
+On 2026-10-19 Jeff found that separate coding and personal workspaces did not
+work as they should and asked for the choice at project creation in a modal.
+He chose two kinds, **Coding** and **Personal**, for New project and Open folder.
+The kind sets the first conversation type and the starting structure preset
+(Coding or Knowledge work). It does not lock features: Code conversations and API
+chat stay available in every project, and it adds no persona or access. Existing
+projects show Not set until he chooses. [J06](specification/journeys.md#project-kind-coding-or-personal)
+holds the state chart. The three choices above stay independent.
+
 ### File memory and setup direction: 2026-09-13
 
 Jeff asked for a simple memory system built from workspace files, with Git,

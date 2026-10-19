@@ -1,6 +1,7 @@
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
 import { workspacePatternChoices, workspacePreset } from "../shared/workspace-patterns.ts";
+import { workspaceKind } from "../shared/workspace-kind.ts";
 import { createManagedProject } from "../server/managed-projects.mjs";
 
 export default defineAction({
@@ -9,6 +10,7 @@ export default defineAction({
     name: z.string().trim().min(1).max(128),
     patternChoices: workspacePatternChoices.optional(),
     preset: workspacePreset.optional(),
+    workspaceKind: workspaceKind.optional(),
     displayName: z.string().trim().min(1).max(200),
     acceptedPlanSha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   }),

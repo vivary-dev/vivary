@@ -163,6 +163,40 @@ test("one managed target has one apply and registration owner", async () => {
   }
 });
 
+test("a new project saves its chosen kind after registration and passes the kind's preset to the creator", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "vivary-managed-kind-"));
+  const effects = [];
+  const dependencies = {
+    dataDir,
+    getAccess: async () => ({ code: "catalog" }),
+    runCreator: async call => {
+      effects.push(["apply", call.preset]);
+      await mkdir(call.target, { recursive: true });
+      return { code: "created", target: call.target, planSha256: "sha256:" + "c".repeat(64) };
+    },
+    connectFolder: async (_context, _target, displayName) => {
+      effects.push(["register", displayName]);
+      return { code: displayName === "Refused" ? "denied" : "registered", projectId: "project_" + displayName.toLowerCase() };
+    },
+    setProjectKind: async (_context, projectId, kind) => { effects.push(["kind", projectId, kind]); },
+  };
+  const input = (name, extra) => ({ name, displayName: name, acceptedPlanSha256: "sha256:" + "c".repeat(64), ...extra });
+  try {
+    await createManagedProject({}, input("Notes", { preset: "knowledge-work", workspaceKind: "personal" }), dependencies);
+    await createManagedProject({}, input("Code", { preset: "coding", workspaceKind: "coding" }), dependencies);
+    await createManagedProject({}, input("Plain"), dependencies);
+    await createManagedProject({}, input("Refused", { workspaceKind: "coding" }), dependencies);
+    assert.deepEqual(effects, [
+      ["apply", "knowledge-work"], ["register", "Notes"], ["kind", "project_notes", "personal"],
+      ["apply", "coding"], ["register", "Code"], ["kind", "project_code", "coding"],
+      ["apply", "coding"], ["register", "Plain"],
+      ["apply", "coding"], ["register", "Refused"],
+    ], "no kind without a choice or without a registered project");
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("managed names reject Windows device names and case collisions before apply", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "vivary-managed-name-"));
   await mkdir(path.join(dataDir, "projects"));

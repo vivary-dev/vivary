@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { RegistrationResult } from "@/lib/project-catalog-schema";
 import { WorkspacePatternChoices } from "./WorkspacePatternChoices";
+import { WORKSPACE_KIND_PRESET, workspaceKindLabel, type WorkspaceKind } from "../../../shared/workspace-kind.ts";
 import { workspacePatternCatalog, workspacePreset, type WorkspacePatternChoice,
   type WorkspacePatternDefinition, type WorkspacePreset } from "../../../shared/workspace-patterns.ts";
 
@@ -33,21 +34,31 @@ type CreateResult = Created | { code: "plan-changed" };
 
 export function CreateProjectForm({
   disabled,
+  workspaceKind,
+  onChangeKind,
   onClose,
   onCreated,
 }: {
   disabled: boolean;
+  workspaceKind: WorkspaceKind;
+  onChangeKind: () => void;
   onClose: () => void;
   onCreated: (projectId: string) => Promise<boolean>;
 }) {
   const { call, ready } = useNativeActionCaller();
   const [name, setName] = useState("");
-  const [preset, setPreset] = useState<WorkspacePreset>("coding");
+  const [preset, setPreset] = useState<WorkspacePreset>(WORKSPACE_KIND_PRESET[workspaceKind]);
   const [catalog, setCatalog] = useState<WorkspacePatternDefinition[] | null>(null);
   const [patternChoices, setPatternChoices] = useState<WorkspacePatternChoice[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [working, setWorking] = useState<"preview" | "create" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // A changed kind starts from that kind's guidance preset. The owner can still pick another one below.
+  useEffect(() => {
+    setPreset(WORKSPACE_KIND_PRESET[workspaceKind]);
+    setPreview(null);
+  }, [workspaceKind]);
 
   useEffect(() => {
     if (!ready) return;
@@ -83,6 +94,7 @@ export function CreateProjectForm({
       const result = await call<CreateResult>("vivary-create-new-project", {
         name,
         preset,
+        workspaceKind,
         displayName: name,
         acceptedPlanSha256: preview.plan.plan_sha256,
         patternChoices,
@@ -111,6 +123,8 @@ export function CreateProjectForm({
 
   const unavailable = disabled || !ready || catalog === null || working !== null;
   return <form className="project-registration" onSubmit={previewProject} aria-label="Create project">
+    <p className="project-kind-summary">Project kind: <strong>{workspaceKindLabel(workspaceKind)}</strong>
+      <Button size="sm" variant="ghost" type="button" disabled={unavailable} onClick={onChangeKind}>Change</Button></p>
     <label htmlFor="new-project-name">Project name</label>
     <Input id="new-project-name" value={name} autoComplete="off" maxLength={128}
       pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" disabled={unavailable}

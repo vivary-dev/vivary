@@ -41,7 +41,7 @@ stateDiagram-v2
 
 Missing and denied are distinct. Missing keeps authorized history and drafts readable with file-dependent execution disabled. Denied must protect history and files. The metadata/history read path must not require live folder resolution, but must still recheck current project authorization. Never silently select a different project. An active owned run keeps a Stop path even if its root disappears.
 
-Acceptance: two projects with different drafts and conversations. Fail selection/refresh. Move/remove one folder. Revoke access. Retry. Reopen the previous authorized history. Registration never creates instructions or adopts the folder. M02, M03 and M05 own this path.
+Acceptance: two projects with different drafts and conversations. Fail selection/refresh. Move/remove one folder. Revoke access. Retry. Reopen the previous authorized history. Registration never creates instructions or adopts the folder. The Coding or Personal choice that follows Open folder ([J06](#project-kind-coding-or-personal)) saves only a registry value. M02, M03 and M05 own this path.
 
 ## J03: Choose a model or another harness
 
@@ -149,6 +149,33 @@ sequenceDiagram
   Original-->>View: Actual receipt and recovery if partial
   View-->>User: Open registered project conversation
 ```
+
+### Project kind: Coding or Personal
+
+The owner chose this on 2026-10-19. New project and Open folder ask for one of two kinds in a modal. **Coding** starts new conversations with a coding agent (Claude Code or Codex) and uses `STATE.md` for handoff. **Personal** starts new conversations as API chat for notes, research and writing. The kind sets defaults and locks nothing: Code conversations and API chat stay available in every project. Not set and the Personal workspace keep the Code default.
+
+```mermaid
+stateDiagram-v2
+  state "Not set" as NotSet
+  [*] --> AskNew: New project
+  AskNew --> Form: choose Coding or Personal (fills the preset)
+  AskNew --> [*]: cancel, nothing created
+  Form --> AskNew: change kind
+  Form --> Coding: create with Coding
+  Form --> Personal: create with Personal
+  Form --> [*]: cancel, nothing created
+  [*] --> Registered: Open folder registers the folder, no files written
+  Registered --> Coding: choose Coding, registry row only
+  Registered --> Personal: choose Personal, registry row only
+  Registered --> NotSet: cancel
+  [*] --> NotSet: project registered before migration 7
+  NotSet --> Coding: owner sets kind in Project details
+  NotSet --> Personal: owner sets kind in Project details
+  Coding --> Personal: owner changes kind
+  Personal --> Coding: owner changes kind
+```
+
+The project is selected after the Open folder choice or cancel, so its first conversation already follows the kind. A saved or requested conversation surface still wins over the kind. No path sets a kind without the owner's choice. Acceptance: both kinds from New project and Open folder, cancel at each step, keyboard-only choice, an upgraded profile whose projects show Not set, and a folder whose files are unchanged after Open folder and a kind choice.
 
 Skip VCS, repository host, template and Brain independently. Adoption preserves existing instructions/tooling and makes conflicts visible. A built-in pattern is editable workspace content, not a mandatory agent personality. External templates remain held until their separate prerequisites and owner decision pass. Test empty/populated/no-VCS folders, changed files after preview, duplicate submit and partial application.
 

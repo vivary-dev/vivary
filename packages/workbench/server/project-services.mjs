@@ -482,6 +482,25 @@ export async function resolveLocalProjectHistory(context, projectId) {
     bindingRevision: binding.bindingRevision });
 }
 
+/**
+ * Saves the owner's Coding or Personal choice for one registered project in
+ * the owner's scope. It writes only the registry row, never project files, and
+ * does not need the folder to be available.
+ */
+export async function setLocalProjectKind(context, projectId, kind) {
+  // Only the owner chooses. An admitted chat tool may read its project but never change this preference.
+  if (context?.caller === "tool") {
+    throw Object.assign(new Error("Local project access is unavailable."), { statusCode: 403 });
+  }
+  const { service, owner, scope } = await resolveLocalProjectBinding(context, projectId);
+  const { updateProjectWorkspaceKind } = await import("./registry-store.mjs");
+  await requireCurrentProjectScope(service, owner, scope);
+  if (!await updateProjectWorkspaceKind(projectId, kind)) {
+    throw Object.assign(new Error("Choose a registered project."), { statusCode: 404 });
+  }
+  return Object.freeze({ projectId, workspaceKind: kind });
+}
+
 /** Resolves local access for Native execution. This is not a held-custody execution grant. */
 export async function resolveLocalProjectWorkspace(context, projectId) {
   const { service, owner, scope, binding } = await resolveLocalProjectBinding(context, projectId);

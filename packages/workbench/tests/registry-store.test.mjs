@@ -37,15 +37,22 @@ async function worker() {
   register(new URL("./native-dependency-loader.mjs", import.meta.url), {
     data: { corePackageJson: process.env.VIVARY_TEST_CORE_PACKAGE_JSON }, // guard:allow-env-credential — Test dependency manifest path; no credential value.
   });
-  const { withMigrationRuntime, getDbExec, closeDbExec } = await import("@agent-native/core/db");
-  const { migrateRegistry } = await import("../server/db/migrations.mjs");
+  const { withMigrationRuntime, getDbExec, closeDbExec, runMigrations } = await import("@agent-native/core/db");
+  const { migrateRegistry, REGISTRY_MIGRATIONS } = await import("../server/db/migrations.mjs");
   const { getDb } = await import("../server/db/index.mjs");
   const schema = await import("../server/db/schema.mjs");
   const { eq } = await import("@agent-native/core/db/schema");
-  const { createRegistryStore } = await import("../server/registry-store.mjs");
+  const { createRegistryStore, updateProjectWorkspaceKind } = await import("../server/registry-store.mjs");
   const { evaluateRegistryOperation } = await import("../../../scripts/registry_contract_model.mjs");
   process.send({ type: "ready" });
   const payload = await new Promise((resolve) => process.once("message", resolve));
+  if (payload.migrateThrough) {
+    // An installation from before a later migration: the same tracking table, fewer entries.
+    await withMigrationRuntime(() => runMigrations(REGISTRY_MIGRATIONS.slice(0, payload.migrateThrough),
+      { table: "vivary_workbench_registry_migrations" })());
+    await getDbExec().execute(`INSERT INTO vivary_registry_projects (project_id, schema_version, display_name)
+      VALUES ('project-existing', 1, 'Existing project')`);
+  }
   if (payload.migrate) await withMigrationRuntime(() => migrateRegistry());
   if (payload.fixtureVcsReplacement) {
     const setup = payload.fixtureVcsReplacement;
@@ -105,6 +112,16 @@ async function worker() {
     }
   } else if (payload.action === "export") {
     value = { decision: await store.exportProject(payload.request), allocations };
+  } else if (payload.action === "set-kind") {
+    value = { updates: [] };
+    for (const [projectId, kind] of payload.updates) {
+      try { value.updates.push(await updateProjectWorkspaceKind(projectId, kind)); }
+      catch (error) { value.updates.push(error.name); }
+    }
+    try {
+      await getDbExec().execute("UPDATE vivary_registry_projects SET workspace_kind = 'work'");
+      value.rawInvalid = "accepted";
+    } catch { value.rawInvalid = "rejected"; }
   } else if (payload.action === "parallel") {
     value = await Promise.all(payload.requests.map((item) => store.register(item)));
   } else if (payload.action !== "snapshot") {
@@ -237,6 +254,32 @@ if (process.env.VIVARY_REGISTRY_WORKER === "1") { // guard:allow-env-credential 
   test("native migrations are repeatable and an unopened registry has no product records", async () => sandbox(async (dir) => {
     empty((await run(dir, { migrate: true, action: "snapshot" })).snapshot);
     empty((await run(dir, { migrate: true, action: "snapshot" })).snapshot);
+  }));
+
+  test("migration 7 keeps existing projects and leaves their kind Not set", async () => sandbox(async (dir) => {
+    const upgraded = await run(dir, { migrateThrough: 6, migrate: true, action: "snapshot" });
+    assert.deepEqual(upgraded.snapshot.projects, [{ projectId: "project-existing", schemaVersion: 1,
+      displayName: "Existing project", contentAlgorithm: null, contentManifestDigest: null, workspaceKind: null }]);
+    const reopened = await run(dir, { migrate: true, action: "snapshot" });
+    assert.deepEqual(reopened.snapshot, upgraded.snapshot);
+  }));
+
+  test("the workspace kind is saved outside registration and refuses other values", async () => sandbox(async (dir) => {
+    const created = await run(dir, { migrate: true, action: "register", request: request(), snapshot: true });
+    assert.equal(created.snapshot.projects[0].workspaceKind, null, "registration never chooses a kind");
+    const changed = await run(dir, { action: "set-kind", snapshot: true, updates: [
+      ["project-new", "personal"], ["project-new", "coding"], ["project-missing", "coding"],
+      ["project-new", "work"], ["project-new", null], ["../project-new", "coding"]] });
+    assert.deepEqual(changed.updates, [true, true, false, "TypeError", "TypeError", "TypeError"]);
+    assert.equal(changed.rawInvalid, "rejected", "the column check refuses a value the store would refuse");
+    assert.deepEqual(changed.snapshot.projects, [{ ...created.snapshot.projects[0], workspaceKind: "coding" }]);
+    for (const table of ["bindings", "receipts", "revisions"]) {
+      assert.deepEqual(changed.snapshot[table], created.snapshot[table], `${table} stay unchanged`);
+    }
+    const exported = await run(dir, { action: "export", request: exportRequest() });
+    assert.deepEqual(exported.decision.output.project, {
+      schemaVersion: 1, projectId: "project-new", displayName: "Example project", contentIdentity: null,
+    }, "the portable record does not carry the preference");
   }));
 
   test("file-backed registration survives process exit and exports only portable fields", async () => sandbox(async (dir) => {

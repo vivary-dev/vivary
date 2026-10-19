@@ -30,6 +30,11 @@ export function connectLocalProjectFolder(
   folder: string,
   displayName?: string,
 ): Promise<RegistrationResult & { locationRef: string; displayName: string }>;
+export function setLocalProjectKind(
+  context: ActionRunContext | undefined,
+  projectId: string,
+  kind: "coding" | "personal",
+): Promise<{ projectId: string; workspaceKind: "coding" | "personal" }>;
 export function resolveLocalProjectHistory(
   context: ActionRunContext | undefined,
   projectId: string,
