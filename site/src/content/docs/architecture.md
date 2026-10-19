@@ -759,7 +759,9 @@ says so and keeps its text there. The Prepare handoff request shows as one
 and Native conversation view creates one status hub from
 [`handoff-status.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/handoff-status.ts).
 `HandoffControl` publishes its freshness read and the last refused Save to it, and
-each preview states its own reply's status: not saved yet, refused with the
+publishes no status while its freshness check has failed, so a preview never keeps
+an older status beside the control's failed check. Each preview states its own
+reply's status: not saved yet, refused with the
 parser's reasons, saved and Fresh, out of date, failed, or not the latest request.
 A read-only history view has no control, so its previews state no status. The
 stored message text, the parser and schema in `server/handoff.ts`, its validation,

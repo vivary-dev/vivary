@@ -39,12 +39,13 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   }, [key]);
   const query = useQuery({ queryKey: ["vivary-handoff-freshness", key], enabled: ready, retry: false, staleTime: 0,
     queryFn: () => call<HandoffFreshness>("vivary-handoff-freshness", { projectId, conversation }) });
-  // The reply previews in this conversation show the same save status and refusal reasons.
+  // The reply previews in this conversation show the same save status and refusal reasons. A failed read keeps
+  // react-query's older data, so a failed check publishes no status rather than one the control no longer shows.
   const hub = useContext(HandoffStatusContext);
   useEffect(() => {
-    hub?.set({ status: query.data ?? null,
+    hub?.set({ status: query.isError ? null : query.data ?? null,
       refusal: notice?.problems && notice.requestId ? { requestId: notice.requestId, problems: notice.problems } : null });
-  }, [hub, query.data, notice]);
+  }, [hub, query.data, query.isError, notice]);
   useEffect(() => () => hub?.set(null), [hub]);
   useEffect(() => {
     const refresh = () => { void query.refetch(); };

@@ -110,6 +110,18 @@ test("each save status is explicit: not saved yet, refused with the parser's rea
   assert.equal(status(), "Saved to STATE.md. Fresh.");
 });
 
+test("a failed freshness check clears the preview status instead of keeping the older one", async () => {
+  handoffFixture.status = { status: "fresh", covered, reasons: [] };
+  await render({ hub: module.exports.createHandoffStatusHub(), content: reply() });
+  assert.equal(status(), "Saved to STATE.md. Fresh.");
+  handoffFixture.status = Promise.reject(new Error("offline"));
+  handoffFixture.status.catch(() => {});
+  await act(async () => window.dispatchEvent(new window.Event("agent-chat:threads-updated"))); await settle();
+  assert.match(host.textContent, /Handoff freshness could not be checked/);
+  assert.equal(status(), null);
+  assert.match(host.textContent, /Goal: Finish the relay beta/);
+});
+
 test("out of date, failed, superseded and unreported states each say so", async () => {
   const cases = [
     [{ status: "out-of-date", covered, reasons: ["head-moved"] }, "Saved to STATE.md. Out of date."],
