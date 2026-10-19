@@ -1,6 +1,6 @@
 import { fail } from "@agent-native/core/action";
 import { updateCodeAgentRunRecord, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
-import { getDbExec } from "@agent-native/core/db";
+import { getDbExec, isPostgres } from "@agent-native/core/db";
 import { getThread, listThreads, setThreadArchived } from "@agent-native/core/server";
 import { codeDraftSelectionKey } from "../shared/code-draft";
 import { LINKED_TARGET_SOURCE_URL } from "../shared/linked-conversation";
@@ -72,6 +72,17 @@ export const PERSONAL_LABEL = "Personal workspace";
 const NATIVE_SCOPE_TYPE = "workspace-app";
 const MAX_NATIVE_ROWS = 1_000;
 export const RESULT_SHOWN_MS = 24 * 60 * 60 * 1000;
+
+// Native creates `agent_runs` with its first turn, so a fresh database has no such table and no run state yet.
+let agentRunsTableSeen = false;
+async function agentRunsTableExists(): Promise<boolean> {
+  if (agentRunsTableSeen) return true;
+  const found = await getDbExec().execute(isPostgres()
+    ? { sql: "SELECT to_regclass('agent_runs') AS name", args: [] }
+    : { sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'", args: [] });
+  agentRunsTableSeen = found.rows.length > 0 && found.rows[0].name != null;
+  return agentRunsTableSeen;
+}
 
 /** A finished run's result shows while it is recent. A run with no known end shows nothing. */
 function recentResult(result: "failed" | "completed", endedAt: number, now: number): InboxAttention {
@@ -158,8 +169,9 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
   args: [...args, MAX_NATIVE_ROWS + 1] });
   const limited = threads.rows.length > MAX_NATIVE_ROWS;
   // The join repeats the owner filter, so a run row can only describe one of these conversations.
-  const runs = await db.execute({ sql: `SELECT r.thread_id, r.status, COALESCE(r.completed_at, r.started_at) AS ended_at
-    FROM agent_runs r JOIN chat_threads t ON t.id = r.thread_id WHERE ${where} ORDER BY r.started_at DESC`, args });
+  const runs = await agentRunsTableExists() ? await db.execute({ sql: `SELECT r.thread_id, r.status,
+    COALESCE(r.completed_at, r.started_at) AS ended_at FROM agent_runs r JOIN chat_threads t ON t.id = r.thread_id
+    WHERE ${where} ORDER BY r.started_at DESC`, args }) : { rows: [] };
   const latest = new Map<string, { status: string; endedAt: number }>();
   for (const run of runs.rows) {
     const threadId = String(run.thread_id);
@@ -267,8 +279,9 @@ export async function archiveNativeConversation(input: { ownerEmail: string; org
   if (!thread || !threadBelongsToChatIdentity(identity, thread, input.ownerEmail, input.orgId)) {
     fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   }
-  const latest = await getDbExec().execute({
-    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [input.threadId] });
+  const latest = await agentRunsTableExists() ? await getDbExec().execute({
+    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [input.threadId] })
+    : { rows: [] };
   if (latest.rows[0]?.status === "running") refuseArchive(ARCHIVE_REFUSALS.working);
   let queued: unknown;
   try { queued = (JSON.parse(thread.threadData || "{}") as { queuedMessages?: unknown }).queuedMessages; }

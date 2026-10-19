@@ -7822,7 +7822,9 @@ opens it), reads Native `chat_threads` once across the catalog's scope ids with
 the owner, organization, scope and source predicates of the content search, and
 reads the newest `agent_runs` row per thread through a join that repeats those
 predicates. Empty Native conversations have no row, as in `listThreads`, except
-an empty linked target. It probes no runtime. A project whose registry binding
+an empty linked target. Native creates `agent_runs` with its first turn, so on a
+fresh database the read and the archive check skip run state until that table
+exists. It probes no runtime. A project whose registry binding
 cannot resolve keeps its API chats and is reported in `unavailableProjects`.
 Unassigned history stays in its own section. The same read lists the owner's saved
 drafts in every listed project from the application-state owner the composers write
@@ -7932,7 +7934,10 @@ refusal while running. `tests/conversation-inbox-components.test.mjs` renders
 the filter keeping the open conversation, its saved choice, the destination and
 New conversation in another project for Code and API chat, search, selection, keyboard movement, the row menu, rename, state
 labels, drafts, the folder, and a cross-project open that lands on the clicked
-row with and without a restored saved conversation. Until the sidebar integration lands, the inbox is not mounted in the app.
+row with and without a restored saved conversation.
+`tests/conversation-inbox-app.mjs` runs against the built app with a fresh data
+folder: a manual API chat name survives a later PUT carrying a generated title,
+before and after a server restart, and the archive action refuses queued messages. Until the sidebar integration lands, the inbox is not mounted in the app.
 
 ### Linked runtime conversations
 
@@ -8505,6 +8510,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Inbox on a fresh database (W5). The built-app test found that the inbox
+read failed with no `agent_runs` table, which Native creates with its first turn.
+The Conversation inbox section now says run state is skipped until the table exists,
+and names the built-app test. Evidence inspected: the built-app test run before and
+after the fix, and the server tests.
 
 2026-10-19 Inbox archive guards (W5). The Conversation inbox section now describes
 the server-side archive checks for Code and API chat, the new
