@@ -277,7 +277,11 @@ pending requests. This replaces the single `activeRun` and `pendingApproval`
 fields, and every caller moved in the same change. `busy` counts only the
 caller's runs. In `getVivaryCodeState`, `busy` means the selected conversation is
 running, and `folderRuns` lists active runs, any owner's, whose folder overlaps
-the workspace.
+the workspace. Only the caller's runs carry their run ID and title. Another
+owner's run carries a random placeholder ID, kept for the life of the run so an
+earlier Proceed still covers it, and no title. A send that names a run checks
+ownership before the per-conversation refusal, so another owner's run ID gets the
+same `vivary_code_run_not_found` (404) as any unknown ID.
 
 [`CodeRunControl.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/CodeRunControl.tsx)
 lists each running conversation with Open conversation, its own Stop, and its
@@ -889,6 +893,13 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Review fix for concurrent Code conversations (PR #261). `folderRuns`
+returned other owners' run IDs to every caller, and a send checked the
+conversation's active run before ownership, so another owner's working run ID
+got `vivary_code_conversation_active` (409) instead of the unowned-run 404.
+`runsInFolder` now gives another owner's run a random placeholder ID, and the
+send resolves ownership first. `tests/code-concurrency.test.ts` covers both.
 
 2026-10-19 Merge of PR #258's review fixes into the concurrency branch. Both
 behaviors hold together. A switch refuses only for the switched conversation's
