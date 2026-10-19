@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@agent-native/toolkit/ui";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { ConversationReference } from "../../../shared/linked-conversation";
 import { STALE_REASON_TEXT, type HandoffFreshness, type HandoffPrepareResult, type HandoffRecord,
   type HandoffSaveResult, type StaleReason } from "../../../shared/handoff";
+import { HandoffStatusContext } from "./handoff-status";
 
 /**
  * Prepare handoff and its freshness for one project conversation. Prepare
@@ -22,7 +23,7 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   const { call, ready } = useNativeActionCaller();
   const key = JSON.stringify([projectId, conversation.kind, conversation.id]);
   const [busy, setBusy] = useState(false), [running, setRunning] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; problems?: string[] } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; problems?: string[]; requestId?: string } | null>(null);
   const visit = useRef(0), runEvents = useRef(0), latestRunActive = useRef(runActive);
   latestRunActive.current = runActive;
   useEffect(() => {
@@ -38,6 +39,13 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
   }, [key]);
   const query = useQuery({ queryKey: ["vivary-handoff-freshness", key], enabled: ready, retry: false, staleTime: 0,
     queryFn: () => call<HandoffFreshness>("vivary-handoff-freshness", { projectId, conversation }) });
+  // The reply previews in this conversation show the same save status and refusal reasons.
+  const hub = useContext(HandoffStatusContext);
+  useEffect(() => {
+    hub?.set({ status: query.data ?? null,
+      refusal: notice?.problems && notice.requestId ? { requestId: notice.requestId, problems: notice.problems } : null });
+  }, [hub, query.data, notice]);
+  useEffect(() => () => hub?.set(null), [hub]);
   useEffect(() => {
     const refresh = () => { void query.refetch(); };
     // Native reports later run changes here.
@@ -85,7 +93,8 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     const result = await call<HandoffSaveResult>("vivary-handoff-save", { projectId, conversation, requestId });
     // A conflict or failed write comes back as the Failed status on the refetch.
     // A correction sent in this conversation is a new turn, which Save refuses, so recovery is a new Prepare.
-    if ("problems" in result) setNotice({ text: "The reply was not saved. Prepare the handoff again to ask for a new reply.", problems: result.problems });
+    if ("problems" in result) setNotice({ text: "The reply was not saved. Prepare the handoff again to ask for a new reply.",
+      problems: result.problems, requestId });
     else if ("message" in result) setNotice({ text: result.message });
   });
 

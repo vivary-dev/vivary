@@ -21,6 +21,17 @@ only when nothing streamed or the result differs from the last streamed message.
 tool call, and a result with no streamed text. Workbench readers treat an exact
 repeat in older transcripts as one reply.
 
+## Message display renderers
+
+`dist/client/chat/message-text-renderers.js` holds two display registries,
+exported from `@agent-native/core/client/chat`. `registerMarkdownFenceRenderer`
+renders a fenced code language in chat Markdown with an app component, and
+`registerUserMessageTextRenderer` renders a matching user message. The `pre`
+component in `markdown-renderer.js` and `UserMessageText` in
+`message-components.js` consult them before their defaults. Stored message text
+and clipboard copies are unchanged. Vivary registers the handoff request and
+reply renderers in `app/components/workspace/HandoffDisplay.tsx`.
+
 ## Claude launcher and provider errors
 
 The optional `claudeCli` executor options preserve the resolved executable,

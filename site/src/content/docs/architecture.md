@@ -307,7 +307,10 @@ Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
 bookkeeping and private reasoning are excluded. For Code, only a completed tool
-result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. An assistant reply that exactly
+repeats the reply recorded just before it is one entry, the later copy. Claude Code conversations recorded before
+2026-10-19 hold every reply twice that way, and handoff, linked history and content search apply the same rule.
+A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder
 that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
@@ -353,7 +356,9 @@ notice. **Prepare handoff** records the project facts in one pending row and
 submits a request message to that conversation. A Code conversation sends it
 through its own chat handle and adapter. Native sends it with Core's same-window
 submit, which only Native chats receive. Neither path changes the composer draft.
-The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+The agent replies with one fenced `vivary-handoff` JSON block. The conversation
+shows the request as one line and the reply as a readable preview that states its
+save status, with the raw text behind disclosures. **Save handoff**
 is a second owner click. `handoff.ts` reads the reply from the conversation's
 completed history, never from the client. It reads a conversation only through
 the linked conversation service: a linked target's own link is checked as every
@@ -714,6 +719,55 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Readable handoff request and reply. After Prepare handoff, an API chat
+showed the whole request prompt and the agent's `vivary-handoff` JSON block as raw
+text. The maintained Core patch adds two display registries in
+`dist/client/chat/message-text-renderers.js`, exported from
+`@agent-native/core/client/chat`. `registerMarkdownFenceRenderer` lets an app render
+a fenced code language in chat Markdown, and `registerUserMessageTextRenderer` lets
+it render a matching user message. Core's `pre` component and `UserMessageText`
+consult them before their defaults. Vivary's
+[`HandoffDisplay.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/HandoffDisplay.tsx)
+registers both. A `vivary-handoff` block reads as goal, decisions, changes, checks,
+unfinished work, risks and next action, with the block itself under a closed Raw
+details disclosure. A block that is not valid JSON, such as one still streaming,
+says so and keeps its text there. The Prepare handoff request shows as one
+"Handoff requested" line with the full prompt under a closed disclosure. Each Code
+and Native conversation view creates one status hub from
+[`handoff-status.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/handoff-status.ts).
+`HandoffControl` publishes its freshness read and the last refused Save to it, and
+each preview states its own reply's status: not saved yet, refused with the
+parser's reasons, saved and Fresh, out of date, failed, or not the latest request.
+A read-only history view has no control, so its previews state no status. The
+stored message text, the parser and schema in `server/handoff.ts`, its validation,
+and clipboard copies are unchanged. `tests/handoff-display-components.test.mjs`
+covers the preview, both disclosures, each status and the request matcher.
+
+2026-10-19 Claude Code replies recorded once. Every Claude Code reply was stored
+twice in a Code transcript, about 0.6 seconds apart with the same text. Core's
+`executeClaudeCliRun` records each streamed assistant message through
+`appendClaudeParticipantTranscriptEvents` (`source: "claude-cli"`), then recorded
+the result text again with the engine and model. The result repeats the last
+streamed message. Save handoff joins every assistant entry after the request, so it
+found two `vivary-handoff` blocks and refused. The maintained Core patch now puts
+the engine, model and effort on each streamed reply and records the result only
+when nothing streamed or the result differs from the last streamed message. Codex
+already recorded one event per message. Existing transcripts keep their pairs.
+`repeatsAssistantReply` in
+[`linked-history.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/linked-history.ts) is now the one
+rule for an exact repeat of the previous assistant event, with the same phase and
+item. `codeHistoryItems` keeps the later copy, so handoff, linked history and the
+quoted send block count each old reply once. The Code conversation view's existing
+dedupe in [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts)
+uses the same rule and stays for old transcripts. Content search in
+[`chat-content-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/chat-content-search.ts)
+reports the first copy only. Core's own display dedupe is unchanged. The linked
+history paragraph above now states the rule. `tests/claude-session-continuity.test.mjs`
+drives the real executor with an offline Claude CLI that repeats its last message as
+the result, and checks one stored event per reply, each with engine and model.
+`tests/handoff.test.ts`, `tests/linked-history.test.ts` and
+`tests/chat-content-search.test.ts` cover old transcripts with the repeated pair.
 
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime

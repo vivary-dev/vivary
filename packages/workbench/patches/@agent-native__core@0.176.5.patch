@@ -18119,3 +18119,109 @@ diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
              });
              continue;
          }
+diff --git a/dist/client/chat/markdown-renderer.js b/dist/client/chat/markdown-renderer.js
+--- a/dist/client/chat/markdown-renderer.js
++++ b/dist/client/chat/markdown-renderer.js
+@@ -1,4 +1,5 @@
+ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
++import { markdownFenceRenderer } from "./message-text-renderers.js";
+ // Owns: lazy react-markdown/shiki loaders, SmoothMarkdownText, MarkdownText,
+ // HighlightedCodeBlock wrapper, and the markdownComponents/markdownUrlTransform
+ // used by every markdown render path in AssistantChat.
+@@ -182,6 +183,9 @@
+             const langMatch = className.match(/\blanguage-([\w+-]+)\b/);
+             if (langMatch) {
+                 const code = extractCodeText(childProps.children).replace(/\n$/, "");
++                const Registered = markdownFenceRenderer(langMatch[1]);
++                if (Registered)
++                    return _jsx(Registered, { code: code, lang: langMatch[1] });
+                 return _jsx(HighlightedCodeBlock, { code: code, lang: langMatch[1] });
+             }
+         }
+diff --git a/dist/client/chat/message-components.js b/dist/client/chat/message-components.js
+--- a/dist/client/chat/message-components.js
++++ b/dist/client/chat/message-components.js
+@@ -1,4 +1,5 @@
+ import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
++import { userMessageTextRenderer } from "./message-text-renderers.js";
+ // Owns: message-timestamp helpers, SelectionAttachedPill, UserMessage,
+ // AssistantMessage, MessageBranchPicker, CheckpointContext, MessageActionsContext,
+ // UserStoppedRunContext, RunningActivityStatus, ThinkingIndicator, and
+@@ -321,6 +322,9 @@
+ function UserMessageText({ text }) {
+     // Strip injected <context>...</context> blocks before display
+     const displayText = displayableUserMessageText(text);
++    const registered = userMessageTextRenderer(displayText);
++    if (registered)
++        return _jsx(registered.Component, { text: displayText });
+     const parts = [];
+     let lastIndex = 0;
+     let match;
+diff --git a/dist/client/chat/index.js b/dist/client/chat/index.js
+--- a/dist/client/chat/index.js
++++ b/dist/client/chat/index.js
+@@ -14,6 +14,7 @@
+ export { useSendToAgentChat } from "../use-send-to-agent-chat.js";
+ export { DESKTOP_LOCAL_CODE_CHANGE_EVENT, requestDesktopLocalCodeChange, } from "../desktop-local-code-change.js";
+ export { AGENT_SIDEBAR_DEFAULT_MAX_WIDTH, AGENT_SIDEBAR_MIN_WIDTH, AGENT_SIDEBAR_WIDE_WIDTH_RATIO, clampAgentSidebarWidth, getAgentSidebarMaxWidth, getAgentSidebarWideWidth, requestAgentSidebarOpen, SIDEBAR_STATE_CHANGE_EVENT, setAgentSidebarOpenPreference, } from "../agent-sidebar-state.js";
++export { registerMarkdownFenceRenderer, registerUserMessageTextRenderer, } from "./message-text-renderers.js";
+ export { clearReservedToolRenderersForTests, clearToolRenderersForTests, registerActionChatRenderer, registerFallbackToolRenderer, registerReservedActionChatRenderer, registerReservedFallbackToolRenderer, registerReservedToolRenderer, registerToolRenderer, resolveToolRenderer, } from "./tool-render-registry.js";
+ export { ACTION_CHAT_UI_DATA_CHART_RENDERER, ACTION_CHAT_UI_DATA_INSIGHTS_RENDERER, ACTION_CHAT_UI_DATA_TABLE_RENDERER, ACTION_CHAT_UI_DATA_WIDGET_RENDERER, ACTION_CHAT_UI_INLINE_EXTENSION_RENDERER, ACTION_CHAT_UI_WORKSPACE_FILE_RENDERER, } from "../../action-ui.js";
+ export { DATA_CHART_WIDGET, DATA_INSIGHTS_WIDGET, DATA_TABLE_WIDGET, createDataChartWidgetResult, createDataInsightsWidgetResult, createDataTableWidgetResult, dataChartWidgetResultSchema, dataChartWidgetSchema, dataInsightsWidgetResultSchema, dataTableWidgetResultSchema, dataTableWidgetSchema, dataWidgetResultSchema, isDataChartWidget, isDataTableWidget, isDataWidgetResult, normalizeDataWidgetKind, normalizeDataWidgetResult, } from "./widgets/data-widget-types.js";
+diff --git a/dist/client/chat/index.d.ts b/dist/client/chat/index.d.ts
+--- a/dist/client/chat/index.d.ts
++++ b/dist/client/chat/index.d.ts
+@@ -14,6 +14,7 @@
+ export { useSendToAgentChat } from "../use-send-to-agent-chat.js";
+ export { DESKTOP_LOCAL_CODE_CHANGE_EVENT, requestDesktopLocalCodeChange, type DesktopLocalCodeChangeDetail, } from "../desktop-local-code-change.js";
+ export { AGENT_SIDEBAR_DEFAULT_MAX_WIDTH, AGENT_SIDEBAR_MIN_WIDTH, AGENT_SIDEBAR_WIDE_WIDTH_RATIO, clampAgentSidebarWidth, getAgentSidebarMaxWidth, getAgentSidebarWideWidth, requestAgentSidebarOpen, SIDEBAR_STATE_CHANGE_EVENT, setAgentSidebarOpenPreference, type AgentSidebarStateChangeDetail, type AgentSidebarStateMode, type AgentSidebarStateSource, } from "../agent-sidebar-state.js";
++export { registerMarkdownFenceRenderer, registerUserMessageTextRenderer, type MarkdownFenceRendererProps, type UserMessageTextRenderer, } from "./message-text-renderers.js";
+ export { clearReservedToolRenderersForTests, clearToolRenderersForTests, registerActionChatRenderer, registerFallbackToolRenderer, registerReservedActionChatRenderer, registerReservedFallbackToolRenderer, registerReservedToolRenderer, registerToolRenderer, resolveToolRenderer, type ActionChatRendererRegistration, type ToolRendererComponent, type ToolRendererContext, type ToolRendererMatch, type ToolRendererProps, type ToolRendererRegistration, } from "./tool-render-registry.js";
+ export { ACTION_CHAT_UI_DATA_CHART_RENDERER, ACTION_CHAT_UI_DATA_INSIGHTS_RENDERER, ACTION_CHAT_UI_DATA_TABLE_RENDERER, ACTION_CHAT_UI_DATA_WIDGET_RENDERER, ACTION_CHAT_UI_INLINE_EXTENSION_RENDERER, ACTION_CHAT_UI_WORKSPACE_FILE_RENDERER, type ActionChatUIConfig, } from "../../action-ui.js";
+ export { DATA_CHART_WIDGET, DATA_INSIGHTS_WIDGET, DATA_TABLE_WIDGET, createDataChartWidgetResult, createDataInsightsWidgetResult, createDataTableWidgetResult, dataChartWidgetResultSchema, dataChartWidgetSchema, dataInsightsWidgetResultSchema, dataTableWidgetResultSchema, dataTableWidgetSchema, dataWidgetResultSchema, isDataChartWidget, isDataTableWidget, isDataWidgetResult, normalizeDataWidgetKind, normalizeDataWidgetResult, type DataChartSeriesDefinition, type DataChartWidget, type DataChartWidgetResult, type DataChartWidgetResultInput, type DataInsightsWidgetResult, type DataInsightsWidgetResultInput, type DataTableColumn, type DataTableWidget, type DataTableWidgetResult, type DataTableWidgetResultInput, type DataWidgetDisplay, type DataWidgetKind, type DataWidgetResult, type DataWidgetResultMetadata, } from "./widgets/data-widget-types.js";
+diff --git a/dist/client/chat/message-text-renderers.js b/dist/client/chat/message-text-renderers.js
+new file mode 100644
+--- /dev/null
++++ b/dist/client/chat/message-text-renderers.js
+@@ -0,0 +1,27 @@
++// Display renderers an app registers for its own message formats. The stored
++// message text is unchanged. Only the chat display uses these renderers.
++const fenceRenderers = new Map();
++const userTextRenderers = [];
++/** Render a fenced code block whose language is `lang` with `Component`, which receives the code. */
++export function registerMarkdownFenceRenderer(lang, Component) {
++    fenceRenderers.set(lang, Component);
++    return () => {
++        if (fenceRenderers.get(lang) === Component)
++            fenceRenderers.delete(lang);
++    };
++}
++export function markdownFenceRenderer(lang) {
++    return fenceRenderers.get(lang);
++}
++/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
++export function registerUserMessageTextRenderer(renderer) {
++    userTextRenderers.push(renderer);
++    return () => {
++        const index = userTextRenderers.indexOf(renderer);
++        if (index >= 0)
++            userTextRenderers.splice(index, 1);
++    };
++}
++export function userMessageTextRenderer(text) {
++    return userTextRenderers.find((renderer) => renderer.matches(text));
++}
+diff --git a/dist/client/chat/message-text-renderers.d.ts b/dist/client/chat/message-text-renderers.d.ts
+new file mode 100644
+--- /dev/null
++++ b/dist/client/chat/message-text-renderers.d.ts
+@@ -0,0 +1,9 @@
++import type { ComponentType } from "react";
++export type MarkdownFenceRendererProps = { code: string; lang: string };
++export type UserMessageTextRenderer = { matches: (text: string) => boolean; Component: ComponentType<{ text: string }> };
++/** Render a fenced code block whose language is `lang` with `Component`, which receives the code. */
++export declare function registerMarkdownFenceRenderer(lang: string, Component: ComponentType<MarkdownFenceRendererProps>): () => void;
++export declare function markdownFenceRenderer(lang: string): ComponentType<MarkdownFenceRendererProps> | undefined;
++/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
++export declare function registerUserMessageTextRenderer(renderer: UserMessageTextRenderer): () => void;
++export declare function userMessageTextRenderer(text: string): UserMessageTextRenderer | undefined;
