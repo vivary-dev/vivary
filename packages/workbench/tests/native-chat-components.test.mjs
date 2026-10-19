@@ -212,7 +212,7 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
     },
     menuOpen: () => Boolean(menu()),
     async open() { await key(picker(), "Enter"); await settle(); },
-    async escape() { await key(menu(), "Escape"); await settle(); },
+    async escapeMenu() { await key(menu(), "Escape"); await settle(); },
     async click(name) {
       const button = [...view.host.querySelectorAll("button")].find(item => item.textContent.trim() === name);
       if (!button) throw new Error("No button named " + name);
@@ -1013,7 +1013,7 @@ test("Native chat controls", async t => {
     try {
       await view.open();
       assert.equal(view.menuOpen(), true);
-      await view.escape();
+      await view.escapeMenu();
       assert.equal(view.menuOpen(), false);
       await view.choose("Codex", "GPT Fixture", { keyboard: true });
       assert.equal(view.menuOpen(), false);
