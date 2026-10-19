@@ -2,7 +2,7 @@ import { getCodePermissionMode, type CodePermissionMode } from "./code-permissio
 import { readCodeTranscriptWindow } from "./code-transcript-page";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, realpath, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -77,6 +77,8 @@ type ActiveRun = {
   workspace: VivaryCodeWorkspace;
   /** The workspace folder's real path, compared with other runs' folders for the shared-folder warning. */
   canonicalRoot: string;
+  /** Names this run in another owner's shared-folder list. It is random and is not the run ID. */
+  folderToken: string;
   permissionMode: CodePermissionMode;
   requests: Map<string, { request: CodexActionRequest; resolve: (response: Record<string, unknown>) => void }>;
 };
@@ -165,7 +167,10 @@ export type VivaryCodeActiveRun = Pick<CodeAgentRunRecord, "id" | "title" | "sta
   pendingApprovals: VivaryCodePendingApproval[];
 };
 
-/** An active run, any owner's, whose folder overlaps the workspace. Another owner's run shows no title. */
+/**
+ * An active run, any owner's, whose folder overlaps the workspace. The caller's own run carries its run ID and title.
+ * Another owner's run carries a stable placeholder ID and no title, so the list never reveals another owner's run ID.
+ */
 export type VivaryCodeFolderRun = { id: string; title: string | null };
 
 export type VivaryCodeHostState = {
@@ -874,15 +879,17 @@ function activeRunView(run: CodeAgentRunRecord, active: ActiveRun): VivaryCodeAc
 }
 
 /**
- * Active runs, any owner's, whose folder overlaps `root`. Only the caller's runs show a title. A run whose stop is still
- * ending counts, because its coding process can still change files.
+ * Active runs, any owner's, whose folder overlaps `root`. Only the caller's runs show their run ID and title. Another
+ * owner's run appears as its `folderToken`, which stays the same while the run works, so the composer's Proceed still
+ * covers it on the next poll. A run whose stop is still ending counts, because its coding process can still change files.
  */
 function runsInFolder(root: string, ownerEmail: string, orgId?: string): VivaryCodeFolderRun[] {
   const found: VivaryCodeFolderRun[] = [];
   for (const [runId, active] of activeRuns) {
     if (!foldersOverlap(active.canonicalRoot, root)) continue;
     const owned = active.ownerEmail === ownerEmail && active.orgId === orgId;
-    found.push({ id: runId, title: owned ? getCodeAgentRunRecord(runId)?.title ?? null : null });
+    found.push(owned ? { id: runId, title: getCodeAgentRunRecord(runId)?.title ?? null }
+      : { id: `other-${active.folderToken}`, title: null });
   }
   return found;
 }
@@ -1037,10 +1044,10 @@ export async function sendVivaryCodeMessage(input: {
   // Issue #121. A send is when a refusal matters, so it waits for a check. The host-state polls never start one.
   if (hostState.cleanup) await (hostState.cleanupCheck ?? recheckVivaryCodeCleanup()).catch(() => undefined);
   assertCodeHostAvailable();
+  // Ownership first, so another owner's run ID gets the same 404 as any unknown ID, never this conversation's refusal.
+  const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
   // Refuse early, before runtime probes. The same checks repeat at the claim below, after every await.
   assertConversationCanStart(input, canonicalRoot);
-
-  const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
   if (existing?.metadata?.linkedCreationPending || (existing?.metadata?.linkedHistoryId && !input.loadLinkedContext)) {
     fail("The linked history could not be verified. Retry from the original conversation.", {
       errorCode: "vivary_linked_history_unavailable", statusCode: 409,
@@ -1324,6 +1331,7 @@ function startVivaryCodeRun(input: {
     stopReason: null,
     workspace: input.workspace,
     canonicalRoot: input.canonicalRoot,
+    folderToken: randomUUID(),
     permissionMode: input.permissionMode,
     requests: new Map(),
   };
@@ -1678,6 +1686,14 @@ function isListedRun(run: CodeAgentRunRecord): boolean {
   return !run.metadata?.linkedCreationPending;
 }
 
+/**
+ * Every listed Code run the caller owns, in any project or none, most recently updated first (the order
+ * listCodeAgentRunRecords returns). One directory scan, no runtime probes.
+ */
+export function listOwnedVivaryCodeRuns(ownerEmail: string, orgId?: string): CodeAgentRunRecord[] {
+  return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
     (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
@@ -1873,14 +1889,14 @@ function pendingSwitchFromRun(run: CodeAgentRunRecord): VivaryCodeRunSummary["pe
     ? { engine: pending.engine, model: pending.model } : null;
 }
 
-function engineLabelFromRun(run: CodeAgentRunRecord): string {
+export function engineLabelFromRun(run: CodeAgentRunRecord): string {
   const engine = metadataString(run, "engine");
   if (engine === "claude-cli") return "Claude Code";
   if (engine === "codex-cli") return "Codex CLI";
   return "Local code agent";
 }
 
-function modelFromRun(run: CodeAgentRunRecord): string {
+export function modelFromRun(run: CodeAgentRunRecord): string {
   return metadataString(run, "model")
     ?? (metadataString(run, "engine") === "claude-cli"
       ? "sonnet"

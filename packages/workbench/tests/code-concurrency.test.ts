@@ -236,6 +236,57 @@ test("two simultaneous sends into one conversation start one turn", { timeout: 6
     } finally { await settle(runId); }
   });
 
+test("another owner's run in the folder shows no run ID, and its ID refuses as an unowned run", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { folder } = await ipcFixture("foreign");
+  const workspace = project(folder, "foreign_project");
+  const other = { ownerEmail: "other-owner@example.test", orgId: owner.orgId };
+  const foreign = (await send(workspace, "Another owner works here", other)).run!.id;
+  try {
+    const state = await agent.getVivaryCodeState(owner.ownerEmail, undefined, workspace, owner.orgId);
+    assert.equal(state.folderRuns.length, 1);
+    assert.equal(state.folderRuns[0].title, null);
+    assert.notEqual(state.folderRuns[0].id, foreign);
+    assert.equal(JSON.stringify(state).includes(foreign), false, "the state payload names no foreign run ID");
+    const again = await agent.getVivaryCodeState(owner.ownerEmail, undefined, workspace, owner.orgId);
+    assert.equal(again.folderRuns[0].id, state.folderRuns[0].id, "the placeholder stays the same, so Proceed still covers it");
+    const records = listCodeAgentRunRecords("vivary-local-code").length;
+    for (const extra of [{}, { acknowledgeSharedFolder: true }]) {
+      await assert.rejects(send(workspace, "Into their conversation", { runId: foreign, ...extra }),
+        { errorCode: "vivary_code_run_not_found", statusCode: 404 });
+    }
+    assert.equal(listCodeAgentRunRecords("vivary-local-code").length, records, "a refused send writes no run");
+    assert.equal(listCodeAgentTranscriptEvents(foreign).filter(event => event.kind === "user").length, 1);
+  } finally {
+    await agent.stopVivaryCodeRun({ ...other, runId: foreign, projectId: workspace.projectId }).catch(() => undefined);
+    await host().activeRuns.get(foreign)?.execution;
+  }
+});
+
+test("listOwnedVivaryCodeRuns lists the caller's runs in every project, most recently updated first", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { folder } = await ipcFixture("owned-list");
+  const other = { ownerEmail: "list-other@example.test", orgId: owner.orgId };
+  const finished = async (state: Awaited<ReturnType<typeof send>>) => {
+    const runId = state.run!.id;
+    await waitFor(() => !host().activeRuns.has(runId), "the turn to finish");
+    return runId;
+  };
+  const first = await finished(await send(project(folder, "owned_one"), "Finish in one project"));
+  const second = await finished(await send(project(folder, "owned_two"), "Finish in another", codex));
+  const theirs = await finished(await send(project(folder, "owned_one"), "Finish as another owner", other));
+  const listed = agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId);
+  const ids = listed.map(run => run.id);
+  assert.ok(ids.includes(first) && ids.includes(second), "runs from both projects");
+  assert.equal(ids.includes(theirs), false, "another owner's run is not listed");
+  assert.ok(listed.every(run => run.metadata?.ownerEmail === owner.ownerEmail && run.metadata?.orgId === owner.orgId));
+  assert.deepEqual(listed.map(run => run.updatedAt), listed.map(run => run.updatedAt).sort().reverse());
+  assert.equal(agent.listOwnedVivaryCodeRuns(owner.ownerEmail, "another-org").some(run => ids.includes(run.id)), false);
+  assert.deepEqual(agent.listOwnedVivaryCodeRuns(other.ownerEmail, other.orgId).map(run => run.id), [theirs]);
+  const codexRun = listed.find(run => run.id === second)!;
+  assert.deepEqual([agent.engineLabelFromRun(codexRun), agent.modelFromRun(codexRun)], ["Codex CLI", "gpt-6-astra"]);
+});
+
 test("folders that overlap warn, while separate projects and Git worktrees run without a warning", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { fixture, folder } = await ipcFixture("folders");
