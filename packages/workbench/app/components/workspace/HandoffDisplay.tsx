@@ -36,7 +36,9 @@ export function HandoffReplyPreview({ code }: { code: string; lang?: string }) {
     <Section title="Changes" items={list(proposal.changes)} />
     {checks.length > 0 && <section><h4>Checks</h4><ul>{checks.map((check, index) => {
       const item = isRecord(check) ? check : {};
-      const evidence = typeof item.evidenceEventId === "string" ? ` (event ${item.evidenceEventId})` : "";
+      const cited = typeof item.evidenceEventId === "string" ? item.evidenceEventId : null;
+      // The reply cites a check from its own turn as tool:<call ID>. Save records the event that holds that call.
+      const evidence = cited === null ? "" : cited.startsWith("tool:") ? ` (tool call ${cited.slice(5)})` : ` (event ${cited})`;
       return <li key={index}>{text(item.outcome)}: {text(item.name)}{evidence}</li>;
     })}</ul></section>}
     <Section title="Unfinished work" items={list(proposal.unfinished)} />

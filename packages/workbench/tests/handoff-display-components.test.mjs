@@ -89,6 +89,13 @@ test("the reply block reads as a handoff, with the raw JSON in a closed Raw deta
   assert.equal(raw.querySelector("pre").textContent, code);
 });
 
+test("a check that cites a tool call from the reply turn is labeled as a tool call, not an event", async () => {
+  const cited = JSON.stringify({ ...proposal, checks: [{ name: "state read", outcome: "passed", evidenceEventId: "tool:call_1" }] });
+  await render({ hub: module.exports.createHandoffStatusHub(), content: reply(cited) });
+  assert.deepEqual([...host.querySelectorAll(".vivary-handoff-preview section li")].map(item => item.textContent)
+    .filter(text => text.includes("state read")), ["passed: state read (tool call call_1)"]);
+});
+
 test("a reply that is not valid JSON, such as one still streaming, keeps its text under Raw details", async () => {
   const partial = code.slice(0, 40);
   await render({ hub: module.exports.createHandoffStatusHub(), content: reply(partial) });

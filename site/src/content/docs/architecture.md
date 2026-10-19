@@ -735,7 +735,8 @@ on a Code `tool_done` event.
 History digests are taken over the stored entries and events, so existing links
 keep their bindings. `proposalFrom` in `server/handoff.ts` resolves a `tool:` citation
 only against tool calls in the reply turn, after the request and before any later
-user message, and records the completed event that holds it. A completed event ID
+user message, and records the completed event that holds it. The reply preview labels such a
+citation as a tool call. A completed event ID
 is still checked first and kept as cited. A made-up ID, or a
 call from an earlier turn, is refused with a problem that names it. Every other
 validation rule is unchanged. `tests/handoff.test.ts` covers Native and Code saves
