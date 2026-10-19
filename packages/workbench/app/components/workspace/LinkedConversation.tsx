@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@agent-native/toolkit/ui";
+import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@agent-native/toolkit/ui";
+import { IconDots } from "@tabler/icons-react";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ConversationReference, LinkedConversationResult, LinkedHistoryPage } from "../../../shared/linked-conversation";
@@ -34,19 +36,22 @@ export function linkTargetChoices(engines: VivaryCodeState["engines"], sourceEng
   })).filter(choice => choice.model);
 }
 
-export function LinkedConversationChooser({ projectId, source, sourceEngine, engines, saveDraft }: {
-  projectId: string | null; source: ConversationReference; sourceEngine: string;
-  engines: VivaryCodeState["engines"]; saveDraft: () => Promise<void>;
+type LinkTargetChoice = ReturnType<typeof linkTargetChoices>[number];
+
+/**
+ * Opens a linked conversation from one source after saving the source draft. One operation ID per choice is reused
+ * by Retry, so a server that committed before its response was lost returns the same target instead of creating a
+ * second one.
+ */
+export function useLinkedConversationOpener({ projectId, source, choices, saveDraft }: {
+  projectId: string | null; source: ConversationReference; choices: LinkTargetChoice[]; saveDraft: () => Promise<void>;
 }) {
   const { call, ready } = useNativeActionCaller(), navigate = useNavigate();
   const [busy, setBusy] = useState(false), [failedChoice, setFailedChoice] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const visit = useRef(0), inFlight = useRef(false);
-  // One operation ID per choice, reused by Retry, so a server that committed before its response was lost
-  // returns the same target instead of creating a second one.
   const operation = useRef<{ engine: string; id: string } | null>(null);
   useEffect(() => () => { visit.current++; }, [projectId, source.kind, source.id]);
-  const choices = linkTargetChoices(engines, sourceEngine);
   async function open(engine: string) {
     if (inFlight.current || !ready) return;
     inFlight.current = true;
@@ -79,40 +84,95 @@ export function LinkedConversationChooser({ projectId, source, sourceEngine, eng
       if (generation === visit.current) setBusy(false);
     }
   }
+  return { open, busy, ready, failedChoice, failure };
+}
+
+export type LinkedConversationOpener = ReturnType<typeof useLinkedConversationOpener>;
+
+/** Every target a source can open as a linked conversation: each usable other Code runtime, then Native chat. */
+export function linkedConversationTargets(choices: LinkTargetChoice[]): { engine: string; label: string }[] {
+  return [...choices.map(({ engine, label }) => ({ engine, label })), { engine: "native", label: "Native chat" }];
+}
+
+/**
+ * The "Open linked conversation in <runtime>" items for any Toolkit dropdown menu: the Code conversation header's
+ * actions menu, and a conversation row's menu. The menu owner supplies the opener and shows its failure.
+ */
+export function LinkedConversationMenuItems({ targets, link }: {
+  targets: { engine: string; label: string }[]; link: LinkedConversationOpener;
+}) {
+  return <>
+    <DropdownMenuLabel>Linked conversation</DropdownMenuLabel>
+    {targets.map(target => <DropdownMenuItem key={target.engine} disabled={link.busy || !link.ready}
+      onSelect={() => void link.open(target.engine)}>Open linked conversation in {target.label}</DropdownMenuItem>)}
+    <p className="local-agent-actions-hint">{LINK_HINT}</p>
+  </>;
+}
+
+export function LinkFailure({ link }: { link: LinkedConversationOpener }) {
+  const failed = link.failedChoice;
+  return failed ? <div role="alert">{link.failure} This conversation is still selected.
+    <Button size="sm" variant="outline" onClick={() => void link.open(failed)}>Retry link</Button></div> : null;
+}
+
+const LINK_HINT = "Opens an inactive conversation in this project. Your draft and approvals stay here. Nothing is sent.";
+
+/** The Native conversation's chooser, shown above its composer. */
+export function LinkedConversationChooser({ projectId, source, sourceEngine, engines, saveDraft }: {
+  projectId: string | null; source: ConversationReference; sourceEngine: string;
+  engines: VivaryCodeState["engines"]; saveDraft: () => Promise<void>;
+}) {
+  const choices = linkTargetChoices(engines, sourceEngine);
+  const link = useLinkedConversationOpener({ projectId, source, choices, saveDraft });
   return <div className="local-agent-notice">
     <label className="flex items-center gap-2 text-sm">Linked conversation
-      <select aria-label="Open linked conversation in another harness" value="" disabled={busy || !ready}
+      <select aria-label="Open linked conversation in another harness" value="" disabled={link.busy || !link.ready}
         className="rounded-md border bg-background px-2 py-1 text-foreground"
-        onChange={event => { if (event.target.value) void open(event.target.value); }}>
-        <option value="">{busy ? "Opening…" : "Choose another harness…"}</option>
+        onChange={event => { if (event.target.value) void link.open(event.target.value); }}>
+        <option value="">{link.busy ? "Opening…" : "Choose another harness…"}</option>
         {choices.map(choice => <option key={choice.engine} value={choice.engine}>{choice.label}</option>)}
         {source.kind === "code" && <option value="native">Native chat</option>}
       </select>
     </label>
-    <p className="text-xs text-muted-foreground">Opens an inactive conversation in this project. Your draft and approvals stay here. Nothing is sent.</p>
-    {failedChoice && <div role="alert">{failure} This conversation is still selected.
-      <Button size="sm" variant="outline" onClick={() => void open(failedChoice)}>Retry link</Button></div>}
+    <p className="text-xs text-muted-foreground">{LINK_HINT}</p>
+    <LinkFailure link={link} />
   </div>;
 }
 
 type Probe<T> = { data?: T; isError: boolean; refetch: () => unknown };
 
 /**
- * The Code chooser, shown only after the same sourceAvailable check Native uses. An owner with no organization,
- * or a target whose link no longer validates, is not offered choices that cannot work. A failed check offers Retry.
+ * A Code conversation's linked-conversation actions, offered only after the same sourceAvailable check Native uses.
+ * An owner with no organization, or a target whose link no longer validates, is not offered choices that cannot
+ * work. The actions go in the conversation header's menu, which `menuSlot` holds. A failed check or link shows
+ * here, beside the composer, with Retry.
  */
-export function CodeLinkOptions({ projectId, runId, sourceEngine, engines, storageKey, saveDraft, workspaceAvailable }: {
+export function CodeLinkActions({ projectId, runId, sourceEngine, engines, storageKey, saveDraft, workspaceAvailable, menuSlot }: {
   projectId: string | null; runId: string; sourceEngine: string; engines: VivaryCodeState["engines"];
-  storageKey: string; saveDraft: () => Promise<void>; workspaceAvailable: boolean;
+  storageKey: string; saveDraft: () => Promise<void>; workspaceAvailable: boolean; menuSlot: HTMLElement | null;
 }) {
   const source = useLinkSourceEligibility({ projectId, storageKey, threadId: runId, enabled: true, kind: "code" });
+  // A Code target needs the project folder. Without it only the Code to Native choice can work.
+  const choices = linkTargetChoices(workspaceAvailable ? engines : [], sourceEngine);
+  const link = useLinkedConversationOpener({ projectId, source: { kind: "code", id: runId }, choices, saveDraft });
   if (source.isError) return <div className="local-agent-notice" role="alert">
     Linked conversation options could not load.
     <Button size="sm" variant="outline" onClick={() => { void source.refetch(); }}>Retry linked conversation</Button></div>;
   if (source.data?.available !== true) return null;
-  // A Code target needs the project folder. Without it only the Code to Native choice can work.
-  return <LinkedConversationChooser projectId={projectId} source={{ kind: "code", id: runId }} sourceEngine={sourceEngine}
-    engines={workspaceAvailable ? engines : []} saveDraft={saveDraft} />;
+  const targets = linkedConversationTargets(choices);
+  return <>
+    {menuSlot && createPortal(<DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Conversation actions" aria-busy={link.busy || undefined}>
+          <IconDots size={18} aria-hidden /></Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="local-agent-actions-menu">
+        <LinkedConversationMenuItems targets={targets} link={link} />
+      </DropdownMenuContent>
+    </DropdownMenu>, menuSlot)}
+    {link.busy && <div className="local-agent-notice" role="status">Opening the linked conversation…</div>}
+    {link.failedChoice && <div className="local-agent-notice"><LinkFailure link={link} /></div>}
+  </>;
 }
 
 /** The Native chooser once its source eligibility and runtime state have loaded. A failed prerequisite offers Retry. */

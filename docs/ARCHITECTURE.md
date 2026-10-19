@@ -47,8 +47,14 @@ The selected coding runtime owns execution, tools, model access, and native sess
 
 ### Coding model selection and provider routes
 
-The Code composer embeds the runtime and model selectors inside its existing
-toolbar. Saved draft choices remain unchanged when a model catalog changes.
+The Code composer has one runtime and model picker inside the prompt box, beside
+Send, styled like Core's Native model button. It opens a menu that lists models
+grouped under Claude Code and Codex, with an unavailable runtime's reason beside
+its heading and its models disabled. [`CodeModelPicker.tsx`](../packages/workbench/app/components/workspace/CodeModelPicker.tsx)
+renders it with Toolkit's Radix menu, which supplies the roles, arrow keys,
+typeahead, Escape and focus return. Core's own picker is not reused because it
+shows the `claude-cli` and `codex-cli` groups only for a matching harness agent
+and has no per-model disabled state. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
 model, update Claude Code, or verify its installed version. A retained
 conversation changes its runtime or model in place through a confirmed switch,
@@ -193,7 +199,7 @@ After the new session's first turn, follow-ups resume that session as before.
 
 In the composer, choosing another runtime or model on an idle retained
 conversation shows a short confirm that states what transfers. Switch calls the
-action, and the selectors then show the new route. While this conversation's run
+action, and the picker then shows the new route. While this conversation's run
 works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
 switch asks again and says the current request will be cancelled and completed
 work stays. Confirming calls Stop for this run, waits until the run leaves
@@ -475,7 +481,10 @@ support an owner with no organization, so an ordinary run's follow-up send and
 notice need none. Linking does need one: such an owner is not offered the chooser,
 and creation refuses with a clear reason. The Code and Native choosers both appear
 only after the same source eligibility check, so an owner without an organization,
-or a target whose link no longer validates, is not offered choices that cannot work. An unlinked conversation in a project whose
+or a target whose link no longer validates, is not offered choices that cannot work.
+Native shows its chooser above the composer. A Code conversation offers "Open
+linked conversation in <runtime>" in the conversation actions menu beside Session
+details, and shows a failed check or link beside its composer with Retry. An unlinked conversation in a project whose
 folder is not connected therefore shows no notice and no false verification error.
 The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. A Code send refused after linked preparation emits
@@ -743,9 +752,9 @@ checking access again are explicit choices. Network failures have separate retry
 wording. An already mounted workspace is hidden during denial so Native fallback notices cannot compete with access recovery. It stays mounted through denial or connection
 failure so unsent drafts survive. The connection
 wrapper owns the dynamic viewport height; its wrapping notice and workspace share
-that height, with the existing shell filling the remaining space. Conversation recovery notices, runtime selectors and the setup
-card share the existing scrollable composer slot when space is short, preserving
-the composer.
+that height, with the existing shell filling the remaining space. Conversation recovery notices, the handoff bar and the setup
+card share the composer slot, which is compact and scrolls on its own above 35
+percent of the viewport height, preserving the composer.
 
 Optional remote previews use a separate protected HTTPS port on the same hostname,
 with a dedicated loopback listener that never dispatches Native. Port separation

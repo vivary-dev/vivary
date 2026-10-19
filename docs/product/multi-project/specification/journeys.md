@@ -72,15 +72,18 @@ stateDiagram-v2
   Working --> Idle: turn ends
 ```
 
+Implemented for Code conversations on 2026-10-19: one picker inside the prompt box groups model rows under Claude Code and Codex, with readiness beside an unavailable runtime and its models disabled. A choice on a new conversation selects the route. A choice on a retained conversation enters the in-place switch above. The linked conversation opens from the conversation actions menu, not from the picker. Logos and other registered harnesses remain target behavior.
+
 The single picker groups model rows under Claude Code, Codex and other supported registered harness names. Each group has a small trusted logo or generic fallback. Unknown brands cannot inject markup. Readiness appears beside unavailable entries. No preset persona is required. Optional user-authored profiles use the existing Native resource/settings owner or intentionally authored project instructions. A person can create/edit, select, clear and inspect their effective instruction sources. Selection applies to future explicitly requested context and records the profile revision. Clearing preserves history and does not claim prior model context was erased. Profiles cannot grant tool permissions or transfer approval.
 
 ```mermaid
 stateDiagram-v2
   [*] --> CurrentConversation
-  CurrentConversation --> Picker: open model menu
-  Picker --> CurrentConversation: cancel
-  Picker --> CurrentConversation: compatible same-harness model change
-  Picker --> Linking: choose different harness
+  CurrentConversation --> Picker: open runtime and model picker
+  Picker --> CurrentConversation: Escape
+  Picker --> CurrentConversation: choice on a new conversation, route selected
+  Picker --> InPlaceSwitch: choice on a retained conversation, first chart
+  CurrentConversation --> Linking: Open linked conversation in the actions menu
   Linking --> LinkedConversation: destination reference created
   Linking --> CurrentConversation: refused or failed, retain draft
   LinkedConversation --> PendingRequest: explicit send

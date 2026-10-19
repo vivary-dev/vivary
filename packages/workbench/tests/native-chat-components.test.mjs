@@ -89,48 +89,48 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
     if (!example || example.disabled) throw new Error("native runtime did not enable the composer");
     await act(async () => { example.dispatchEvent(new window.Event("click", { bubbles: true })); });
   }
-  const runtime = view.host.querySelector('[aria-label="Conversation runtime"]');
-  const select = view.host.querySelector('[aria-label="Conversation model"]');
+  const picker = view.host.querySelector(PICKER);
   const toolbar = view.host.querySelector('[data-agent-composer-slot="toolbar"]');
   const send = view.host.querySelector('[data-agent-composer-slot="send-button"]');
   const nodes = toolbar ? [...toolbar.querySelectorAll("select,button")] : [];
-  const describedBy = [runtime, select].map(control => control?.getAttribute("aria-describedby") ?? null);
-  const reasons = [...new Set(describedBy)].filter(Boolean).flatMap(ids => ids.split(" "))
-    .map(id => document.getElementById(id)?.textContent ?? null);
-  const snapshot = { embedded: !!toolbar?.contains(runtime) && !!toolbar?.contains(select),
-    beforeSend: nodes.indexOf(runtime) < nodes.indexOf(send) && nodes.indexOf(select) < nodes.indexOf(send),
+  const describedBy = picker?.getAttribute("aria-describedby") ?? null;
+  const snapshot = { embedded: !!toolbar?.contains(picker), beforeSend: nodes.indexOf(picker) < nodes.indexOf(send),
+    selects: toolbar?.querySelectorAll("select").length ?? 0,
     noticesOutsideToolbar: !toolbar?.contains(view.host.querySelector('[data-testid="preserved-notice"]')),
-    model: select?.value, labels: [runtime?.getAttribute("aria-label"), select?.getAttribute("aria-label")],
-    disabled: [runtime?.disabled, select?.disabled, send?.disabled], choices,
+    model: picker?.querySelector(".local-agent-model-name")?.textContent, label: picker?.getAttribute("aria-label"),
+    disabled: [picker?.disabled, send?.disabled], choices,
     exampleDisabled: [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
-    describedBy, reasons, modelLabel: select?.querySelector("option[value=\"" + model + "\"]")?.textContent ?? null,
-    text: view.host.textContent };
+    describedBy, text: view.host.textContent };
   await view.unmount(); client.clear();
   return snapshot;
 }
 
-// A retained Code conversation with both runtimes ready, driven through its selectors and switch panel.
+// The Code composer's one runtime and model picker, found by its accessible name.
+const PICKER = '[aria-label^="Runtime and model:"]';
 const FOLDER_ISOLATION = { available: false, choosing: false, error: undefined, async openFolder() {} };
 
-// A retained conversation with both runtimes ready, driven through its selectors, switch panel, and shared-folder warning.
-// folderRuns lists other conversations working in its folder.
+// A Code conversation with both runtimes ready, driven through its picker, switch panel, and shared-folder warning.
+// folderRuns lists other conversations working in its folder. retained: false opens a new conversation instead.
+// codexReady: false leaves Codex signed out.
 export async function renderCodeSwitch({ running = false, folderRuns = [], viewingMatch = false, events = [], refuse,
-  folderPicker = false } = {}) {
+  folderPicker = false, retained = true, codexReady = true } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const version = "2.1.300";
   const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
     runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
     models: claudeCodeModelChoices(version).map(model => model.id), claudeModels: claudeCodeModelChoices(version) };
-  const codex = { engine: "codex-cli", label: "Codex", configured: true, runtime: { status: "ready", message: "Signed in" },
+  const codex = codexReady ? { engine: "codex-cli", label: "Codex", configured: true, runtime: { status: "ready", message: "Signed in" },
     modelCatalog: { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }, { id: "gpt-other", label: "GPT Other" }],
       defaultModel: "gpt-fixture", connections: [], message: "" },
-    models: ["gpt-fixture", "gpt-other"], claudeModels: null };
+    models: ["gpt-fixture", "gpt-other"], claudeModels: null }
+    : { engine: "codex-cli", label: "Codex", configured: false, runtime: { status: "sign-in-required", message: "Sign in to Codex" },
+      modelCatalog: null, models: [], claudeModels: null };
   const state = { engines: [claude, codex], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null,
     workspaceLabel: "Fixture project" };
   const calls = [], choices = [];
   let settled = 0;
-  let run = { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
-    status: running ? "running" : "completed", phase: running ? "running" : "complete" };
+  let run = retained ? { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
+    status: running ? "running" : "completed", phase: running ? "running" : "complete" } : null;
   globalThis.codeActionFixture = async (name, params) => {
     // Linked history and handoff controls read their own actions on mount. They stay refused, as in the other cases.
     if (name !== "vivary-code-switch" && name !== "vivary-code-stop") throw new Error("No Code action expected");
@@ -141,7 +141,8 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
   const opened = [];
   const folderIsolation = { ...FOLDER_ISOLATION, available: folderPicker, async openFolder() { opened.push("open-folder"); } };
   const element = () => <QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation state={state}
-    selection={{ key: "retained-run", runId: "retained-run" }} ownerKey="fixture-owner" projectId={null} workspaceAvailable
+    selection={retained ? { key: "retained-run", runId: "retained-run" } : { key: "new-draft", runId: null }}
+    ownerKey="fixture-owner" projectId={null} workspaceAvailable
     previewScope="fixture" viewingMatch={viewingMatch} notices={null} folderRuns={folderRuns} folderIsolation={folderIsolation}
     onOpenRun={target => opened.push(target.id)} pendingApprovals={0}
     active={running} streaming={false} stopping={false} run={run}
@@ -150,7 +151,22 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
   const view = await mount(element());
   const settle = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
   await settle();
-  const control = label => view.host.querySelector('[aria-label="' + label + '"]');
+  const picker = () => view.host.querySelector(PICKER);
+  const key = (target, name) => act(async () => {
+    target.dispatchEvent(Object.assign(new window.Event("keydown", { bubbles: true, cancelable: true }), { key: name }));
+  });
+  // Radix renders the open menu in a portal on the document body. Enter on the trigger toggles it, as a keyboard does.
+  const menu = () => document.body.querySelector(".local-agent-model-menu");
+  const groups = () => [...(menu()?.querySelectorAll('[role="group"][aria-labelledby]') ?? [])].map(group => ({
+    heading: document.getElementById(group.getAttribute("aria-labelledby"))?.textContent ?? "",
+    items: [...group.querySelectorAll('[role="menuitemradio"],[role="menuitem"]')] }));
+  async function withMenu(read) {
+    await key(picker(), "Enter"); await settle();
+    if (!menu()) throw new Error("The runtime and model menu did not open");
+    try { return await read(); } finally { if (menu()) { await key(picker(), "Enter"); await settle(); } }
+  }
+  const item = (heading, label) => groups().find(group => group.heading.startsWith(heading))?.items
+    .find(entry => entry.querySelector(".local-agent-model-item-label")?.textContent === label);
   const panel = () => view.host.querySelector('[aria-label="Switch runtime or model"]');
   const shared = () => view.host.querySelector('[aria-label="Shared folder"]');
   return {
@@ -163,16 +179,28 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
     composerLocked: () => [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
     panel: () => panel()?.textContent ?? null,
     buttons: () => [...(panel()?.querySelectorAll("button") ?? [])].map(button => button.textContent),
-    disabled: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.disabled),
-    describedBy: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.getAttribute("aria-describedby") ?? null),
-    options: label => [...control(label).querySelectorAll("option")].map(option => option.getAttribute("value")),
-    async choose(label, value) {
-      const select = control(label);
-      Object.defineProperty(select, "value", { value, configurable: true });
-      await act(async () => { select.dispatchEvent(new window.Event("change", { bubbles: true })); });
-      delete select.value;
+    disabled: () => picker()?.disabled,
+    describedBy: () => picker()?.getAttribute("aria-describedby") ?? null,
+    pickerLabel: () => picker()?.getAttribute("aria-label") ?? null,
+    // Each runtime heading with its items: label, whether Radix can reach it, and whether it is disabled or checked.
+    groups: () => withMenu(() => groups().map(group => ({ heading: group.heading, items: group.items.map(entry => ({
+      label: entry.querySelector(".local-agent-model-item-label")?.textContent ?? entry.textContent.trim(),
+      reachable: entry.hasAttribute("data-radix-collection-item"),
+      disabled: entry.hasAttribute("data-disabled"), checked: entry.getAttribute("aria-checked") === "true" })) }))),
+    options: heading => withMenu(() => groups().find(group => group.heading.startsWith(heading))?.items
+      .map(entry => entry.querySelector(".local-agent-model-item-label")?.textContent ?? null) ?? []),
+    // Opens the menu from the keyboard and chooses a model with Enter (keyboard) or a click.
+    async choose(heading, label, { keyboard = false } = {}) {
+      await key(picker(), "Enter"); await settle();
+      const entry = item(heading, label);
+      if (!entry) throw new Error("No " + heading + " item " + label);
+      if (keyboard) await key(entry, "Enter");
+      else await act(async () => { entry.dispatchEvent(new window.Event("click", { bubbles: true })); });
       await settle();
     },
+    menuOpen: () => Boolean(menu()),
+    async open() { await key(picker(), "Enter"); await settle(); },
+    async escape() { await key(menu(), "Escape"); await settle(); },
     async click(name) {
       const button = [...view.host.querySelectorAll("button")].find(item => item.textContent.trim() === name);
       if (!button) throw new Error("No button named " + name);
@@ -745,15 +773,16 @@ test("Native chat controls", async t => {
   const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
 
-  await t.test("the Workbench selectors render inside the actual composer before Send, with notices outside", async () => {
+  await t.test("the Workbench picker renders inside the actual composer before Send, with notices outside", async () => {
     const server = installChatServer();
     try {
       const snapshot = await proof.renderWorkbenchComposer({});
       assert.equal(snapshot.embedded, true);
       assert.equal(snapshot.beforeSend, true);
       assert.equal(snapshot.noticesOutsideToolbar, true);
-      assert.deepEqual(snapshot.labels, ["Conversation runtime", "Conversation model"]);
-      assert.deepEqual(snapshot.disabled, [false, false, true]);
+      assert.equal(snapshot.label, "Runtime and model: Claude Code Sonnet 5.5");
+      assert.equal(snapshot.selects, 0, "one picker replaces the two native selects");
+      assert.deepEqual(snapshot.disabled, [false, true]);
       assert.doesNotMatch(snapshot.text, /Subscription controls|funding|Usage credits/);
       assert.doesNotMatch(snapshot.text, /API list price/);
     } finally { server(); }
@@ -767,31 +796,31 @@ test("Native chat controls", async t => {
       assert.match(saved.text, /legacy or unavailable/);
       const busy = await proof.renderWorkbenchComposer({ active: true });
       assert.equal(busy.embedded, true);
-      assert.deepEqual(busy.disabled.slice(0, 2), [true, true]);
+      assert.equal(busy.disabled[0], true);
       const retained = await proof.renderWorkbenchComposer({ history: true });
       assert.equal(retained.embedded, true);
-      assert.deepEqual(retained.disabled.slice(0, 2), [false, false], "a retained conversation can switch in place");
+      assert.equal(retained.disabled[0], false, "a retained conversation can switch in place");
       assert.doesNotMatch(retained.text, /This conversation keeps|Start a new conversation/);
     } finally { server(); }
   });
 
-  await t.test("a read-only history view keeps both selectors locked without a reason line", async () => {
+  await t.test("a read-only history view keeps the picker locked without a reason line", async () => {
     const server = installChatServer();
     try {
       const snapshot = await proof.renderWorkbenchComposer({ history: true, viewingMatch: true });
-      assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
+      assert.equal(snapshot.disabled[0], true);
       assert.doesNotMatch(snapshot.text, /This conversation keeps/);
-      assert.deepEqual(snapshot.describedBy, [null, null]);
+      assert.equal(snapshot.describedBy, null);
     } finally { server(); }
   });
 
-  await t.test("a new conversation's selectors are open and carry no reason", async () => {
+  await t.test("a new conversation's picker is open and carries no reason", async () => {
     const server = installChatServer();
     try {
       const snapshot = await proof.renderWorkbenchComposer({});
-      assert.deepEqual(snapshot.disabled.slice(0, 2), [false, false]);
+      assert.equal(snapshot.disabled[0], false);
       assert.doesNotMatch(snapshot.text, /This conversation keeps/);
-      assert.deepEqual(snapshot.describedBy, [null, null]);
+      assert.equal(snapshot.describedBy, null);
     } finally { server(); }
   });
 
@@ -799,12 +828,12 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     try {
       const snapshot = await proof.renderWorkbenchComposer({ history: true, folderRuns: [OTHER_RUN] });
-      assert.deepEqual(snapshot.disabled.slice(0, 2), [false, false]);
-      assert.deepEqual(snapshot.describedBy, [null, null]);
+      assert.equal(snapshot.disabled[0], false);
+      assert.equal(snapshot.describedBy, null);
       const view = await proof.renderCodeSwitch({ folderRuns: [OTHER_RUN] });
       try {
-        assert.deepEqual(view.disabled(), [false, false]);
-        await view.choose("Conversation runtime", "codex-cli");
+        assert.equal(view.disabled(), false);
+        await view.choose("Codex", "GPT Fixture");
         assert.match(view.panel(), /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
       } finally { await view.unmount(); }
     } finally { server(); }
@@ -817,14 +846,14 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch();
     try {
-      assert.deepEqual(view.disabled(), [false, false]);
-      assert.deepEqual(view.options("Conversation runtime"), ["claude-cli", "codex-cli"]);
-      await view.choose("Conversation runtime", "codex-cli");
+      assert.equal(view.disabled(), false);
+      assert.deepEqual((await view.groups()).map(group => group.heading), ["Claude Code", "Codex"]);
+      await view.choose("Codex", "GPT Fixture");
       assert.equal(view.panel(), "Switch this conversation from Claude Code Sonnet 5.5 to Codex GPT Fixture? " + transfer + "SwitchCancel");
-      assert.deepEqual(view.options("Conversation model"), ["gpt-fixture", "gpt-other"], "the target runtime's models");
-      assert.deepEqual(view.describedBy(), [view.describedBy()[0], view.describedBy()[0]]);
-      assert.ok(view.describedBy()[0], "the selectors point at the confirm");
-      await view.choose("Conversation model", "gpt-other");
+      assert.deepEqual(await view.options("Codex"), ["GPT Fixture", "GPT Other"], "the target runtime's models");
+      assert.equal(view.pickerLabel(), "Runtime and model: Codex GPT Fixture", "the picker shows the pending target");
+      assert.ok(view.describedBy(), "the picker points at the confirm");
+      await view.choose("Codex", "GPT Other");
       assert.match(view.panel(), /to Codex GPT Other\?/);
       assert.deepEqual(view.calls, [], "nothing is sent before the confirm");
       await view.click("Switch");
@@ -840,12 +869,12 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch();
     try {
-      await view.choose("Conversation runtime", "codex-cli");
+      await view.choose("Codex", "GPT Fixture");
       await view.click("Cancel");
       assert.equal(view.panel(), null);
-      await view.choose("Conversation model", "claude-opus-5-5");
+      await view.choose("Claude Code", "Opus 5.5");
       assert.match(view.panel(), /to Claude Code Opus 5\.5\?/);
-      await view.choose("Conversation model", "claude-sonnet-5-5");
+      await view.choose("Claude Code", "Sonnet 5.5");
       assert.equal(view.panel(), null);
       assert.deepEqual([view.calls, view.choices], [[], []]);
     } finally { await view.unmount(); server(); }
@@ -855,13 +884,13 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
     try {
-      assert.deepEqual(view.disabled(), [false, false], "the selectors stay open so Stop and switch is reachable");
-      await view.choose("Conversation model", "claude-opus-5-5");
+      assert.equal(view.disabled(), false, "the picker stays open so Stop and switch is reachable");
+      await view.choose("Claude Code", "Opus 5.5");
       assert.equal(view.panel(), "This conversation is working. Wait for the current request to finish, or stop it and switch to "
         + "Claude Code Opus 5.5.WaitStop and switch");
       await view.click("Wait");
       assert.equal(view.panel(), null);
-      await view.choose("Conversation model", "claude-opus-5-5");
+      await view.choose("Claude Code", "Opus 5.5");
       await view.click("Stop and switch");
       assert.equal(view.panel(), "Stop and switch to Claude Code Opus 5.5? The current request will be cancelled. "
         + "Completed work stays in this conversation and the workspace. " + transfer + "Stop and switchKeep working");
@@ -869,7 +898,7 @@ test("Native chat controls", async t => {
       await view.click("Stop and switch");
       assert.deepEqual(view.calls, [{ name: "vivary-code-stop", params: { projectId: undefined, runId: "retained-run" } }]);
       assert.equal(view.panel(), "Stopping the current request. The switch follows once it stops.");
-      assert.deepEqual(view.disabled(), [true, true]);
+      assert.equal(view.disabled(), true);
       await view.update({ status: "running", phase: "stopping" });
       assert.equal(view.calls.length, 1, "the switch waits while the run is stopping");
       await view.update({ status: "paused", phase: "paused" });
@@ -884,7 +913,7 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
     try {
-      await view.choose("Conversation runtime", "codex-cli");
+      await view.choose("Codex", "GPT Fixture");
       assert.match(view.panel(), /^This conversation is working\./);
       await view.update({ status: "completed", phase: "complete" });
       assert.match(view.panel(), /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
@@ -896,7 +925,7 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ refuse: "This conversation is still stopping. Switch after it stops." });
     try {
-      await view.choose("Conversation runtime", "codex-cli");
+      await view.choose("Codex", "GPT Fixture");
       await view.click("Switch");
       assert.match(view.text(), /This conversation is still stopping\. Switch after it stops\./);
       assert.deepEqual(view.choices, []);
@@ -910,7 +939,63 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ viewingMatch: true });
     try {
-      assert.deepEqual(view.disabled(), [true, true]);
+      assert.equal(view.disabled(), true);
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("the picker lists models grouped by runtime, with the current route checked", async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch();
+    try {
+      const groups = await view.groups();
+      assert.deepEqual(groups.map(group => group.heading), ["Claude Code", "Codex"]);
+      assert.deepEqual(groups[0].items.map(item => item.label), ["Sonnet 5.5", "Haiku 5.5", "Opus 5.5", "Fable 5.1"]);
+      assert.deepEqual(groups[0].items.filter(item => item.checked).map(item => item.label), ["Sonnet 5.5"]);
+      assert.deepEqual(groups[1].items.map(item => [item.label, item.checked, item.disabled]),
+        [["GPT Fixture", false, false], ["GPT Other", false, false]]);
+      assert.ok(groups.every(group => group.items.every(item => item.reachable)), "arrow keys and typeahead reach every model");
+      assert.equal(view.menuOpen(), false, "Enter on the trigger closes the menu again");
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("on a new conversation a choice selects that runtime and model without a switch", async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch({ retained: false });
+    try {
+      await view.choose("Codex", "GPT Other");
+      assert.deepEqual(view.choices, [{ engine: "codex-cli", model: "gpt-other" }]);
+      assert.equal(view.panel(), null, "no switch confirm for a conversation that has not started");
+      assert.deepEqual(view.calls, []);
+      assert.equal(view.pickerLabel(), "Runtime and model: Codex GPT Other");
+      assert.equal(view.menuOpen(), false, "choosing closes the menu");
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("an unavailable runtime keeps its heading and reason, and offers nothing to choose", async () => {
+    const server = installChatServer();
+    for (const retained of [false, true]) {
+      const view = await proof.renderCodeSwitch({ retained, codexReady: false });
+      try {
+        const codex = (await view.groups()).find(group => group.heading.startsWith("Codex"));
+        assert.equal(codex.heading, "CodexSign in required");
+        assert.deepEqual(codex.items.map(item => [item.label, item.disabled]), [["No models available", true]]);
+      } finally { await view.unmount(); }
+    }
+    server();
+  });
+
+  await t.test("the keyboard opens the picker, Escape closes it, and Enter on a model asks to switch", async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch();
+    try {
+      await view.open();
+      assert.equal(view.menuOpen(), true);
+      await view.escape();
+      assert.equal(view.menuOpen(), false);
+      await view.choose("Codex", "GPT Fixture", { keyboard: true });
+      assert.equal(view.menuOpen(), false);
+      assert.match(view.panel(), /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
+      assert.deepEqual(view.calls, [], "nothing is sent before the confirm");
     } finally { await view.unmount(); server(); }
   });
 
@@ -918,9 +1003,9 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     try {
       const snapshot = await proof.renderWorkbenchComposer({});
-      assert.deepEqual(snapshot.disabled.slice(0, 2), [false, false]);
+      assert.equal(snapshot.disabled[0], false);
       assert.equal(snapshot.exampleDisabled, false);
-      assert.deepEqual(snapshot.describedBy, [null, null]);
+      assert.equal(snapshot.describedBy, null);
       assert.doesNotMatch(snapshot.text, /Other agents are working in this folder|another conversation/);
     } finally { server(); }
   });
@@ -931,7 +1016,7 @@ test("Native chat controls", async t => {
     try {
       assert.equal(view.warning(), SHARED_FOLDER_WARNING, "the warning is the owner's text");
       assert.equal(view.composerLocked(), true, "Send waits for a choice");
-      assert.deepEqual(view.disabled(), [false, false], "the runtime and model stay open");
+      assert.equal(view.disabled(), false, "the runtime and model stay open");
       assert.deepEqual(view.sharedRuns(), ["Write the parser testsOpen"]);
       assert.deepEqual(view.sharedButtons(), ["Open", "Proceed", "Use another folder", "Copy"]);
       assert.equal(view.command(), "git worktree add ../Fixture-project-worktree");
@@ -968,11 +1053,11 @@ test("Native chat controls", async t => {
     const server = installChatServer();
     try {
       const unknown = await proof.renderWorkbenchComposer({ model: "claude-haiku-5-5", version: null });
-      assert.equal(unknown.disabled[2], true);
+      assert.equal(unknown.disabled[1], true);
       assert.equal(unknown.exampleDisabled, true, "unknown version refuses work independently of the empty draft");
       const supported = await proof.renderWorkbenchComposer({ model: "claude-haiku-5-5", version: "2.1.300", prefill: true });
-      assert.equal(supported.disabled[2], false);
-      assert.equal(supported.model, "claude-haiku-5-5");
+      assert.equal(supported.disabled[1], false);
+      assert.equal(supported.model, "Haiku 5.5");
       assert.deepEqual(supported.choices, [], "version discovery preserves the selected model");
     } finally { server(); }
   });
