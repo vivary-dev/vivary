@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,6 +44,23 @@ const proofSource = `
 import { Editor } from "@tiptap/core";
 import { createSharedEditorExtensions } from "./extensions.js";
 import { getEditorMarkdown } from "./useCollabReconcile.js";
+
+// The reader mounts the same editor in the page, where TipTap's table node view adds the wrapper.
+export function mountedTable(value) {
+  const element = document.createElement("div");
+  const editor = new Editor({ element,
+    extensions: createSharedEditorExtensions({ dialect: "gfm", preset: "plan",
+      features: { image: false, tables: true, tasks: true, link: true }, extraExtensions: [], collab: null }),
+    content: value,
+    editable: false,
+  });
+  try {
+    const table = element.querySelector("table.an-rich-md-table");
+    return { wrapper: table?.parentElement?.className ?? null };
+  } finally {
+    editor.destroy();
+  }
+}
 
 export function readMarkdown(value) {
   const editor = new Editor({
@@ -109,14 +126,22 @@ function installDom() {
   }
 }
 
-test("a Markdown file keeps its GFM structure through the shared TipTap editor", async (t) => {
-  installDom();
-  // A file keeps failure stacks readable, which a data: URL of the whole bundle does not.
-  const folder = mkdtempSync(join(tmpdir(), "vivary-markdown-reader-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const bundle = join(folder, "proof.mjs");
-  writeFileSync(bundle, await buildProof());
-  const proof = await import(pathToFileURL(bundle).href);
+// Both tests share one bundle, because a second copy of Yjs in the process warns.
+// A file keeps failure stacks readable, which a data: URL of the whole bundle does not.
+const folder = mkdtempSync(join(tmpdir(), "vivary-markdown-reader-"));
+let proofReady;
+function loadProof() {
+  proofReady ??= (async () => {
+    installDom();
+    const bundle = join(folder, "proof.mjs");
+    writeFileSync(bundle, await buildProof());
+    return import(pathToFileURL(bundle).href);
+  })();
+  return proofReady;
+}
+
+test("a Markdown file keeps its GFM structure through the shared TipTap editor", async () => {
+  const proof = await loadProof();
   const { json, html, markdown: readBack } = proof.readMarkdown(markdown);
 
   assert.deepEqual(json.content.map((block) => block.type),
@@ -146,4 +171,34 @@ test("a Markdown file keeps its GFM structure through the shared TipTap editor",
   assert.equal(readBack, `${markdown.replace("- [x] shipped\n", "- [x] shipped\n\n")}\n`);
 });
 
-test.after(() => esbuild.stop());
+// A selector run starts after the previous statement, so an at-rule such as @source does not join it.
+function declarations(css, selector) {
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(([, selectors]) => selectors.slice(selectors.lastIndexOf(";") + 1).split(",").map((item) => item.trim()).includes(selector));
+  return Object.fromEntries(rules.flatMap(([, , body]) => body.split(";").map((item) => item.split(":").map((part) => part.trim()))
+    .filter(([name, value]) => name && value)));
+}
+
+// linkedom has no layout, so this test pins the table rules and the reader DOM they select.
+test("Markdown tables wrap ordinary cell text and scroll only when code or content cannot fit", async () => {
+  const app = new URL("../app/", import.meta.url);
+  const global = readFileSync(new URL("global.css", app), "utf8");
+  const files = readFileSync(new URL("project-files.css", app), "utf8");
+  // Chat: Core sets width:max-content, which keeps every cell on one line. The override must follow Core's import.
+  assert.ok(global.indexOf(".agent-markdown-table-wrap > table") > global.indexOf("@agent-native/core/styles/agent-native.css"));
+  assert.deepEqual(declarations(global, ".agent-markdown-table-wrap > table"), { width: "auto", "overflow-wrap": "break-word" });
+  assert.deepEqual(declarations(global, ".agent-markdown-table-wrap code"), { "white-space": "nowrap" });
+  // Reader: the table stays a table with automatic layout, and TipTap's wrapper scrolls a table that cannot fit.
+  assert.deepEqual(declarations(files, ".file-reading-surface .tiptap .tableWrapper"), { "overflow-x": "auto" });
+  assert.deepEqual(declarations(files, ".file-reading-surface .tiptap table"), { "table-layout": "auto", "overflow-wrap": "break-word" });
+  assert.deepEqual(declarations(files, ".file-reading-surface .tiptap table code"), { "white-space": "nowrap" });
+
+  const proof = await loadProof();
+  assert.deepEqual(proof.mountedTable("| Name | Value |\n| --- | --- |\n| alpha | 1 |"), { wrapper: "tableWrapper" },
+    "the read-only reader renders the wrapper that scrolls wide tables");
+});
+
+test.after(() => {
+  rmSync(folder, { recursive: true, force: true });
+  return esbuild.stop();
+});

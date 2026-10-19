@@ -55,7 +55,12 @@ The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
 model, update Claude Code, or verify its installed version. Retained conversations
-keep their recorded model ID. A historical Claude run
+keep their recorded runtime and model ID, because the saved provider session and
+resume depend on both, and the send boundary refuses a change. Above the composer,
+a conversation with a run says which runtime and model it keeps and offers New
+conversation, and the locked selectors name that line as their description. When
+another conversation's agent is working, the selectors also name that notice.
+A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
 
@@ -709,6 +714,53 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Code selector lock reason and Markdown table wrapping, found during
+Windows acceptance and related to issue #256. In a Code conversation the runtime
+and model selectors are disabled when the open conversation has a run, when any
+Code run is active on the host, and while a reply streams, and nothing said why.
+Those rules, the server refusals in
+[`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts), and
+runtime discovery are unchanged. `LocalCodeConversation` in
+[`CodeConversation.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/CodeConversation.tsx)
+now shows "This conversation keeps <runtime> and <model>. Start a new conversation
+to use a different runtime or model." in the composer slot once the run has
+loaded, with a New conversation button that calls the parent's existing
+`newConversation`. The line names the run's recorded engine and model, and it is
+left out of the read-only search-match and Unassigned views. Both selectors name
+the sentence through `aria-describedby`. The parent puts an id on the sentence of
+its existing "An agent is working in another conversation." notice and passes it
+down only while that notice renders, and the selectors name it as well. That
+notice also shows on a new draft while another run is active, so a draft's
+selectors name it then. A new draft never shows the kept-route line. The option
+labels and the line share one `modelLabel` lookup. The Coding model selection
+section above now describes the line.
+
+Markdown tables in chat replies used Core's `width: max-content`, so every cell
+stayed on one line and the table scrolled sideways. `app/global.css` now sets
+`width: auto` and `overflow-wrap: break-word` on `.agent-markdown-table-wrap >
+table` after Core's import, which keeps Core's `min-width: 100%` and scrolling
+wrapper, and keeps inline code in a cell on one line. Core's rules are not in a
+cascade layer, so source order decides. The Markdown reader in Files and in
+Settings > Documentation set `display: block` on the table itself. `app/project-files.css`
+now lets TipTap's `.tableWrapper` scroll, sets `table-layout: auto` and
+`overflow-wrap: break-word` on the table, and keeps inline code in a cell on one
+line. The Core and Toolkit patches are unchanged. A headless Chrome 154 check on
+the server rendered the real Core and Toolkit stylesheets and the real read-only
+TipTap editor at 360, 800, and 1200 pixels, before and after. Before, two prose
+tables in chat measured 1078 and 1122 pixels in a 313 or 753 pixel reply, one line
+per cell. After, both fit at 753 pixels and the three-column one fits at 313
+pixels, with no word split. A five-column table whose words need 339 pixels and a
+table holding an 806 pixel code path scroll, and the code stays on one line in
+chat and in the reader. In the reader, prose columns measured the same before and
+after, because TipTap's injected `.ProseMirror` rule already sets `word-wrap:
+break-word`, so the reported letter-by-letter breaking was not reproduced there.
+Before, 11 code spans in this document's table split across lines at 360 pixels,
+and none after. `tests/native-chat-components.test.mjs` renders the composer for a
+retained conversation, a read-only history view, a new draft, a busy host, and a
+retained conversation on a busy host.
+`tests/markdown-reader.test.mjs` pins the table rules and checks that the
+read-only reader renders `.tableWrapper`.
 
 2026-10-19 Installer file collision (issue #254 item 7). Extraction with `File /r`
 replaced whatever sat at a payload path, so a file the user added at the exact
