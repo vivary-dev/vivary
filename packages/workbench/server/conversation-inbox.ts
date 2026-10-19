@@ -1,11 +1,11 @@
 import { fail } from "@agent-native/core/action";
 import { updateCodeAgentRunRecord, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { getDbExec } from "@agent-native/core/db";
-import { listThreads } from "@agent-native/core/server";
+import { getThread, listThreads, setThreadArchived } from "@agent-native/core/server";
 import { codeDraftSelectionKey } from "../shared/code-draft";
 import { LINKED_TARGET_SOURCE_URL } from "../shared/linked-conversation";
-import { createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts } from "./chat-draft";
-import { createVivaryChatIdentity } from "./chat-identity";
+import { createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts, readChatDraft } from "./chat-draft";
+import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-identity";
 import { projectChatScopeId } from "./chat-project-scope.mjs";
 import {
   engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, linkedCodeDraftRuns, listOwnedVivaryCodeRuns, modelFromRun,
@@ -242,6 +242,46 @@ async function readInboxDrafts(input: { ownerEmail: string; orgId: string; proje
   return { onRows, drafts };
 }
 
+/** Why archive waits. Archive never stops, approves, sends or discards work to make itself possible. */
+const ARCHIVE_REFUSALS = {
+  approval: "This conversation is waiting for your approval. Answer or stop it, then archive it.",
+  working: "This conversation is working. Stop it or let it finish, then archive it.",
+  queued: "This conversation has queued messages. Send or remove them, then archive it.",
+  sending: "A message to this conversation is still being sent. Wait for it, then archive it.",
+} as const;
+
+function refuseArchive(message: string): never {
+  fail(message, { errorCode: "vivary_conversation_archive_pending", statusCode: 409 });
+}
+
+/**
+ * Archives the owner's API chat in one project, the inbox's only archive path for Native. It refuses while a turn
+ * runs, while queued messages wait in the thread, or while a send from its draft is pending. Restore stays with
+ * `vivary-native-archive`.
+ */
+export async function archiveNativeConversation(input: { ownerEmail: string; orgId: string; projectId: string | null;
+  threadId: string }): Promise<{ archived: true }> {
+  const identity = createVivaryChatIdentity(input.ownerEmail, input.orgId,
+    { kind: "project", projectId: input.projectId, label: "" });
+  const thread = await getThread(input.threadId);
+  if (!thread || !threadBelongsToChatIdentity(identity, thread, input.ownerEmail, input.orgId)) {
+    fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+  }
+  const latest = await getDbExec().execute({
+    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [input.threadId] });
+  if (latest.rows[0]?.status === "running") refuseArchive(ARCHIVE_REFUSALS.working);
+  let queued: unknown;
+  try { queued = (JSON.parse(thread.threadData || "{}") as { queuedMessages?: unknown }).queuedMessages; }
+  catch { queued = undefined; }
+  if (Array.isArray(queued) && queued.length) refuseArchive(ARCHIVE_REFUSALS.queued);
+  if ((await readChatDraft(identity, input.threadId))?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
+  // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
+  if (!await setThreadArchived(input.threadId, true, { ownerEmail: thread.ownerEmail })) {
+    fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+  }
+  return { archived: true };
+}
+
 export const MAX_TITLE_LENGTH = 160;
 export type CodeConversationChange =
   | { operation: "rename"; title: string }
@@ -261,9 +301,14 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
   if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   if (input.change.operation === "archive") {
     const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
-    if (host.activeRuns.some(run => run.id === input.runId)) {
-      fail("This conversation is working. Stop it or let it finish, then archive it.", {
-        errorCode: "vivary_code_archive_active", statusCode: 409 });
+    const active = host.activeRuns.find(run => run.id === input.runId);
+    if (active?.pendingApprovals.length) refuseArchive(ARCHIVE_REFUSALS.approval);
+    if (active) refuseArchive(ARCHIVE_REFUSALS.working);
+    // A follow-up whose send is still pending is queued work for this conversation.
+    const draftThreadId = owned.metadata?.draftThreadId;
+    if (typeof draftThreadId === "string" && input.orgId) {
+      const draft = await readChatDraft(createCodeDraftIdentity(input.ownerEmail, input.orgId, input.projectId), draftThreadId);
+      if (draft?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
     }
   }
   const now = new Date().toISOString();

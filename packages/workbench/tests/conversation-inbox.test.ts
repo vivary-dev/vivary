@@ -265,3 +265,53 @@ test("changes refuse another owner's run, another project's run and invalid titl
   assert.equal(metaAction.schema.safeParse({ operation: "rename", runId: "a", projectId: null, title: "x".repeat(161) }).success, false);
   assert.equal(metaAction.schema.safeParse({ operation: "delete", runId: "a", projectId: null }).success, false);
 });
+
+test("API chat archive waits for a running turn, queued messages and a pending send, and restore keeps identity and order", async () => {
+  const archive = (threadId: string, projectId: string | null = "beta", user = owner) => asUser(user, orgId,
+    () => inbox.archiveNativeConversation({ ownerEmail: user, orgId, projectId, threadId }));
+  const refused = (pattern: RegExp) => (error: { statusCode?: number; errorCode?: string; message: string }) =>
+    error.statusCode === 409 && error.errorCode === "vivary_conversation_archive_pending" && pattern.test(error.message);
+  const before = (await load()).rows.filter(row => !row.archived).map(row => row.id);
+  await assert.rejects(archive("native-alpha", "alpha"), refused(/is working/), "a running turn blocks archive");
+  const thread = await getDbExec().execute({ sql: "SELECT thread_data FROM chat_threads WHERE id = ?", args: ["native-beta"] });
+  const data = JSON.parse(String(thread.rows[0].thread_data));
+  await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?",
+    args: [JSON.stringify({ ...data, queuedMessages: [{ id: "q1", text: "Next" }] }), "native-beta"] });
+  await assert.rejects(archive("native-beta"), refused(/queued messages/));
+  await getDbExec().execute({ sql: "UPDATE chat_threads SET thread_data = ? WHERE id = ?",
+    args: [JSON.stringify({ ...data, queuedMessages: [] }), "native-beta"] });
+  const betaChat = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "beta", label: "Beta" });
+  await saveDraft(betaChat, "native-beta", "Sending now", true);
+  await assert.rejects(archive("native-beta"), refused(/still being sent/));
+  await asUser(owner, orgId, async () => {
+    const { readChatDraft } = await import("../server/chat-draft.ts");
+    await changeIndexedChatDraft(betaChat, "native-beta", await readChatDraft(betaChat, "native-beta"),
+      { text: "", status: "cleared", submitId: null });
+  });
+  await assert.rejects(archive("native-beta", "beta", "other@example.test"), (error: { statusCode?: number }) => error.statusCode === 404,
+    "another owner cannot archive it");
+  await assert.rejects(archive("native-beta", "alpha"), (error: { statusCode?: number }) => error.statusCode === 404,
+    "the wrong project cannot archive it");
+  assert.deepEqual(await archive("native-beta"), { archived: true });
+  assert.equal((await load()).rows.find(row => row.id === "native:native-beta")?.archived, true);
+  const { restoreArchivedNativeChat } = await import("../server/native-archive.ts");
+  await restoreArchivedNativeChat(betaChat, "native-beta", owner, orgId);
+  assert.deepEqual((await load()).rows.filter(row => !row.archived).map(row => row.id), before, "restore keeps the place");
+});
+
+test("Code archive also waits for an approval and a pending send", async () => {
+  const change = () => asUser(owner, orgId, () => inbox.changeCodeConversation({ ownerEmail: owner, orgId,
+    runId: "alpha-failed", projectId: "alpha", change: { operation: "archive" } }));
+  activate("alpha-failed", { requests: new Map([["r1", { request: { requestId: "r1", kind: "command" } }]]) });
+  try {
+    await assert.rejects(change(), (error: { statusCode?: number; message: string }) =>
+      error.statusCode === 409 && /waiting for your approval/.test(error.message));
+  } finally { host.activeRuns.clear(); }
+  const { updateCodeAgentRunRecord } = await import("@agent-native/core/code-agents");
+  const draftThreadId = codeDraftThreadId("alpha", "follow-up");
+  updateCodeAgentRunRecord("alpha-failed", record => ({ metadata: { draftThreadId }, updatedAt: record.updatedAt }));
+  await saveDraft(createCodeDraftIdentity(owner, orgId, "alpha"), draftThreadId, "Next step", true);
+  await assert.rejects(change(), (error: { statusCode?: number; message: string }) =>
+    error.statusCode === 409 && /still being sent/.test(error.message));
+  assert.equal(getCodeAgentRunRecord("alpha-failed")?.metadata?.archivedAt, undefined, "nothing was archived");
+});

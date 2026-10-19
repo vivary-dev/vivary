@@ -119,7 +119,7 @@ function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) 
   return { filter, setFilter };
 }
 
-async function changeNativeThread(row: InboxListRow, operation: "rename" | "pin" | "archive", body: unknown) {
+async function changeNativeThread(row: InboxListRow, operation: "rename" | "pin", body: unknown) {
   const threadId = row.id.slice("native:".length);
   const params = new URLSearchParams({ scopeType: "workspace-app", scopeId: row.nativeScopeId ?? "" });
   const response = await fetch(`${agentNativePath(`/_agent-native/agent-chat/threads/${encodeURIComponent(threadId)}/${operation}`)}?${params}`,
@@ -231,7 +231,8 @@ export function ConversationInbox() {
             threadId: row.id.slice("native:".length) });
         } else if (operation === "rename") await changeNativeThread(row, "rename", { title });
         else if (operation === "archive") {
-          await changeNativeThread(row, "archive", { archived: true });
+          // The server refuses while a turn runs, messages are queued or a send is pending.
+          await call("vivary-conversation-archive", { projectId: row.projectId, threadId: row.id.slice("native:".length) });
           // Native cannot show an archived conversation, so its open route closes, as in the project history.
           if (selectedInboxRowId(location.search) === row.id) navigate("/");
         } else await changeNativeThread(row, "pin", { pinned: operation === "pin" });

@@ -346,6 +346,20 @@ test("after Archive the row moves to Archived and focus moves to the row that to
   assert.equal(document.activeElement?.dataset.rowId, "native:a2");
 });
 
+test("an API chat is archived through the guarded action, and a refusal is shown without changing the row", async () => {
+  inboxFixture.call = async (name, input) => {
+    inboxFixture.calls.push({ name, input });
+    throw new Error("This conversation is working. Stop it or let it finish, then archive it.");
+  };
+  await render();
+  await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
+  await act(async () => button("Archive").click());
+  await settle();
+  assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive", input: { projectId: "alpha", threadId: "a2" } });
+  assert.match(host.querySelector('[role="alert"]').textContent, /is working\. Stop it or let it finish/);
+  assert.deepEqual(titles(), ["Old pinned plan", "Fix table wrapping", "Write launch notes"], "the row stays in place");
+});
+
 test("rename edits the title in place and returns focus to the row", async () => {
   await render();
   await act(async () => host.querySelector('[aria-label="Actions for Fix table wrapping"]').click());

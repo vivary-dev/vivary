@@ -422,10 +422,26 @@ Rename writes the record's `title`, which the Code header, Agent work and search
 read, and keeps the first generated title as `metadata.generatedTitle`. Archive
 and pin write `metadata.archivedAt` and `metadata.pinnedAt`. Every change runs on
 the owner's run record in the named project, under Core's file lock, and keeps
-`updatedAt`, so no list reorders. Archive refuses a
-working conversation with `vivary_code_archive_active` (409), because archive
-must never stop work or hide its approvals. Every change is reversible and no
-migration runs.
+`updatedAt`, so no list reorders. Every change is reversible and no migration runs.
+
+Archive waits for unresolved work, for Code and API chat alike, and refuses with
+`vivary_conversation_archive_pending` (409) and a message naming what to resolve:
+a pending approval or a working or stopping run for Code, a running turn or queued
+messages in the thread for API chat, and for both a send from the draft that is
+still pending. Archive never stops, approves, sends or discards anything. The inbox
+archives an API chat only through the owner action
+[`vivary-conversation-archive`](../packages/workbench/actions/vivary-conversation-archive.ts),
+which runs these checks on the server before `setThreadArchived`. Restore uses
+`vivary-native-archive` and returns the row to its place, since rows sort by
+creation time. The Unassigned conversations list (`ChatHistory.tsx`) and the
+project history this inbox replaces still call Core's archive route directly.
+
+Rename keeps a manual API chat title against later generated titles on the server.
+Core's `renameThread` (`dist/chat-threads/store.js`, about line 750) stores
+`_titleOverride` in thread_data, `updateThreadData` keeps that key when a client
+save omits it, and the thread PUT handler (`dist/server/agent-chat-plugin.js`,
+about line 4705, `preserveTitleOverride`) replaces any incoming title with the
+override.
 
 The owner action [`vivary-project-location`](../packages/workbench/actions/vivary-project-location.ts)
 returns a project's folder, or Personal workspace's, for the owner's
@@ -1013,6 +1029,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Inbox archive guards (W5). The Conversation inbox section now describes
+the server-side archive checks for Code and API chat, the new
+`vivary-conversation-archive` action, the remaining direct archive call sites, and
+how Core keeps a manual API chat title. Evidence inspected: the archive server and
+component tests and the installed Core store and PUT handler.
 
 2026-10-19 Inbox rename validation (W5). The Conversation inbox section now says an
 empty title is refused. Evidence inspected: the component rename test.
