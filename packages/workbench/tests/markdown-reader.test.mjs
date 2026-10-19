@@ -62,12 +62,15 @@ export function mountedTable(value) {
   }
 }
 
-export function readMarkdown(value) {
+// The Files and Documentation readers pass footnotes: true. An editable document uses the
+// factory's defaults, which leave footnotes off.
+export function readMarkdown(value, { footnotes = false, editable = false } = {}) {
   const editor = new Editor({
-    extensions: createSharedEditorExtensions({ dialect: "gfm", preset: "plan",
-      features: { image: false, tables: true, tasks: true, link: true }, extraExtensions: [], collab: null }),
+    extensions: editable ? createSharedEditorExtensions({ dialect: "gfm" })
+      : createSharedEditorExtensions({ dialect: "gfm", preset: "plan",
+        features: { image: false, tables: true, tasks: true, link: true, footnotes }, extraExtensions: [], collab: null }),
     content: value,
-    editable: false,
+    editable,
   });
   try {
     return { json: editor.getJSON(), html: editor.getHTML(), markdown: getEditorMarkdown(editor) };
@@ -278,6 +281,73 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
   const copied = await chat.copiedHtml(source);
   assert.ok(copied.includes(`href="${url.replaceAll("&", "&amp;")}"`));
   assert.ok(!copied.includes("agent-markdown-long-token"));
+});
+
+// The owner saw a document's footnote definitions run together as one paragraph in the reader.
+// What an editable document saved for footnoteMarkdown before read-only footnotes existed,
+// measured on the unpatched Toolkit. The editable path already escapes the brackets and joins the
+// definitions. That is unchanged here, and this pin proves the read-only feature leaves it alone.
+const EDITABLE_FOOTNOTE_MARKDOWN = [
+  "TypeScript checks ran at three versions\\[^diagnostics-matrix\\] with the same options\\[^options-matrix\\].",
+  "",
+  "A second mention of the versions\\[^diagnostics-matrix\\] and a reference with no note\\[^missing\\].",
+  "",
+  "\\[^diagnostics-matrix\\]: TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2. \\[^options-matrix\\]: TypeScript compiler options"
+    + " from `tsconfig.json`. An indented line continues the note. \\[^unused\\]: A definition that nothing references.",
+].join("\n");
+const footnoteMarkdown = [
+  "TypeScript checks ran at three versions[^diagnostics-matrix] with the same options[^options-matrix].",
+  "",
+  "A second mention of the versions[^diagnostics-matrix] and a reference with no note[^missing].",
+  "",
+  "[^diagnostics-matrix]: TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2.",
+  "[^options-matrix]: TypeScript compiler options from `tsconfig.json`.",
+  "    An indented line continues the note.",
+  "[^unused]: A definition that nothing references.",
+].join("\n");
+
+test("the reader renders GFM footnotes as superscript links and one notes list at the end", async () => {
+  const proof = await loadProof();
+  const { json, html } = proof.readMarkdown(footnoteMarkdown, { footnotes: true });
+  const types = json.content.map((block) => block.type);
+  assert.deepEqual(types, ["paragraph", "paragraph", "footnotes"]);
+  const references = json.content.slice(0, 2).flatMap((block) => block.content.filter((node) => node.type === "footnoteReference"));
+  assert.deepEqual(references.map((node) => [node.attrs.label, node.attrs.number]),
+    [["diagnostics-matrix", 1], ["options-matrix", 2], ["diagnostics-matrix", 1]]);
+  // A reference without a definition stays text, as in GFM.
+  assert.match(json.content[1].content.at(-1).text, /\[\^missing\]\.$/);
+  // Notes follow the order of first reference, and an unreferenced definition is not shown.
+  const notes = json.content[2].content;
+  assert.deepEqual(notes.map((item) => item.attrs.label), ["diagnostics-matrix", "options-matrix"]);
+  assert.equal(notes[0].content[0].content[0].text, "TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2.");
+  assert.deepEqual(notes[1].content[0].content.map((node) => node.text),
+    ["TypeScript compiler options from ", "tsconfig.json", ". An indented line continues the note."]);
+  // Each reference is a superscript link to its note. Repeated references share the note's number.
+  assert.equal(html.match(/<sup class="an-rich-md-footnote-ref"><a [^>]*href="#fn-1"[^>]*>1<\/a><\/sup>/g)?.length, 2);
+  assert.equal(html.match(/<sup class="an-rich-md-footnote-ref"><a [^>]*href="#fn-2"[^>]*>2<\/a><\/sup>/g)?.length, 1);
+  assert.match(html, /<section [^>]*class="an-rich-md-footnotes"[^>]*><ol><li id="fn-1"><p>TypeScript diagnostics[^<]*<\/p><\/li><li id="fn-2">/);
+  assert.equal(html.match(/ id="/g)?.length, 2, "only the two notes carry ids, so no id repeats");
+  assert.ok(!html.includes("[^diagnostics-matrix]") && !html.includes("[^options-matrix]") && !html.includes("[^unused]"));
+  // Files and Settings > Documentation are the read-only readers that opt in. Both follow a note link in place.
+  for (const route of ["files.tsx", "architecture.tsx"]) {
+    const source = readFileSync(new URL(`../app/routes/${route}`, import.meta.url), "utf8");
+    assert.match(source, /Features = \{ image: false, tables: true, tasks: true, link: true, footnotes: true \};/, route);
+    assert.match(source, /focusFootnote/, route);
+  }
+});
+
+test("editable documents keep footnote Markdown and their saved bytes unchanged", async () => {
+  const proof = await loadProof();
+  // The editable factory registers no footnote nodes, so its parse and save path is the one it had before.
+  const editable = proof.readMarkdown(footnoteMarkdown, { editable: true });
+  assert.ok(!JSON.stringify(editable.json).includes("footnote"));
+  assert.equal(editable.markdown, EDITABLE_FOOTNOTE_MARKDOWN);
+  // The existing round-trip corpus still saves byte-identically.
+  assert.equal(proof.readMarkdown(markdown, { editable: true }).markdown, `${markdown.replace("- [x] shipped\n", "- [x] shipped\n\n")}\n`);
+  // A read-only reconcile that reads Markdown gets the footnote syntax back.
+  const readOnly = proof.readMarkdown(footnoteMarkdown, { footnotes: true }).markdown;
+  assert.match(readOnly, /versions\[\^diagnostics-matrix\] with the same options\[\^options-matrix\]\./);
+  assert.match(readOnly, /\n\[\^diagnostics-matrix\]: TypeScript diagnostics at 5\.9\.3, 6\.0\.3, and 7\.0\.2\.\n/);
 });
 
 test.after(() => {

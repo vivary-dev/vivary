@@ -3390,3 +3390,30 @@ spaces. `tests/markdown-reader.test.mjs` renders the installed components with
 react-markdown and remark-gfm and checks the spans, text, hrefs, code, cell
 attributes, and copied HTML. Remove these hunks when a pinned Core release lets
 long unbroken table text wrap without splitting ordinary words.
+
+## Read-only Markdown footnotes
+
+The Files reader and Settings > Documentation showed GFM footnotes as raw text.
+Toolkit's shared editor parses Markdown with tiptap-markdown, which uses plain
+markdown-it with no footnote syntax. `[^id]` references stayed literal, and
+consecutive `[^id]: note` definitions ran together as one paragraph.
+
+The Toolkit patch adds `dist/editor/footnotes.js` and a `features.footnotes`
+option to `createSharedEditorExtensions`. The option is off by default. When it
+is on, three nodes are added. `footnotes` registers markdown-it rules for
+definitions and references through tiptap-markdown's parse setup hook.
+`footnoteReference` renders a superscript link to `#fn-<number>`, and
+`footnoteItem` renders the note as the list item with that id. Following GFM,
+notes appear once in a list at the end in order of first reference, a reference
+with no definition stays text, and a definition that nothing references is not
+shown. Each node has a serializer that writes the footnote syntax back, so a
+read-only reconcile that reads Markdown never falls back to placeholder text.
+
+Only Workbench's two read-only routes pass `footnotes: true`, and their
+`focusFootnote` helper moves focus to a note without changing the route. An
+editable document gets no footnote nodes, so its parse and save path is
+unchanged. That path already escapes `[^id]` as `\[^id\]` and joins
+consecutive definitions when it saves. `tests/markdown-reader.test.mjs` pins
+that output and the existing round-trip corpus, renders footnotes in the
+reader, and checks the route opt-ins. Remove these hunks when a pinned Toolkit
+release renders GFM footnotes in read-only views.

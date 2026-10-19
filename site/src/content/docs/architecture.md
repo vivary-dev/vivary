@@ -715,6 +715,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Footnotes in the read-only Markdown readers. The owner saw a
+document's footnote definitions run together as one paragraph in the Files
+reader. Toolkit's shared editor parses Markdown with plain markdown-it, which has
+no footnote syntax. The maintained Toolkit patch adds an opt-in
+`features.footnotes` to `createSharedEditorExtensions`. With it, references render
+as superscript links and definitions as one notes list at the end, in order of
+first reference. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#read-only-markdown-footnotes)
+own the details. `app/routes/files.tsx` and `app/routes/architecture.tsx` opt in,
+and [`footnote-links.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/footnote-links.ts) moves
+focus to a note without changing the route. Editable documents do not opt in, so
+their saved Markdown is unchanged. A test pins that output. Chat already rendered
+footnotes through remark-gfm, and Core keeps a reply with a definition in one block.
+A Playwright check in Chrome 154 rendered one corpus in the real reader and in chat
+at 360 and 1000 pixels. Both showed four superscript references, two notes, no raw
+`[^` text, task-list checkboxes, and strikethrough. A trusted click on a reference
+focused its note and left the URL unchanged. Bare URLs remain plain text in the
+reader, because the GFM dialect keeps `linkify` off for byte-stable saves, while
+chat links them.
+
 2026-10-19 Long links and unbroken strings in chat tables, a follow-up to the
 table wrapping entry below and related to issue #256. With `width: auto`, a column
 still could not be narrower than its longest unbroken string, so one long URL, a

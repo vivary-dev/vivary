@@ -404,3 +404,343 @@ index 60b87f649b6bd2f3e9007fd07ca4e708c1bb28ee..81a91e98232e720a025c332893e4c798
    }, [editable, editor]);
  
    useEffect(() => {
+diff --git a/dist/editor/extensions.js b/dist/editor/extensions.js
+index eb5cac1c6acc5e365c7127957bca7c8f73a398b1..c49df56fe4575f7595d62c9240d3bc9a6144ea8e 100644
+--- a/dist/editor/extensions.js
++++ b/dist/editor/extensions.js
+@@ -43,6 +43,7 @@ const codeLowlight = createLowlight({
+ });
+ import { createCodeBlockNode } from "./CodeBlockNode.js";
+ import { createImageExtension } from "./ImageExtension.js";
++import { createFootnoteExtensions } from "./footnotes.js";
+ const CollaborationWithSafeInitialSelection = Collaboration.extend({
+     addProseMirrorPlugins() {
+         const plugins = this.parent?.() ?? [];
+@@ -131,6 +132,9 @@ const DEFAULT_FEATURES = {
+     // Off by default: only Plans opt in today. Content injects its own richer
+     // image node via `extraExtensions` and must not get a second `image` node.
+     image: false,
++    // Vivary: off by default so editable documents keep their schema and saved
++    // Markdown. Read-only views opt in.
++    footnotes: false,
+ };
+ /**
+  * The ONE editor extension factory shared by every embedder (Plans today,
+@@ -239,6 +243,9 @@ preset: _preset = "plan", placeholder = "Type '/' for commands...", features, st
+     if (feat.image) {
+         exts.push(createImageExtension({ onImageUpload }));
+     }
++    if (feat.footnotes) {
++        exts.push(...createFootnoteExtensions());
++    }
+     // App-specific extensions (Notion/media/drag handles/comments). Appended
+     // before Collaboration so they can extend the schema and Collaboration binds
+     // over the full set.
+diff --git a/dist/editor/extensions.d.ts b/dist/editor/extensions.d.ts
+index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493709f9f6a 100644
+--- a/dist/editor/extensions.d.ts
++++ b/dist/editor/extensions.d.ts
+@@ -66,6 +66,13 @@ export interface SharedEditorFeatures {
+      * option instead.
+      */
+     markdown?: boolean;
++    /**
++     * Vivary: GFM footnotes. `[^id]` references render as superscript links and
++     * `[^id]: note` definitions as one notes list at the end. Default `false`, and
++     * meant for read-only views, so editable documents keep their schema and
++     * saved Markdown.
++     */
++    footnotes?: boolean;
+     /**
+      * The shared block-level image node (`@tiptap/extension-image`). Default
+      * `false` so existing embedders are unchanged. When `true`, images
+diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf8504aa61
+--- /dev/null
++++ b/dist/editor/footnotes.js
+@@ -0,0 +1,269 @@
++import { mergeAttributes, Node } from "@tiptap/core";
++/**
++ * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
++ * with plain markdown-it, which has no footnote syntax, so `[^id]` references
++ * stayed literal text and consecutive `[^id]: note` definitions ran together as
++ * one paragraph. These extensions add a markdown-it block rule for definitions,
++ * an inline rule for references, and a core rule that moves the definitions
++ * into one notes list at the end of the document, in order of first reference.
++ * This follows GFM: a reference without a definition stays text, and a
++ * definition that nothing references is not shown.
++ *
++ * Opt in with `features.footnotes`. It is off by default so editable documents
++ * keep their existing schema and saved Markdown. The serializers write the
++ * footnote syntax back so a read-only reconcile that reads Markdown still gets
++ * footnote syntax rather than a fallback.
++ */
++const LABEL_LIMIT = 999;
++const parsers = new WeakSet();
++function readLabel(src, start, max) {
++    // `[^` then a label with no whitespace, closed by `]`.
++    if (src.charCodeAt(start) !== 0x5b || src.charCodeAt(start + 1) !== 0x5e)
++        return null;
++    for (let pos = start + 2; pos < max && pos - start <= LABEL_LIMIT; pos++) {
++        const code = src.charCodeAt(pos);
++        if (code === 0x5d)
++            return pos === start + 2 ? null : { label: src.slice(start + 2, pos), end: pos + 1 };
++        if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x5b)
++            return null;
++    }
++    return null;
++}
++function footnoteDefinition(state, startLine, endLine, silent) {
++    const start = state.bMarks[startLine] + state.tShift[startLine];
++    const max = state.eMarks[startLine];
++    // Four columns of indentation make the line an indented code block instead.
++    if (state.sCount[startLine] - state.blkIndent >= 4)
++        return false;
++    const found = readLabel(state.src, start, max);
++    if (!found || state.src.charCodeAt(found.end) !== 0x3a)
++        return false;
++    if (silent)
++        return true;
++    const env = state.env;
++    env.footnotes ??= { refs: new Map(), list: [] };
++    if (!env.footnotes.refs.has(found.label))
++        env.footnotes.refs.set(found.label, -1);
++    const open = new state.Token("footnote_definition_open", "", 1);
++    open.meta = { label: found.label };
++    open.level = state.level++;
++    state.tokens.push(open);
++    // Parse the rest of the line and the indented lines after it as the
++    // definition's own blocks, the way markdown-it parses a list item.
++    const oldBMark = state.bMarks[startLine];
++    const oldTShift = state.tShift[startLine];
++    const oldSCount = state.sCount[startLine];
++    const oldParentType = state.parentType;
++    const afterColon = found.end + 1;
++    const initial = state.sCount[startLine] + afterColon - start;
++    let offset = initial;
++    let pos = afterColon;
++    while (pos < max) {
++        const code = state.src.charCodeAt(pos);
++        if (code === 0x09)
++            offset += 4 - (offset % 4);
++        else if (code === 0x20)
++            offset++;
++        else
++            break;
++        pos++;
++    }
++    state.tShift[startLine] = pos - afterColon;
++    state.sCount[startLine] = offset - initial;
++    state.bMarks[startLine] = afterColon;
++    state.blkIndent += 4;
++    state.parentType = "footnote";
++    if (state.sCount[startLine] < state.blkIndent)
++        state.sCount[startLine] += state.blkIndent;
++    state.md.block.tokenize(state, startLine, endLine, true);
++    state.parentType = oldParentType;
++    state.blkIndent -= 4;
++    state.tShift[startLine] = oldTShift;
++    state.sCount[startLine] = oldSCount;
++    state.bMarks[startLine] = oldBMark;
++    const close = new state.Token("footnote_definition_close", "", -1);
++    close.level = --state.level;
++    state.tokens.push(close);
++    return true;
++}
++function footnoteReference(state, silent) {
++    const footnotes = state.env.footnotes;
++    if (!footnotes)
++        return false;
++    const found = readLabel(state.src, state.pos, state.posMax);
++    if (!found || !footnotes.refs.has(found.label))
++        return false;
++    if (!silent) {
++        let index = footnotes.refs.get(found.label);
++        if (index < 0) {
++            index = footnotes.list.length;
++            footnotes.list.push(found.label);
++            footnotes.refs.set(found.label, index);
++        }
++        const token = state.push("footnote_reference", "", 0);
++        token.meta = { label: found.label, number: index + 1 };
++    }
++    state.pos = found.end;
++    return true;
++}
++function footnoteTail(state) {
++    const footnotes = state.env.footnotes;
++    if (!footnotes)
++        return;
++    // Lift each definition's tokens out of the flow, then append the referenced
++    // ones in order of first reference.
++    const definitions = new Map();
++    let current = null;
++    state.tokens = state.tokens.filter((token) => {
++        if (token.type === "footnote_definition_open") {
++            current = [];
++            if (!definitions.has(token.meta.label))
++                definitions.set(token.meta.label, current);
++            return false;
++        }
++        if (token.type === "footnote_definition_close") {
++            current = null;
++            return false;
++        }
++        if (current)
++            current.push(token);
++        return !current;
++    });
++    if (footnotes.list.length === 0)
++        return;
++    state.tokens.push(new state.Token("footnote_block_open", "", 1));
++    footnotes.list.forEach((label, index) => {
++        const open = new state.Token("footnote_open", "", 1);
++        open.meta = { label, number: index + 1 };
++        state.tokens.push(open, ...(definitions.get(label) ?? []), new state.Token("footnote_close", "", -1));
++    });
++    state.tokens.push(new state.Token("footnote_block_close", "", -1));
++}
++function installFootnoteSyntax(md) {
++    if (parsers.has(md))
++        return;
++    parsers.add(md);
++    const escape = md.utils.escapeHtml;
++    md.block.ruler.before("reference", "footnote_definition", footnoteDefinition, {
++        alt: ["paragraph", "reference"],
++    });
++    md.inline.ruler.after("image", "footnote_reference", footnoteReference);
++    md.core.ruler.after("inline", "footnote_tail", footnoteTail);
++    md.renderer.rules.footnote_reference = (tokens, index) => {
++        const { label, number } = tokens[index].meta;
++        return `<sup data-footnote-ref="${escape(label)}" data-footnote-number="${number}">${number}</sup>`;
++    };
++    md.renderer.rules.footnote_block_open = () => '<section data-footnotes=""><ol>';
++    md.renderer.rules.footnote_block_close = () => "</ol></section>";
++    md.renderer.rules.footnote_open = (tokens, index) => {
++        const { label, number } = tokens[index].meta;
++        return `<li data-footnote="${escape(label)}" data-footnote-number="${number}">`;
++    };
++    md.renderer.rules.footnote_close = () => "</li>";
++}
++const numberAttribute = {
++    default: 1,
++    parseHTML: (element) => Number(element.getAttribute("data-footnote-number")) || 1,
++    renderHTML: () => ({}),
++};
++/** A footnote reference, shown as a superscript link to its note. */
++export const FootnoteReference = Node.create({
++    name: "footnoteReference",
++    group: "inline",
++    inline: true,
++    atom: true,
++    selectable: false,
++    addAttributes() {
++        return {
++            label: {
++                default: "",
++                parseHTML: (element) => element.getAttribute("data-footnote-ref") ?? "",
++                renderHTML: () => ({}),
++            },
++            number: numberAttribute,
++        };
++    },
++    parseHTML() {
++        return [{ tag: "sup[data-footnote-ref]" }];
++    },
++    renderHTML({ node, HTMLAttributes }) {
++        const number = String(node.attrs.number);
++        return ["sup", mergeAttributes(HTMLAttributes, { class: "an-rich-md-footnote-ref" }),
++            ["a", { href: `#fn-${number}`, "aria-label": `Note ${number}` }, number]];
++    },
++    renderText({ node }) {
++        return String(node.attrs.number);
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.write(`[^${node.attrs.label}]`);
++                },
++                parse: {},
++            },
++        };
++    },
++});
++/** One note in the list, holding the definition's blocks. */
++export const FootnoteItem = Node.create({
++    name: "footnoteItem",
++    content: "block+",
++    defining: true,
++    addAttributes() {
++        return {
++            label: {
++                default: "",
++                parseHTML: (element) => element.getAttribute("data-footnote") ?? "",
++                renderHTML: () => ({}),
++            },
++            number: numberAttribute,
++        };
++    },
++    parseHTML() {
++        return [{ tag: "li[data-footnote]", priority: 60 }];
++    },
++    renderHTML({ node, HTMLAttributes }) {
++        return ["li", mergeAttributes(HTMLAttributes, { id: `fn-${node.attrs.number}` }), 0];
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.wrapBlock("    ", `[^${node.attrs.label}]: `, node, () => state.renderContent(node));
++                },
++                parse: {},
++            },
++        };
++    },
++});
++/** The notes list at the end of the document. It registers the markdown-it rules. */
++export const Footnotes = Node.create({
++    name: "footnotes",
++    group: "block",
++    content: "footnoteItem+",
++    parseHTML() {
++        return [{ tag: "section[data-footnotes]", contentElement: "ol" }];
++    },
++    renderHTML({ HTMLAttributes }) {
++        return ["section", mergeAttributes(HTMLAttributes, { class: "an-rich-md-footnotes", "aria-label": "Notes" }), ["ol", 0]];
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.renderContent(node);
++                    state.closeBlock(node);
++                },
++                parse: {
++                    setup(markdownit) {
++                        installFootnoteSyntax(markdownit);
++                    },
++                },
++            },
++        };
++    },
++});
++export function createFootnoteExtensions() {
++    return [FootnoteReference, FootnoteItem, Footnotes];
++}
+diff --git a/dist/editor/footnotes.d.ts b/dist/editor/footnotes.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..69e0786c21fc706a970dfdd08185b9d2466536ef
+--- /dev/null
++++ b/dist/editor/footnotes.d.ts
+@@ -0,0 +1,9 @@
++import { Node } from "@tiptap/core";
++/** A footnote reference, shown as a superscript link to its note. */
++export declare const FootnoteReference: Node<any, any>;
++/** One note in the list, holding the definition's blocks. */
++export declare const FootnoteItem: Node<any, any>;
++/** The notes list at the end of the document. It registers the markdown-it rules. */
++export declare const Footnotes: Node<any, any>;
++/** Read-only GFM footnote support for `features.footnotes`. */
++export declare function createFootnoteExtensions(): Node<any, any>[];
