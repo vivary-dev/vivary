@@ -20,6 +20,31 @@ function adapterForTest(rejections, actions, engine = "codex-cli", actionError =
   });
 }
 
+test("a shared-folder refusal restores the draft and asks the warning again", async () => {
+  const rejections = [], actions = [];
+  let refused = 0;
+  const refusal = Object.assign(new Error("Other agents are working in this folder."),
+    { errorCode: "vivary_code_shared_folder_active", statusCode: 409 });
+  const adapter = createLocalCodeChatAdapter({
+    context: { engineRef: { current: "codex-cli" }, modelRef: { current: "fixture-model" } },
+    call: async (...args) => { actions.push(args); throw refusal; },
+    projectId: "project-one", draftThreadId: "original-draft-id", runIdRef: { current: null },
+    engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
+      modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
+    onKnownRejected: async submitId => { rejections.push(submitId); },
+    acknowledgeSharedFolder: () => false, onSharedFolderRefused: () => { refused += 1; },
+    onStarted: () => {}, onStreaming: () => {}, onSettled: () => {},
+  });
+  await assert.rejects(async () => {
+    for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Edit the parser" }] }],
+      runConfig: { custom: { agentNativeQueuedMessageId: "submit-shared" } }, abortSignal: new AbortController().signal })) {}
+  }, { errorCode: "vivary_code_shared_folder_active" });
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0][1].acknowledgeSharedFolder, false);
+  assert.deepEqual(rejections, ["submit-shared"], "the draft is restored");
+  assert.equal(refused, 1, "the warning asks again");
+});
+
 test("Code local validation restores a known rejected draft before any owner action", async () => {
   const rejections = [], actions = [];
   const adapter = adapterForTest(rejections, actions);

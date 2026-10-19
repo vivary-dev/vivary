@@ -6705,8 +6705,9 @@ Several Code conversations can work at once, in one project or in different
 projects, with Claude Code and Codex side by side. The strip at the top lists
 each running conversation with its own requests and Stop. Before you send in a
 folder where another conversation's agent is working, Vivary shows a warning.
-Choose **Proceed** to work there anyway, or **Use another folder** to open a
-separate folder or a Git worktree you made. The warning shows a
+Choose **Proceed** to work there anyway, **Use another folder** to open a
+separate folder or a Git worktree you made, or **Cancel** to close the warning
+and keep your draft. The warning shows a
 `git worktree add` command you can copy. This prerelease artifact predates the
 switch and concurrent conversations. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
@@ -7769,7 +7770,7 @@ after 750 ms or when the owner presses a key or the pointer. In
 the composer locks only while this conversation's run works, New conversation
 and history stay available, and Stop targets the selected conversation's run.
 When other conversations work in this folder, the composer slot shows the
-warning, those conversations with Open, Proceed, Use another folder, and a
+warning, those conversations with Open, Proceed, Use another folder, Cancel, and a
 copyable `git worktree add ../<folder>-worktree` command. Use another folder is
 the existing Open folder flow, now in
 [`open-project-folder.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/open-project-folder.ts),
@@ -8372,6 +8373,17 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
+three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape
+close the warning without acknowledging it, send nothing, keep the draft, and
+return focus to the composer. A later send meets the server's
+`vivary_code_shared_folder_active` refusal, which restores the draft and opens
+the warning again through the adapter's `onSharedFolderRefused`. Isolation stays
+optional. `VIVARY_OWNER_ACTIONS` also names `vivary-conversation-archive` for the
+conversation inbox. Tests: the warning case in `native-chat-components.test.mjs`,
+the refusal case in `local-code-chat-adapter.test.mjs`, and a second send into a
+working conversation in `code-concurrency.test.ts`.
 
 2026-10-19 Shared route hold for opening a conversation in another project, on PR
 #261. `CodeRunControl.openConversation` selected the project and then navigated,
