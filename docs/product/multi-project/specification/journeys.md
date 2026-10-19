@@ -152,6 +152,36 @@ stateDiagram-v2
   Stopping --> Uncertain: cleanup unverified
 ```
 
+### Concurrent Code conversations
+
+Implemented for Code conversations ([HLDD](../../../ARCHITECTURE.md#concurrent-code-conversations)). The chart follows one conversation. Every other conversation, in this project or another, keeps its own copy of these states, its own requests and its own Stop, so acting on one never changes another. "Busy" means this conversation's own turn.
+
+```mermaid
+stateDiagram-v2
+  state "Shared-folder warning" as Warning
+  state "Proceeded in this folder" as Proceeded
+  state "Separate folder or worktree" as Elsewhere
+  state "Awaiting tool approval" as AwaitingToolApproval
+  [*] --> Idle
+  Idle --> Busy: send, no other agent in an overlapping folder
+  Idle --> Warning: another agent works in an overlapping folder
+  Warning --> Proceeded: Proceed
+  Warning --> Elsewhere: Use another folder
+  Warning --> Idle: the other agents finish
+  Proceeded --> Warning: another agent starts here
+  Proceeded --> Busy: send with acknowledgement
+  Elsewhere --> [*]
+  Busy --> Busy: second send refused
+  Busy --> AwaitingToolApproval: Codex request for this run
+  AwaitingToolApproval --> Busy: this run's request answered
+  Busy --> Stopping: this run's Stop
+  AwaitingToolApproval --> Stopping: this run's Stop
+  Stopping --> Idle: stopped
+  Busy --> Idle: turn ends
+```
+
+A cleanup refusal after a failed stop still holds every Code send on the host, as the Cancellation chart's Uncertain state shows. Runs already working keep their requests and Stop.
+
 This is a user-visible normalized state model, not a replacement Native lifecycle table. Map existing owner states without fabricating transitions. Approval shows the request, project, harness and effect scope. Denial starts nothing. Each follow-up follows its actual approval policy. Runtime completion and workflow acceptance remain separate. A terminal denied outcome belongs in its conversation rather than a permanent banner over unrelated work.
 
 Closing a browser does not cancel already approved background work when the selected mode supports it. Reopening shows the actual state and result. Closing panels never removes the activity/Stop path. A host restart must not reinterpret pending work as approved or blindly replay a possibly completed operation.

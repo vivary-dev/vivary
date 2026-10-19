@@ -13,7 +13,8 @@ import type {
 const PRE_APPEND_CODE_REJECTIONS = new Set([
   "vivary_code_engine_changed", "vivary_code_runtime_unavailable", "vivary_code_models_unavailable",
   "vivary_code_model_changed", "vivary_code_model_unsupported", "vivary_code_project_changed",
-  "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_run_active",
+  "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_conversation_active",
+  "vivary_code_shared_folder_active",
   "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
   "vivary_code_cleanup_required",
   "vivary_linked_history_unavailable",
@@ -31,6 +32,8 @@ type LocalCodeChatOptions = {
   draftThreadId: string;
   runIdRef: { current: string | null };
   engines: () => VivaryCodeState["engines"];
+  /** The owner chose Proceed on the shared-folder warning for this conversation. */
+  acknowledgeSharedFolder: () => boolean;
   onStarted: (runId: string) => void;
   onStreaming: (streaming: boolean) => void;
   onSettled: () => void;
@@ -92,7 +95,8 @@ export function createLocalCodeChatAdapter(
         const starting = options.runIdRef.current === null;
         if (starting) {
           const state = scopedState(await send({ projectId, message, model, engine: engine.engine,
-            draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined }));
+            draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined,
+            acknowledgeSharedFolder: options.acknowledgeSharedFolder() }));
           if (state.error) throw new Error(state.error);
           if (!state.run) throw new Error("The agent did not return a conversation.");
           options.runIdRef.current = state.run.id;
@@ -120,7 +124,8 @@ export function createLocalCodeChatAdapter(
           sendFollowUp: async ({ runId, prompt, mode }) => {
             if (mode === "queued") return { ok: false, error: "Wait for the current response or stop it before sending another message." };
             const state = scopedState(await send({ projectId, runId, message: prompt, model, engine: engine.engine,
-              draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined }));
+              draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined,
+              acknowledgeSharedFolder: options.acknowledgeSharedFolder() }));
             return { ok: !state.error && !!state.run, run: state.run, error: state.error };
           },
           control: async ({ runId, command }) => {

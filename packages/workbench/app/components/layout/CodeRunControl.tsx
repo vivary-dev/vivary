@@ -1,12 +1,20 @@
 import { CodexRequestFields, requestTitle, object } from "./CodexRequestFields";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { actionErrorMessage, useActionQuery } from "@agent-native/core/client/hooks";
 import { Button } from "@agent-native/toolkit/ui";
 import { useNativeActionCaller } from "../../lib/native-actions";
 import { useProjects } from "../projects/ProjectContext";
-import type { VivaryCodeHostState } from "../../../server/local-code-agent";
+import type { VivaryCodeActiveRun, VivaryCodeHostState, VivaryCodePendingApproval } from "../../../server/local-code-agent";
 
+function failureMessage(failure: unknown): string {
+  return actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The request could not finish. Try again.");
+}
+
+/**
+ * The host strip. It lists each running Code conversation with its own approvals and its own Stop, so acting on one
+ * never answers or stops another.
+ */
 export function CodeRunControl() {
   const status = useActionQuery<VivaryCodeHostState>("vivary-code-state", { scope: "host" }, {
     refetchInterval: 1000, retry: false,
@@ -14,52 +22,22 @@ export function CodeRunControl() {
   const { call, ready, retrySession } = useNativeActionCaller();
   const { selectProject, catalog } = useProjects();
   const navigate = useNavigate();
-  const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
-  const active = status.data?.activeRun;
-  const pending = status.data?.pendingApproval;
-  const recent = status.data?.recentRun;
   const cleanup = status.data?.cleanup;
+  // Issue #121. A run stays active while its failed stop's own check runs. The strip shows that check in its place.
+  const runs = (status.data?.activeRuns ?? []).filter(run => !(cleanup?.checking && cleanup.run?.id === run.id));
+  const recent = status.data?.recentRun;
   // Issue #121. Which cleanup choice is running.
   const [resolving, setResolving] = useState<"end" | "continue" | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [content, setContent] = useState<Record<string, unknown>>({});
-  useEffect(() => {
-    setAnswers({}); setError(undefined);
-    const fields = object(object(pending?.params.requestedSchema).properties);
-    const values: Record<string, unknown> = {};
-    for (const [key, raw] of Object.entries(fields)) {
-      const field = object(raw);
-      if (field.default != null) values[key] = field.default;
-      else if (field.type === "boolean") values[key] = false;
-      else if (field.type === "array") values[key] = [];
-    }
-    setContent(values);
-  }, [pending?.requestId]);
-  const current = pending ?? active;
-  const currentRunId = pending?.runId ?? active?.id ?? recent?.id;
-  const projectLabel = current?.projectId
-    ? catalog?.projects.find(project => project.projectId === current.projectId)?.displayName ?? "Unavailable project"
+  const projectLabel = (projectId: string | null) => projectId
+    ? catalog?.projects.find(project => project.projectId === projectId)?.displayName ?? "Unavailable project"
     : "Personal workspace";
 
-  async function decide(decision: "approve" | "deny" | "stop") {
-    if (!current || working) return;
-    setWorking(true);
+  async function settle(action: Promise<unknown>) {
     setError(undefined);
-    try {
-      if (decision === "stop" && active) {
-        await call("vivary-code-stop", { runId: active.id, projectId: active.projectId ?? undefined });
-      } else if (pending && decision !== "stop") {
-        await call(decision === "approve" ? "vivary-code-approve" : "vivary-code-deny", {
-          runId: pending.runId, requestId: pending.requestId, projectId: pending.projectId ?? undefined,
-          ...(decision === "approve" ? { answers, content } : {}),
-        });
-      }
-      await status.refetch();
-    } catch (failure) {
-      setError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The request could not finish. Try again."));
-      await status.refetch();
-    } finally { setWorking(false); }
+    try { await action; }
+    catch (failure) { setError(failureMessage(failure)); }
+    finally { await status.refetch(); }
   }
 
   // Issue #121. The buttons keep focus while a choice or a check runs, so they ignore clicks instead of disabling.
@@ -75,43 +53,34 @@ export function CodeRunControl() {
       if (!next.cleanup) document.getElementById("workbench-content")?.focus();
       await status.refetch();
     } catch (failure) {
-      setError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The request could not finish. Try again."));
+      setError(failureMessage(failure));
       await status.refetch();
     } finally { setResolving(null); }
   }
 
-  async function openConversation(target = current && currentRunId ? { id: currentRunId, projectId: current.projectId } : null) {
-    if (!target) return;
+  async function openConversation(target: { id: string; projectId: string | null }) {
     setError(undefined);
     if (!await selectProject(target.projectId)) {
-      setError(pending || active ? "The project is unavailable. You can still deny or stop its work here." : "The project is unavailable. Its conversation history is retained.");
+      setError(runs.some(run => run.id === target.id) ? "The project is unavailable. You can still deny or stop its work here." : "The project is unavailable. Its conversation history is retained.");
       return;
     }
     navigate("/?run=" + encodeURIComponent(target.id));
   }
 
-  if (!current && !cleanup && !status.error) return null;
+  if (!runs.length && !cleanup && !status.error) return null;
   const cleanupHeld = !ready || resolving !== null || cleanup?.checking === true;
-  // Issue #121. The run stays active while its failed stop's own check runs, and the owner sees that check, not Stop.
-  const stopChecking = Boolean(active && cleanup?.checking && cleanup.run?.id === active.id);
+  const cleanupRun = cleanup?.run;
   return <section aria-label="Agent work" className="shrink-0 border-b px-4 py-3 text-sm">
-    {pending ? <div className="flex max-h-[60vh] flex-col gap-3 overflow-auto rounded-lg bg-black/5 p-3 dark:bg-black/20" role="region" aria-label="Codex request">
-      <h2 className="font-semibold">{requestTitle(pending.method)}</h2>
-      <p className="text-xs text-muted-foreground">{pending.workspaceLabel} · Codex</p>
-      <CodexRequestFields key={pending.requestId} request={pending} answers={answers} content={content} setAnswers={setAnswers} setContent={setContent} />
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={!ready || working} onClick={() => void decide("approve")}>{pending.method.includes("requestApproval") ? "Allow once" : "Continue"}</Button>
-        <Button size="sm" variant="outline" disabled={!ready || working} onClick={() => void decide("deny")}>Decline</Button>
-        <Button size="sm" variant="outline" disabled={!ready || working} onClick={() => void decide("stop")}>Stop</Button>
-        <Button size="sm" variant="ghost" onClick={() => void openConversation()}>Open conversation</Button>
-      </div>
-    </div> : active && !stopChecking ? <div className="flex flex-wrap items-center gap-2">
-      <span className="min-w-0 flex-1" role="status">Agent working in the background in {projectLabel}: {active.title}</span>
-      <Button variant="ghost" size="sm" onClick={() => void openConversation()}>Open conversation</Button>
-      <Button variant="outline" size="sm" disabled={!ready || working} onClick={() => void decide("stop")} aria-label="Stop active run">
-        {working ? "Stopping…" : "Stop"}
-      </Button>
-    </div> : cleanup ? <div className="flex flex-col gap-2" role="region" aria-label="Leftover coding processes">
+    {runs.length > 0 && <ul className="flex max-h-[60vh] flex-col gap-2 overflow-auto" aria-label="Running conversations">
+      {runs.map(run => <ActiveRunItem key={run.id} run={run} projectLabel={projectLabel(run.projectId)} ready={ready}
+        onOpen={() => void openConversation(run)}
+        onStop={() => settle(call("vivary-code-stop", { runId: run.id, projectId: run.projectId ?? undefined }))}
+        onDecide={(request, decision) => settle(call(decision.allow ? "vivary-code-approve" : "vivary-code-deny", {
+          runId: request.runId, requestId: request.requestId, projectId: request.projectId ?? undefined,
+          ...(decision.allow ? { answers: decision.answers, content: decision.content } : {}),
+        }))} />)}
+    </ul>}
+    {cleanup ? <div className={`flex flex-col gap-2${runs.length ? " mt-3" : ""}`} role="region" aria-label="Leftover coding processes">
       <h2 className="font-semibold">{cleanup.heading}</h2>
       {cleanup.remaining.length > 0 && <ul className="max-h-32 overflow-auto break-words">
         {cleanup.remaining.map(leftover => <li key={leftover.pid}>
@@ -127,22 +96,85 @@ export function CodeRunControl() {
         </Button>}
         {cleanup.canContinue && <Button size="sm" variant="outline" aria-disabled={cleanupHeld || undefined}
           onClick={() => void resolveCleanup("continue")}>{resolving === "continue" ? "Continuing…" : "Continue anyway"}</Button>}
-        {cleanup.run && <Button variant="ghost" size="sm" onClick={() => void openConversation(cleanup.run)}>Open conversation</Button>}
+        {cleanupRun && <Button variant="ghost" size="sm" onClick={() => void openConversation(cleanupRun)}>Open conversation</Button>}
       </div>
-    </div> : recent ? <div className="flex flex-wrap items-center gap-2">
+    </div> : !runs.length && recent ? <div className="flex flex-wrap items-center gap-2">
       <span className="min-w-0 flex-1" role="status">{recent.phase === "approval-denied"
         ? "Request denied. No agent work started" : recent.phase === "interrupted"
           ? "Agent work was interrupted" : recent.status === "completed"
             ? "Agent work completed" : recent.status === "errored"
-              ? "Agent work failed" : "Agent work stopped"} in {projectLabel}: {recent.title}</span>
-      <Button variant="ghost" size="sm" onClick={() => void openConversation()}>Open conversation</Button>
-    </div> : <div className="flex items-center gap-2">
+              ? "Agent work failed" : "Agent work stopped"} in {projectLabel(recent.projectId)}: {recent.title}</span>
+      <Button variant="ghost" size="sm" onClick={() => void openConversation(recent)}>Open conversation</Button>
+    </div> : !runs.length && <div className="flex items-center gap-2">
       <span role="status">Agent status could not be loaded.</span>
       <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>Retry</Button>
     </div>}
     {!ready && <Button size="sm" variant="outline" onClick={retrySession}>Retry session</Button>}
     {error && <p className="mt-2 text-destructive" role="alert">{error}</p>}
   </section>;
+}
+
+type ApprovalDecision = { allow: false } | { allow: true; answers: Record<string, string[]>; content: Record<string, unknown> };
+
+/** One running conversation: what it is, where, its pending requests, and a Stop that ends only this run. */
+function ActiveRunItem({ run, projectLabel, ready, onOpen, onStop, onDecide }: {
+  run: VivaryCodeActiveRun;
+  projectLabel: string;
+  ready: boolean;
+  onOpen: () => void;
+  onStop: () => Promise<void>;
+  onDecide: (request: VivaryCodePendingApproval, decision: ApprovalDecision) => Promise<void>;
+}) {
+  const [stopping, setStopping] = useState(false);
+  return <li className="flex flex-col gap-2" aria-label={run.title}>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-0 flex-1" role="status">{run.stopping ? "Stopping" : "Agent working"} in {projectLabel} ({run.engineLabel}): {run.title}</span>
+      <Button variant="ghost" size="sm" onClick={onOpen}>Open conversation</Button>
+      <Button variant="outline" size="sm" disabled={!ready || stopping || run.stopping}
+        aria-label={`Stop ${run.title}`} onClick={() => {
+          setStopping(true);
+          void onStop().finally(() => setStopping(false));
+        }}>{stopping || run.stopping ? "Stopping…" : "Stop"}</Button>
+    </div>
+    {run.pendingApprovals.map(request => <ApprovalCard key={request.requestId} request={request} ready={ready}
+      onDecide={decision => onDecide(request, decision)} />)}
+  </li>;
+}
+
+/** A Codex request of one run. Its answers stay with this card, so two pending requests never share input. */
+function ApprovalCard({ request, ready, onDecide }: {
+  request: VivaryCodePendingApproval;
+  ready: boolean;
+  onDecide: (decision: ApprovalDecision) => Promise<void>;
+}) {
+  const [working, setWorking] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [content, setContent] = useState<Record<string, unknown>>(() => {
+    const values: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(object(object(request.params.requestedSchema).properties))) {
+      const field = object(raw);
+      if (field.default != null) values[key] = field.default;
+      else if (field.type === "boolean") values[key] = false;
+      else if (field.type === "array") values[key] = [];
+    }
+    return values;
+  });
+  function decide(decision: ApprovalDecision) {
+    if (working) return;
+    setWorking(true);
+    void onDecide(decision).finally(() => setWorking(false));
+  }
+  return <div className="flex flex-col gap-3 rounded-lg bg-black/5 p-3 dark:bg-black/20" role="region"
+    aria-label={`Codex request: ${request.title}`}>
+    <h2 className="font-semibold">{requestTitle(request.method)}</h2>
+    <p className="text-xs text-muted-foreground">{request.workspaceLabel} · Codex · {request.title}</p>
+    <CodexRequestFields request={request} answers={answers} content={content} setAnswers={setAnswers} setContent={setContent} />
+    <div className="flex flex-wrap gap-2">
+      <Button size="sm" disabled={!ready || working} onClick={() => decide({ allow: true, answers, content })}>
+        {request.method.includes("requestApproval") ? "Allow once" : "Continue"}</Button>
+      <Button size="sm" variant="outline" disabled={!ready || working} onClick={() => decide({ allow: false })}>Decline</Button>
+    </div>
+  </div>;
 }
 
 /** Issue #121. The server marks commands with backticks. Code spans wrap anywhere, so a long command stays on screen. */

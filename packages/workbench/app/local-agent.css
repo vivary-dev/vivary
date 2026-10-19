@@ -47,3 +47,9 @@
   .local-agent-heading p { max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .local-agent-runtime-setup, .local-agent-notice { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
 }
+/* The shared-folder warning stacks its warning, the working conversations, and the isolation choices. */
+.local-agent-notice.local-agent-shared-folder { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 8px; }
+.local-agent-shared-folder ul { display: flex; flex-direction: column; gap: 2px; }
+.local-agent-shared-folder li, .local-agent-shared-folder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.local-agent-shared-folder code { overflow-wrap: anywhere; font-size: 12px; }
+.local-agent-shared-folder-hint { color: hsl(var(--muted-foreground)); }

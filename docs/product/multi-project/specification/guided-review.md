@@ -38,7 +38,7 @@ Jeff accepted guide snapshot `e86d06ed592a2d3c` on 2026-09-14 through his submit
 
 Later on 2026-09-14, Jeff explicitly clarified that one central conversation does not mean one total conversation for a project. Projects must allow multiple chats with independent history and context. Several threads may eventually run at the same time.
 
-This intent is settled and needs no additional design vote. The workspace must show activity and approvals for each thread and protect shared files from conflicting writes. The current runtime still permits one active root conversation run at a time, so concurrent execution remains an implementation gap. The product must show that limit accurately until runtime support changes.
+This intent is settled and needs no additional design vote. The workspace must show activity and approvals for each thread and protect shared files from conflicting writes. Since 2026-10-19 several Code conversations run at once, each with its own activity, approvals and Stop, and a send beside another agent in an overlapping folder shows a warning (issue #228). Conflicting writes to shared files are not controlled, a risk the owner accepted.
 
 ### Accepted clarification: harness capabilities and permission boundaries
 

@@ -220,14 +220,13 @@ process.send({type:"vivary:code-worker:ready"});
       assert.equal(afterRefusal.lastPrepared!.entries, 3, "preparation is recorded even though the send was refused");
       assert.deepEqual(afterRefusal.lastAccepted, receipt, "the accepted receipt is unchanged");
       assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.id), usersBefore);
-      const slotId = "selected-host-refusal";
       try {
         await assert.rejects(send({ loadLinkedContext: async () => {
           const prepared = await loadLinkedContext();
-          // Hold the existing host admission seam while this send is awaiting preparation.
-          host.activeRuns.set(slotId, { runId: slotId }); return prepared;
-        } }), { errorCode: "vivary_code_run_active" });
-      } finally { host.activeRuns.delete(slotId); }
+          // Another send claims this conversation while this one awaits preparation, so the final claim refuses.
+          host.activeRuns.set(runId, { stopReason: null }); return prepared;
+        } }), { errorCode: "vivary_code_conversation_active" });
+      } finally { host.activeRuns.delete(runId); }
       assert.deepEqual((await service.load(actor, project.projectId, linked.target))!.lastAccepted, receipt);
       assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
       assert.equal(host.activeRuns.size, 0);

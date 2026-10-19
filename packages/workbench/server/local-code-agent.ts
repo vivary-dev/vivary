@@ -28,7 +28,9 @@ import { getCodexModels, type CodexModelCatalog } from "./codex-models";
 import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
   claudeCodeModelChoices, type ClaudeCodeModelId } from "../shared/claude-models";
 import { codexSessionLogLifecycle } from "./codex-session-process";
+import { canonicalFolder, foldersOverlap } from "./folder-overlap";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
+import { SHARED_FOLDER_WARNING } from "../shared/code-concurrency";
 
 import {
   WINDOWS_SCAN_FAILURES, type WindowsScanFailure,
@@ -73,6 +75,8 @@ type ActiveRun = {
   execution: Promise<void> | null;
   stopReason: "shutdown" | "user" | null;
   workspace: VivaryCodeWorkspace;
+  /** The workspace folder's real path, compared with other runs' folders for the shared-folder warning. */
+  canonicalRoot: string;
   permissionMode: CodePermissionMode;
   requests: Map<string, { request: CodexActionRequest; resolve: (response: Record<string, unknown>) => void }>;
 };
@@ -148,15 +152,32 @@ export type VivaryCodeCleanupView = {
   run: { id: string; title: string; projectId: string | null } | null;
 };
 
+/** One of the caller's running Code conversations. Each has its own approvals and Stop, keyed by its run ID. */
+export type VivaryCodeActiveRun = Pick<CodeAgentRunRecord, "id" | "title" | "status" | "phase"> & {
+  projectId: string | null;
+  workspaceLabel: string;
+  engineLabel: string;
+  model: string;
+  /** Stop was requested and the run has not ended yet. */
+  stopping: boolean;
+  pendingApprovals: VivaryCodePendingApproval[];
+};
+
+/** An active run, any owner's, whose folder overlaps the workspace. Another owner's run shows no title. */
+export type VivaryCodeFolderRun = { id: string; title: string | null };
+
 export type VivaryCodeHostState = {
-  activeRun: { id: string; title: string; projectId: string | null } | null;
-  pendingApproval: VivaryCodePendingApproval | null;
+  /** The caller's running conversations, in the order their turns started. Several can run at once, in any projects. */
+  activeRuns: VivaryCodeActiveRun[];
   recentRun: VivaryCodeRecentRun | null;
+  /** Whether any of the caller's conversations is running. `VivaryCodeState` narrows it to the selected one. */
   busy: boolean;
   cleanup: VivaryCodeCleanupView | null;
 };
 
 export type VivaryCodeState = VivaryCodeHostState & {
+  /** Active runs whose folder overlaps this workspace's folder, including the selected conversation's own run. */
+  folderRuns: VivaryCodeFolderRun[];
   projectId: string | null;
   workspaceLabel: string;
   engineLabel: string;
@@ -813,13 +834,15 @@ export async function getVivaryCodeHostState(
 function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
   const owned = runs.filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
-  const active = owned.find(run => activeRuns.has(run.id));
-  const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
+  const ownedById = new Map(owned.map(run => [run.id, run]));
+  // Start order, which stays put while the runs write their records.
+  const active = [...activeRuns].flatMap(([runId, activeRun]) => {
+    const run = ownedById.get(runId);
+    return run ? [activeRunView(run, activeRun)] : [];
+  });
   const recent = owned.find(run => !activeRuns.has(run.id));
   return {
-    activeRun: active ? { id: active.id, title: active.title, projectId: metadataString(active, "projectId") } : null,
-    // The card shows a redacted copy. The stored request stays as Codex sent it, so the answer matches it.
-    pendingApproval: pending && active ? { ...redactCredentialsInValue(pending), runId: active.id, title: active.title, projectId: metadataString(active, "projectId"), workspaceLabel: activeRuns.get(active.id)!.workspace.label } : null,
+    activeRuns: active,
     recentRun: recent ? {
       id: recent.id,
       title: recent.title,
@@ -827,10 +850,38 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
       phase: recent.phase,
       projectId: metadataString(recent, "projectId"),
     } : null,
-    busy: activeRuns.size > 0,
+    busy: active.length > 0,
     // Every user of the host sees the refusal, because it refuses them all.
     cleanup: hostState.cleanup ? cleanupView(hostState.cleanup, runs, ownerEmail, orgId) : null,
   };
+}
+
+function activeRunView(run: CodeAgentRunRecord, active: ActiveRun): VivaryCodeActiveRun {
+  const projectId = metadataString(run, "projectId");
+  const workspaceLabel = active.workspace.label;
+  return {
+    // A run whose record already settled reads as running until its worker ends, as in `toRunSummary`.
+    id: run.id, title: run.title, status: isActiveCodeAgentRun(run) ? run.status : "running", phase: run.phase,
+    projectId, workspaceLabel,
+    engineLabel: engineLabelFromRun(run), model: modelFromRun(run), stopping: active.stopReason !== null,
+    // The card shows a redacted copy. The stored request stays as Codex sent it, so the answer matches it.
+    pendingApprovals: [...active.requests.values()].map(({ request }) => ({
+      ...redactCredentialsInValue(request), runId: run.id, title: run.title, projectId, workspaceLabel })),
+  };
+}
+
+/**
+ * Active runs, any owner's, whose folder overlaps `root`. Only the caller's runs show a title. A run whose stop is still
+ * ending counts, because its coding process can still change files.
+ */
+function runsInFolder(root: string, ownerEmail: string, orgId?: string): VivaryCodeFolderRun[] {
+  const found: VivaryCodeFolderRun[] = [];
+  for (const [runId, active] of activeRuns) {
+    if (!foldersOverlap(active.canonicalRoot, root)) continue;
+    const owned = active.ownerEmail === ownerEmail && active.orgId === orgId;
+    found.push({ id: runId, title: owned ? getCodeAgentRunRecord(runId)?.title ?? null : null });
+  }
+  return found;
 }
 
 export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: VivaryCodeReadScope | undefined,
@@ -874,6 +925,8 @@ export async function getVivaryCodeState(
 ): Promise<VivaryCodeState> {
   const workspace = selectedWorkspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
+  const folder = "root" in workspace ? workspace.root : modelDiscoveryRoot;
+  const folderRoot = folder ? await canonicalFolder(folder) : null;
   let runs = ownedRuns(ownerEmail, orgId, workspace);
   let selected = runId
     ? requireOwnedRun(runId, ownerEmail, orgId, workspace)
@@ -927,6 +980,9 @@ export async function getVivaryCodeState(
 
   return {
     ...host,
+    // Per conversation: the selected one is running. Other conversations never lock its composer.
+    busy: !!selected && activeRuns.has(selected.id),
+    folderRuns: folderRoot ? runsInFolder(folderRoot, ownerEmail, orgId) : [],
     projectId: workspace.projectId ?? null,
     workspaceLabel: workspace.label,
     defaultEngine: VIVARY_CODE_DEFAULT_ENGINE,
@@ -969,12 +1025,17 @@ export async function sendVivaryCodeMessage(input: {
   recordProjectContext?: (load: ProjectContextLoad) => void;
   /** Revalidate the frozen link after runtime discovery, before claiming the host. */
   loadLinkedContext?: () => Promise<PreparedLinkedContext | null>;
+  /** The sender saw SHARED_FOLDER_WARNING and chose to work beside the other agents in this folder. */
+  acknowledgeSharedFolder?: boolean;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
+  const canonicalRoot = await canonicalFolder(workspace.root);
   // Issue #121. A send is when a refusal matters, so it waits for a check. The host-state polls never start one.
   if (hostState.cleanup) await (hostState.cleanupCheck ?? recheckVivaryCodeCleanup()).catch(() => undefined);
   assertCodeHostAvailable();
+  // Refuse early, before runtime probes. The same checks repeat at the claim below, after every await.
+  assertConversationCanStart(input, canonicalRoot);
 
   const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
   if (existing?.metadata?.linkedCreationPending || (existing?.metadata?.linkedHistoryId && !input.loadLinkedContext)) {
@@ -1041,8 +1102,10 @@ export async function sendVivaryCodeMessage(input: {
     }
   }
 
-  // Claim the host slot synchronously after all runtime and project checks.
+  // Claim this conversation's slot synchronously after all runtime and project checks. No await separates these checks
+  // from `activeRuns.set` in startVivaryCodeRun, so of two simultaneous sends into one conversation only one starts.
   assertCodeHostAvailable();
+  assertConversationCanStart(input, canonicalRoot);
   // A switch can land while this send awaits its checks. Launch only the route the record still names.
   if (existing) {
     const current = getCodeAgentRunRecord(existing.id);
@@ -1097,7 +1160,7 @@ export async function sendVivaryCodeMessage(input: {
     metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
-    ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, permissionMode });
+    ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
 }
 
@@ -1246,6 +1309,7 @@ function startVivaryCodeRun(input: {
   ownerEmail: string;
   orgId?: string;
   workspace: VivaryCodeWorkspace;
+  canonicalRoot: string;
   permissionMode: CodePermissionMode;
 }): void {
   const controller = new AbortController();
@@ -1256,6 +1320,7 @@ function startVivaryCodeRun(input: {
     orgId: input.orgId,
     stopReason: null,
     workspace: input.workspace,
+    canonicalRoot: input.canonicalRoot,
     permissionMode: input.permissionMode,
     requests: new Map(),
   };
@@ -1641,6 +1706,13 @@ function isOwnedIdentity(
     && metadataString(run, "orgId") === (orgId ?? null);
 }
 
+/**
+ * Refusals that apply to every send on the host. Issue #121's cleanup refusal stays host-wide even though runs are
+ * concurrent: its target is a process group or a PID set, not a folder, so Vivary cannot tell which folders leftover
+ * processes can reach (a `yolo` run is not confined to its workspace), and a refusal that could not scan lists no
+ * processes at all. The strip and `resolveVivaryCodeCleanup` also act on one refusal at a time, the oldest. Runs that
+ * are already working continue, with their approvals and Stop.
+ */
 function assertCodeHostAvailable(): void {
   if (projectReconnectionPending()) {
     fail("Project reconnection is in progress. Retry this coding request after it finishes.", {
@@ -1653,12 +1725,39 @@ function assertCodeHostAvailable(): void {
   if (hostState.cleanup) {
     fail(cleanupRefusalMessage(hostState.cleanup), { errorCode: "vivary_code_cleanup_required", statusCode: 409 });
   }
-  if (activeRuns.size > 0) {
-    fail("A Vivary coding request is active or waiting for approval. Open it, deny it, or stop it.", {
-      errorCode: "vivary_code_run_active",
-      statusCode: 409,
+}
+
+/**
+ * Conversations run concurrently, in one project or many, with Claude Code and Codex side by side. One conversation
+ * runs one turn at a time, because a second would drive the same provider session. Another run in an overlapping folder
+ * refuses until the sender acknowledges SHARED_FOLDER_WARNING. The server enforces it, so a Remote access client cannot
+ * skip the warning.
+ */
+function assertConversationCanStart(input: { runId?: string; ownerEmail: string; orgId?: string;
+  acknowledgeSharedFolder?: boolean }, canonicalRoot: string): void {
+  const own = input.runId ? activeRuns.get(input.runId) : undefined;
+  if (own) {
+    fail(own.stopReason ? "This conversation is still stopping. Send again after it stops."
+      : "This conversation is working. Wait for it to finish, or stop it, before sending another message.", {
+      errorCode: "vivary_code_conversation_active", statusCode: 409,
     });
   }
+  if (input.acknowledgeSharedFolder) return;
+  const others = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId);
+  if (others.length) {
+    fail(`${SHARED_FOLDER_WARNING} ${folderRunsSentence(others)}`, {
+      errorCode: "vivary_code_shared_folder_active", statusCode: 409,
+    });
+  }
+}
+
+/** Names the caller's conversations working in the folder and counts any other owner's. */
+function folderRunsSentence(runs: readonly VivaryCodeFolderRun[]): string {
+  const named = runs.flatMap(run => run.title === null ? [] : [`"${run.title}"`]);
+  const unnamed = runs.length - named.length;
+  const parts = [...named, ...unnamed ? [`${unnamed} conversation${unnamed === 1 ? "" : "s"} of another user`] : []];
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+  return `Working in this folder: ${list}.`;
 }
 
 export function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {

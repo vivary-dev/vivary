@@ -12,6 +12,7 @@ import {
 } from "./local-root-provider.mjs";
 import { getLocalProjectReconnectionService } from "./project-services.mjs";
 import { claimProjectReconnection } from "./project-reconnection-admission.mjs";
+import { canonicalFolderSync, foldersOverlap } from "./folder-overlap.ts";
 import { managedProjectDataDirectory } from "./managed-projects.mjs";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
@@ -367,16 +368,27 @@ export async function previewManagedProjectReconnection(context, input, dependen
   }
 }
 
-function hasVivaryCodeHostActivity() {
+/**
+ * Whether a Code run that can use this project's folder is active: a run of the project, or a run whose folder
+ * overlaps `folder` when it is known. Runs in other folders keep working while this folder reconnects.
+ */
+function hasVivaryCodeActivity(projectId, folder) {
+  const usesFolder = (runProjectId, root) => runProjectId === projectId
+    || (folder !== undefined && foldersOverlap(root, folder));
   const host = globalThis[Symbol.for("vivary.workbench.code-host")];
-  if (host?.activeRuns instanceof Map && host.activeRuns.size > 0) return true;
+  if (host?.activeRuns instanceof Map) {
+    for (const active of host.activeRuns.values()) {
+      if (usesFolder(active.workspace.projectId, active.canonicalRoot)) return true;
+    }
+  }
   return listCodeAgentRunRecords("vivary-local-code").some(run =>
-    run.metadata?.app === "vivary-workbench-local-code" && isActiveCodeAgentRun(run));
+    run.metadata?.app === "vivary-workbench-local-code" && isActiveCodeAgentRun(run)
+      && usesFolder(run.metadata?.projectId, canonicalFolderSync(run.cwd)));
 }
 
-function requireIdleCodeHost() {
-  if (hasVivaryCodeHostActivity()) {
-    throw refuse("Stop or deny the active coding request before reconnecting this folder.");
+function requireIdleProjectCode(projectId, folder) {
+  if (hasVivaryCodeActivity(projectId, folder)) {
+    throw refuse("Stop or deny the active coding request in this folder before reconnecting it.");
   }
 }
 
@@ -391,7 +403,8 @@ export async function confirmManagedProjectReconnection(context, input, dependen
   let exec;
   let observed;
   try {
-    requireIdleCodeHost();
+    // The folder path is known after the snapshot loads. The check inside the transaction adds it.
+    requireIdleProjectCode(projectId);
     exec = await (dependencies.createExec ?? localExec)();
     // A completed exact retry is checked before the folder or plan is recalculated.
     const replay = await exec.transaction(async tx => {
@@ -412,9 +425,7 @@ export async function confirmManagedProjectReconnection(context, input, dependen
       const snapshot = await loadSnapshot(tx, owner, projectId);
       const existing = await readReceipt(tx, snapshot, request);
       if (existing) return existing;
-      if (hasVivaryCodeHostActivity()) {
-        throw refuse("Stop or deny the active coding request before reconnecting this folder.");
-      }
+      requireIdleProjectCode(projectId, snapshot.grant.canonicalPath);
       assertReplacement(snapshot, observed);
       assertStillFolderSync(snapshot, managed, observed,
         managedProjectDataDirectory(dependencies));
