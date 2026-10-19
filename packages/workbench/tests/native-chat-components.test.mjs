@@ -58,7 +58,7 @@ import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
 
 export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false, version = "2.1.296", prefill = false,
-  busyNotice = false, startNew = false }) {
+  busyNotice = false, startNew = false, viewingMatch = false }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const choices = [];
   let newConversations = 0;
@@ -69,10 +69,11 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
   const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null };
   const selection = { key: "composer-review", runId: history ? "retained-run" : null, choice: { engine: "claude-cli", model } };
   // The busy case passes the parent's notice and its id, as CodeConversation does when another run is active.
-  const notices = busyNotice ? <div id="fixture-busy-notice" className="local-agent-notice" role="status">
-    <span>An agent is working in another conversation.</span></div> : <div data-testid="preserved-notice">Existing notice</div>;
+  const notices = busyNotice ? <div className="local-agent-notice" role="status">
+    <span id="fixture-busy-notice">An agent is working in another conversation.</span>
+    <button type="button">Open conversation</button></div> : <div data-testid="preserved-notice">Existing notice</div>;
   const props = { state, selection, ownerKey: "fixture-owner", projectId: null, workspaceAvailable: true,
-    previewScope: "fixture", notices, busyNoticeId: busyNotice ? "fixture-busy-notice" : undefined, active, streaming: false,
+    previewScope: "fixture", viewingMatch, notices, busyNoticeId: busyNotice ? "fixture-busy-notice" : undefined, active, streaming: false,
     stopping: false, run: history ? { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model, events: [], status: "completed" } : null,
     onChoice: choice => choices.push(choice), onStarted() {}, onStreaming() {}, onSettled() {},
     onNewConversation() { newConversations += 1; },
@@ -704,8 +705,17 @@ test("Native chat controls", async t => {
       assert.ok(snapshot.text.includes(reason), "the locked selectors show their reason");
       // Both selectors point at that line, and nothing else describes them.
       assert.equal(snapshot.describedBy[0], snapshot.describedBy[1]);
-      assert.deepEqual(snapshot.reasons, [reason + "New conversation"]);
+      assert.deepEqual(snapshot.reasons, [reason]);
       assert.deepEqual(snapshot.newConversation, { disabled: false, clicks: 1 }, "the line starts a new conversation through the parent's action");
+    } finally { server(); }
+  });
+
+  await t.test("a read-only history view leaves out the kept-route line", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({ history: true, viewingMatch: true });
+      assert.doesNotMatch(snapshot.text, /This conversation keeps/);
+      assert.deepEqual(snapshot.describedBy, [null, null]);
     } finally { server(); }
   });
 
@@ -717,6 +727,17 @@ test("Native chat controls", async t => {
       assert.doesNotMatch(snapshot.text, /This conversation keeps/);
       assert.deepEqual(snapshot.describedBy, [null, null]);
       assert.equal(snapshot.newConversation, null);
+    } finally { server(); }
+  });
+
+  await t.test("a retained conversation on a busy host names both reasons", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({ history: true, active: true, busyNotice: true });
+      assert.equal(snapshot.describedBy[0], snapshot.describedBy[1]);
+      assert.equal(snapshot.reasons.length, 2);
+      assert.match(snapshot.reasons[0], /^This conversation keeps Claude Code and .+\. Start a new conversation/);
+      assert.equal(snapshot.reasons[1], "An agent is working in another conversation.");
     } finally { server(); }
   });
 

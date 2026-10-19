@@ -32,9 +32,10 @@
 .file-reading-surface .tiptap p { line-height:1.75; margin:.75rem 0; }
 .file-reading-surface .tiptap ul { list-style:disc; padding-left:1.5rem; }
 .file-reading-surface .tiptap ol { list-style:decimal; padding-left:1.5rem; }
-/* Markdown tables: Toolkit's fixed layout splits columns evenly, and the surface's overflow-wrap:anywhere
-   then breaks words letter by letter. Auto layout sizes columns to their text and wraps at spaces.
-   Code stays on one line. A table wider than the page scrolls inside TipTap's wrapper. */
+/* Markdown tables: display:block made the table its own scroller and left Toolkit's fixed layout
+   without effect. Auto layout sizes columns to their text and wraps at spaces. break-word keeps a
+   column from shrinking below its longest word if an ancestor sets overflow-wrap:anywhere. Code stays
+   on one line. A table wider than the page scrolls inside TipTap's wrapper. */
 .file-reading-surface .tiptap .tableWrapper { overflow-x:auto; }
 .file-reading-surface .tiptap table { table-layout:auto; overflow-wrap:break-word; }
 .file-reading-surface .tiptap table code { white-space:nowrap; }

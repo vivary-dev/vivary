@@ -346,8 +346,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     {error && <div className="local-agent-notice" role="alert">
       <span>{error}</span><Button variant="ghost" size="sm" onClick={() => { void state.refetch(); if (selection?.runId) void selectedState.refetch(); }}>Retry</Button>
     </div>}
-    {otherActiveRun && <div id={busyNoticeId} className="local-agent-notice" role="status">
-      <span>An agent is working in another conversation.</span>
+    {otherActiveRun && <div className="local-agent-notice" role="status">
+      <span id={busyNoticeId}>An agent is working in another conversation.</span>
       <Button variant="ghost" size="sm" onClick={() => {
         if (otherActiveRun.projectId === projectId) selectConversation(otherActiveRun.id);
         else void onOpenActive(otherActiveRun).then(opened => {
@@ -606,8 +606,9 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // A conversation with a run keeps its runtime and model, because its provider session and
   // resume depend on them. The server refuses a change, so the selectors say why they are locked.
   const routeLockId = useId();
-  const keptRoute = props.selection.runId && props.run
-    ? `${selectedEngine?.label ?? props.run.engineLabel} and ${modelLabel(selectedEngine, choice.model)}` : null;
+  const runEngine = props.state.engines.find(engine => engine.engine === props.run?.engine);
+  const keptRoute = props.selection.runId && props.run && !props.viewingMatch
+    ? `${runEngine?.label ?? props.run.engineLabel} and ${modelLabel(runEngine, props.run.model)}` : null;
   const selectorReasonIds = [keptRoute ? routeLockId : null, props.busyNoticeId].filter(Boolean).join(" ") || undefined;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
@@ -716,8 +717,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       {!selectedClaudeModel && choice.engine === "claude-cli" && <div className="local-agent-notice" role="status">
         <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model for a new conversation.</span>
       </div>}
-      {keptRoute && <p id={routeLockId} className="local-agent-route-note">
-        <span>This conversation keeps {keptRoute}. Start a new conversation to use a different runtime or model.</span>
+      {keptRoute && <p className="local-agent-route-note">
+        <span id={routeLockId}>This conversation keeps {keptRoute}. Start a new conversation to use a different runtime or model.</span>
         <Button variant="link" size="sm" disabled={!props.workspaceAvailable} onClick={props.onNewConversation}>New conversation</Button>
       </p>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
