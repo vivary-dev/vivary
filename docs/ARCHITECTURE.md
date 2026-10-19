@@ -1035,6 +1035,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Inbox tests in CI (W5). `test:conversation-inbox` runs the inbox server and
+component tests, and `test:maintained` now includes it, so the maintained workbench
+job covers the inbox. The Conversation inbox section already names both test files.
+Evidence inspected: the new script run, 35 of 35 passing.
+
 2026-10-19 Inbox on a fresh database (W5). The built-app test found that the inbox
 read failed with no `agent_runs` table, which Native creates with its first turn.
 The Conversation inbox section now says run state is skipped until the table exists,
