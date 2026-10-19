@@ -277,6 +277,26 @@ test("continuation is bound to actor, scope and query, caps and cancellation are
   assert.deepEqual(viaGet.results.map(hit => hit.sessionId), ["native-unassigned"]);
 });
 
+test("an older Claude Code reply recorded twice is one match, and the same text in a later turn is another", async () => {
+  const id = "claude-repeated-reply", projectId = "claude-repeat-project";
+  const isolated = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Repeat" });
+  run(id, { projectId });
+  const at = (i: number) => new Date(1700000000000 + i).toISOString();
+  const events = [
+    { id: "repeat-ask", kind: "user", message: "Explain repeatneedle" },
+    { id: "repeat-streamed", kind: "system", message: "The repeatneedle answer.", metadata: { role: "assistant", source: "claude-cli" } },
+    { id: "repeat-final", kind: "system", message: "The repeatneedle answer.", metadata: { role: "assistant", engine: "claude-cli", model: "sonnet" } },
+    { id: "repeat-done", kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } },
+    { id: "repeat-again", kind: "user", message: "Once more" },
+    { id: "repeat-later", kind: "system", message: "The repeatneedle answer.", metadata: { role: "assistant", engine: "claude-cli", model: "sonnet" } },
+  ].map((event, i) => ({ schemaVersion: 1, runId: id, createdAt: at(i), ...event }));
+  await writeFile(codeAgentRunTranscriptPath(id), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const page = await searchChatContent({ ownerEmail: owner, orgId, identity: isolated, codeScope: { ...scope, projectId } },
+    { projectId, query: "repeatneedle", includeArchived: false, unassigned: false });
+  assert.deepEqual(page.results.map(hit => hit.referenceId), ["repeat-ask", "repeat-streamed", "repeat-later"]);
+});
+
 test("continuation after an oversized Code line and a full result page keeps the next complete event", async () => {
   const id = "oversized-code-line";
   const projectId = "oversized-code-project";

@@ -151,8 +151,27 @@ function completedTurnEvents(events: CodeAgentTranscriptEvent[]): CodeAgentTrans
   return kept;
 }
 
+const isAssistantReply = (event: CodeAgentTranscriptEvent) => event.kind === "system" && event.metadata?.role === "assistant";
+
+/**
+ * True when event repeats the assistant reply recorded directly before it. Claude Code conversations recorded before
+ * 2026-10-19 hold every reply twice in a row: once as it streamed and once with the engine and model. Readers keep
+ * the later copy, so an old conversation still counts, quotes and searches each reply once.
+ */
+export function repeatsAssistantReply(previous: CodeAgentTranscriptEvent, event: CodeAgentTranscriptEvent): boolean {
+  return isAssistantReply(previous) && isAssistantReply(event)
+    && previous.metadata?.phase === event.metadata?.phase && previous.metadata?.itemId === event.metadata?.itemId
+    && previous.message.trim() === event.message.trim();
+}
+
 export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryItem[] {
-  return completedTurnEvents(events).flatMap(event => {
+  const kept: CodeAgentTranscriptEvent[] = [];
+  for (const event of completedTurnEvents(events)) {
+    const previous = kept.at(-1);
+    if (previous && repeatsAssistantReply(previous, event)) kept[kept.length - 1] = event;
+    else kept.push(event);
+  }
+  return kept.flatMap(event => {
     if (event.kind === "user" || event.metadata?.role === "assistant")
       return [{ id: event.id, role: event.kind === "user" ? "User" : "Assistant", text: event.message }];
     if (event.kind === "artifact") {

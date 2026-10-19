@@ -18049,3 +18049,73 @@ diff --git a/dist/client/chat/repo-helpers.js b/dist/client/chat/repo-helpers.js
          if (drop)
              changed = true;
          return !drop;
+diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
+--- a/dist/cli/code-agent-executor.js
++++ b/dist/cli/code-agent-executor.js
+@@ -488,6 +488,8 @@
+     const cwd = options.run.cwd || process.cwd();
+     const model = normalizeClaudeCliModel(options.model);
+     const reasoningEffort = normalizeClaudeCliEffort(options.reasoningEffort);
++    // Each recorded reply names the engine and model that wrote it.
++    const replyMetadata = { engine: CLAUDE_CLI_ENGINE_NAME, model, ...(reasoningEffort ? { reasoningEffort } : {}) };
+     const streamToolOutputToStdout = options.streamToolOutputToStdout ??
+         process.env.AGENT_NATIVE_CODE_AGENT_STRUCTURED_STDOUT !== "1";
+     const assistantText = [];
+@@ -552,7 +554,7 @@
+                         ? event.errors.filter(value => typeof value === "string" && value.trim()).join("\n") : "";
+                     throw new Error(errors || (typeof event.result === "string" && event.result.trim()) || "Claude Code returned an error.");
+                 }
+-                const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames);
++                const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames, replyMetadata);
+                 if (!text)
+                     return;
+                 assistantText.push(text);
+@@ -560,19 +562,17 @@
+                     options.stdout?.write(text);
+             },
+         });
+-        const finalMessage = readClaudeParticipantResultText(result.events) ??
+-            (assistantText.join("\n\n").trim() || "Claude Code run completed.");
+-        appendCodeAgentTranscriptEvent({
+-            runId: options.run.id,
+-            kind: "system",
+-            message: finalMessage,
+-            metadata: {
+-                role: "assistant",
+-                engine: CLAUDE_CLI_ENGINE_NAME,
+-                model,
+-                ...(reasoningEffort ? { reasoningEffort } : {}),
+-            },
+-        });
++        // Claude's result repeats its last streamed message, which is already recorded. Record the result only
++        // when nothing streamed or it differs, so each reply is stored once.
++        const resultText = readClaudeParticipantResultText(result.events);
++        if (assistantText.length === 0 || (resultText !== null && resultText !== assistantText.at(-1))) {
++            appendCodeAgentTranscriptEvent({
++                runId: options.run.id,
++                kind: "system",
++                message: resultText ?? "Claude Code run completed.",
++                metadata: { role: "assistant", ...replyMetadata },
++            });
++        }
+         const pendingFollowUp = dequeueCodeAgentFollowUp(options.run.id);
+         if (pendingFollowUp) {
+             const message = pendingFollowUp.mode === "queued"
+@@ -714,7 +714,7 @@
+ function normalizeClaudeCliEffort(effort) {
+     return effort && effort !== "auto" ? effort : undefined;
+ }
+-function appendClaudeParticipantTranscriptEvents(runId, event, toolNames) {
++function appendClaudeParticipantTranscriptEvents(runId, event, toolNames, replyMetadata) {
+     const eventType = cliStringValue(event.type);
+     const message = asRecordValue(event.message);
+     const messageContent = Array.isArray(message?.content)
+@@ -737,7 +737,7 @@
+                 runId,
+                 kind: "system",
+                 message: text,
+-                metadata: { role: "assistant", source: "claude-cli" },
++                metadata: { role: "assistant", source: "claude-cli", ...replyMetadata },
+             });
+             continue;
+         }

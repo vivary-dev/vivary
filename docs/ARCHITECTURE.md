@@ -303,7 +303,10 @@ Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
 bookkeeping and private reasoning are excluded. For Code, only a completed tool
-result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. An assistant reply that exactly
+repeats the reply recorded just before it is one entry, the later copy. Claude Code conversations recorded before
+2026-10-19 hold every reply twice that way, and handoff, linked history and content search apply the same rule.
+A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder
 that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
@@ -710,6 +713,31 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Claude Code replies recorded once. Every Claude Code reply was stored
+twice in a Code transcript, about 0.6 seconds apart with the same text. Core's
+`executeClaudeCliRun` records each streamed assistant message through
+`appendClaudeParticipantTranscriptEvents` (`source: "claude-cli"`), then recorded
+the result text again with the engine and model. The result repeats the last
+streamed message. Save handoff joins every assistant entry after the request, so it
+found two `vivary-handoff` blocks and refused. The maintained Core patch now puts
+the engine, model and effort on each streamed reply and records the result only
+when nothing streamed or the result differs from the last streamed message. Codex
+already recorded one event per message. Existing transcripts keep their pairs.
+`repeatsAssistantReply` in
+[`linked-history.ts`](../packages/workbench/server/linked-history.ts) is now the one
+rule for an exact repeat of the previous assistant event, with the same phase and
+item. `codeHistoryItems` keeps the later copy, so handoff, linked history and the
+quoted send block count each old reply once. The Code conversation view's existing
+dedupe in [`local-code-agent.ts`](../packages/workbench/server/local-code-agent.ts)
+uses the same rule and stays for old transcripts. Content search in
+[`chat-content-search.ts`](../packages/workbench/server/chat-content-search.ts)
+reports the first copy only. Core's own display dedupe is unchanged. The linked
+history paragraph above now states the rule. `tests/claude-session-continuity.test.mjs`
+drives the real executor with an offline Claude CLI that repeats its last message as
+the result, and checks one stored event per reply, each with engine and model.
+`tests/handoff.test.ts`, `tests/linked-history.test.ts` and
+`tests/chat-content-search.test.ts` cover old transcripts with the repeated pair.
 
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime

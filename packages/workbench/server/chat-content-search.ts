@@ -4,13 +4,14 @@ import path from "node:path";
 import { fail } from "@agent-native/core/action";
 import { getDbExec, isPostgres } from "@agent-native/core/db";
 import { listThreads } from "@agent-native/core/server";
-import { codeAgentRunsDir, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
+import { codeAgentRunsDir, type CodeAgentRunRecord, type CodeAgentTranscriptEvent } from "@agent-native/core/code-agents";
 import type { VivaryChatIdentity } from "../app/lib/chat-scope";
 import type { ChatSearchHit, ChatSearchInput, ChatSearchPage } from "../app/lib/chat-search-schema";
 import { lowercaseMatches } from "../app/lib/chat-search-matches";
 import { isOwnedRun, type VivaryCodeReadScope } from "./local-code-agent";
 import { readCodeTranscriptPage, TRANSCRIPT_PAGE_BYTES } from "./code-transcript-page";
 import { createVivaryChatIdentity } from "./chat-identity";
+import { repeatsAssistantReply } from "./linked-history";
 
 const LIMITS = { sessions: 25, messages: 500, bytes: 16 * 1024 * 1024, results: 25 };
 const MAX_RUN_NAMES = 10_000;
@@ -241,14 +242,17 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
       if (!canStartSession()) { completed = false; break; }
       const wasActive = cursor.active && cursor.session === record.id;
       beginSession(record.id, wasActive ? cursor.time : time); page.readBytes += bytes;
-      let done = false;
+      let done = false, previous: CodeAgentTranscriptEvent | undefined;
       while (canRead()) {
         const transcript = await readCodeTranscriptPage(record.id, cursor.offset, LIMITS.messages - page.scannedMessages, cursor.discardLine);
         page.readBytes += transcript.readBytes; budgetBytes += transcript.readBytes; page.limited ||= transcript.limited;
         for (const entry of transcript.entries) {
           if (page.results.length >= LIMITS.results) break;
           page.scannedMessages++;
-          const contentMatch = entry.event.message.toLowerCase().includes(query);
+          // An older Claude Code conversation repeats each reply, so the repeat is not a second match.
+          const repeated = previous !== undefined && repeatsAssistantReply(previous, entry.event);
+          previous = entry.event;
+          const contentMatch = !repeated && entry.event.message.toLowerCase().includes(query);
           const titleMatch = !cursor.titleDone && record.title.toLowerCase().includes(query);
           if (contentMatch || titleMatch) hit(record.id, record.title, entry.event.id, contentMatch ? entry.event.message : record.title,
             "code", false, contentMatch ? "content" : "title", cursor.time, entry.event.createdAt, entry.offset);

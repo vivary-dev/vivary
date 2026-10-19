@@ -605,6 +605,36 @@ test("handoffs are written through the file owner and go stale without a model c
     await saveHandoff();
   });
 
+  await t.test("a Claude Code reply an older build recorded twice still saves, while two different blocks are refused", async () => {
+    // The pair observed in a Windows Claude Code transcript on 2026-10-19: the streamed reply, then the same text
+    // with the engine and model.
+    const claudeReply = (message: string, reply: string) => {
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message });
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: reply, metadata: { role: "assistant", source: "claude-cli" } });
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: reply,
+        metadata: { role: "assistant", engine: "claude-cli", model: "claude-haiku-5-5" } });
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
+    };
+    const request = await prepared();
+    claudeReply(request.message, fenced(proposal(request.requestId, { goal: "Saved from a repeated Claude reply" })));
+    const saved = await handoff.save(actor, { ...input, requestId: request.requestId });
+    assert.equal(saved.code, "saved", JSON.stringify(saved));
+    assert.match(await readFile(statePath, "utf8"), /Saved from a repeated Claude reply/);
+    const bytes = await readFile(statePath);
+    const different = await prepared();
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: different.message });
+    for (const goal of ["First draft", "Second draft"]) {
+      appendCodeAgentTranscriptEvent({ runId: run.id, kind: "system", message: fenced(proposal(different.requestId, { goal })),
+        metadata: { role: "assistant", source: "claude-cli" } });
+    }
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
+    const refused = await handoff.save(actor, { ...input, requestId: different.requestId });
+    assert.equal(refused.code, "refused");
+    assert.match(JSON.stringify(refused), /more than one vivary-handoff block/);
+    assert.deepEqual(await readFile(statePath), bytes);
+    await saveHandoff();
+  });
+
   await t.test("no designated state document refuses Prepare with a clear message", async () => {
     const plainWorkspace = service(memoryFor({ status: "plain", memory: [".vivary/knowledge"], protected: [],
       privacy: thin.privacy }));
