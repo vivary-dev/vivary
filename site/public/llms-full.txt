@@ -6926,6 +6926,7 @@ your firewall.
 | Setup or the uninstaller says it is already running | Another setup or uninstaller is open for your account. Finish or close it, then try again. |
 | Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |
 | Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
+| Setup says a file is not a Vivary file | A file you put in `%LOCALAPPDATA%\Programs\Vivary` has the same name and place as a file the new Vivary installs. Setup kept your file and did not replace it. During an upgrade, setup had already removed the previous Vivary files, so Vivary does not start until setup finishes, and the message says so. On a first install, or a reinstall into a folder the uninstaller kept, nothing was removed. Move that file out of the folder, then run setup again. |
 | Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary: no file list, no `vivary-setup.txt`, no `vivary.exe`, and no uninstaller. An uninstall that keeps files you added leaves `vivary-setup.txt`, so this happens only for files placed there some other way. Move them elsewhere, then run setup again. |
 | An upgrade stopped partway, for example on a full disk | Run setup again to finish it. You can also uninstall first: setup writes the new file list before it copies any file, so the uninstaller removes every Vivary file, keeps files you added, and a later setup installs normally. |
 | No window after launching from a terminal | Try File Explorer. An inherited `ELECTRON_RUN_AS_NODE=1` can make Electron run as Node. Remove that variable only from the launch shell and retry. |
@@ -8165,6 +8166,35 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Installer file collision (issue #254 item 7). Extraction with `File /r`
+replaced whatever sat at a payload path, so a file the user added at the exact
+relative path of a payload file was overwritten. That happened on an upgrade whose
+new version adds that path, and on a reinstall into a folder the uninstaller kept.
+`packages/desktop/installer/vivary.nsi` now calls `RequireNoUnownedFiles` after
+`RemoveInstalledFiles` and after `install-files.tmp` is extracted, before
+`MoveFileExW` and `File /r`. It reads `install-files.tmp` with the existing
+`ReadListLine` and `CheckListLine` and tests each file line, not folder lines, with
+`IfFileExists`. Every file the previous list named is already gone and a failed
+removal already stopped setup, so a hit is a file setup does not own. Setup then
+deletes only `install-files.tmp`, names the file, and stops with exit code 2. The
+old list, entry, uninstaller, and marker stay, and a rerun after the user moves the
+file succeeds. The check runs after removal, so on an upgrade or repair, where
+`RemoveInstalledFiles` read a list (`$R8` = 0), the previous version's files are
+already gone and the message says Vivary will not start until setup finishes. The
+section starts `$R8` at -1, so a new folder, like a kept-files folder with the
+marker and no list (`$R8` = 1), gets the message that nothing was changed. When `RemoveInstalledFiles` returned 2, a damaged list with the
+marker, setup skips the check and keeps copying over the folder, because it cannot
+tell owned files from others there. That path can still replace a user file at a
+payload path. A file at a payload folder path stays out of scope: `File /r` cannot
+create the folder, `AllowSkipFiles off` turns that into a stop through
+`write_failed`, and nothing is replaced. The installer's architecture as described
+in the 2026-10-18 entry below still holds, with this check added before extraction.
+Evidence: 93 of 93 installer tests pass with `makensis` 3.10 and 92 pass with one
+skip without it, and each of 115 single-rule changes to the script fails the
+static tests, including the message chosen for each path. A model test of the
+upgrade and the kept-files reinstall keeps the user's file and lets a rerun install
+after the file is moved.
 
 2026-10-18 Windows installer. The owner asked for a Windows installer as the
 website's main download. `packages/desktop/installer/vivary.nsi` is an NSIS 3 script

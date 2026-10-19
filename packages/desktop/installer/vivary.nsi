@@ -397,6 +397,9 @@ FunctionEnd
 
 Section "Vivary"
   SectionIn RO
+  ; RemoveInstalledFiles sets $R8 to 0, 1 or 2. A new folder skips it, so -1
+  ; means no previous install was read and nothing was removed.
+  StrCpy $R8 -1
   Call RequireFixedInstallDir
   Call RequirePathRoom
   Call RequireVivaryClosed
@@ -441,6 +444,12 @@ Section "Vivary"
   ; write leaves the old list or the new one, never part of one.
   File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"
   IfErrors write_failed
+  ; Before anything is replaced, refuse a file at a payload path that setup does
+  ; not own. A damaged list with the marker ($R8 = 2) cannot tell owned files
+  ; from others, so that repair path keeps copying over the folder.
+  StrCmp $R8 2 owned_checked
+  Call RequireNoUnownedFiles
+  owned_checked:
   System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
   IntCmp $0 0 write_failed
   File /r "${PAYLOAD_DIR}/*"
@@ -462,6 +471,51 @@ Section "Vivary"
   MessageBox MB_OK|MB_ICONSTOP "Setup could not write every Vivary file to $INSTDIR. Run setup again." /SD IDOK
   Abort "Setup could not write every Vivary file."
 SectionEnd
+
+; Stops setup when a file already sits at a payload file path in the new list,
+; install-files.tmp. Every file the previous list named is gone by now, and a
+; failed removal already stopped setup, so such a file is one setup does not own,
+; for example one the user added. Setup deletes only install-files.tmp, so the old
+; list, entry, uninstaller and marker stay as they were, and a rerun after the user
+; moves the file succeeds. When RemoveInstalledFiles read a list ($R8 = 0), the
+; previous version's files are already gone, and the message says so. Otherwise
+; nothing was removed. Folder lines are skipped: a file at a payload folder path
+; makes File /r fail, which stops setup through write_failed and replaces nothing.
+Function RequireNoUnownedFiles
+  ClearErrors
+  FileOpen $R3 "$INSTDIR\${INSTALL_LIST_TEMP}" r
+  IfErrors unreadable
+  next_line:
+  Call ReadListLine
+  StrCmp $R9 "eof" checked
+  StrCmp $R9 "truncated" invalid
+  Call CheckListLine
+  StrCmp $R5 "" 0 invalid
+  StrCpy $2 $R4 1 -1
+  StrCmp $2 "\" next_line
+  IfFileExists "$INSTDIR\$R4" unowned next_line
+  checked:
+  FileClose $R3
+  Return
+  unowned:
+  FileClose $R3
+  Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
+  StrCmp $R8 0 0 nothing_removed
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$R4 is not a Vivary file, so setup did not replace it. The previous Vivary files were already removed, so Vivary will not start until setup finishes. Move that file out of $INSTDIR, then run setup again." /SD IDOK
+  SetErrorLevel 2
+  Abort "$INSTDIR\$R4 is not a Vivary file. The previous Vivary files were already removed. Move that file, then run setup again."
+  nothing_removed:
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$R4 is not a Vivary file, so setup did not replace it. Move it out of $INSTDIR, then run setup again." /SD IDOK
+  SetErrorLevel 2
+  Abort "$INSTDIR\$R4 is not a Vivary file. Nothing was changed."
+  invalid:
+  FileClose $R3
+  unreadable:
+  Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
+  MessageBox MB_OK|MB_ICONSTOP "Setup could not read its new file list. Run setup again." /SD IDOK
+  SetErrorLevel 2
+  Abort "Setup could not read its new file list. Run setup again."
+FunctionEnd
 
 Function LaunchVivary
   SetOutPath "$INSTDIR"
