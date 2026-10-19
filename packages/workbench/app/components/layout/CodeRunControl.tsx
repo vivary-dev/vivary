@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { actionErrorMessage, useActionQuery } from "@agent-native/core/client/hooks";
 import { Button } from "@agent-native/toolkit/ui";
+import { useConversationRouteHold } from "../../lib/conversation-route-hold";
 import { useNativeActionCaller } from "../../lib/native-actions";
 import { useProjects } from "../projects/ProjectContext";
 import type { VivaryCodeActiveRun, VivaryCodeHostState, VivaryCodePendingApproval } from "../../../server/local-code-agent";
@@ -20,8 +21,10 @@ export function CodeRunControl() {
     refetchInterval: 1000, retry: false,
   });
   const { call, ready, retrySession } = useNativeActionCaller();
-  const { selectProject, catalog } = useProjects();
+  const { selectProject, catalog, activeProject, checking } = useProjects();
+  const activeProjectId = activeProject?.projectId ?? null;
   const navigate = useNavigate();
+  const routeHold = useConversationRouteHold({ activeProjectId, checking });
   const [error, setError] = useState<string>();
   const cleanup = status.data?.cleanup;
   // Issue #121. A run stays active while its failed stop's own check runs. The strip shows that check in its place.
@@ -60,11 +63,17 @@ export function CodeRunControl() {
 
   async function openConversation(target: { id: string; projectId: string | null }) {
     setError(undefined);
-    if (!await selectProject(target.projectId)) {
-      setError(runs.some(run => run.id === target.id) ? "The project is unavailable. You can still deny or stop its work here." : "The project is unavailable. Its conversation history is retained.");
+    const href = "/?run=" + encodeURIComponent(target.id);
+    if (!checking && target.projectId === activeProjectId) {
+      navigate(href);
       return;
     }
-    navigate("/?run=" + encodeURIComponent(target.id));
+    // The project change clears the route and the new project restores its saved view, so the target route is held.
+    routeHold.hold(target.projectId, href);
+    if (!await selectProject(target.projectId)) {
+      routeHold.release();
+      setError(runs.some(run => run.id === target.id) ? "The project is unavailable. You can still deny or stop its work here." : "The project is unavailable. Its conversation history is retained.");
+    }
   }
 
   if (!runs.length && !cleanup && !status.error) return null;
