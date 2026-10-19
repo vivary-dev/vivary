@@ -59,7 +59,8 @@ const pending = { status: "pending", requestId: "req-1", conversation: { kind: "
 let host, root;
 test.beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  globalThis.handoffFixture = { status: pending, saveResult: { code: "refused", problems: ["risks: Too small: expected array to have >=1 items"] },
+  globalThis.handoffFixture = { status: pending,
+    saveResult: { code: "refused", replyRefused: true, problems: ["risks: Too small: expected array to have >=1 items"] },
     call: async name => {
       if (name === "vivary-handoff-freshness") return handoffFixture.status;
       if (name === "vivary-handoff-save") return handoffFixture.saveResult;
@@ -115,6 +116,15 @@ test("each save status is explicit: not saved yet, refused with the parser's rea
   handoffFixture.status = { status: "fresh", covered, reasons: [] };
   await act(async () => button("Save handoff").click()); await settle();
   assert.equal(status(), "Saved to STATE.md. Fresh.");
+});
+
+test("a Save clicked before the reply finished shows its reason in the control and does not mark the reply refused", async () => {
+  const early = "The agent has not finished replying to this handoff request in this conversation. Wait for its reply, then click Save handoff.";
+  handoffFixture.saveResult = { code: "refused", problems: [early] };
+  await render({ hub: module.exports.createHandoffStatusHub(), content: reply() });
+  await act(async () => button("Save handoff").click()); await settle();
+  assert.equal(status(), "Not saved yet. Click Save handoff to write it to the state document.");
+  assert.ok([...host.querySelectorAll("[role=alert] li")].some(item => item.textContent === early));
 });
 
 test("a failed freshness check clears the preview status instead of keeping the older one", async () => {

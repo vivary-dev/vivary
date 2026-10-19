@@ -760,6 +760,10 @@ publishes no status while its freshness check has failed, so a preview never kee
 an older status beside the control's failed check. Each preview states its own
 reply's status: not saved yet, refused with the
 parser's reasons, saved and Fresh, out of date, failed, or not the latest request.
+Only a Save that read the reply and refused it (`replyRefused` in the result, for a
+block that fails validation or a conversation that continued past it) marks the
+reply refused. A Save clicked before the reply finished shows its reason in the
+control, and the preview stays at not saved yet.
 A read-only history view has no control, so its previews state no status. The
 stored message text, the parser and schema in `server/handoff.ts`, its validation,
 and clipboard copies are unchanged. `tests/handoff-display-components.test.mjs`

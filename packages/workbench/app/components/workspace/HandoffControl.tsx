@@ -94,8 +94,11 @@ export function HandoffControl({ projectId, conversation, disabled, submit, runA
     const result = await call<HandoffSaveResult>("vivary-handoff-save", { projectId, conversation, requestId });
     // A conflict or failed write comes back as the Failed status on the refetch.
     // A correction sent in this conversation is a new turn, which Save refuses, so recovery is a new Prepare.
-    if ("problems" in result) setNotice({ text: "The reply was not saved. Prepare the handoff again to ask for a new reply.",
-      problems: result.problems, requestId });
+    // Only a refusal of the reply itself marks that reply as refused. A Save clicked before the reply finished
+    // shows its reason here, and the reply can still be saved once it has.
+    if ("problems" in result) setNotice(result.replyRefused
+      ? { text: "The reply was not saved. Prepare the handoff again to ask for a new reply.", problems: result.problems, requestId }
+      : { text: "The reply was not saved.", problems: result.problems });
     else if ("message" in result) setNotice({ text: result.message });
   });
 

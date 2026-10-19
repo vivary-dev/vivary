@@ -185,6 +185,7 @@ test("handoffs are written through the file owner and go stale without a model c
       const result = await handoff.save(actor, { ...input, requestId: request.requestId });
       assert.equal(result.code, "refused", name);
       assert.ok("problems" in result && result.problems.length > 0, name);
+      assert.equal("replyRefused" in result && result.replyRefused, true, name);
       assert.deepEqual(await readFile(statePath), bytes, name);
       assert.deepEqual(await row(), pending, name);
     }
@@ -197,6 +198,8 @@ test("handoffs are written through the file owner and go stale without a model c
     const early = await handoff.save(actor, { ...input, requestId: midTurn.requestId });
     assert.equal(early.code, "refused");
     assert.match(JSON.stringify(early), /not finished/);
+    // The reply was not read, so the reply preview must not show it as refused.
+    assert.equal("replyRefused" in early, false);
     assert.deepEqual(await readFile(statePath), bytes);
     appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } });
     const unanswered = await prepared();
@@ -353,6 +356,7 @@ test("handoffs are written through the file owner and go stale without a model c
     const result = await handoff.save(actor, { ...input, requestId: request.requestId });
     assert.equal(result.code, "refused", JSON.stringify(result));
     assert.match(JSON.stringify(result), /continued after the handoff reply/);
+    assert.equal("replyRefused" in result && result.replyRefused, true);
     assert.deepEqual(await readFile(statePath), bytes);
     assert.equal((await handoff.freshness(actor, input)).status, "pending");
   });

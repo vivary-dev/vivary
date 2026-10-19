@@ -334,9 +334,9 @@ export function createHandoffService(overrides: Partial<Dependencies> = {}) {
       const reply = replyTo(prefix.items, request.requestId);
       if (reply === null) return { code: "refused", problems: ["The agent has not finished replying to this handoff request in this conversation. Wait for its reply, then click Save handoff."] };
       // Completed history excludes trailing stopped, failed and active turns. Their user requests still count.
-      if (reply.continued || progression.continued) return { code: "refused", problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
+      if (reply.continued || progression.continued) return { code: "refused", replyRefused: true, problems: ["The conversation continued after the handoff reply, so the reply does not describe the newer work. Click Update handoff to prepare it again."] };
       const validated = proposalFrom(reply.text, request.requestId, prefix.items, reply.items);
-      if ("problems" in validated) return { code: "refused", problems: validated.problems };
+      if ("problems" in validated) return { code: "refused", replyRefused: true, problems: validated.problems };
       const failed = async <T extends HandoffSaveResult & { message: string }>(result: T, retryable = false): Promise<T> => {
         await writeRow({ ...row, request: { ...request, state: "failed", message: result.message, retryable } });
         return result;
