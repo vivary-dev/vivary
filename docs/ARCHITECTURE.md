@@ -725,6 +725,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Project kind save after creation (PR #260 review). New project saves
+the kind after its files are applied and the folder is registered. When that
+save fails, `createManagedProject` now returns the created registration with
+`kindSaved: false` instead of failing the action. The form selects the project,
+and the project list tells the owner the kind shows Not set and can be set in
+Project details. The project kind description in System structure still holds:
+the kind is saved only on the registry row, after registration. Evidence: the
+failed-save case in `tests/managed-projects.test.mjs`.
+
 2026-10-19 Sidebar mark (owner request of the same date). The sidebar header's
 letter tile now shows the approved Vivary mark from a byte-identical copy of
 `site/src/assets/vivary-mark.png`, which `packages/desktop/README.md` names as the

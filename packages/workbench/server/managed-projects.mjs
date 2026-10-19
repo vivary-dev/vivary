@@ -252,8 +252,15 @@ export async function createManagedProject(context, input, dependencies = {}) {
       input.displayName ?? childName,
     );
     // The kind chosen before the form opened belongs to the registered project, not to its files.
+    // The files and registration already exist, so a failed kind save must not report the creation as failed.
+    // The project opens with kind Not set and the owner can set it in Project details.
     if (input.workspaceKind && ["registered", "already-registered"].includes(registration.code)) {
-      await (dependencies.setProjectKind ?? setLocalProjectKind)(context, registration.projectId, input.workspaceKind);
+      try {
+        await (dependencies.setProjectKind ?? setLocalProjectKind)(context, registration.projectId, input.workspaceKind);
+      } catch {
+        return { ...result, registration, kindSaved: false };
+      }
+      return { ...result, registration, kindSaved: true };
     }
     return { ...result, registration };
   } finally {

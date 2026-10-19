@@ -206,7 +206,9 @@ export function ProjectNavigation() {
     {creating && newProjectKind && <CreateProjectForm disabled={checking || selecting}
       workspaceKind={newProjectKind} onChangeKind={() => setKindPrompt({ purpose: "new" })}
       onClose={() => setCreating(false)}
-      onCreated={async projectId => {
+      onCreated={async (projectId, kindSaved) => {
+        setRecoveryNotice(kindSaved ? null
+          : "Project created. Its kind could not be saved, so it shows Not set. Set it in Project details.");
         await refresh();
         return selectProject(projectId);
       }} />}

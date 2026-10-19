@@ -29,6 +29,7 @@ type Created = {
   target: string;
   planSha256: string;
   registration: RegistrationResult;
+  kindSaved?: boolean;
 };
 type CreateResult = Created | { code: "plan-changed" };
 
@@ -43,7 +44,7 @@ export function CreateProjectForm({
   workspaceKind: WorkspaceKind;
   onChangeKind: () => void;
   onClose: () => void;
-  onCreated: (projectId: string) => Promise<boolean>;
+  onCreated: (projectId: string, kindSaved: boolean) => Promise<boolean>;
 }) {
   const { call, ready } = useNativeActionCaller();
   const [name, setName] = useState("");
@@ -109,7 +110,7 @@ export function CreateProjectForm({
         setMessage("The files were created, but the project could not be registered. Retry creation.");
         return;
       }
-      if (await onCreated(registration.projectId)) {
+      if (await onCreated(registration.projectId, result.kindSaved !== false)) {
         onClose();
       } else {
         setMessage("Project created. Retry selecting it from the Projects list.");

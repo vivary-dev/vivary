@@ -178,19 +178,32 @@ test("a new project saves its chosen kind after registration and passes the kind
       effects.push(["register", displayName]);
       return { code: displayName === "Refused" ? "denied" : "registered", projectId: "project_" + displayName.toLowerCase() };
     },
-    setProjectKind: async (_context, projectId, kind) => { effects.push(["kind", projectId, kind]); },
+    setProjectKind: async (_context, projectId, kind) => {
+      effects.push(["kind", projectId, kind]);
+      if (projectId === "project_scopechanged") {
+        throw Object.assign(new Error("Project folder access changed."), { statusCode: 403 });
+      }
+    },
   };
   const input = (name, extra) => ({ name, displayName: name, acceptedPlanSha256: "sha256:" + "c".repeat(64), ...extra });
   try {
-    await createManagedProject({}, input("Notes", { preset: "knowledge-work", workspaceKind: "personal" }), dependencies);
+    const notes = await createManagedProject({}, input("Notes", { preset: "knowledge-work", workspaceKind: "personal" }), dependencies);
     await createManagedProject({}, input("Code", { preset: "coding", workspaceKind: "coding" }), dependencies);
-    await createManagedProject({}, input("Plain"), dependencies);
+    const plain = await createManagedProject({}, input("Plain"), dependencies);
     await createManagedProject({}, input("Refused", { workspaceKind: "coding" }), dependencies);
+    // A kind save that fails after the files and registration exist still reports the created, registered project.
+    const unsaved = await createManagedProject({}, input("ScopeChanged", { workspaceKind: "personal" }), dependencies);
+    assert.equal(notes.kindSaved, true);
+    assert.equal(Object.hasOwn(plain, "kindSaved"), false, "no kind was requested");
+    assert.equal(unsaved.code, "created");
+    assert.deepEqual(unsaved.registration, { code: "registered", projectId: "project_scopechanged" });
+    assert.equal(unsaved.kindSaved, false);
     assert.deepEqual(effects, [
       ["apply", "knowledge-work"], ["register", "Notes"], ["kind", "project_notes", "personal"],
       ["apply", "coding"], ["register", "Code"], ["kind", "project_code", "coding"],
       ["apply", "coding"], ["register", "Plain"],
       ["apply", "coding"], ["register", "Refused"],
+      ["apply", "coding"], ["register", "ScopeChanged"], ["kind", "project_scopechanged", "personal"],
     ], "no kind without a choice or without a registered project");
   } finally {
     await rm(dataDir, { recursive: true, force: true });

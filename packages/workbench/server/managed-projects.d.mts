@@ -42,6 +42,8 @@ export function createManagedProject(
       target: string;
       planSha256: string;
       registration: Record<string, unknown>;
+      /** Present when a kind was requested. False when the project exists but its kind was not saved. */
+      kindSaved?: boolean;
     }
 >;
 
