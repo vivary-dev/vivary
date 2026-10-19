@@ -7843,9 +7843,12 @@ Restore. No row state is a live region and no duration is shown. Unsent drafts
 of the selected project join the list labeled Draft or Review send.
 
 Opening a row in the selected project navigates to its route. A row in another
-project first clears the route, because `Workspace.tsx` clears any conversation
-route when the project changes, then selects the project and navigates once the
-new project is selected. Native rename, pin and archive use Native's own thread
+project selects the project and holds the target route. `Workspace.tsx` clears
+the old conversation route when the project changes, and the new project then
+restores its saved conversation onto the bare route. The inbox navigates once the
+old route is gone, navigates again with replace if a restore lands after it, and
+releases the target once it has held for 750 ms or the owner presses a key or the
+pointer. Native rename, pin and archive use Native's own thread
 routes with the row's scope. Restore uses `vivary-native-archive`.
 
 Code rename, archive and pin go through the owner action
@@ -7869,7 +7872,7 @@ keeping identity and `updatedAt`, and the archive refusal while running.
 `tests/conversation-inbox-components.test.mjs` renders the filter, its saved
 choice, search, selection, keyboard movement, the row menu, rename, state
 labels, drafts, the folder, and a cross-project open that lands on the clicked
-row. Until the sidebar integration lands, the inbox is not mounted in the app.
+row with and without a restored saved conversation. Until the sidebar integration lands, the inbox is not mounted in the app.
 
 ### Linked runtime conversations
 

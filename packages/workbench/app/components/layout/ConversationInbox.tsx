@@ -36,6 +36,17 @@ export type InboxFilterMode = "all" | "project";
 const FILTER_KEY = "vivary-conversation-filter-v1";
 const ALL_PROJECTS = "all";
 const PERSONAL = "personal";
+/** How long an opened conversation's route must hold before a later restore may replace it. */
+const OPEN_SETTLE_MS = 750;
+type PendingOpen = { projectId: string | null; href: string; from: string; landed: boolean };
+/** The route keys `Workspace.tsx` clears when the selected project changes. */
+const WORKSPACE_ROUTE_KEYS = ["panel", "path", "project", "runtime", "thread", "history", "run", "draft", "line", "message",
+  "event", "eventOffset"];
+/** Workspace renders only on the home route, so another page has no conversation route to clear. */
+function hasWorkspaceRoute(pathname: string, search: string): boolean {
+  const params = new URLSearchParams(search);
+  return pathname === "/" && WORKSPACE_ROUTE_KEYS.some(key => params.has(key));
+}
 
 const ATTENTION: Record<InboxAttention, { label: string; icon: ReactNode } | null> = {
   "needs-approval": { label: "Needs approval", icon: <IconHandStop size={13} aria-hidden /> },
@@ -177,14 +188,35 @@ export function ConversationInbox() {
     };
   }, [refetchInbox]);
 
-  // A conversation in another project opens in two steps. The route is cleared first, because the workspace clears any
-  // conversation route when the project changes. The target route is applied once the new project is selected.
-  const [pendingOpen, setPendingOpen] = useState<{ projectId: string | null; href: string }>();
+  // A conversation in another project opens after its project is selected. Workspace.tsx clears the old conversation
+  // route when the project changes, then the new project restores its saved conversation onto the bare route. Either
+  // can land after this navigation, so the target is held: applied once the old route is gone, applied again if a
+  // restore replaces it, and released once it has held for a moment or the owner presses a key or the pointer.
+  const location = useLocation();
+  const [pendingOpen, setPendingOpen] = useState<PendingOpen>();
+  const route = location.pathname + location.search;
   useEffect(() => {
     if (!pendingOpen || checking || activeProjectId !== pendingOpen.projectId) return;
-    setPendingOpen(undefined);
-    navigate(pendingOpen.href);
-  }, [pendingOpen, checking, activeProjectId, navigate]);
+    if (route === pendingOpen.href) {
+      if (!pendingOpen.landed) { setPendingOpen({ ...pendingOpen, landed: true }); return; }
+      const release = setTimeout(() => setPendingOpen(current => current === pendingOpen ? undefined : current),
+        OPEN_SETTLE_MS);
+      return () => clearTimeout(release);
+    }
+    // Workspace would clear a target that lands before the old route, so wait for the old route to go.
+    if (!pendingOpen.landed && route === pendingOpen.from && hasWorkspaceRoute(location.pathname, location.search)) return;
+    navigate(pendingOpen.href, { replace: pendingOpen.landed });
+  }, [pendingOpen, checking, activeProjectId, route, location.pathname, location.search, navigate]);
+  useEffect(() => {
+    if (!pendingOpen) return;
+    const ownerActed = () => setPendingOpen(undefined);
+    document.addEventListener("keydown", ownerActed, true);
+    document.addEventListener("pointerdown", ownerActed, true);
+    return () => {
+      document.removeEventListener("keydown", ownerActed, true);
+      document.removeEventListener("pointerdown", ownerActed, true);
+    };
+  }, [pendingOpen !== undefined]);
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
     setNotice(undefined);
@@ -205,8 +237,7 @@ export function ConversationInbox() {
       navigate(href);
       return;
     }
-    setPendingOpen({ projectId: row.projectId, href });
-    navigate("/");
+    setPendingOpen({ projectId: row.projectId, href, from: route, landed: false });
     if (!await selectProject(row.projectId)) {
       setPendingOpen(undefined);
       setNotice("That project is unavailable. Its conversations are retained.");
@@ -227,7 +258,7 @@ export function ConversationInbox() {
         else if (operation === "archive") {
           await changeNativeThread(row, "archive", { archived: true });
           // Native cannot show an archived conversation, so its open route closes, as in the project history.
-          if (selectedInboxRowId(window.location.search) === row.id) navigate("/");
+          if (selectedInboxRowId(location.search) === row.id) navigate("/");
         } else await changeNativeThread(row, "pin", { pinned: operation === "pin" });
         window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
       }

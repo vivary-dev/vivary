@@ -99,6 +99,13 @@ const bundle = await build({ stdin: { contents: `
       }
       setReady(current);
     }, [ready, current, params.toString(), setParams]);
+    // The ready project's conversation puts its saved selection back on a bare route, as CodeConversation's showInUrl
+    // and Workspace's saved-surface restore do.
+    useEffect(() => {
+      if (ready !== current || [...params.keys()].length) return;
+      const saved = ${fixture}.savedRoutes?.[current];
+      if (saved) setParams(new URLSearchParams(saved), { replace: true });
+    }, [ready, current, params.toString(), setParams]);
     return null;
   }
   export function view(route) {
@@ -304,8 +311,10 @@ test("rename edits the title in place and returns focus to the row", async () =>
   assert.equal(inboxFixture.calls.at(-1).input.title, "Wrap tables", "Escape renames nothing");
 });
 
-test("a row in another project opens exactly that conversation after the project changes", async () => {
+for (const restores of [false, true]) test(`a row in another project opens exactly that conversation after the project changes${restores ? ", over a restored saved conversation" : ""}`, async () => {
   inboxFixture.state.set("vivary-conversation-filter-v1", { scopeKey: "scope", mode: "all" });
+  // Each project can restore its own saved conversation onto a bare route. The click must still land on its row.
+  if (restores) inboxFixture.savedRoutes = { alpha: "run=a3", beta: "run=b-saved", personal: "runtime=native&history=project&thread=saved" };
   await render("/?run=a1");
   await act(async () => rowButtons().find(item => item.dataset.rowId === "code:b1").click());
   await settle();
