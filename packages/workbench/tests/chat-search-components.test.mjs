@@ -51,6 +51,9 @@ const stubs = new Map([
   ["@agent-native/toolkit/ui", ui], ["@/components/ui/button", ui],
   ["@/components/layout/use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: globalThis.searchFixture.identity });`],
   ["../projects/ProjectContext", `export const useProjects = () => globalThis.searchFixture.projects;`],
+  // The Coding or Personal dialog stays closed in these proofs. Its own test renders it.
+  ["../projects/WorkspaceKindDialog", `export const WorkspaceKindDialog = () => null;
+    export const useSaveProjectKind = () => async () => {};`],
   ["@/lib/chat-draft", `export const registerSelectionCloseFlush = () => () => {};
     export const trackSelectionWrite = promise => promise;
     export const useOrphanedDrafts = () => [];
