@@ -74,3 +74,5 @@
 .local-agent-shared-folder li, .local-agent-shared-folder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .local-agent-shared-folder code { overflow-wrap: anywhere; font-size: 12px; }
 .local-agent-shared-folder-hint { color: hsl(var(--muted-foreground)); }
+/* A long conversation title truncates. Hover shows it through the title attribute, and keyboard focus wraps it in full. */
+.local-agent-header .local-agent-heading h2:focus-visible { white-space: normal; overflow: visible; border-radius: 2px; outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }

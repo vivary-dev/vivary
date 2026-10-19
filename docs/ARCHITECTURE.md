@@ -907,8 +907,12 @@ built from `LinkedConversationMenuItems` and `useLinkedConversationOpener` in
 `LinkedConversation.tsx` so another menu can reuse them. Native keeps its chooser.
 The composer slot scrolls on its own above 35 percent of the viewport height, and
 each "Loaded project context" note is its own muted row in
-`code-match-repository.ts`, with no reply actions. No server, action or storage
-contract changed. Evidence: `tests/native-chat-components.test.mjs` drives the
+`code-match-repository.ts`, with no reply actions. The API chat now has the same
+compact header as a Code conversation, from `NativeConversationHeader.tsx`: Core's
+own thread title, which already prefers a manual rename, over "API chat / <project>".
+It reads the same scoped `useChatThreads` list as the history and refreshes on
+`agent-chat:threads-updated`, so a rename or switch shows at once. It adds no title
+store. No server, action or storage contract changed. Evidence: `tests/native-chat-components.test.mjs` drives the
 picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
 opens a linked conversation from the header action, and a headless Chrome run of
 the built app on the server measured 74 layouts. The B1 whole-window scroll the

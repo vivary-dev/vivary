@@ -372,7 +372,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     <ConversationMatch key={requestedRun + ":" + requestedEvent} container={matchContainer} messageId={matchMessageId} />
     <header className="local-agent-header">
       <div className="local-agent-heading">
-        <h2>{run?.title ?? "New conversation"}</h2>
+        <h2 title={run?.title ?? "New conversation"} tabIndex={0}>{run?.title ?? "New conversation"}</h2>
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
@@ -691,8 +691,6 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   [props.state.engines, props.selection.runId, choice.engine, choice.model]);
   const selectedEngine = props.state.engines.find(engine => engine.engine === choice.engine);
   const modelChoices = availableModels.find(engine => engine.engine === choice.engine)?.models ?? [];
-  // The picker shows a pending switch's target.
-  const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
   // Keep a saved choice even when the catalog changes. Only a deliberate selection replaces it.
   const selectedClaudeModel = selectedEngine?.claudeModels?.find(model => model.id === choice.model);
   const selectedModelAvailable = modelChoices.includes(choice.model)
@@ -703,6 +701,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
+  // The picker shows a pending switch's target.
+  const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
   // A retained conversation switches in place (vivary-code-switch). Another conversation's run never locks either kind.
   const retained = !!props.selection.runId;
   // A Stop and switch the host recorded on the run. It survives a reload and applies when the run stops.

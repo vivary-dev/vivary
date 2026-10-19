@@ -394,12 +394,12 @@ test("a stale or mismatched link operation shows the server's reason and the nex
   }
 });
 
-test("with the project folder unavailable the Code chooser offers only Native, since Code targets need the folder", async () => {
+test("with the project folder unavailable the Code actions offer only Native, since Code targets need the folder", async () => {
   linkFixture.workspaceAvailable = false;
   linkFixture.call = async () => ({ available: true });
   await render("code-options"); await settle(); await notify();
-  assert.equal(Boolean(host.querySelector('option[value="codex-cli"]')), false, "no Code target that would always fail");
-  assert.equal(Boolean(host.querySelector('option[value="native"]')), true, "Code to Native still works");
+  const items = [...linkFixture.menuSlot.querySelectorAll('[role="menuitem"]')].map(item => item.textContent);
+  assert.deepEqual(items, ["Open linked conversation in Native chat"], "no Code target that would always fail, and Code to Native still works");
 });
 
 test("a Code conversation's header action opens an inactive linked conversation and moves nothing", async () => {
