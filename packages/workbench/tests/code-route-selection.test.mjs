@@ -41,7 +41,7 @@ function fixture() {
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace, ensureVivaryCodeHostInitialized: async () => {},
-    hostState, assertCodeHostAvailable() {},
+    hostState, assertCodeHostAvailable() {}, assertConversationCanStart() {}, canonicalFolder: async folder => folder,
     requireOwnedRun: id => records.get(id) ?? fail("Local Vivary code run not found.", { statusCode: 404 }),
     getCodeAgentRunRecord: id => records.get(id) ?? null,
     engineFromRun: run => run.metadata.engine,
