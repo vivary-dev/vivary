@@ -784,7 +784,10 @@ quoted send block count each old reply once. The Code conversation view's existi
 dedupe in [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts)
 uses the same rule and stays for old transcripts. Content search in
 [`chat-content-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/chat-content-search.ts)
-reports the first copy only. Core's own display dedupe is unchanged. The linked
+reports the first copy only. Its search cursor carries the digest of the last
+assistant reply it read (`assistantReplyKey`), so a result page that ends between
+the two copies does not report the second one on the next page. Core's own display
+dedupe is unchanged. The linked
 history paragraph above now states the rule. `tests/claude-session-continuity.test.mjs`
 drives the real executor with an offline Claude CLI that repeats its last message as
 the result, and checks one stored event per reply, each with engine and model.

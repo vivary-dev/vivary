@@ -297,6 +297,35 @@ test("an older Claude Code reply recorded twice is one match, and the same text 
   assert.deepEqual(page.results.map(hit => hit.referenceId), ["repeat-ask", "repeat-streamed", "repeat-later"]);
 });
 
+test("a result page that ends between the two copies of an older reply does not report the second copy", async () => {
+  const id = "claude-repeat-boundary", projectId = "claude-boundary-project";
+  const isolated = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId, label: "Boundary" });
+  run(id, { projectId });
+  const at = (i: number) => new Date(1700000000000 + i).toISOString();
+  // Twenty-four asks and the streamed copy fill the 25-result page, so the next page starts at the repeated copy.
+  const events = [
+    ...Array.from({ length: 24 }, (_, i) => ({ id: `boundary-ask-${i}`, kind: "user", message: `boundaryneedle ${i}` })),
+    { id: "boundary-streamed", kind: "system", message: "The boundaryneedle answer.", metadata: { role: "assistant", source: "claude-cli" } },
+    { id: "boundary-final", kind: "system", message: "The boundaryneedle answer.", metadata: { role: "assistant", engine: "claude-cli", model: "sonnet" } },
+    { id: "boundary-done", kind: "status", message: "Completed", metadata: { status: "completed", phase: "complete" } },
+    { id: "boundary-later", kind: "system", message: "The boundaryneedle answer.", metadata: { role: "assistant", engine: "claude-cli", model: "sonnet" } },
+  ].map((event, i) => ({ schemaVersion: 1, runId: id, createdAt: at(i), ...event }));
+  await writeFile(codeAgentRunTranscriptPath(id), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+  const { searchChatContent } = await import("../server/chat-content-search.ts");
+  const actor = { ownerEmail: owner, orgId, identity: isolated, codeScope: { ...scope, projectId } };
+  const input = { projectId, query: "boundaryneedle", includeArchived: false, unassigned: false };
+  const first = await searchChatContent(actor, input);
+  assert.equal(first.results.length, 25);
+  assert.equal(first.results.at(-1)?.referenceId, "boundary-streamed");
+  assert.ok(first.continueAfter);
+  const hits: string[] = [];
+  for (let after: string | null = first.continueAfter, i = 0; after && i < 5; i++) {
+    const page = await searchChatContent(actor, { ...input, after });
+    hits.push(...page.results.map(hit => hit.referenceId)); after = page.continueAfter;
+  }
+  assert.deepEqual(hits, ["boundary-later"]);
+});
+
 test("continuation after an oversized Code line and a full result page keeps the next complete event", async () => {
   const id = "oversized-code-line";
   const projectId = "oversized-code-project";

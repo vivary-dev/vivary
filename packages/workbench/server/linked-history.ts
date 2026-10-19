@@ -159,9 +159,17 @@ const isAssistantReply = (event: CodeAgentTranscriptEvent) => event.kind === "sy
  * the later copy, so an old conversation still counts, quotes and searches each reply once.
  */
 export function repeatsAssistantReply(previous: CodeAgentTranscriptEvent, event: CodeAgentTranscriptEvent): boolean {
-  return isAssistantReply(previous) && isAssistantReply(event)
-    && previous.metadata?.phase === event.metadata?.phase && previous.metadata?.itemId === event.metadata?.itemId
-    && previous.message.trim() === event.message.trim();
+  const key = assistantReplyKey(previous);
+  return key !== null && key === assistantReplyKey(event);
+}
+
+/**
+ * The digest repeatsAssistantReply compares: phase, item and trimmed text of an assistant reply, or null for any
+ * other event. A paged reader keeps it across a page boundary, where the previous event is no longer in memory.
+ */
+export function assistantReplyKey(event: CodeAgentTranscriptEvent): string | null {
+  return isAssistantReply(event) ? createHash("sha256")
+    .update(JSON.stringify([event.metadata?.phase ?? null, event.metadata?.itemId ?? null, event.message.trim()])).digest("hex") : null;
 }
 
 export function codeHistoryItems(events: CodeAgentTranscriptEvent[]): HistoryItem[] {
