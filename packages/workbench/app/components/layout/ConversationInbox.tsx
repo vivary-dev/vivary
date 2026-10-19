@@ -612,7 +612,7 @@ export function InboxList({ label, rows, selectedId, showProject, emptyLabel, on
             event.preventDefault();
             if (renamingId !== row.id) rowButtons().find(button => button.dataset.rowId === row.id)?.focus();
           }}>
-            <ChatHistoryMenuItem onSelect={() => setRenamingId(row.id)}>
+            <ChatHistoryMenuItem onSelect={() => { setMenuId(null); setRenamingId(row.id); }}>
               <IconPencil size={13} aria-hidden /><span>Rename</span></ChatHistoryMenuItem>
             {!row.archived && <ChatHistoryMenuItem onSelect={() => onChange(row, row.pinned ? "unpin" : "pin")}>
               {row.pinned ? <IconPinnedOff size={13} aria-hidden /> : <IconPinned size={13} aria-hidden />}
@@ -630,18 +630,34 @@ export function InboxList({ label, rows, selectedId, showProject, emptyLabel, on
   </ul>;
 }
 
+/**
+ * Enter commits and Escape cancels. An empty title is refused with a message and the field stays open. Leaving the
+ * field commits a changed title and cancels an empty one.
+ */
 function RenameField({ row, onDone }: { row: InboxListRow; onDone: (title: string | null) => void }) {
   const [value, setValue] = useState(row.title);
+  const [empty, setEmpty] = useState(false);
+  const errorId = useId();
   const done = useRef(false);
+  const normalized = () => value.replace(/\s+/g, " ").trim().slice(0, 160);
   const finish = (title: string | null) => {
     if (done.current) return;
     done.current = true;
-    onDone(title === null ? null : title.replace(/\s+/g, " ").trim().slice(0, 160) || null);
+    onDone(title);
   };
-  return <input className="conversation-inbox__rename" aria-label={`Rename ${row.title}`} value={value} maxLength={160}
-    autoFocus onChange={event => setValue(event.target.value)} onBlur={() => finish(value)}
-    onKeyDown={event => {
-      if (event.key === "Enter") { event.preventDefault(); finish(value); }
-      if (event.key === "Escape") { event.preventDefault(); finish(null); }
-    }} />;
+  return <div className="conversation-inbox__rename-field">
+    <input className="conversation-inbox__rename" aria-label={`Rename ${row.title}`} value={value} maxLength={160}
+      aria-invalid={empty || undefined} aria-describedby={empty ? errorId : undefined}
+      autoFocus onChange={event => { setValue(event.target.value); setEmpty(false); }}
+      onBlur={() => finish(normalized() || null)}
+      onKeyDown={event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (normalized()) finish(normalized());
+          else setEmpty(true);
+        }
+        if (event.key === "Escape") { event.preventDefault(); finish(null); }
+      }} />
+    {empty && <p id={errorId} role="alert" className="conversation-inbox__notice">Enter a title, or press Escape to keep the current one.</p>}
+  </div>;
 }

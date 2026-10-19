@@ -363,6 +363,19 @@ test("rename edits the title in place and returns focus to the row", async () =>
   await key(host.querySelector(".conversation-inbox__rename"), "Escape");
   await settle();
   assert.equal(inboxFixture.calls.at(-1).input.title, "Wrap tables", "Escape renames nothing");
+  await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
+  await act(async () => button("Rename").click());
+  const field = host.querySelector(".conversation-inbox__rename");
+  await type(field, "   ");
+  await key(field, "Enter");
+  await settle();
+  assert.match(host.querySelector('[role="alert"]').textContent, /Enter a title/);
+  assert.equal(field.getAttribute("aria-invalid"), "true");
+  assert.ok(host.querySelector(".conversation-inbox__rename"), "an empty title keeps the field open");
+  assert.equal(inboxFixture.calls.at(-1).input.title, "Wrap tables", "an empty title is not sent");
+  await key(field, "Escape");
+  await settle();
+  assert.equal(host.querySelector(".conversation-inbox__rename"), null);
 });
 
 for (const restores of [false, true]) test(`a row in another project opens exactly that conversation after the project changes${restores ? ", over a restored saved conversation" : ""}`, async () => {

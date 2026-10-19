@@ -51,3 +51,4 @@
 .conversation-inbox__excerpt { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   font-size: 12px; line-height: 16px; overflow-wrap: anywhere; color: hsl(var(--sidebar-foreground)); }
 .conversation-inbox__excerpt mark { border-radius: 2px; background: hsl(var(--sidebar-accent)); color: inherit; font-weight: 600; }
+.conversation-inbox__rename-field { display: flex; min-width: 0; flex: 1; flex-direction: column; }

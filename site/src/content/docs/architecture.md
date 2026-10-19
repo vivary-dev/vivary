@@ -395,7 +395,8 @@ one state as text with an icon, its project in All projects, and its runtime for
 Code. The selected row is `aria-current` and holds the list's one Tab stop.
 Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
 Shift+F10 or the row's button opens Rename, Pin or Unpin, and Archive or
-Restore. No row state is a live region and no duration is shown. Drafts of every
+Restore. Rename commits on Enter and cancels on Escape. An empty title is refused
+with a message and the field stays open. No row state is a live region and no duration is shown. Drafts of every
 project in the filter scope are listed first, labeled Draft or Review send.
 Search filters titles at once. From two characters it also searches user messages
 and agent replies through the existing `vivary-chat-search` owner action and
@@ -1016,6 +1017,9 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Inbox rename validation (W5). The Conversation inbox section now says an
+empty title is refused. Evidence inspected: the component rename test.
 
 2026-10-19 Inbox message search (W5). The Conversation inbox section now describes
 message search through the existing search action, its six-scope cap, and its
