@@ -718,8 +718,11 @@ new version adds that path, and on a reinstall into a folder the uninstaller kep
 removal already stopped setup, so a hit is a file setup does not own. Setup then
 deletes only `install-files.tmp`, names the file, and stops with exit code 2. The
 old list, entry, uninstaller, and marker stay, and a rerun after the user moves the
-file succeeds. The section starts `$R8` at 0, so the new-folder path runs the check
-and finds nothing. When `RemoveInstalledFiles` returned 2, a damaged list with the
+file succeeds. The check runs after removal, so on an upgrade or repair, where
+`RemoveInstalledFiles` read a list (`$R8` = 0), the previous version's files are
+already gone and the message says Vivary will not start until setup finishes. The
+section starts `$R8` at -1, so a new folder, like a kept-files folder with the
+marker and no list (`$R8` = 1), gets the message that nothing was changed. When `RemoveInstalledFiles` returned 2, a damaged list with the
 marker, setup skips the check and keeps copying over the folder, because it cannot
 tell owned files from others there. That path can still replace a user file at a
 payload path. A file at a payload folder path stays out of scope: `File /r` cannot
@@ -727,9 +730,10 @@ create the folder, `AllowSkipFiles off` turns that into a stop through
 `write_failed`, and nothing is replaced. The installer's architecture as described
 in the 2026-10-18 entry below still holds, with this check added before extraction.
 Evidence: 93 of 93 installer tests pass with `makensis` 3.10 and 92 pass with one
-skip without it, and each of 110 single-rule changes to the script fails the
-static tests. A model test of the upgrade and the kept-files reinstall keeps the
-user's file and lets a rerun install after the file is moved.
+skip without it, and each of 115 single-rule changes to the script fails the
+static tests, including the message chosen for each path. A model test of the
+upgrade and the kept-files reinstall keeps the user's file and lets a rerun install
+after the file is moved.
 
 2026-10-18 Windows installer. The owner asked for a Windows installer as the
 website's main download. `packages/desktop/installer/vivary.nsi` is an NSIS 3 script

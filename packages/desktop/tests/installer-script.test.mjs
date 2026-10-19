@@ -265,14 +265,9 @@ test("an uninstall that keeps added files leaves setup's marker for the next set
     'IfFileExists "$INSTDIR\\${SETUP_MARKER}" copy_files no_list');
 });
 
-/**
- * Models one upgrade that stops partway, then an uninstall, then setup, using
- * the step order the script itself has. Fails when an uninstall can leave
- * Vivary files that no list names, or when the next setup would refuse the folder.
- */
 test("setup refuses a file it does not own at a payload path before replacing anything", () => {
   const install = sectionBody("Vivary");
-  assert.deepEqual(install.slice(0, 2), ["SectionIn RO", "StrCpy $R8 0"], "a new folder never looks like a damaged list");
+  assert.deepEqual(install.slice(0, 2), ["SectionIn RO", "StrCpy $R8 -1"], "a new folder never looks like a read or damaged list");
   const removal = position(install, "Call RemoveInstalledFiles");
   const temp = position(install, 'File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"');
   const skip = position(install, "StrCmp $R8 2 owned_checked");
@@ -300,13 +295,27 @@ test("setup refuses a file it does not own at a payload path before replacing an
     "checked:",
   ], "every file line of the new list is checked, folder lines are skipped");
   const unowned = position(owned, "unowned:");
-  assert.deepEqual(owned.slice(unowned + 1, unowned + 6), [
+  // After RemoveInstalledFiles read a list ($R8 = 0), the previous files are gone,
+  // and the message says so. Otherwise nothing was removed.
+  assert.deepEqual(owned.slice(unowned + 1, unowned + 11), [
     "FileClose $R3",
     'Delete "$INSTDIR\\${INSTALL_LIST_TEMP}"',
+    "StrCmp $R8 0 0 nothing_removed",
+    'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\\$R4 is not a Vivary file, so setup did not replace it. The previous Vivary files were already removed, so Vivary will not start until setup finishes. Move that file out of $INSTDIR, then run setup again." /SD IDOK',
+    "SetErrorLevel 2",
+    'Abort "$INSTDIR\\$R4 is not a Vivary file. The previous Vivary files were already removed. Move that file, then run setup again."',
+    "nothing_removed:",
     'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\\$R4 is not a Vivary file, so setup did not replace it. Move it out of $INSTDIR, then run setup again." /SD IDOK',
     "SetErrorLevel 2",
     'Abort "$INSTDIR\\$R4 is not a Vivary file. Nothing was changed."',
   ]);
+  // Only the path where RemoveInstalledFiles read a list says files were removed.
+  const removedText = owned.filter(line => line.includes("were already removed"));
+  assert.equal(removedText.length, 2);
+  assert.ok(owned.indexOf(removedText[1]) < position(owned, "nothing_removed:"));
+  assert.ok(!owned.slice(position(owned, "nothing_removed:")).some(line => line.includes("removed.") && line.includes("previous")));
+  // A list that cannot be read does not claim that nothing changed.
+  assert.ok(!owned.slice(position(owned, "invalid:")).some(line => /nothing was changed/i.test(line)));
   // Only the temporary list is deleted, so the old list, entry, uninstaller and marker stay.
   const deletes = owned.filter(line => /^(Delete|RMDir|DeleteReg)/.test(line));
   assert.deepEqual([...new Set(deletes)], ['Delete "$INSTDIR\\${INSTALL_LIST_TEMP}"']);
@@ -359,6 +368,11 @@ test("a user file at a new payload path survives an upgrade or a reinstall besid
   }
 });
 
+/**
+ * Models one upgrade that stops partway, then an uninstall, then setup, using
+ * the step order the script itself has. Fails when an uninstall can leave
+ * Vivary files that no list names, or when the next setup would refuse the folder.
+ */
 test("an interrupted upgrade, then uninstall, then setup recovers with the script's step order", () => {
   const install = sectionBody("Vivary");
   const at = line => position(install, line);

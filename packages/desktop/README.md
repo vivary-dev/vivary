@@ -363,8 +363,13 @@ The installer script is `installer/vivary.nsi`. Its rules:
   file path in `install-files.tmp`. Every file the previous list named is gone by
   then, so a file found at a payload path is not Vivary's, for example one the user
   added. Setup then deletes only `install-files.tmp`, names the file, and stops with
-  exit code 2, leaving the old list, entry, uninstaller, and marker as they were. A
-  rerun after the user moves the file succeeds. Folder paths are not checked: a file
+  exit code 2, leaving the old list, entry, uninstaller, and marker as they were. On
+  an upgrade or repair, where `RemoveInstalledFiles` read a list (`$R8` = 0), the
+  previous version's files are already removed by then, so Vivary does not start
+  until setup finishes, and the message says so. On a new folder (`$R8` starts at
+  -1) or a kept-files folder with the marker and no list, nothing was removed, and
+  the message says nothing was changed. A rerun after the user moves the file
+  succeeds. Folder paths are not checked: a file
   at a payload folder path makes extraction fail, which stops setup without
   replacing anything. A damaged list with the marker skips this check and copies
   over the folder, because setup cannot tell its files from others there, so it can

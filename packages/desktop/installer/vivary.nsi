@@ -397,8 +397,9 @@ FunctionEnd
 
 Section "Vivary"
   SectionIn RO
-  ; RemoveInstalledFiles sets $R8. A new folder skips it, so start from 0.
-  StrCpy $R8 0
+  ; RemoveInstalledFiles sets $R8 to 0, 1 or 2. A new folder skips it, so -1
+  ; means no previous install was read and nothing was removed.
+  StrCpy $R8 -1
   Call RequireFixedInstallDir
   Call RequirePathRoom
   Call RequireVivaryClosed
@@ -476,7 +477,9 @@ SectionEnd
 ; failed removal already stopped setup, so such a file is one setup does not own,
 ; for example one the user added. Setup deletes only install-files.tmp, so the old
 ; list, entry, uninstaller and marker stay as they were, and a rerun after the user
-; moves the file succeeds. Folder lines are skipped: a file at a payload folder path
+; moves the file succeeds. When RemoveInstalledFiles read a list ($R8 = 0), the
+; previous version's files are already gone, and the message says so. Otherwise
+; nothing was removed. Folder lines are skipped: a file at a payload folder path
 ; makes File /r fail, which stops setup through write_failed and replaces nothing.
 Function RequireNoUnownedFiles
   ClearErrors
@@ -497,6 +500,11 @@ Function RequireNoUnownedFiles
   unowned:
   FileClose $R3
   Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
+  StrCmp $R8 0 0 nothing_removed
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$R4 is not a Vivary file, so setup did not replace it. The previous Vivary files were already removed, so Vivary will not start until setup finishes. Move that file out of $INSTDIR, then run setup again." /SD IDOK
+  SetErrorLevel 2
+  Abort "$INSTDIR\$R4 is not a Vivary file. The previous Vivary files were already removed. Move that file, then run setup again."
+  nothing_removed:
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$R4 is not a Vivary file, so setup did not replace it. Move it out of $INSTDIR, then run setup again." /SD IDOK
   SetErrorLevel 2
   Abort "$INSTDIR\$R4 is not a Vivary file. Nothing was changed."
@@ -504,9 +512,9 @@ Function RequireNoUnownedFiles
   FileClose $R3
   unreadable:
   Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
-  MessageBox MB_OK|MB_ICONSTOP "Setup could not read its new file list, so nothing was changed. Run setup again." /SD IDOK
+  MessageBox MB_OK|MB_ICONSTOP "Setup could not read its new file list. Run setup again." /SD IDOK
   SetErrorLevel 2
-  Abort "Setup could not read its new file list. Nothing was changed."
+  Abort "Setup could not read its new file list. Run setup again."
 FunctionEnd
 
 Function LaunchVivary
