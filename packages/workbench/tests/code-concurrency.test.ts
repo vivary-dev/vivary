@@ -17,7 +17,9 @@ const root = await mkdtemp(path.join(tmpdir(), "vivary-code-concurrency-"));
 const database = `file:${path.join(root, "state.sqlite")}`;
 const original = { // guard:allow-env-credential - Saved fixture names, restored after the suite.
   DATABASE_URL: process.env.DATABASE_URL, DATABASE_URL_UNPOOLED: process.env.DATABASE_URL_UNPOOLED,
+  // guard:allow-env-credential - Saved test mode flag and fixture store path, restored after the suite.
   VIVARY_ACCESS_MODE: process.env.VIVARY_ACCESS_MODE, AGENT_NATIVE_CODE_AGENTS_HOME: process.env.AGENT_NATIVE_CODE_AGENTS_HOME,
+  // guard:allow-env-credential - Saved search path, restored after the suite.
   PATH: process.env.PATH,
 };
 Object.assign(process.env, { DATABASE_URL: database, DATABASE_URL_UNPOOLED: database, // guard:allow-env-credential - Disposable fixture store.
