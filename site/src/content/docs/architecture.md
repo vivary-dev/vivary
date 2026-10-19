@@ -719,7 +719,8 @@ the user's own level and installs to the fixed folder `%LOCALAPPDATA%\Programs\V
 menu shortcut, an optional desktop shortcut, and an uninstall entry under HKCU.
 `AllowSkipFiles off` makes a file that cannot be written stop setup with an error.
 Setup writes `install-files.txt`, every payload file and then every payload folder
-deepest first, as its last step. In a folder it creates, it first writes the marker
+deepest first, after it removes the previous version's files and before it extracts
+any payload file, so the list on disk names every Vivary file there. In a folder it creates, it first writes the marker
 `vivary-setup.txt`, before any payload file. Nothing is deleted recursively. Upgrade and
 uninstall read the previous list behind an exact-path and not-a-link check on the
 install folder, check every line (no drive, leading backslash, `.` or `..` part,
@@ -771,7 +772,8 @@ setup writes the marker `vivary-setup.txt` before any payload file. A rerun
 recognizes the marker and copies over a folder that has it but no list, and the
 uninstaller asks for that rerun and removes the marker with the list. Setup never
 writes the marker into a folder that already held files, so a pre-existing folder
-without a marker is still refused. The list check also refuses a path part that
+without a marker is still refused. The uninstaller writes it again when files the
+user added keep the folder. The list check also refuses a path part that
 ends in a dot or space. Payload file paths and list lines are capped at 179
 characters, because Windows file paths stop at 259 and the install root for a
 40-character profile folder name takes 80. Folder paths are capped at 167 (168 for a
@@ -806,10 +808,19 @@ gone after deleting it, and that the uninstall entry no longer opens after
 the entry, marker, and list and stops with a message, so the uninstaller or setup can
 run again. A damaged list without the marker now stops with "install-files.txt is
 damaged" and the reason: a cut-off line, a path outside the Vivary folder, or an
-empty or too long line. Evidence: 89 of 89 installer tests pass with `makensis` 3.10
-and 88 pass with one skip without it, each of 93 single-rule changes to the script
-fails the static tests, and the 2aaf04f payload's longest file path has 103
-characters and its longest folder path 90. The 70957d1 installer passed install,
+empty or too long line. Review round 7: an upgrade that stopped during extraction,
+then an uninstall, then setup, left new-version files that the old list on disk did
+not name, and the next setup refused the folder. Setup now writes the new list
+before `File /r`, after the old files are removed, so the list on disk always names
+every Vivary file present, and the uninstaller treats a listed file that never
+arrived as removed. When files the user added keep the folder after an uninstall,
+the uninstaller writes `vivary-setup.txt` again, so the next setup takes its
+marker-without-list path and installs beside those files without deleting any. A
+script test models that sequence with the script's own step order and fails on the
+74f8885 order. Evidence: 91 of 91 installer tests pass with `makensis` 3.10 and 90
+pass with one skip without it, each of 98 single-rule changes to the script fails
+the static tests, and the 2aaf04f payload's longest file path has 103 characters and
+its longest folder path 90. The 70957d1 installer passed install,
 reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a

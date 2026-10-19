@@ -432,6 +432,17 @@ Section "Vivary"
   copy_files:
   ClearErrors
   SetOutPath "$INSTDIR"
+  ; The new list goes in before any payload file. The previous version's files
+  ; are gone by now, so the list on disk always names every Vivary file there,
+  ; and an uninstall after an interrupted extraction removes all of them. A
+  ; listed file that never arrived counts as removed. The list is written under
+  ; a temporary name, then moved over the old list in one step
+  ; (MOVEFILE_REPLACE_EXISTING 1 + MOVEFILE_WRITE_THROUGH 8), so an interrupted
+  ; write leaves the old list or the new one, never part of one.
+  File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"
+  IfErrors write_failed
+  System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
+  IntCmp $0 0 write_failed
   File /r "${PAYLOAD_DIR}/*"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
   CreateShortcut "$SMPROGRAMS\Vivary.lnk" "$INSTDIR\vivary.exe" "" "$INSTDIR\vivary.exe" 0
@@ -446,14 +457,6 @@ Section "Vivary"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   IfErrors write_failed
-  ; The list goes last, so it exists only after every file was written. It is
-  ; written under a temporary name, then moved over the old list in one step
-  ; (MOVEFILE_REPLACE_EXISTING 1 + MOVEFILE_WRITE_THROUGH 8), so an interrupted
-  ; write leaves the old list or the new one, never part of one.
-  File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"
-  IfErrors write_failed
-  System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
-  IntCmp $0 0 write_failed
   Return
   write_failed:
   MessageBox MB_OK|MB_ICONSTOP "Setup could not write every Vivary file to $INSTDIR. Run setup again." /SD IDOK
@@ -533,7 +536,17 @@ Section "Uninstall"
   ; Removes the folder only when it is empty. Files a user added stay.
   RMDir "$INSTDIR"
   IfFileExists "$INSTDIR\*.*" 0 kept_data
-  DetailPrint "Files you added to $INSTDIR were kept."
+  ; Files the user added keep the folder. A new marker tells the next setup that
+  ; the folder is Vivary's, so it installs beside those files and deletes none.
+  ClearErrors
+  FileOpen $0 "$INSTDIR\${SETUP_MARKER}" a
+  IfErrors marker_not_written
+  FileWrite $0 "Vivary was uninstalled. Files you added to this folder were kept. Vivary setup can install here again beside them."
+  FileClose $0
+  DetailPrint "Files you added to $INSTDIR were kept. Vivary setup can install there again beside them."
+  Goto kept_data
+  marker_not_written:
+  DetailPrint "Files you added to $INSTDIR were kept. Move them elsewhere before you run Vivary setup again."
   kept_data:
   DetailPrint "${KEPT_DATA_TEXT}"
 SectionEnd

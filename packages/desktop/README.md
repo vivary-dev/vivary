@@ -352,10 +352,13 @@ The installer script is `installer/vivary.nsi`. Its rules:
 - When Vivary or its bundled Node or Python is running, it asks the user to close
   Vivary and offers Retry or Cancel. It never stops a process.
 - A file that cannot be written stops setup (`AllowSkipFiles off`), and setup exits
-  with an error. `install-files.txt` is written last, after every other file. Setup
-  writes it as `install-files.tmp` and then moves it over the old list in one step
-  (`MoveFileExW` with replace and write-through), so an interrupted write leaves the
-  old list or the new one, never part of one.
+  with an error. Setup writes the new `install-files.txt` after it removes the
+  previous version's files and before it extracts any payload file, so the list on
+  disk always names every Vivary file there. An uninstall after an interrupted
+  extraction therefore removes all of them, and a listed file that never arrived
+  counts as removed. Setup writes the list as `install-files.tmp` and then moves it
+  over the old list in one step (`MoveFileExW` with replace and write-through), so an
+  interrupted write leaves the old list or the new one, never part of one.
 - Nothing is deleted recursively. Upgrade and uninstall read the previous
   `install-files.txt`, check every line before deleting anything, delete the listed
   files, then remove each listed folder only when it is empty. A line with a drive,
@@ -368,7 +371,9 @@ The installer script is `installer/vivary.nsi`. Its rules:
   path 247, as can happen under a long or relocated profile folder.
 - When the folder does not exist or is empty, setup writes its marker
   `vivary-setup.txt` there before copying any payload file. Setup never writes the
-  marker into a folder that already held files.
+  marker into a folder that already held files. When files the user added keep the
+  folder after an uninstall, the uninstaller writes the marker again, so the next
+  setup recognizes the folder and installs beside those files without deleting any.
 - Both first confirm that the folder is exactly `%LOCALAPPDATA%\Programs\Vivary`
   and is not a link. An upgrade changes an existing folder only when its uninstall
   entry points there or it holds `install-files.txt`, the marker, `vivary.exe`, or

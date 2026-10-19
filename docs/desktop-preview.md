@@ -155,7 +155,8 @@ shortcut, the desktop shortcut when setup created it, the uninstaller itself, th
 Installed apps entry, setup's `vivary-setup.txt` marker, and last the file list.
 Nothing is deleted recursively. Files you added
 to `%LOCALAPPDATA%\Programs\Vivary` stay, and so does the folder when it still
-holds them.
+holds them. The uninstaller then leaves `vivary-setup.txt` there, so a later setup
+installs beside your files without deleting any.
 
 The uninstaller keeps `%USERPROFILE%\.vivary`, `%APPDATA%\Vivary`, and every
 project folder, so your projects, conversations, and settings remain. Delete those
@@ -462,7 +463,8 @@ your firewall.
 | Setup or the uninstaller says it is already running | Another setup or uninstaller is open for your account. Finish or close it, then try again. |
 | Setup or the uninstaller says a Vivary folder is a link | A folder inside `%LOCALAPPDATA%\Programs\Vivary` was replaced by a link or junction. Nothing was removed. Remove that link, then try again. |
 | Setup says Vivary is not in its expected folder | Setup and the uninstaller work only in `%LOCALAPPDATA%\Programs\Vivary`. Run the uninstaller from **Installed apps** rather than from a copy. |
-| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary. Move them elsewhere, then run setup again. |
+| Setup says the folder does not contain Vivary | `%LOCALAPPDATA%\Programs\Vivary` holds other files and no sign of a previous Vivary: no file list, no `vivary-setup.txt`, no `vivary.exe`, and no uninstaller. An uninstall that keeps files you added leaves `vivary-setup.txt`, so this happens only for files placed there some other way. Move them elsewhere, then run setup again. |
+| An upgrade stopped partway, for example on a full disk | Run setup again to finish it. You can also uninstall first: setup writes the new file list before it copies any file, so the uninstaller removes every Vivary file, keeps files you added, and a later setup installs normally. |
 | No window after launching from a terminal | Try File Explorer. An inherited `ELECTRON_RUN_AS_NODE=1` can make Electron run as Node. Remove that variable only from the launch shell and retry. |
 | Windows asks which app should open a file | Cancel. Recheck that you launched the extracted `.exe`. Do not change file associations. |
 | Folder selection times out | Close the chooser, then choose Open folder again. |
