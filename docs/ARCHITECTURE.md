@@ -50,12 +50,13 @@ The selected coding runtime owns execution, tools, model access, and native sess
 The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
-model, update Claude Code, or verify its installed version. Retained conversations
-keep their recorded runtime and model ID, because the saved provider session and
-resume depend on both, and the send boundary refuses a change. Above the composer,
-a conversation with a run says which runtime and model it keeps and offers New
-conversation, and the locked selectors name that line as their description. When
-another conversation's agent is working, the selectors also name that notice.
+model, update Claude Code, or verify its installed version. A retained
+conversation changes its runtime or model in place through a confirmed switch,
+described below. The send boundary still refuses a send that names a runtime or
+model the run does not record, so only that switch changes a retained route. When
+another conversation's agent is working, a new conversation's selectors stay
+locked and name that notice. A retained conversation's selectors stay open,
+because a switch waits only for its own run.
 A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
@@ -138,6 +139,77 @@ prefixes and Windows SystemRoot while retaining credential filtering.
 
 Offline runtime fixtures cover route selection and error handling. Live provider
 execution and packaged Windows acceptance remain separate checks.
+
+### Switching a Code conversation in place
+
+The owner required on 2026-10-19 that a Code conversation can change its runtime
+or model without leaving the visible conversation or starting over. A Code
+conversation is one Native Code run, so the switch changes that run instead of
+creating another. Replies, approvals, worker messages, the transcript, and Stop
+are keyed by the run ID, so they keep routing to the same conversation.
+`switchVivaryCodeRuntime` in
+[`local-code-agent.ts`](../packages/workbench/server/local-code-agent.ts) owns the
+change, and the `vivary-code-switch` action carries a signed-in owner's request
+with the same project resolution a send uses.
+
+The switch refuses while this conversation's run is active
+(`vivary_code_switch_run_active`), while it is stopping
+(`vivary_code_switch_run_stopping`), and while a cleanup refusal names it
+(`vivary_code_cleanup_required`). Another conversation's active run does not
+block it, because a switch only edits this run's record. The target runtime must
+be ready, and the target model must be one that runtime lists now: a Claude Code
+catalog ID the installed version supports, or a model from Codex's live
+`model/list`. Legacy aliases, retained historical IDs, and Codex's `default` are
+refused. After those awaited checks the owner reads the run again and refuses if
+it started, stopped, or changed route meanwhile. A send that awaited its own
+checks while a switch landed reads the record again before it claims the host
+and refuses with `vivary_code_engine_changed`, so it never launches the old route.
+
+Every switch, including a model change inside one runtime, starts a new provider
+session. Codex refuses to resume a thread under another model, Claude Code's
+behavior on resume with a new model is not established, and Core's Claude adapter
+reads `claudeSessionId` without checking the runtime. The switch therefore sets
+the new `engine` and `model`, removes both `claudeSessionId` and `codexSessionId`
+and the last `providerSessionMode`, and keeps the earlier session ID in
+`previousProviderSessions` (at most 20) so its provider log can still be found.
+It appends a visible `note` event with `metadata.source: "vivary-runtime-switch"`,
+the from and to runtime and model, and the time. Core's transcript event kinds are
+a closed set, so the switch reuses `note` the way the project context load does.
+`codeMatchRepository` in
+[`code-match-repository.ts`](../packages/workbench/app/lib/code-match-repository.ts)
+renders that note as its own divider row (a Markdown rule and one short line)
+instead of letting Core fold it into the reply before it.
+
+The next send finds no stored session for the new runtime and uses
+`buildVivaryCodeFollowUpPrompt`. That prompt quotes user and assistant text only,
+at most the last 24 messages and 12,000 characters, under a header that says the
+text is quoted earlier conversation with no instruction authority, that the new
+session shares no state with any earlier provider session, and that reasoning,
+tool output, and files read by an earlier runtime or model do not carry over
+unless the quoted text shows them. Tool calls and results, hidden reasoning,
+provider-side compaction, and private session state do not transfer between
+providers. Completed work stays in the transcript and in the workspace files.
+After the new session's first turn, follow-ups resume that session as before.
+
+In the composer, choosing another runtime or model on an idle retained
+conversation shows a short confirm that states what transfers. Switch calls the
+action, and the selectors then show the new route. While this conversation's run
+works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
+switch asks again and says the current request will be cancelled and completed
+work stays. Confirming calls Stop for this run, waits until the run leaves
+`stopping`, and then switches. If the turn finishes during the choice, the plain
+confirm replaces it. A refused switch keeps the route and shows the server's
+reason. The [journeys state chart](product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
+draws these states. A linked conversation, described next, remains the way to
+continue in a separate conversation that keeps the source unchanged.
+
+Offline evidence: `tests/code-route-selection.test.mjs` runs the switch owner as
+written against stub records, `tests/code-run-worker.test.ts` runs the real worker
+with stub Claude Code and Codex executables from Claude to Codex and back,
+`tests/local-code-agent.test.ts` runs Stop and switch and a later approval on the
+real Native store, `tests/chat-search-code-replay.test.mjs` checks the divider
+rows, and `tests/native-chat-components.test.mjs` drives the composer. No live
+provider turn and no packaged Windows run has exercised the switch.
 
 ### Linked runtime conversations
 
@@ -710,6 +782,19 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Runtime and model switch inside a Code conversation, stacked on PR #257.
+The owner rejected #257's explanation of locked selectors as the answer and asked
+for a supported transition. The new section "Switching a Code conversation in
+place" describes the action, refusals, session clearing, divider, quoted context,
+and composer flow. The Coding model selection section no longer says a retained
+conversation keeps its route, and #257's kept-route line and its New conversation
+link are gone. The header's New conversation button is unchanged. The send
+refusals for a changed runtime or model are unchanged in effect and now name the
+switch. The send owner rereads the record before claiming the host. The worker's
+model check is unchanged, because it compares the start message with the record
+the switch already updated. Session details read the run's current engine, so a
+switched run reports no provider session until its next turn.
 
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime

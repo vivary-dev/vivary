@@ -7,10 +7,12 @@ import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
 import {
   appendCodeAgentTranscriptEvent,
+  codeAgentRunsDir,
   createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   listCodeAgentTranscriptEvents,
   listCodeAgentRunRecords,
+  updateCodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
 import codeStateAction from "../actions/vivary-code-state.ts";
@@ -25,6 +27,7 @@ import {
   denyVivaryCodeMessage,
   getVivaryCodeFiles,
   getVivaryCodeHostState,
+  getVivaryCodeSessionDetails,
   getVivaryCodeState,
   hasOwnedVivaryCodeSubmit,
   linkedCodeDraftRuns,
@@ -35,6 +38,7 @@ import {
   isVivaryAppRun,
   sendVivaryCodeMessage,
   stopVivaryCodeRun,
+  switchVivaryCodeRuntime,
 } from "../server/local-code-agent.ts";
 
 import { claimProjectReconnection } from "../server/project-reconnection-admission.mjs";
@@ -516,6 +520,123 @@ process.send({type:"vivary:code-worker:ready"});
       if (runId) {
         const execution = Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")).activeRuns.get(runId)?.execution;
         await stopVivaryCodeRun({ ownerEmail: "immediate@example.com", orgId: "immediate-org", runId, projectId: workspace.projectId }).catch(() => undefined);
+        await execution;
+      }
+      process.chdir(previousCwd);
+      if (previousMode === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previousMode; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    }
+  });
+
+  it("Stop and switch keeps one run, refuses while this run works, and routes the next approval by run ID", async () => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-switch-"));
+    temporaryRoots.push(fixture);
+    const server = path.join(fixture, ".output", "server");
+    const bin = path.join(fixture, "bin");
+    await mkdir(server, { recursive: true });
+    await mkdir(bin);
+    await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
+  process.stdout.write('2.1.300 (Claude Code)\\n');
+  process.exit(0);
+}
+if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
+process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
+`, { mode: 0o755 });
+    // The first turn works until it is stopped. The turn after the switch asks for one approval, then finishes.
+    await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+import {appendFileSync, writeFileSync} from "node:fs";
+let runId;
+process.on("message", message => {
+ if(message.type === "vivary:code-worker:start") {
+  runId = message.runId;
+  appendFileSync("starts.jsonl", JSON.stringify({ runId, model: message.model, prompt: message.prompt }) + "\\n");
+  if (message.prompt.includes("Needs approval")) process.send({type:"vivary:code-worker:request",runId,
+    request:{requestId:"switch-request",method:"item/commandExecution/requestApproval",params:{command:"read fixture"}}});
+ }
+ if(message.type === "vivary:code-worker:response") {
+  writeFileSync("response.json", JSON.stringify(message));
+  process.send({type:"vivary:code-worker:resolved",runId,requestId:message.requestId});
+  process.send({type:"vivary:code-worker:done",runId});
+ }
+});
+process.send({type:"vivary:code-worker:ready"});
+`);
+    const previousCwd = process.cwd();
+    const previousMode = process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const previousPath = process.env.PATH; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    const host = () => Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host"));
+    const owner = { ownerEmail: "switch@example.com", orgId: "switch-org" };
+    const workspace = { root: fixture, label: "Switch project", projectId: "switch",
+      bindingId: "switch-binding", rootId: "switch-root", bindingRevision: 1 };
+    let runId: string | undefined;
+    try {
+      process.chdir(fixture);
+      process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.PATH = bin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+      assert.equal((await getVivaryRuntimeStatus("claude-cli", { refresh: true })).status, "ready");
+      const started = await sendVivaryCodeMessage({ ...owner, message: "Keep working", engine: "claude-cli",
+        model: "claude-sonnet-5-5", workspace, revalidateWorkspace: async () => workspace });
+      runId = started.run!.id;
+      const target = { ...owner, runId, engine: "claude-cli" as const, model: "claude-opus-5-5", workspace };
+      await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_active", statusCode: 409 });
+      await stopVivaryCodeRun({ ...owner, runId, projectId: workspace.projectId });
+      await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
+      await host().activeRuns.get(runId)?.execution;
+      assert.equal(getCodeAgentRunRecord(runId)?.status, "paused");
+
+      // A stale ID for each runtime, as a conversation that already moved between them could hold.
+      updateCodeAgentRunRecord(runId, { metadata: { claudeSessionId: "00000000-0000-4000-8000-000000000012",
+        codexSessionId: "stale-thread", providerSessionMode: "native-resume" } });
+      const switched = await switchVivaryCodeRuntime(target);
+      assert.equal(switched.run?.id, runId);
+      assert.equal(switched.run?.model, "claude-opus-5-5");
+      const stored = JSON.parse(await readFile(path.join(codeAgentRunsDir(), `${runId}.json`), "utf8")).metadata;
+      assert.equal("claudeSessionId" in stored || "codexSessionId" in stored || "providerSessionMode" in stored, false);
+      assert.equal(stored.previousProviderSessions.length, 1);
+      const details = await getVivaryCodeSessionDetails(owner.ownerEmail, runId, workspace, owner.orgId);
+      assert.deepEqual([details.sessionId, details.continuity, details.nextTurn], [null, "not-recorded", "reconstructed-context"]);
+      assert.match(details.log.excerpt, /note: Switched from Claude Code Sonnet 5\.5 to Claude Code Opus 5\.5\./);
+      const transcript = listCodeAgentTranscriptEvents(runId);
+      assert.deepEqual(transcript.filter(event => event.kind === "user").map(event => event.message), ["Keep working"]);
+      assert.equal(transcript.at(-1)?.metadata?.source, "vivary-runtime-switch");
+
+      // A send that names the earlier model, without a switch, still refuses before any write.
+      for (const change of [{ model: "claude-sonnet-5-5" }, { engine: "codex-cli" as const, model: "gpt-fixture" }]) {
+        await assert.rejects(sendVivaryCodeMessage({ ...owner, runId, message: "Wrong route", engine: "claude-cli",
+          model: "claude-opus-5-5", workspace, ...change }), { statusCode: 409 });
+      }
+      assert.equal(listCodeAgentTranscriptEvents(runId).length, transcript.length);
+
+      await sendVivaryCodeMessage({ ...owner, runId, message: "Needs approval", engine: "claude-cli", model: "claude-opus-5-5",
+        workspace, revalidateWorkspace: async () => workspace });
+      let pending;
+      for (let attempt = 0; attempt < 200 && !pending; attempt++) {
+        pending = (await getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).pendingApproval;
+        if (!pending) await delay(20);
+      }
+      assert.equal(pending?.runId, runId, "the approval belongs to the switched conversation");
+      assert.equal(pending?.requestId, "switch-request");
+      await approveVivaryCodeMessage({ ...owner, runId, requestId: "switch-request", workspace,
+        revalidateWorkspace: async () => workspace });
+      await host().activeRuns.get(runId)?.execution;
+      const response = JSON.parse(await readFile(path.join(fixture, "response.json"), "utf8"));
+      assert.equal(response.requestId, "switch-request");
+      const starts = (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+      assert.deepEqual(starts.map(start => [start.runId, start.model]), [[runId, "claude-sonnet-5-5"], [runId, "claude-opus-5-5"]]);
+      assert.equal(starts[0].prompt, "Keep working");
+      assert.match(starts[1].prompt, /^# Previous conversation\nThese are quoted earlier messages from this Vivary conversation\./);
+      assert.match(starts[1].prompt, /\nUser: Keep working\n\n# Current request\nNeeds approval$/);
+      assert.equal(listCodeAgentRunRecords("vivary-local-code").filter(run => run.metadata?.ownerEmail === owner.ownerEmail).length, 1);
+      runId = undefined;
+    } finally {
+      if (runId) {
+        const execution = host().activeRuns.get(runId)?.execution;
+        await stopVivaryCodeRun({ ...owner, runId, projectId: workspace.projectId }).catch(() => undefined);
         await execution;
       }
       process.chdir(previousCwd);

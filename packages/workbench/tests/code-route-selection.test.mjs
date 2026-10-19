@@ -6,6 +6,14 @@ import { transform } from "esbuild";
 import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS, claudeCodeModelChoices }
   from "../shared/claude-models.ts";
 
+// Compiles one slice of local-code-agent.ts, from the named start to the next named owner, with its dependencies injected.
+async function slice(from, to) {
+  const begin = source.indexOf(from);
+  const finish = source.indexOf(to, begin);
+  assert.ok(begin >= 0 && finish > begin, from);
+  return (await transform(source.slice(begin, finish).replaceAll(/^export /gm, ""), { loader: "ts" })).code;
+}
+
 const source = await readFile(new URL("../server/local-code-agent.ts", import.meta.url), "utf8");
 const start = source.indexOf("export async function sendVivaryCodeMessage(");
 const end = source.indexOf("\nexport type VivaryCodeSessionDetails", start);
@@ -17,23 +25,33 @@ const resolverEnd = source.indexOf("\nfunction titleFromMessage", resolverStart)
 assert.ok(resolverStart >= 0 && resolverEnd > resolverStart);
 const resolver = await transform(source.slice(resolverStart, resolverEnd).replace("export ", ""), { loader: "ts" });
 const fail = (message, options) => { throw Object.assign(new Error(message), options); };
+// vivary-code-switch, its refusals, its model check, and the record change, as written.
+const switchCode = await slice("export async function switchVivaryCodeRuntime(", "\nexport async function getVivaryCodeFiles(");
+const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
 const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
   ["VIVARY_CODE_DEFAULT_MODEL", "VIVARY_CODE_MODELS", "CLAUDE_CODE_LEGACY_ALIASES", "fail"])(
   CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_MODELS.map(model => model.id), CLAUDE_CODE_LEGACY_ALIASES, fail);
 
 function fixture() {
   let runtime = { status: "ready", version: "2.1.300" };
+  let codex = { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" };
+  let statusGate = null;
   const records = new Map(), events = [], launches = [], writes = [];
+  const activeRuns = new Map(), hostState = { cleanup: null };
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace, ensureVivaryCodeHostInitialized: async () => {},
-    hostState: { cleanup: null }, assertCodeHostAvailable() {},
-    requireOwnedRun: id => records.get(id), engineFromRun: run => run.metadata.engine,
+    hostState, assertCodeHostAvailable() {},
+    requireOwnedRun: id => records.get(id) ?? fail("Local Vivary code run not found.", { statusCode: 404 }),
+    getCodeAgentRunRecord: id => records.get(id) ?? null,
+    engineFromRun: run => run.metadata.engine,
     modelFromRun: run => run.metadata.model, VIVARY_CODE_DEFAULT_ENGINE: "claude-cli",
+    metadataString: (run, key) => typeof run.metadata?.[key] === "string" ? run.metadata[key] : null,
     sameWorkspace: (a, b) => a.root === b.root,
     fail,
-    getVivaryRuntimeStatus: async () => runtime,
-    getCodexModels: async () => ({ status: "ready", models: [{ id: "gpt-fixture" }], defaultModel: "gpt-fixture" }),
+    // A held gate pauses only the next status read, so a second caller can run past it.
+    getVivaryRuntimeStatus: async () => { const gate = statusGate; statusGate = null; await gate?.(); return runtime; },
+    getCodexModels: async () => codex,
     resolveVivaryCodeModel,
     claudeCodeModelChoices,
     getCodePermissionMode: async () => "normal", refreshHeldCredentials: async () => {},
@@ -46,9 +64,17 @@ function fixture() {
     startVivaryCodeRun: input => { launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
     recordProjectContextLoad() { writes.push("context"); },
+    activeRuns, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
+    cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
+    engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));
-  return { send, records, events, launches, writes, workspace, setRuntime(value) { runtime = value; } };
+  const switchRoute = compileFunction(sessionCode + "\n" + switchCode + "\nreturn switchVivaryCodeRuntime;",
+    Object.keys(owners))(...Object.values(owners));
+  const snapshot = () => JSON.stringify([Array.from(records), events, launches, writes]);
+  return { send, switchRoute, records, events, launches, writes, workspace, activeRuns, hostState, snapshot,
+    setRuntime(value) { runtime = value; }, setCodex(value) { codex = value; },
+    holdStatus(gate) { statusGate = gate; } };
 }
 
 for (const engine of ["claude-cli", "codex-cli"]) test(`${engine} new and resumed sends keep the selected route and model`, async () => {
@@ -68,7 +94,9 @@ for (const engine of ["claude-cli", "codex-cli"]) test(`${engine} new and resume
   assert.deepEqual(value.records.get(first.run.id).metadata.subscriptionFundingBinding, { obsolete: true });
 });
 
-test("sign-in, changed runtime, changed model, and changed project refuse before writes without fallback", async () => {
+// A send names the conversation's route. Without a switch, another runtime or model still refuses, because only
+// vivary-code-switch may change a retained conversation's route.
+test("without a switch, sign-in, changed runtime, changed model, and changed project refuse before writes without fallback", async () => {
   const value = fixture();
   const input = { ownerEmail: "fixture@example.test", engine: "codex-cli", message: "First", model: "gpt-fixture", workspace: value.workspace };
   const first = await value.send(input);
@@ -120,4 +148,138 @@ test("Claude aliases and retained historical IDs keep their existing admission b
   await assert.rejects(value.send({ ownerEmail: "fixture@example.test", engine: "claude-cli", message: "New",
     model: "claude-sonnet-4-20250514", workspace: value.workspace }), { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
   assert.equal(value.launches.length, 0);
+});
+
+const owner = "fixture@example.test";
+const claudeSession = "00000000-0000-4000-8000-000000000011";
+
+test("a switch moves Claude to Codex and back in place, clears both sessions, and the next sends use the new route", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-fable-5-1",
+    workspace: value.workspace });
+  const runId = first.run.id;
+  // A stale Codex ID beside the Claude one is the case Core's Claude adapter would resume without a runtime check.
+  Object.assign(value.records.get(runId).metadata, { claudeSessionId: claudeSession, codexSessionId: "stale-thread",
+    providerSessionMode: "native-resume" });
+  const toCodex = await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture",
+    workspace: value.workspace });
+  let run = value.records.get(runId);
+  assert.equal(toCodex.run, run);
+  assert.equal(run.metadata.engine, "codex-cli");
+  assert.equal(run.metadata.model, "gpt-fixture");
+  for (const key of ["claudeSessionId", "codexSessionId", "providerSessionMode"]) assert.equal(run.metadata[key], undefined, key);
+  assert.equal(JSON.parse(JSON.stringify(run)).metadata.claudeSessionId, undefined, "the stored record drops the key");
+  assert.deepEqual(run.metadata.previousProviderSessions.map(item => [item.engine, item.model, item.sessionId]),
+    [["claude-cli", "claude-fable-5-1", claudeSession]]);
+  const note = value.events.at(-1);
+  assert.equal(note.kind, "note");
+  assert.equal(note.runId, runId);
+  assert.equal(note.metadata.source, "vivary-runtime-switch");
+  assert.deepEqual([note.metadata.from, note.metadata.to], [{ engine: "claude-cli", model: "claude-fable-5-1" },
+    { engine: "codex-cli", model: "gpt-fixture" }]);
+  assert.match(note.metadata.switchedAt, /^\d{4}-\d\d-\d\dT/);
+  assert.equal(note.message, "Switched from Claude Code Fable 5.1 to Codex GPT Fixture. "
+    + "The next message starts a new Codex session with the visible conversation text.");
+
+  await value.send({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", message: "Second", workspace: value.workspace });
+  run = value.records.get(runId);
+  run.metadata.codexSessionId = "fixture-thread";
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", workspace: value.workspace });
+  run = value.records.get(runId);
+  assert.equal(run.metadata.claudeSessionId, undefined);
+  assert.equal(run.metadata.codexSessionId, undefined);
+  assert.deepEqual(run.metadata.previousProviderSessions.map(item => item.sessionId), [claudeSession, "fixture-thread"]);
+  await value.send({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", message: "Third", workspace: value.workspace });
+  assert.deepEqual(value.launches.map(launch => [launch.runId, launch.engine, launch.model]), [
+    [runId, "claude-cli", "claude-fable-5-1"], [runId, "codex-cli", "gpt-fixture"], [runId, "claude-cli", "claude-opus-5-5"]]);
+  assert.equal(value.records.size, 1, "the conversation keeps one run");
+  assert.deepEqual(value.events.map(event => event.kind), ["user", "note", "user", "note", "user"]);
+});
+
+test("a same-runtime model switch also clears the session, and choosing the current route writes nothing", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "codex-cli", message: "First", model: "gpt-fixture", workspace: value.workspace });
+  value.setCodex({ status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }, { id: "gpt-other", label: "GPT Other" }],
+    defaultModel: "gpt-fixture" });
+  value.records.get(first.run.id).metadata.codexSessionId = "fixture-thread";
+  const before = value.snapshot();
+  await value.switchRoute({ ownerEmail: owner, runId: first.run.id, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace });
+  assert.equal(value.snapshot(), before);
+  await value.switchRoute({ ownerEmail: owner, runId: first.run.id, engine: "codex-cli", model: "gpt-other", workspace: value.workspace });
+  assert.equal(value.records.get(first.run.id).metadata.model, "gpt-other");
+  assert.equal(value.records.get(first.run.id).metadata.codexSessionId, undefined, "Codex refuses to resume a thread under another model");
+});
+
+test("a switch refuses unsupported models, unavailable runtimes, and this run's active, stopping, or cleanup state before writes", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  const attempt = change => value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture",
+    workspace: value.workspace, ...change });
+  const before = value.snapshot();
+  for (const [change, errorCode] of [
+    [{ model: "gpt-unlisted" }, "vivary_code_model_unsupported"],
+    [{ model: "default" }, "vivary_code_model_unsupported"],
+    [{ engine: "claude-cli", model: "sonnet" }, "vivary_code_model_unsupported"],
+    [{ engine: "claude-cli", model: "claude-sonnet-4-20250514" }, "vivary_code_model_unsupported"],
+  ]) await assert.rejects(attempt(change), { errorCode }, JSON.stringify(change));
+  value.setRuntime({ status: "ready", version: "2.1.289" });
+  await assert.rejects(attempt({ engine: "claude-cli", model: "claude-haiku-5-5" }),
+    { errorCode: "vivary_code_model_unsupported", message: /Requires Claude Code 2\.1\.293/ });
+  value.setRuntime({ status: "sign-in-required", message: "Codex needs sign-in" });
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_runtime_unavailable", message: "Codex needs sign-in" });
+  value.setRuntime({ status: "ready", version: "2.1.300" });
+  value.setCodex({ status: "unavailable", message: "Codex models are unavailable.", models: [] });
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_models_unavailable" });
+  value.setCodex({ status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" });
+
+  value.activeRuns.set(runId, { stopReason: null });
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_switch_run_active", statusCode: 409 });
+  value.activeRuns.set(runId, { stopReason: "user" });
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
+  value.activeRuns.delete(runId);
+  value.hostState.cleanup = { runId };
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_cleanup_required", message: `Cleanup for ${runId} is pending.` });
+  value.hostState.cleanup = null;
+  value.records.get(runId).metadata.cleanupRefusal = { refusedAt: "2026-10-19T00:00:00.000Z" };
+  await assert.rejects(attempt({}), { errorCode: "vivary_code_cleanup_required" });
+  delete value.records.get(runId).metadata.cleanupRefusal;
+  value.records.get(runId).metadata.linkedCreationPending = true;
+  await assert.rejects(attempt({}), { errorCode: "vivary_linked_history_unavailable" });
+  delete value.records.get(runId).metadata.linkedCreationPending;
+  await assert.rejects(attempt({ runId: "missing-run" }), { statusCode: 404 });
+  assert.equal(value.snapshot(), before);
+
+  // Another conversation's active run or cleanup does not hold this one.
+  value.activeRuns.set("other-run", { stopReason: null });
+  value.hostState.cleanup = { runId: "other-run" };
+  await attempt({});
+  assert.equal(value.records.get(runId).metadata.engine, "codex-cli");
+});
+
+test("a run that starts while a switch checks its runtime keeps its route, and a switch during a send's checks refuses that send", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  let release;
+  value.holdStatus(() => new Promise(resolve => { release = resolve; }));
+  const switching = value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace });
+  await new Promise(resolve => setImmediate(resolve));
+  value.activeRuns.set(runId, { stopReason: null });
+  release();
+  await assert.rejects(switching, { errorCode: "vivary_code_switch_run_active" });
+  assert.equal(value.records.get(runId).metadata.engine, "claude-cli");
+  value.activeRuns.delete(runId);
+
+  const launched = value.launches.length;
+  value.holdStatus(() => new Promise(resolve => { release = resolve; }));
+  const sending = value.send({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", message: "Late",
+    workspace: value.workspace });
+  await new Promise(resolve => setImmediate(resolve));
+  // The send waits on its runtime check. The switch's own status read is not held, so it lands first.
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace });
+  release();
+  await assert.rejects(sending, { errorCode: "vivary_code_engine_changed", statusCode: 409 });
+  assert.equal(value.launches.length, launched);
+  assert.deepEqual(value.events.filter(event => event.kind === "user").map(event => event.message), ["First"]);
 });
