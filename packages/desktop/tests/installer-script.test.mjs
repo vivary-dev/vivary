@@ -169,7 +169,10 @@ test("removal reads the installed-file list behind the exact-folder guard", () =
   const firstDelete = remove.findIndex(line => /^(Delete|RMDir)\b/.test(line));
   const checked = position(remove, "checked:");
   assert.ok(position(remove, "Call ${PREFIX}CheckListLine") < checked);
-  assert.ok(position(remove, "StrCmp $R9 \"truncated\" bad_line") < checked);
+  const truncated = position(remove, 'StrCmp $R9 "truncated" 0 check_content');
+  assert.ok(truncated < checked);
+  assert.deepEqual(remove.slice(truncated + 1, truncated + 4), ['StrCpy $R5 "a cut-off line"', "Goto bad_line", "check_content:"],
+    "a cut-off line is refused with its own reason");
   assert.ok(position(remove, "System::Call 'kernel32::GetFileAttributesW(w \"$INSTDIR\\$6\") i .r3'") < checked);
   assert.ok(checked < firstDelete, "deletes follow the check pass");
   for (const label of ["bad_line_stop:", "linked:", "unreadable:"]) {
@@ -181,10 +184,17 @@ test("removal reads the installed-file list behind the exact-folder guard", () =
   assert.deepEqual(remove.slice(badLine + 1, badLine + 6), [
     "FileClose $R3",
     'IfFileExists "$INSTDIR\\${SETUP_MARKER}" 0 bad_line_stop',
-    'DetailPrint "$INSTDIR\\${INSTALL_LIST} is damaged. Nothing was removed."',
+    'DetailPrint "$INSTDIR\\${INSTALL_LIST} is damaged ($R5). Nothing was removed."',
     "StrCpy $R8 2",
     "Return",
   ]);
+  // Without the marker the message names the damage and its reason.
+  const stop = position(remove, "bad_line_stop:");
+  assert.deepEqual(remove.slice(stop + 1, stop + 3), [
+    'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\\${INSTALL_LIST} is damaged ($R5), so nothing was removed." /SD IDOK',
+    'Abort "The installed-file list is damaged ($R5). Nothing was removed."',
+  ]);
+  assert.ok(!code.includes("names a path outside the Vivary folder"));
   assert.ok(lines.includes('!insertmacro VIVARY_SHARED_FUNCTIONS ""'));
   assert.ok(lines.includes('!insertmacro VIVARY_SHARED_FUNCTIONS "un."'));
 });
@@ -280,6 +290,32 @@ test("the uninstaller removes itself, its entry, the marker and then the list, o
   assert.ok(position(uninstall, 'RMDir "$INSTDIR"') > list, "the folder goes last, and only when empty");
 });
 
+test("the uninstaller stops before the marker and list when it cannot remove itself or its entry", () => {
+  const uninstall = sectionBody("Uninstall");
+  const self = position(uninstall, 'Delete "$INSTDIR\\${UNINSTALLER}"');
+  assert.deepEqual(uninstall.slice(self + 1, self + 5), [
+    'IfFileExists "$INSTDIR\\${UNINSTALLER}" 0 uninstaller_removed',
+    'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\\${UNINSTALLER} could not be removed. Close any program that is scanning or holding it, then run the uninstaller again." /SD IDOK',
+    'Abort "The uninstaller could not remove itself. Run it again."',
+    "uninstaller_removed:",
+  ], "a held uninstaller stops before the entry, marker and list");
+  const entry = position(uninstall, 'DeleteRegKey HKCU "${UNINSTALL_KEY}"');
+  assert.equal(uninstall[entry - 1], "ClearErrors");
+  assert.deepEqual(uninstall.slice(entry + 1, entry + 8), [
+    "IfErrors 0 entry_removed",
+    "ClearErrors",
+    'EnumRegValue $0 HKCU "${UNINSTALL_KEY}" 0',
+    "IfErrors entry_removed",
+    'MessageBox MB_OK|MB_ICONSTOP "The Installed apps entry for Vivary could not be removed. Run Vivary setup to repair the install, then uninstall again." /SD IDOK',
+    'Abort "The uninstall entry could not be removed. Run setup, then uninstall again."',
+    "entry_removed:",
+  ], "an entry that still opens stops before the marker and list");
+  const removed = position(uninstall, "entry_removed:");
+  for (const file of ["${SETUP_MARKER}", "${INSTALL_LIST_TEMP}", "${INSTALL_LIST}"]) {
+    assert.ok(removed < position(uninstall, `Delete "$INSTDIR\\${file}"`), `${file} goes only after both succeed`);
+  }
+});
+
 test("user data is never referenced except in the kept-data message", () => {
   const userData = /\.vivary|%USERPROFILE%|\$PROFILE|(?<!LOCAL)APPDATA/i;
   const mentions = lines.filter(line => userData.test(line));
@@ -293,7 +329,7 @@ test("user data is never referenced except in the kept-data message", () => {
 
 test("registry access stays in the current user's uninstall key", () => {
   assert.doesNotMatch(code, /\bHK(LM|CR|U|CC)\b|HKEY_|SHCTX|HKEY_LOCAL_MACHINE/i);
-  const registry = lines.filter(line => /^(Write|Read|Delete)Reg/i.test(line));
+  const registry = lines.filter(line => /^(Write|Read|Delete|Enum)Reg/i.test(line));
   assert.ok(registry.length > 0);
   for (const line of registry) assert.match(line, /^\w+ (\$\w+ )?HKCU "\$\{UNINSTALL_KEY\}"/, line);
   assert.ok(lines.includes('!define UNINSTALL_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Vivary"'));

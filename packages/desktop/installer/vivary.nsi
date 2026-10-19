@@ -270,7 +270,10 @@ Function ${PREFIX}RemoveInstalledFiles
   check_line:
   Call ${PREFIX}ReadListLine
   StrCmp $R9 "eof" checked
-  StrCmp $R9 "truncated" bad_line
+  StrCmp $R9 "truncated" 0 check_content
+  StrCpy $R5 "a cut-off line"
+  Goto bad_line
+  check_content:
   Call ${PREFIX}CheckListLine
   StrCmp $R5 "" 0 bad_line
   StrCpy $2 $R4 1 -1
@@ -316,12 +319,13 @@ Function ${PREFIX}RemoveInstalledFiles
   ; Nothing was deleted yet. With setup's marker here, a setup rerun rewrites
   ; the list, so the caller decides instead of stopping for good.
   IfFileExists "$INSTDIR\${SETUP_MARKER}" 0 bad_line_stop
-  DetailPrint "$INSTDIR\${INSTALL_LIST} is damaged. Nothing was removed."
+  DetailPrint "$INSTDIR\${INSTALL_LIST} is damaged ($R5). Nothing was removed."
   StrCpy $R8 2
   Return
+  ; $R5 holds the reason: a cut-off line or the CheckListLine result.
   bad_line_stop:
-  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\${INSTALL_LIST} names a path outside the Vivary folder, so nothing was removed." /SD IDOK
-  Abort "The installed-file list is not valid. Nothing was removed."
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\${INSTALL_LIST} is damaged ($R5), so nothing was removed." /SD IDOK
+  Abort "The installed-file list is damaged ($R5). Nothing was removed."
   linked:
   FileClose $R3
   MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\$6 is a link to another folder, so nothing was removed. Remove that link, then try again." /SD IDOK
@@ -505,7 +509,24 @@ Section "Uninstall"
     Delete "$DESKTOP\Vivary.lnk"
   ${EndIf}
   Delete "$INSTDIR\${UNINSTALLER}"
+  ; A scanner or another program can hold the file. The entry, marker and list
+  ; then stay, so the uninstaller can run again.
+  IfFileExists "$INSTDIR\${UNINSTALLER}" 0 uninstaller_removed
+  MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\${UNINSTALLER} could not be removed. Close any program that is scanning or holding it, then run the uninstaller again." /SD IDOK
+  Abort "The uninstaller could not remove itself. Run it again."
+  uninstaller_removed:
+  ClearErrors
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
+  IfErrors 0 entry_removed
+  ; The error flag is also set when the key is already gone. Only a key that
+  ; still opens is a failure.
+  ClearErrors
+  EnumRegValue $0 HKCU "${UNINSTALL_KEY}" 0
+  IfErrors entry_removed
+  ; The marker and list stay, so setup can still recognize and repair the folder.
+  MessageBox MB_OK|MB_ICONSTOP "The Installed apps entry for Vivary could not be removed. Run Vivary setup to repair the install, then uninstall again." /SD IDOK
+  Abort "The uninstall entry could not be removed. Run setup, then uninstall again."
+  entry_removed:
   Delete "$INSTDIR\${SETUP_MARKER}"
   Delete "$INSTDIR\${INSTALL_LIST_TEMP}"
   Delete "$INSTDIR\${INSTALL_LIST}"

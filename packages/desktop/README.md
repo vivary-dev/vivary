@@ -383,8 +383,12 @@ The installer script is `installer/vivary.nsi`. Its rules:
   its entry, list, and itself so it can run again. Otherwise the uninstaller removes
   the shortcuts (the desktop one only when setup made it), then itself, the
   uninstall entry, the marker, any leftover `install-files.tmp`, and the list last.
+  It stops, keeping the entry, marker, and list, when its own file is still there
+  after the delete or when the uninstall entry still opens after `DeleteRegKey`.
   Stopped at any point, the folder still holds the list, which setup recognizes and
   repairs, or nothing setup made.
+- A damaged list without the marker stops setup and the uninstaller with the reason:
+  a cut-off line, a path outside the Vivary folder, or an empty or too long line.
 - Neither program reads, writes, or deletes `%USERPROFILE%\.vivary`,
   `%APPDATA%\Vivary`, or any project folder.
 - `/S` runs the installer or the uninstaller silently. A running Vivary then

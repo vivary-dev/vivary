@@ -800,10 +800,16 @@ setup recognizes and repairs, or nothing setup made. Setup writes the list as
 write-through), so an interrupted write cannot leave a cut-off list. A damaged list
 with the marker present no longer stops for good: setup copies over it, which
 rewrites the list, and the uninstaller asks for that setup rerun. Without the marker
-both still stop and change nothing. Evidence: 88 of 88 installer tests pass with
-`makensis` 3.10 and 87 pass with one skip without it, each of 84 single-rule changes
-to the script fails the static tests, and the 2aaf04f payload's longest file path has
-103 characters and its longest folder path 90. The 70957d1 installer passed install,
+both still stop and change nothing. Review round 6: the uninstaller checks that its own file is
+gone after deleting it, and that the uninstall entry no longer opens after
+`DeleteRegKey` fails, before it deletes the marker and the list. Either failure keeps
+the entry, marker, and list and stops with a message, so the uninstaller or setup can
+run again. A damaged list without the marker now stops with "install-files.txt is
+damaged" and the reason: a cut-off line, a path outside the Vivary folder, or an
+empty or too long line. Evidence: 89 of 89 installer tests pass with `makensis` 3.10
+and 88 pass with one skip without it, each of 93 single-rule changes to the script
+fails the static tests, and the 2aaf04f payload's longest file path has 103
+characters and its longest folder path 90. The 70957d1 installer passed install,
 reinstall, locked-file upgrade, recovery rerun, and uninstall on Windows.
 
 2026-10-18 Windows runtime lookup (PR #251). Code runtime detection could pick a
