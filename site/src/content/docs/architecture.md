@@ -352,13 +352,18 @@ reads the newest `agent_runs` row per thread through a join that repeats those
 predicates. Empty Native conversations have no row, as in `listThreads`, except
 an empty linked target. It probes no runtime. A project whose registry binding
 cannot resolve keeps its API chats and is reported in `unavailableProjects`.
-Unassigned history stays in its own section. The action reads the project catalog
+Unassigned history stays in its own section. The same read lists the owner's saved
+drafts in every listed project from the application-state owner the composers write
+(`chat-draft.ts`). A draft whose conversation is listed marks that row. Any other
+draft is a new conversation, shown first in a Drafts block. The action reads the project catalog
 on every call as its access check, and caches each project's history scope by
 owner and catalog revision, so a two-second poll does not repeat one registry read
 per project. The list polls only while the window is visible. Measured on the
 build server on 2026-10-19 with 20 projects, 100 Code and 100 API chat
 conversations of 40 messages each: the read after the catalog took 8.9 ms and
-9.4 ms median over two runs of 50 calls (p90 10.0 ms).
+9.4 ms median over two runs of 50 calls (p90 10.0 ms). With one Code and one API chat
+draft in each project, the draft reads raise it to 67 ms and 71 ms median (p90 81 ms),
+most of it one application-state prefix read per scope.
 
 Each row has a stable identity, `code:<runId>` or `native:<threadId>`, the same
 identity the routes and saved selections use, plus its project, title, creation
@@ -390,8 +395,8 @@ one state as text with an icon, its project in All projects, and its runtime for
 Code. The selected row is `aria-current` and holds the list's one Tab stop.
 Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
 Shift+F10 or the row's button opens Rename, Pin or Unpin, and Archive or
-Restore. No row state is a live region and no duration is shown. Unsent drafts
-of the selected project join the list labeled Draft or Review send.
+Restore. No row state is a live region and no duration is shown. Drafts of every
+project in the filter scope are listed first, labeled Draft or Review send.
 
 Opening a row in the selected project navigates to its route. A row in another
 project selects the project and holds the target route. `Workspace.tsx` clears
@@ -1003,6 +1008,11 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Inbox drafts (W5). The inbox read lists saved drafts in every listed
+project, and the Conversation inbox section says so, with the measured read cost.
+Evidence inspected: the server and component draft tests and the 20-project
+measurement with 40 drafts.
 
 2026-10-19 Conversation inbox on the shared route hold (W5). The inbox now imports
 `useConversationRouteHold` from #261 instead of its own copy. The Conversation

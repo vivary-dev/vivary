@@ -17,6 +17,12 @@ const { ensureRunTables } = await import(new URL("../../agent/run-store.js", cor
 const inbox = await import("../server/conversation-inbox.ts");
 const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
 const metaAction = (await import("../actions/vivary-code-conversation-meta.ts")).default;
+const { changeIndexedChatDraft, createCodeDraftIdentity } = await import("../server/chat-draft.ts");
+const { codeDraftThreadId } = await import("../shared/code-draft.ts");
+async function saveDraft(identity: { storageKey: string }, threadId: string, text: string, pending = false, user = owner) {
+  await asUser(user, orgId, () => changeIndexedChatDraft(identity, threadId, null, pending
+    ? { text, status: "pending", submitId: crypto.randomUUID() } : { text, status: "draft", submitId: null }));
+}
 
 const owner = "owner@example.test", orgId = "org-a", personalRoot = path.join(temporary, "personal");
 const history = (projectId: string) => ({ label: projectId === "alpha" ? "Alpha" : "Beta", projectId,
@@ -24,8 +30,11 @@ const history = (projectId: string) => ({ label: projectId === "alpha" ? "Alpha"
 const projects = [{ projectId: "alpha", label: "Alpha", code: history("alpha") },
   { projectId: "beta", label: "Beta", code: history("beta") }];
 const personal = { root: personalRoot, label: "personal" };
-const load = (input: Partial<Parameters<typeof inbox.loadConversationInbox>[0]> = {}) =>
-  inbox.loadConversationInbox({ ownerEmail: owner, orgId, projects, personal, ...input });
+const { runWithRequestContext } = await import("@agent-native/core/server");
+// Drafts live in application state, which Native scopes to the request's user, as an action's request does.
+const asUser = <T>(userEmail: string, org: string, work: () => Promise<T>) => runWithRequestContext({ userEmail, orgId: org }, work);
+const load = (input: Partial<Parameters<typeof inbox.loadConversationInbox>[0]> = {}) => asUser(input.ownerEmail ?? owner,
+  input.orgId ?? orgId, () => inbox.loadConversationInbox({ ownerEmail: owner, orgId, projects, personal, ...input }));
 
 function codeRun(id: string, projectId: string | null, metadata: Record<string, unknown> = {}, status = "completed") {
   createCodeAgentRunRecord({ id, goalId: "vivary-local-code", title: `Code ${id}`, status: status as never,
@@ -167,6 +176,28 @@ test("Failed and Completed show for 24 hours after the run ended, for Code and A
   assert.equal(later.get("native:native-alpha"), "running", "running work shows however long it takes");
   const result = inbox.codeAttention({ status: "completed", updatedAt: "not a date" }, undefined);
   assert.equal(result, "idle", "a run with no known end shows nothing");
+});
+
+test("drafts in every project are listed, and unsent text on a saved conversation marks its row", async () => {
+  await saveDraft(createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "beta", label: "Beta" }),
+    "native-new-beta", "Ask about the release");
+  await saveDraft(createCodeDraftIdentity(owner, orgId, "alpha"), codeDraftThreadId("alpha", "fresh-alpha"), "Plan it", true);
+  await saveDraft(createCodeDraftIdentity(owner, orgId, null), codeDraftThreadId(null, "fresh-personal"), "Personal note");
+  await saveDraft(createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "alpha", label: "Alpha" }),
+    "native-alpha", "A follow-up");
+  // Another owner's draft in the same project never appears.
+  await saveDraft(createCodeDraftIdentity("other@example.test", orgId, "alpha"), codeDraftThreadId("alpha", "foreign"), "Not yours",
+    false, "other@example.test");
+  const result = await load();
+  assert.deepEqual(result.drafts.map(draft => [draft.id, draft.kind, draft.projectId, draft.preview, draft.status]).sort(), [
+    ["code-draft:fresh-alpha", "code", "alpha", "Plan it", "pending"],
+    ["code-draft:fresh-personal", "code", null, "Personal note", "draft"],
+    ["native:native-new-beta", "native", "beta", "Ask about the release", "draft"],
+  ]);
+  assert.equal(result.rows.find(row => row.id === "native:native-alpha")?.draft, "draft");
+  assert.equal(result.rows.find(row => row.id === "code:alpha-old")?.draft, null);
+  const noBetaCode = await load({ projects: [projects[0], { ...projects[1], code: null }] });
+  assert.ok(noBetaCode.drafts.some(draft => draft.id === "native:native-new-beta"), "API chat drafts stay without Code history");
 });
 
 test("rows are ordered pinned first, then newest created, and live updates never move them", async () => {

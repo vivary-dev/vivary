@@ -11,11 +11,9 @@ import {
   IconFolder, IconFolderPlus, IconHandStop, IconLoader2, IconPencil, IconPinned, IconPinnedOff, IconPlus,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { ConversationInbox as InboxData, InboxAttention, InboxRow } from "../../../server/conversation-inbox";
-import { codeDraftSelectionKey } from "../../../shared/code-draft";
-import { useChatDraftList, type DraftListItem } from "@/lib/chat-draft";
+import type { ConversationInbox as InboxData, InboxAttention, InboxDraft, InboxRow } from "../../../server/conversation-inbox";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import { focusAfterRemoval } from "@/lib/row-focus";
@@ -30,7 +28,7 @@ import "./conversation-inbox.css";
 /** A row the inbox lists: a saved conversation from the server, or an unsent draft of the selected project. */
 export type InboxListRow = Pick<InboxRow, "id" | "projectId" | "projectLabel" | "title" | "createdAt" | "pinned"
   | "archived" | "attention" | "runtime"> & { kind: InboxRow["kind"] | "draft"; draftLabel?: string;
-  nativeScopeId: string | null };
+  nativeScopeId: string | null; draft?: InboxRow["draft"] };
 
 /**
  * `all`, `personal`, or a project ID. The filter only scopes the list and names where New conversation starts. It never
@@ -86,25 +84,14 @@ export function visibleInboxRows(rows: readonly InboxListRow[], filter: InboxFil
   return { active: sortInboxRows(shown.filter(row => !row.archived)), archived: sortInboxRows(shown.filter(row => row.archived)) };
 }
 
-/**
- * Unsent conversations of the selected project that have no saved row yet. A Native draft shares its thread's id. A
- * Code draft without a run opens through its draft key.
- */
-export function inboxDraftRows(input: { projectId: string | null; projectLabel: string; savedIds: ReadonlySet<string>;
-  nativeDrafts: readonly DraftListItem[]; codeDrafts: readonly DraftListItem[] }): InboxListRow[] {
-  const draft = (id: string, item: DraftListItem): InboxListRow => ({
-    id, kind: "draft", projectId: input.projectId, projectLabel: input.projectLabel,
-    title: item.preview || "Untitled conversation", createdAt: item.createdAt, pinned: false, archived: false,
+/** New conversations that exist only as unsent text. They are listed first, in their own Drafts block. */
+export function inboxDraftRows(drafts: readonly InboxDraft[]): InboxListRow[] {
+  return drafts.map(draft => ({
+    id: draft.id, kind: "draft", projectId: draft.projectId, projectLabel: draft.projectLabel,
+    title: draft.preview || "Untitled conversation", createdAt: draft.createdAt, pinned: false, archived: false,
     attention: "idle", runtime: null, nativeScopeId: null,
-    draftLabel: item.status === "pending" ? "Review send" : "Draft",
-  });
-  const native = input.nativeDrafts.filter(item => !input.savedIds.has(`native:${item.threadId}`))
-    .map(item => draft(`native:${item.threadId}`, item));
-  const code = input.codeDrafts.filter(item => !item.run).flatMap(item => {
-    const key = codeDraftSelectionKey(input.projectId, item.threadId);
-    return key ? [draft(`code-draft:${key}`, item)] : [];
-  });
-  return [...native, ...code];
+    draftLabel: draft.status === "pending" ? "Review send" : "Draft",
+  }));
 }
 
 function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) {
@@ -141,8 +128,6 @@ type NativeScope = {
   identity: VivaryChatIdentity;
   createThread: () => Promise<string | null>;
   switchThread: (threadId: string) => void;
-  nativeDrafts: DraftListItem[];
-  codeDrafts: DraftListItem[];
 };
 
 type Shared = {
@@ -288,18 +273,12 @@ function ScopedInbox({ shared }: { shared: Shared }) {
     : <InboxView shared={shared} scope={null} />;
 }
 
-/** The selected project's Native history owner and its drafts, as in the project history this list replaces. */
+/** The selected project's Native history owner, which creates and selects its API chats. */
 function NativeScoped({ identity, shared }: { identity: VivaryChatIdentity; shared: Shared }) {
-  const { historyAvailable } = useProjects();
   const native = useChatThreads(undefined, identity.storageKey, identity.scope, {
     autoCreate: false, restoreActiveThread: false, isolateHistoryByScope: true, includeExternal: false,
   });
-  const nativeDrafts = useChatDraftList({ kind: identity.kind, projectId: identity.projectId }, identity.storageKey,
-    historyAvailable);
-  const codeDrafts = useChatDraftList({ kind: "code", projectId: identity.projectId }, identity.storageKey + ":code",
-    historyAvailable);
-  const scope: NativeScope = { identity, createThread: native.createThread, switchThread: native.switchThread,
-    nativeDrafts: nativeDrafts.data?.drafts ?? [], codeDrafts: codeDrafts.data?.drafts ?? [] };
+  const scope: NativeScope = { identity, createThread: native.createThread, switchThread: native.switchThread };
   return <InboxView shared={shared} scope={scope} />;
 }
 
@@ -323,13 +302,10 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     destinationId ? { projectId: destinationId } : {}, {
       enabled: elsewhere ? destinationProject?.status === "available" || destinationId === null : workspaceAvailable,
       retry: false, staleTime: 30_000 });
-  const projectLabel = activeProject?.displayName ?? "Personal workspace";
-  const saved: InboxListRow[] = inbox.data?.rows ?? [];
-  const rows = [...saved, ...inboxDraftRows({ projectId: activeProjectId, projectLabel,
-    savedIds: new Set(saved.map(row => row.id)), nativeDrafts: scope?.nativeDrafts ?? [],
-    codeDrafts: scope?.codeDrafts ?? [] })];
-  const visible = visibleInboxRows(rows, filter, search);
+  const visible = visibleInboxRows(inbox.data?.rows ?? [], filter, search);
+  const drafts = visibleInboxRows(inboxDraftRows(inbox.data?.drafts ?? []), filter, search).active;
   const selectedId = selectedInboxRowId(location.search);
+  const draftsHeading = useId();
 
   const creatingNative = useRef(false);
   function newCode() {
@@ -438,6 +414,10 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     {unavailable > 0 && <p className="conversation-inbox__notice">
       Code conversations of {unavailable === 1 ? "one project" : `${unavailable} projects`} are hidden until the
       project's folder is reconnected.</p>}
+    {!loading && drafts.length > 0 && <section className="conversation-inbox__drafts" aria-labelledby={draftsHeading}>
+      <h3 id={draftsHeading}>Drafts</h3>
+      <InboxList label="Drafts" rows={drafts} {...listProps} emptyLabel="" />
+    </section>}
     {loading ? <div className="vivary-history-skeleton" role="status"><span className="sr-only">Opening conversations</span>
       <span /><span /><span /></div>
       : <InboxList label="Conversations" rows={visible.active} {...listProps}
@@ -516,6 +496,8 @@ export function InboxList({ label, rows, selectedId, showProject, emptyLabel, on
             {row.draftLabel ? <span className="conversation-inbox__state" data-state="draft">
               <IconCircleDashed size={13} aria-hidden />{row.draftLabel}</span>
               : state && <span className="conversation-inbox__state" data-state={row.attention}>{state.icon}{state.label}</span>}
+            {row.draft && <span className="conversation-inbox__detail" data-draft={row.draft}>
+              {row.draft === "pending" ? "Review send" : "Draft"}</span>}
             {showProject && <span className="conversation-inbox__detail">{row.projectLabel}</span>}
             {row.runtime && <span className="conversation-inbox__detail">{row.runtime}</span>}
           </span>

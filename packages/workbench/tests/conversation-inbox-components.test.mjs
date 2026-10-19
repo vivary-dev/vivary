@@ -155,7 +155,8 @@ test.beforeEach(() => {
         inboxFixture.active = projectId; inboxFixture.notify(); return true;
       } }),
     read: async (name, input) => {
-      if (name === "vivary-conversation-inbox") return { rows: inboxFixture.rows, unavailableProjects: [], limited: false };
+      if (name === "vivary-conversation-inbox") return { rows: inboxFixture.rows, drafts: inboxFixture.serverDrafts ?? [],
+        unavailableProjects: [], limited: false };
       if (name === "vivary-project-location") return { folderName: `${input.projectId ?? "home"}-folder`,
         path: `/work/${input.projectId ?? "home"}-folder` };
       throw new Error("Unexpected read " + name);
@@ -378,16 +379,30 @@ test("a row in the selected project opens directly and Native rows select their 
   assert.equal(inboxFixture.calls.some(call => call.name === "selectProject"), false);
 });
 
-test("unsent drafts of the selected project are listed and labeled", async () => {
-  inboxFixture.drafts = { project: [{ threadId: "draft-native", createdAt: 60, preview: "", status: "draft" }],
-    code: [{ threadId: "vivary-code:project:alpha:fresh", createdAt: 55, preview: "Plan the release", status: "pending" }] };
+test("drafts in every project are listed first in a Drafts block, labeled, and follow the filter", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.serverDrafts = [
+    { id: "native:draft-native", kind: "native", projectId: "alpha", projectLabel: "Alpha", preview: "", createdAt: 60, status: "draft" },
+    { id: "code-draft:fresh", kind: "code", projectId: "beta", projectLabel: "Beta", preview: "Plan the release", createdAt: 55, status: "pending" },
+  ];
+  inboxFixture.rows = rows().map(item => item.id === "code:a1" ? { ...item, draft: "draft" } : item);
   await render("/?run=new&draft=fresh");
-  assert.deepEqual(titles().slice(0, 3), ["Old pinned plan", "Untitled conversation", "Plan the release"]);
+  const block = host.querySelector(".conversation-inbox__drafts");
+  assert.equal(block.querySelector("h3").textContent, "Drafts");
+  assert.equal(host.querySelector(".conversation-inbox__drafts") === host.querySelector("section.conversation-inbox > section"), true,
+    "the Drafts block comes before the conversation list");
+  assert.deepEqual(titles(block.querySelector("ul")), ["Untitled conversation", "Plan the release"]);
   const draft = host.querySelector('[data-row-id="code-draft:fresh"]');
   assert.equal(draft.getAttribute("aria-current"), "true");
   assert.match(draft.textContent, /Review send/);
+  assert.match(draft.textContent, /Beta/);
   assert.match(host.querySelector('[data-row-id="native:draft-native"]').textContent, /Draft/);
   assert.equal(host.querySelector('[aria-label="Actions for Plan the release"]'), null, "a draft has no saved conversation to change");
+  assert.match(host.querySelector('[data-row-id="code:a1"]').textContent, /Draft/, "unsent text on a saved conversation is marked");
+  await chooseFilter("alpha");
+  assert.deepEqual(titles(host.querySelector(".conversation-inbox__drafts ul")), ["Untitled conversation"]);
+  await chooseFilter("personal");
+  assert.equal(host.querySelector(".conversation-inbox__drafts"), null);
 });
 
 test("the destination shows the selected project and its folder, and the add menu keeps creating and opening distinct", async () => {

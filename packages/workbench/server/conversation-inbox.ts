@@ -2,10 +2,13 @@ import { fail } from "@agent-native/core/action";
 import { updateCodeAgentRunRecord, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { getDbExec } from "@agent-native/core/db";
 import { listThreads } from "@agent-native/core/server";
+import { codeDraftSelectionKey } from "../shared/code-draft";
 import { LINKED_TARGET_SOURCE_URL } from "../shared/linked-conversation";
+import { createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts } from "./chat-draft";
+import { createVivaryChatIdentity } from "./chat-identity";
 import { projectChatScopeId } from "./chat-project-scope.mjs";
 import {
-  engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, listOwnedVivaryCodeRuns, modelFromRun,
+  engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, linkedCodeDraftRuns, listOwnedVivaryCodeRuns, modelFromRun,
   type VivaryCodeActiveRun, type VivaryCodeProjectHistory, type VivaryCodeWorkspace,
 } from "./local-code-agent";
 
@@ -36,10 +39,26 @@ export type InboxRow = {
   attention: InboxAttention;
   /** Native only. The owner's own chat scope, which Native's rename, pin and archive routes require. */
   nativeScopeId: string | null;
+  /** Unsent text saved for this conversation's next message, and whether its send is pending. */
+  draft: "draft" | "pending" | null;
+};
+
+/** A conversation that exists only as unsent text: a Code draft key or a Native thread with no saved row yet. */
+export type InboxDraft = {
+  /** `code-draft:<key>` or `native:<threadId>`, the identity its route and saved selection use. */
+  id: string;
+  kind: "code" | "native";
+  projectId: string | null;
+  projectLabel: string;
+  preview: string;
+  createdAt: number;
+  status: "draft" | "pending";
 };
 
 export type ConversationInbox = {
   rows: InboxRow[];
+  /** New conversations with unsent text, in every listed project, newest first. */
+  drafts: InboxDraft[];
   /** Projects whose Code history could not be resolved. Their Native rows still appear. */
   unavailableProjects: string[];
   /** More Native conversations exist than one read returns. */
@@ -109,7 +128,7 @@ export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; owne
       title: run.title || "Untitled conversation", createdAt: timestamp(run.createdAt), updatedAt: timestamp(run.updatedAt),
       runtime: engineLabelFromRun(run), model: modelFromRun(run),
       pinned: typeof run.metadata?.pinnedAt === "string", archived: typeof run.metadata?.archivedAt === "string",
-      attention: codeAttention(run, active.get(run.id), input.now), nativeScopeId: null,
+      attention: codeAttention(run, active.get(run.id), input.now), nativeScopeId: null, draft: null,
     }];
   });
 }
@@ -155,7 +174,7 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
       title: String(thread.title || thread.preview || "") || "Untitled conversation",
       createdAt: timestamp(thread.created_at), updatedAt: timestamp(thread.updated_at), runtime: null, model: null,
       pinned: thread.pinned_at != null, archived: thread.archived_at != null, attention: nativeAttention(latest.get(id), input.now),
-      nativeScopeId: String(thread.scope_id),
+      nativeScopeId: String(thread.scope_id), draft: null,
     }];
   });
   return { rows, limited };
@@ -177,11 +196,50 @@ export async function loadConversationInbox(input: { ownerEmail: string; orgId: 
       { projectId: project.projectId, label: project.label }] as const),
   ]);
   const native = await readNativeRows({ ownerEmail: input.ownerEmail, orgId: input.orgId, scopes, now });
+  const rows = [...code, ...native.rows];
+  const drafts = await readInboxDrafts(input, new Set(rows.map(row => row.id)));
   return {
-    rows: [...code, ...native.rows].sort(compareInboxRows),
+    rows: rows.map(row => drafts.onRows.has(row.id) ? { ...row, draft: drafts.onRows.get(row.id)! } : row)
+      .sort(compareInboxRows),
+    drafts: drafts.drafts.sort((left, right) => right.createdAt - left.createdAt || (left.id < right.id ? -1 : 1)),
     unavailableProjects: input.projects.filter(project => !project.code).map(project => project.projectId),
     limited: native.limited,
   };
+}
+
+/**
+ * The owner's saved drafts in every listed project, read from the same application-state owner the composers write.
+ * A draft whose conversation is listed marks that row. Any other draft is a new conversation not yet sent.
+ */
+async function readInboxDrafts(input: { ownerEmail: string; orgId: string; projects: readonly InboxProject[];
+  personal: VivaryCodeWorkspace | null }, rowIds: ReadonlySet<string>) {
+  const onRows = new Map<string, "draft" | "pending">();
+  const drafts: InboxDraft[] = [];
+  const scopes = [{ projectId: null, label: PERSONAL_LABEL, code: undefined, codeListed: input.personal !== null },
+    ...input.projects.map(project => ({ projectId: project.projectId, label: project.label, code: project.code ?? undefined,
+      codeListed: project.code !== null }))];
+  await Promise.all(scopes.map(async scope => {
+    const identity = createVivaryChatIdentity(input.ownerEmail, input.orgId,
+      { kind: "project", projectId: scope.projectId, label: scope.label });
+    for (const draft of await listNativeChatDrafts(identity, input.ownerEmail, input.orgId)) {
+      const id = `native:${draft.threadId}`;
+      if (rowIds.has(id)) onRows.set(id, draft.status);
+      else drafts.push({ id, kind: "native", projectId: scope.projectId, projectLabel: scope.label,
+        preview: draft.preview, createdAt: draft.createdAt, status: draft.status });
+    }
+    // A project whose Code history cannot resolve lists no Code rows, so its Code drafts wait with them.
+    if (!scope.codeListed) return;
+    const codeDrafts = await listChatDrafts(createCodeDraftIdentity(input.ownerEmail, input.orgId, scope.projectId));
+    const linked = linkedCodeDraftRuns(input.ownerEmail, input.orgId, scope.code, codeDrafts.map(draft => draft.threadId));
+    for (const draft of codeDrafts) {
+      const run = linked.get(draft.threadId);
+      if (run) { onRows.set(`code:${run.id}`, draft.status); continue; }
+      const key = codeDraftSelectionKey(scope.projectId, draft.threadId);
+      if (key) drafts.push({ id: `code-draft:${key}`, kind: "code", projectId: scope.projectId, projectLabel: scope.label,
+        preview: draft.preview, createdAt: draft.createdAt, status: draft.status });
+    }
+  }));
+  return { onRows, drafts };
 }
 
 export const MAX_TITLE_LENGTH = 160;
