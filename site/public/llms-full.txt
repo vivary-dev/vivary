@@ -6541,6 +6541,10 @@ Windows Explorer can reject a deeply nested destination before the application s
 ### First launch
 
 1. Choose a project, use **Open folder**, or create a disposable project with **New project**.
+   Both ask whether the project is **Coding** or **Personal**. Coding opens new
+   conversations with a coding agent. Personal opens them as API chat. Either kind
+   of conversation stays available in every project. Cancel after Open folder
+   leaves the kind **Not set**, and you can set it later in Project details.
 2. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
 
 Both downloads hold the same application. It bundles Node, Python, and the
@@ -7504,6 +7508,25 @@ The Electron process starts a local Workbench server, opens its loopback origin,
 
 Workbench composes Agent-Native's application, chat, run, action, and storage owners. Native keeps transcripts and run lifecycle. Workbench keeps project identity and authorized root bindings, then resolves those bindings for actions and sends. The registry uses Native's database with Workbench project, binding, revision, receipt, and mutation tables. See the [project registry](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-registry/index.md), [`project-services.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-services.mjs), and [`db/schema.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/db/schema.mjs). An observed path is not by itself a project identity or a write grant.
 
+Each registered project has an owner-chosen kind, Coding or Personal, or null for
+Not set. Registry migration 7 adds the nullable `workspace_kind` column with a
+check on those two values, so existing projects stay Not set. The kind is a
+preference beside the registry contract: the registration decision engine, the
+portable project record, bindings, receipts, and the registry revision do not
+carry it. `vivary-set-project-kind` is an owner-only action (no agent, MCP, or
+chat tool route). [`setLocalProjectKind`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-services.mjs)
+admits the owner's project scope and writes only that row, never project files.
+The catalog returns the kind. New project asks for it in
+[`WorkspaceKindDialog`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/WorkspaceKindDialog.tsx)
+before the form, which fills the matching preset, and saves it after
+registration. Open folder registers the folder unchanged, asks, then selects the
+project. The [conversation surface owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-surface.ts)
+maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
+when no surface is requested or saved. New conversation follows a chosen kind.
+Both conversation kinds remain available in every project. The
+[J06 state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#project-kind-coding-or-personal)
+owns the journey.
+
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/harness-adapters.md), [Native owner map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/native-owners.md), and [runtime source map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
 ### Coding model selection and provider routes
@@ -7512,7 +7535,12 @@ The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
 model, update Claude Code, or verify its installed version. Retained conversations
-keep their recorded model ID. A historical Claude run
+keep their recorded runtime and model ID, because the saved provider session and
+resume depend on both, and the send boundary refuses a change. Above the composer,
+a conversation with a run says which runtime and model it keeps and offers New
+conversation, and the locked selectors name that line as their description. When
+another conversation's agent is working, the selectors also name that notice.
+A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
 
@@ -8166,6 +8194,84 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Project kind save after creation (PR #260 review). New project saves
+the kind after its files are applied and the folder is registered. When that
+save fails, `createManagedProject` now returns the created registration with
+`kindSaved: false` instead of failing the action. The form selects the project,
+and the project list tells the owner the kind shows Not set and can be set in
+Project details. The project kind description in System structure still holds:
+the kind is saved only on the registry row, after registration. Evidence: the
+failed-save case in `tests/managed-projects.test.mjs`.
+
+2026-10-19 Sidebar mark (owner request of the same date). The sidebar header's
+letter tile now shows the approved Vivary mark from a byte-identical copy of
+`site/src/assets/vivary-mark.png`, which `packages/desktop/README.md` names as the
+source of `vivary.ico`. The two site SVGs are different, unreferenced artwork and
+were not used. This is a presentational change inside the existing Workbench
+client, so the system structure, data owners, and trust boundaries described
+here still hold. Evidence: `tests/sidebar-mark-component.test.mjs` checks the
+image, its alt text, the link's accessible name, and that the bundled bytes match
+the site mark.
+
+2026-10-19 Project kind (owner decision of the same date). New project and Open
+folder now ask Coding or Personal. System structure describes the new owner:
+registry migration 7, the owner-only `vivary-set-project-kind` action, the catalog
+field, the dialog, and the default conversation surface. The registry decision
+engine, portable record, bindings, receipts, and revision are unchanged, so the
+registration and custody descriptions still hold. Open folder still writes no
+project files. Evidence: the migration upgrade and storage cases in
+`tests/registry-store.test.mjs`, the folder and scope cases in
+`tests/local-root-provider.test.mjs`, `tests/managed-projects.test.mjs`,
+`tests/conversation-surface.test.mjs`, and
+`tests/workspace-kind-dialog-component.test.mjs`.
+
+2026-10-19 Code selector lock reason and Markdown table wrapping, found during
+Windows acceptance and related to issue #256. In a Code conversation the runtime
+and model selectors are disabled when the open conversation has a run, when any
+Code run is active on the host, and while a reply streams, and nothing said why.
+Those rules, the server refusals in
+[`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts), and
+runtime discovery are unchanged. `LocalCodeConversation` in
+[`CodeConversation.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/CodeConversation.tsx)
+now shows "This conversation keeps <runtime> and <model>. Start a new conversation
+to use a different runtime or model." in the composer slot once the run has
+loaded, with a New conversation button that calls the parent's existing
+`newConversation`. The line names the run's recorded engine and model, and it is
+left out of the read-only search-match and Unassigned views. Both selectors name
+the sentence through `aria-describedby`. The parent puts an id on the sentence of
+its existing "An agent is working in another conversation." notice and passes it
+down only while that notice renders, and the selectors name it as well. That
+notice also shows on a new draft while another run is active, so a draft's
+selectors name it then. A new draft never shows the kept-route line. The option
+labels and the line share one `modelLabel` lookup. The Coding model selection
+section above now describes the line.
+
+Markdown tables in chat replies used Core's `width: max-content`, so every cell
+stayed on one line and the table scrolled sideways. `app/global.css` now sets
+`width: auto` and `overflow-wrap: break-word` on `.agent-markdown-table-wrap >
+table` after Core's import, which keeps Core's `min-width: 100%` and scrolling
+wrapper, and keeps inline code in a cell on one line. Core's rules are not in a
+cascade layer, so source order decides. The Markdown reader in Files and in
+Settings > Documentation set `display: block` on the table itself. `app/project-files.css`
+now lets TipTap's `.tableWrapper` scroll, sets `table-layout: auto` and
+`overflow-wrap: break-word` on the table, and keeps inline code in a cell on one
+line. The Core and Toolkit patches are unchanged. A headless Chrome 154 check on
+the server rendered the real Core and Toolkit stylesheets and the real read-only
+TipTap editor at 360, 800, and 1200 pixels, before and after. Before, two prose
+tables in chat measured 1078 and 1122 pixels in a 313 or 753 pixel reply, one line
+per cell. After, both fit at 753 pixels and the three-column one fits at 313
+pixels, with no word split. A five-column table whose words need 339 pixels and a
+table holding an 806 pixel code path scroll, and the code stays on one line in
+chat and in the reader. In the reader, prose columns measured the same before and
+after, because TipTap's injected `.ProseMirror` rule already sets `word-wrap:
+break-word`, so the reported letter-by-letter breaking was not reproduced there.
+Before, 11 code spans in this document's table split across lines at 360 pixels,
+and none after. `tests/native-chat-components.test.mjs` renders the composer for a
+retained conversation, a read-only history view, a new draft, a busy host, and a
+retained conversation on a busy host.
+`tests/markdown-reader.test.mjs` pins the table rules and checks that the
+read-only reader renders `.tableWrapper`.
 
 2026-10-19 Installer file collision (issue #254 item 7). Extraction with `File /r`
 replaced whatever sat at a payload path, so a file the user added at the exact
