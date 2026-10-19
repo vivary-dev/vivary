@@ -172,9 +172,10 @@ test("a Markdown file keeps its GFM structure through the shared TipTap editor",
 });
 
 // A selector run starts after the previous statement, so an at-rule such as @source does not join it.
+// Only commas outside parentheses separate selectors, so :is(a, b) stays one selector.
 function declarations(css, selector) {
   const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)]
-    .filter(([, selectors]) => selectors.slice(selectors.lastIndexOf(";") + 1).split(",").map((item) => item.trim()).includes(selector));
+    .filter(([, selectors]) => selectors.slice(selectors.lastIndexOf(";") + 1).split(/,(?![^()]*\))/).map((item) => item.trim()).includes(selector));
   return Object.fromEntries(rules.flatMap(([, , body]) => body.split(";").map((item) => item.split(":").map((part) => part.trim()))
     .filter(([name, value]) => name && value)));
 }
@@ -187,6 +188,11 @@ test("Markdown tables wrap ordinary cell text and scroll only when code or conte
   // Chat: Core sets width:max-content, which keeps every cell on one line. The override must follow Core's import.
   assert.ok(global.indexOf(".agent-markdown-table-wrap > table") > global.indexOf("@agent-native/core/styles/agent-native.css"));
   assert.deepEqual(declarations(global, ".agent-markdown-table-wrap > table"), { width: "auto", "overflow-wrap": "break-word" });
+  // The long-token spans the chat test below checks may break anywhere, so a long URL or hash does not widen the table.
+  // Links are left out, so ordinary words in link text still break only at spaces.
+  assert.deepEqual(declarations(global, ".agent-markdown-table-wrap .agent-markdown-long-token"), { "overflow-wrap": "anywhere" });
+  assert.ok(!/\.agent-markdown-table-wrap[^{]*\ba\b[^{]*\{[^}]*anywhere/.test(global.replace(/\/\*[\s\S]*?\*\//g, "")),
+    "no rule lets whole links break anywhere");
   assert.deepEqual(declarations(global, ".agent-markdown-table-wrap code"), { "white-space": "nowrap" });
   // Reader: the table stays a table with automatic layout, and TipTap's wrapper scrolls a table that cannot fit.
   assert.deepEqual(declarations(files, ".file-reading-surface .tiptap .tableWrapper"), { "overflow-x": "auto" });
@@ -196,6 +202,82 @@ test("Markdown tables wrap ordinary cell text and scroll only when code or conte
   const proof = await loadProof();
   assert.deepEqual(proof.mountedTable("| Name | Value |\n| --- | --- |\n| alpha | 1 |"), { wrapper: "tableWrapper" },
     "the read-only reader renders the wrapper that scrolls wide tables");
+});
+
+// Chat replies render through Core's markdownComponents from the installed, patched package. The
+// cells and links mark each unbroken run of 20 or more characters for the CSS above. The rendered
+// text, the hrefs, inline code, and the copied HTML must stay what they would be without the marks.
+const chatProofSource = `
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { markdownComponents, markdownUrlTransform, onMarkdownReady, renderMarkdownToClipboardHtml } from "./markdown-renderer.js";
+
+const render = (markdown, components) => renderToStaticMarkup(createElement(ReactMarkdown,
+  { remarkPlugins: [remarkGfm], components, urlTransform: markdownUrlTransform }, markdown));
+export const renderChat = markdown => render(markdown, markdownComponents);
+// The same Markdown with Core's table wrapper only, which is how the cells rendered before the marks.
+export const renderUnmarked = markdown => render(markdown, { table: markdownComponents.table });
+export const copiedHtml = markdown => new Promise(resolve => onMarkdownReady(() => resolve(renderMarkdownToClipboardHtml(markdown))));
+`;
+
+test("chat table cells and links mark long unbroken text without changing text, links, or code", async () => {
+  const bundle = await esbuild.build({
+    stdin: { contents: chatProofSource, resolveDir: join(CORE, "dist", "client", "chat"), sourcefile: "chat-table-proof.js", loader: "js" },
+    bundle: true, write: false, platform: "node", format: "esm", target: "node22", logLevel: "silent",
+    loader: { ".css": "empty" }, define: { "process.env.NODE_ENV": '"production"' },
+    // react-dom/server's CommonJS build requires Node built-ins.
+    banner: { js: `import { createRequire as createProofRequire } from "node:module";
+const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.json"))});` },
+  });
+  const file = join(folder, "chat-table-proof.mjs");
+  writeFileSync(file, bundle.outputFiles[0].text);
+  const chat = await import(pathToFileURL(file).href);
+
+  const url = "https://github.com/vivary-dev/vivary/releases/download/desktop-preview-20261019/Vivary-Setup.exe.receipt.json?download=1&check=sha256";
+  const hash = "abc123def456abc123def456abc123def456abc123def456abc123def456abcd";
+  const path = "packages/workbench/node_modules/@agent-native/core/dist/styles/agent-conversation.css";
+  const plain = "AbcdefghijklmnopqrstUVWXYZ0123456789-and-more";
+  const source = [
+    "| Source | Note | Size |",
+    "| :--- | --- | ---: |",
+    `| [${url}](${url}) | Authentication keeps the selected runtime | 12 |`,
+    `| ${hash} | Prose with ordinary words and a [short link](https://example.test/notes) | 7 |`,
+    `| \`${path}\` | Code stays whole: \`${path}\` | 1 |`,
+    `| ${plain} | x | 2 |`,
+  ].join("\n");
+  const html = chat.renderChat(source);
+  const before = chat.renderUnmarked(source);
+  const linkedom = createRequire(join(CORE, "package.json"))("linkedom");
+  const parse = (markup) => linkedom.parseHTML(`<!doctype html><html><body>${markup}</body></html>`).document;
+  const marked = parse(html);
+  const unmarked = parse(before);
+  const cells = (doc) => [...doc.querySelectorAll("th, td")];
+  const attributes = (cell) => [...cell.attributes].map((attribute) => `${attribute.name}=${attribute.value}`).join(" ");
+
+  // Spans appear only on runs of 20 or more characters without whitespace, never inside code.
+  assert.deepEqual([...marked.querySelectorAll(".agent-markdown-long-token")].map((span) => span.textContent), [url, hash, plain]);
+  assert.equal(marked.querySelectorAll("code .agent-markdown-long-token").length, 0);
+  assert.deepEqual([...marked.querySelectorAll("code")].map((code) => code.innerHTML), [path, path]);
+  // Every cell's text is byte-identical, and each cell keeps its alignment and other attributes.
+  assert.deepEqual(cells(marked).map((cell) => cell.textContent), cells(unmarked).map((cell) => cell.textContent));
+  assert.equal(marked.querySelector("table").textContent, unmarked.querySelector("table").textContent);
+  assert.deepEqual(cells(marked).map(attributes), cells(unmarked).map(attributes));
+  assert.ok(cells(marked).some((cell) => /text-align:\s*right/.test(cell.getAttribute("style") ?? "")), "the right-aligned column keeps its alignment");
+  // Links keep their original destinations, and a short link renders exactly as before.
+  assert.deepEqual([...marked.querySelectorAll("a")].map((a) => a.getAttribute("href")), [url, "https://example.test/notes"]);
+  assert.equal(marked.querySelector("a").textContent, url);
+  assert.equal(marked.querySelectorAll("a")[1].innerHTML, "short link");
+  // The long-token spans are the only difference from the unmarked rendering. Core's link component
+  // already passed react-markdown's node prop through as an attribute before this change.
+  const withoutMarks = html.replace(/<span class="agent-markdown-long-token">([^<]*)<\/span>/g, "$1");
+  assert.equal(withoutMarks.replaceAll(' node="[object Object]"', ""), before.replaceAll(' node="[object Object]"', ""));
+
+  // Copy uses the message's Markdown as plain text and Core's separate clipboard components for HTML.
+  const copied = await chat.copiedHtml(source);
+  assert.ok(copied.includes(`href="${url.replaceAll("&", "&amp;")}"`));
+  assert.ok(!copied.includes("agent-markdown-long-token"));
 });
 
 test.after(() => {

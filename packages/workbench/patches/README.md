@@ -3367,3 +3367,26 @@ The resource schema and one-second autosave contract are unchanged. Code remains
 the source editor for syntax outside the Visual schema. Focused installed-component
 checks cover non-content updates, real edits, view switching, and height ownership.
 They do not establish Markdown display fidelity or native pixel acceptance.
+
+## Chat table long tokens
+
+A follow-up to the table wrapping change for issue #256. Workbench gives chat
+Markdown tables `width: auto`, so cell text wraps at spaces. A column still cannot
+be narrower than its longest unbroken string, so a long URL, hash, or identifier
+made the table scroll. The patch adds `th` and `td` to `markdownComponents` in
+`dist/client/chat/markdown-renderer.js`, and the plain branch of its `a` component
+applies the same helper to its children. `markLongTokens` wraps each run of 20 or
+more non-whitespace characters in a direct string child in
+`<span class="agent-markdown-long-token">`. Element children, including inline
+code, pass through unchanged. The span adds no characters, so DOM text, selection,
+and hrefs match the unpatched rendering. The cells drop react-markdown's `node`
+prop and pass every other prop, so column alignment is kept. The new-chat and
+Builder link branches and `clipboardMarkdownComponents` are unchanged.
+`dist/client/chat/markdown-renderer.d.ts` declares the two components.
+
+Workbench's `app/global.css` lets only `.agent-markdown-table-wrap
+.agent-markdown-long-token` break anywhere. Short link text keeps breaking at
+spaces. `tests/markdown-reader.test.mjs` renders the installed components with
+react-markdown and remark-gfm and checks the spans, text, hrefs, code, cell
+attributes, and copied HTML. Remove these hunks when a pinned Core release lets
+long unbroken table text wrap without splitting ordinary words.

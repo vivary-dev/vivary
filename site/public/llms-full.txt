@@ -8172,6 +8172,36 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Long links and unbroken strings in chat tables, a follow-up to the
+table wrapping entry below and related to issue #256. With `width: auto`, a column
+still could not be narrower than its longest unbroken string, so one long URL, a
+64-character hash, or a long identifier forced the table wider than the reply and
+it scrolled. The maintained Core patch now adds `th` and `td` components to
+`markdownComponents` in `dist/client/chat/markdown-renderer.js`, and the plain
+branch of its link component does the same to its children. Each run of 20 or more
+non-whitespace characters in a direct text child is wrapped in a
+`.agent-markdown-long-token` span. The span adds no characters, so the cell text,
+selection, and copied text are unchanged, and hrefs and inline code are not
+touched. `clipboardMarkdownComponents` is unchanged, and Copy still writes the
+message's Markdown as plain text. `app/global.css` lets only those spans break
+anywhere. Links are left out of that rule because a measurement with
+`overflow-wrap: anywhere` on whole links split the words "Authentication" and
+"Documentation" in ordinary link text at 300 and 480 pixels. Electron's
+`will-navigate` and `setWindowOpenHandler` in
+[`main.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) act on the URL, and the in-app link
+handlers use `closest("a[href]")`, so a click on a span still resolves to its link.
+A Playwright check in Chrome 154 rendered the installed, patched components in
+Core's stylesheet at 300, 480, 800, and 1200 pixel windows. A long link, a long
+hash, and a table holding prose, a link, and a hash now fit the reply at every
+width with no ordinary word split. Before, the hash table measured 465 pixels in a
+255 pixel reply. A five-column prose table still scrolls at 300 pixels, because its
+words need 339 pixels in 255. Tables of long inline code paths and a 14-column
+numeric table also scroll, and code stays on one line. A trusted click on the last
+line of each wrapped link requested the original URL, and selecting a cell and
+copying it with the keyboard gave the source text. `tests/markdown-reader.test.mjs`
+renders the installed components with react-markdown and remark-gfm and checks the
+spans, cell text, hrefs, code, cell attributes, and the copied HTML.
+
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime
 and model selectors are disabled when the open conversation has a run, when any
