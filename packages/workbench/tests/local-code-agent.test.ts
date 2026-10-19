@@ -540,7 +540,7 @@ process.send({type:"vivary:code-worker:ready"});
     }
   });
 
-  it("Stop and switch keeps one run, refuses while this run works, and routes the next approval by run ID", async () => {
+  it("Stop and switch keeps one run, is owned by the host, and routes the next approval by run ID", async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-switch-"));
     temporaryRoots.push(fixture);
     const server = path.join(fixture, ".output", "server");
@@ -597,19 +597,25 @@ process.send({type:"vivary:code-worker:ready"});
         if (await readFile(path.join(fixture, "starts.jsonl"), "utf8").catch(() => "")) break;
         await delay(20);
       }
-      const target = { ...owner, runId, engine: "claude-cli" as const, model: "claude-opus-5-5", workspace };
+      const target = { ...owner, runId, engine: "claude-cli" as const, model: "claude-opus-5-5", workspace,
+        revalidateWorkspace: async () => workspace };
       await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_active", statusCode: 409 });
-      await stopVivaryCodeRun({ ...owner, runId, projectId: workspace.projectId });
-      await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
-      await host().activeRuns.get(runId)?.execution;
-      assert.equal(getCodeAgentRunRecord(runId)?.status, "paused");
 
       // A stale ID for each runtime, as a conversation that already moved between them could hold.
       updateCodeAgentRunRecord(runId, { metadata: { claudeSessionId: "00000000-0000-4000-8000-000000000012",
         codexSessionId: "stale-thread", providerSessionMode: "native-resume" } });
-      const switched = await switchVivaryCodeRuntime(target);
+      // Stop and switch is one request. The host records the target, stops the run, and applies it when the run leaves,
+      // so no open window has to finish the switch.
+      const stopping = await switchVivaryCodeRuntime({ ...target, stop: true });
+      assert.deepEqual(stopping.run?.pendingSwitch, { engine: "claude-cli", model: "claude-opus-5-5" });
+      assert.equal(stopping.run?.model, "claude-sonnet-5-5", "the route changes only after the run stops");
+      await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
+      await host().activeRuns.get(runId)?.execution;
+      assert.equal(getCodeAgentRunRecord(runId)?.status, "paused");
+      const switched = await getVivaryCodeState(owner.ownerEmail, runId, workspace, owner.orgId);
       assert.equal(switched.run?.id, runId);
       assert.equal(switched.run?.model, "claude-opus-5-5");
+      assert.equal(switched.run?.pendingSwitch, null);
       const stored = JSON.parse(await readFile(path.join(codeAgentRunsDir(), `${runId}.json`), "utf8")).metadata;
       assert.equal("claudeSessionId" in stored || "codexSessionId" in stored || "providerSessionMode" in stored, false);
       assert.equal(stored.previousProviderSessions.length, 1);
@@ -648,7 +654,22 @@ process.send({type:"vivary:code-worker:ready"});
       assert.match(starts[1].prompt, /^# Previous conversation\nThese are quoted earlier messages from this Vivary conversation\./);
       assert.match(starts[1].prompt, /\nUser: Keep working\n\n# Current request\nNeeds approval$/);
       assert.equal(listCodeAgentRunRecords("vivary-local-code").filter(run => run.metadata?.ownerEmail === owner.ownerEmail).length, 1);
+      await host().activeRuns.get(runId)?.execution;
       runId = undefined;
+
+      // A host that ended while a run was stopping toward a switch applies it when the next host starts.
+      const interrupted = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Interrupted switch", status: "running",
+        phase: "stopping", needsApproval: false, permissionMode: "auto-edit", cwd: fixture,
+        metadata: { app: "vivary-workbench-local-code", engine: "claude-cli", model: "claude-sonnet-5-5", ...owner,
+          workspaceRoot: fixture, projectId: workspace.projectId, bindingId: workspace.bindingId, rootId: workspace.rootId,
+          bindingRevision: workspace.bindingRevision,
+          pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5", label: "Opus 5.5", requestedAt: "2026-10-19T00:00:00.000Z" } } });
+      Reflect.set(host(), "initialization", undefined);
+      await getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+      const restarted = getCodeAgentRunRecord(interrupted.id);
+      assert.deepEqual([restarted?.status, restarted?.phase, restarted?.metadata?.model, restarted?.metadata?.pendingSwitch],
+        ["paused", "interrupted", "claude-opus-5-5", undefined]);
+      assert.equal(listCodeAgentTranscriptEvents(interrupted.id).at(-1)?.metadata?.source, "vivary-runtime-switch");
     } finally {
       if (runId) {
         const execution = host().activeRuns.get(runId)?.execution;
