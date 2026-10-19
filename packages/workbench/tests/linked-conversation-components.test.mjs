@@ -18,14 +18,21 @@ Object.assign(globalThis, { window, document: window.document, HTMLElement: wind
 const { createRoot } = await import("react-dom/client");
 const stubs = new Map([
   ["@/lib/native-actions", `export const useNativeActionCaller = () => ({ ready: true, call: globalThis.linkFixture.call });`],
+  // The menu stubs render every item, as an open menu does. Radix's own menu behavior is covered in native-chat-components.
   ["@agent-native/toolkit/ui", `import { createElement } from "react";
-    export const Button = ({ size, variant, ...props }) => createElement("button", props);`],
+    export const Button = ({ size, variant, ...props }) => createElement("button", props);
+    export const DropdownMenu = ({ children }) => createElement("div", null, children);
+    export const DropdownMenuTrigger = ({ children }) => children;
+    export const DropdownMenuContent = ({ children }) => createElement("div", { role: "menu" }, children);
+    export const DropdownMenuLabel = ({ children }) => createElement("div", null, children);
+    export const DropdownMenuItem = ({ onSelect, children, ...props }) =>
+      createElement("button", { role: "menuitem", onClick: onSelect, ...props }, children);`],
 ]);
 const bundle = await build({ stdin: { contents: `
   import { createElement } from "react";
   import { MemoryRouter, useLocation } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-  import { CodeLinkOptions, LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
+  import { CodeLinkActions, LinkedConversationChooser, LinkedHistoryNotice, NativeLinkOptions, useLinkSourceEligibility } from "./app/components/workspace/LinkedConversation";
   export { nativeHistoryRows } from "./app/lib/native-history-rows";
   export { sourceDraftSaver } from "./app/components/workspace/LinkedConversation";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
@@ -41,9 +48,9 @@ const bundle = await build({ stdin: { contents: `
     const client = globalThis.linkFixture.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ["/?run=source"] },
       kind === "eligibility" ? createElement(Eligibility) : kind === "chooser" ? createElement(LinkedConversationChooser, props)
-        : kind === "code-options" ? createElement(CodeLinkOptions, { projectId: "alpha", runId: "code-source", sourceEngine: "claude-cli",
+        : kind === "code-options" ? createElement(CodeLinkActions, { projectId: "alpha", runId: "code-source", sourceEngine: "claude-cli",
           engines: props.engines, storageKey: "owner", saveDraft: globalThis.linkFixture.saveDraft,
-          workspaceAvailable: globalThis.linkFixture.workspaceAvailable ?? true })
+          workspaceAvailable: globalThis.linkFixture.workspaceAvailable ?? true, menuSlot: globalThis.linkFixture.menuSlot })
         : kind === "native-options" ? createElement(NativeLinkOptions, { projectId: "alpha", threadId: "native-source",
           saveDraft: globalThis.linkFixture.saveDraft, ...globalThis.linkFixture.options })
         : kind === "chooser-from-codex" ? createElement(LinkedConversationChooser, { ...props, sourceEngine: "codex-cli",
@@ -66,8 +73,10 @@ test.beforeEach(() => {
     saveDraft: async (...args) => { linkFixture.effects.push({ effect: "saveDraft", args }); },
     call: async (name, input) => { linkFixture.calls.push({ name, input }); linkFixture.effects.push({ effect: name });
       throw new Error("Selected creation failure"); } };
+  // The Code conversation header's actions menu, where the Code link actions render.
+  linkFixture.menuSlot = document.body.appendChild(document.createElement("div"));
 });
-test.afterEach(async () => { await act(async () => root.unmount()); linkFixture.client?.clear(); host.remove(); });
+test.afterEach(async () => { await act(async () => root.unmount()); linkFixture.client?.clear(); host.remove(); linkFixture.menuSlot.remove(); });
 const render = kind => act(async () => root.render(module.exports.view(kind)));
 const settle = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
 async function choose(engine) {
@@ -350,21 +359,21 @@ test("linking settles the source draft through its owner before creating the lin
   assert.deepEqual(settled, ["source-thread"]);
 });
 
-test("the Code chooser appears only after the same source eligibility check Native uses", async () => {
-  const chooser = () => Boolean(host.querySelector('select[aria-label="Open linked conversation in another harness"]'));
+test("the Code header actions appear only after the same source eligibility check Native uses", async () => {
+  const chooser = () => Boolean(linkFixture.menuSlot.querySelector('[aria-label="Conversation actions"]'));
   // Not a source, for example an owner with no organization or a target whose link no longer validates.
   linkFixture.call = async (name, input) => { linkFixture.calls.push({ name, input }); return { available: false }; };
   await render("code-options"); await settle(); await notify();
   assert.equal(chooser(), false, "no choices that cannot work");
   assert.deepEqual(linkFixture.calls.at(-1), { name: "vivary-linked-history",
     input: { operation: "source", projectId: "alpha", target: { kind: "code", id: "code-source" } } });
-  // A failed check shows Retry instead of a chooser.
+  // A failed check shows Retry beside the composer instead of the actions.
   linkFixture.client.clear();
   linkFixture.call = async () => { throw new Error("Eligibility check failed"); };
   await render("code-options"); await settle(); await notify();
   assert.equal(chooser(), false);
   assert.match(host.querySelector('[role="alert"]')?.textContent ?? "", /Linked conversation options could not load/);
-  // An eligible source shows the chooser.
+  // An eligible source shows the actions in the header menu.
   linkFixture.client.clear();
   linkFixture.call = async () => ({ available: true });
   await render("code-options"); await settle(); await notify();
@@ -385,10 +394,30 @@ test("a stale or mismatched link operation shows the server's reason and the nex
   }
 });
 
-test("with the project folder unavailable the Code chooser offers only Native, since Code targets need the folder", async () => {
+test("with the project folder unavailable the Code actions offer only Native, since Code targets need the folder", async () => {
   linkFixture.workspaceAvailable = false;
   linkFixture.call = async () => ({ available: true });
   await render("code-options"); await settle(); await notify();
-  assert.equal(Boolean(host.querySelector('option[value="codex-cli"]')), false, "no Code target that would always fail");
-  assert.equal(Boolean(host.querySelector('option[value="native"]')), true, "Code to Native still works");
+  const items = [...linkFixture.menuSlot.querySelectorAll('[role="menuitem"]')].map(item => item.textContent);
+  assert.deepEqual(items, ["Open linked conversation in Native chat"], "no Code target that would always fail, and Code to Native still works");
+});
+
+test("a Code conversation's header action opens an inactive linked conversation and moves nothing", async () => {
+  linkFixture.call = async (name, input) => {
+    linkFixture.calls.push({ name, input }); linkFixture.effects.push({ effect: name });
+    return name === "vivary-linked-history" ? { available: true } : { target: { kind: "code", id: "target" }, route: "/?run=target" };
+  };
+  await render("code-options"); await settle(); await notify();
+  const items = () => [...linkFixture.menuSlot.querySelectorAll('[role="menuitem"]')];
+  // The source's own harness is not a link target. Native chat always is.
+  assert.deepEqual(items().map(item => item.textContent), ["Open linked conversation in Codex", "Open linked conversation in Native chat"]);
+  assert.match(linkFixture.menuSlot.textContent, /Opens an inactive conversation in this project\. Your draft and approvals stay here\. Nothing is sent\./);
+  assert.equal(host.querySelector("select"), null, "no chooser above the composer");
+  linkFixture.effects.length = 0;
+  await act(async () => items()[0].click()); await settle();
+  assert.deepEqual(linkFixture.effects, [{ effect: "saveDraft", args: [] }, { effect: "vivary-conversation-link" }]);
+  const link = linkFixture.calls.at(-1);
+  assert.deepEqual(link.input.target, { engine: "codex-cli", model: "fixture" });
+  assert.deepEqual(link.input.source, { kind: "code", id: "code-source" });
+  assert.equal(host.querySelector("#route").textContent, "?run=target", "the linked conversation opens");
 });

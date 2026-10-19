@@ -17,12 +17,32 @@
 .local-agent-runtime-setup { margin: 8px 16px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); border-radius: var(--radius); }
 .local-agent-runtime-setup h3 { font-size: 13px; font-weight: 600; }
 .local-agent-runtime-setup p { color: hsl(var(--muted-foreground)); line-height: 1.6; margin-top: 4px; }
-.local-agent-composer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; max-width: 100%; flex: 1 1 180px; }
-.local-agent-composer-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; color: hsl(var(--muted-foreground)); font-size: 11px; }
-.local-agent-composer-runtime { flex: 0 1 145px; }
-.local-agent-composer-model { flex: 1 1 160px; }
-.local-agent-composer-select { width: 100%; min-width: 0; max-width: 100%; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); color: hsl(var(--foreground)); padding: 4px 6px; font: inherit; text-overflow: ellipsis; }
-.local-agent-composer-select:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+/* The runtime and model picker inside the prompt box, styled like Core's Native model button beside Send. */
+.local-agent-model-button { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 16rem; flex-shrink: 1; border: 0; border-radius: calc(var(--radius) - 2px); background: transparent; padding: 4px 8px; font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); cursor: pointer; }
+.local-agent-model-button:hover:not(:disabled), .local-agent-model-button[data-state="open"] { background: hsl(var(--accent) / .5); color: hsl(var(--foreground)); }
+.local-agent-model-button:disabled { opacity: .5; cursor: not-allowed; }
+.local-agent-model-button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.local-agent-model-runtime { flex-shrink: 0; opacity: .75; }
+.local-agent-model-runtime::after { content: "\00b7"; margin-left: 4px; }
+.local-agent-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-agent-model-chevron { width: 12px; height: 12px; flex-shrink: 0; opacity: .6; }
+.local-agent-model-menu { width: 16rem; max-height: min(420px, var(--radix-dropdown-menu-content-available-height, 420px)); overflow-y: auto; }
+.local-agent-model-group { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; }
+.local-agent-model-status { margin-left: auto; font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; white-space: nowrap; color: hsl(var(--muted-foreground)); }
+.local-agent-model-item { gap: 8px; font-size: 12px; }
+.local-agent-model-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-agent-actions-menu { width: min(20rem, calc(100vw - 24px)); }
+.local-agent-actions-hint { padding: 4px 8px 6px; font-size: 11px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
+/* Notices above the composer stay compact and scroll on their own, so they never push the composer out of view. */
+.local-agent-composer-notices { flex-shrink: 0; max-height: 35dvh; overflow-y: auto; }
+.local-agent-composer-notices .local-agent-notice { padding: 6px 16px; gap: 8px; font-size: 12px; line-height: 1.45; }
+.local-agent-composer-notices .local-agent-notice p { margin: 0; }
+.local-agent-composer-notices .local-agent-notice button { height: 26px; padding-inline: 8px; font-size: 12px; }
+.local-agent-composer-notices .local-agent-runtime-setup { margin: 6px 16px; padding: 8px 12px; font-size: 12px; }
+/* A "Loaded project context" note is its own short row (code-match-repository.ts), muted like a status line.
+   Core's Markdown sets the text size on the paragraph, so the rule names it. A status line takes no reply actions. */
+.local-agent-transcript [data-message-id^="code-context-"] :is(p, li, span) { font-size: 12px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
+.local-agent-transcript [data-message-id^="code-context-"] button { display: none; }
 .local-agent-limits { color: hsl(var(--muted-foreground)); font-size: 11px; text-align: center; padding: 8px; }
 .local-agent-output { display: none; flex-direction: column; width: min(40%, 460px); min-width: 280px; min-height: 0; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
 .local-agent-layout.is-viewing-files .local-agent-output { display: flex; }
@@ -46,6 +66,7 @@
   .local-agent-header-actions [role="status"] { display: none; }
   .local-agent-heading p { max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .local-agent-runtime-setup, .local-agent-notice { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .local-agent-model-runtime { display: none; }
 }
 /* The shared-folder warning stacks its warning, the working conversations, and the isolation choices. */
 .local-agent-notice.local-agent-shared-folder { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 8px; }
@@ -53,3 +74,5 @@
 .local-agent-shared-folder li, .local-agent-shared-folder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .local-agent-shared-folder code { overflow-wrap: anywhere; font-size: 12px; }
 .local-agent-shared-folder-hint { color: hsl(var(--muted-foreground)); }
+/* A long conversation title truncates. Hover shows it through the title attribute, and keyboard focus wraps it in full. */
+.local-agent-header .local-agent-heading h2:focus-visible { white-space: normal; overflow: visible; border-radius: 2px; outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
