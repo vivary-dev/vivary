@@ -350,6 +350,72 @@ test("editable documents keep footnote Markdown and their saved bytes unchanged"
   assert.match(readOnly, /\n\[\^diagnostics-matrix\]: TypeScript diagnostics at 5\.9\.3, 6\.0\.3, and 7\.0\.2\.\n/);
 });
 
+// Review of #259: GFM matches footnote labels like link reference labels, ignoring case.
+test("footnote labels match without case, and each side keeps the label it was written with", async () => {
+  const proof = await loadProof();
+  const { json, markdown } = proof.readMarkdown("See[^Note] here.\n\n[^note]: text", { footnotes: true });
+  assert.deepEqual(json.content.map((block) => block.type), ["paragraph", "footnotes"]);
+  const reference = json.content[0].content.find((node) => node.type === "footnoteReference");
+  assert.deepEqual([reference.attrs.label, reference.attrs.number], ["Note", 1]);
+  assert.deepEqual(json.content[1].content.map((item) => [item.attrs.label, item.content[0].content[0].text]), [["note", "text"]]);
+  assert.match(markdown, /See\[\^Note\] here\./);
+  assert.match(markdown, /\n\[\^note\]: text$/);
+});
+
+// GitHub's footnote help writes a note over several lines: two trailing spaces, then the next line.
+// The continuation stays in the note whether it is indented two spaces, as in that help, or not at all.
+test("a footnote continued on the next line keeps the continuation in its note", async () => {
+  const proof = await loadProof();
+  for (const continuation of ["  This allows you to have a footnote with multiple lines.", "This allows you to have a footnote with multiple lines."]) {
+    const source = `Multi[^2] here.\n\n[^2]: Every new line should be prefixed with 2 spaces.  \n${continuation}\n\nAfter.`;
+    const { json } = proof.readMarkdown(source, { footnotes: true });
+    assert.deepEqual(json.content.map((block) => block.type), ["paragraph", "paragraph", "footnotes"], continuation);
+    assert.equal(json.content[1].content[0].text, "After.");
+    const note = json.content[2].content[0].content[0].content;
+    assert.deepEqual(note.map((node) => node.type), ["text", "hardBreak", "text"], continuation);
+    assert.equal(note[2].text.trim(), "This allows you to have a footnote with multiple lines.");
+  }
+});
+
+// A definition inside another becomes its own note, and the outer note keeps the blocks after it.
+test("a nested footnote definition becomes its own note and the outer note keeps its later blocks", async () => {
+  const proof = await loadProof();
+  const source = ["Outer[^outer] and inner[^inner].", "", "[^outer]: Outer start.", "", "    [^inner]: Inner note.", "",
+    "    Outer continues.", "", "Body after."].join("\n");
+  const { json } = proof.readMarkdown(source, { footnotes: true });
+  assert.deepEqual(json.content.map((block) => block.type), ["paragraph", "paragraph", "footnotes"]);
+  assert.equal(json.content[1].content[0].text, "Body after.");
+  const notes = json.content[2].content.map((item) => [item.attrs.label, item.content.map((block) => block.content[0].text)]);
+  assert.deepEqual(notes, [["outer", ["Outer start.", "Outer continues."]], ["inner", ["Inner note."]]]);
+});
+
+// Only a link to a rendered note moves focus. A heading link such as #fn-details keeps its normal handling.
+test("note links move focus only to a rendered note and leave other #fn- links alone", async () => {
+  await loadProof();
+  const built = await esbuild.build({ entryPoints: [join(WORKBENCH, "app", "lib", "footnote-links.ts")], bundle: true,
+    write: false, format: "esm", platform: "node", logLevel: "silent" });
+  const helper = join(folder, "footnote-links.mjs");
+  writeFileSync(helper, built.outputFiles[0].text);
+  const { focusFootnote } = await import(pathToFileURL(helper).href);
+  const reader = document.createElement("div");
+  reader.innerHTML = '<p><sup class="an-rich-md-footnote-ref"><a href="#fn-1">1</a></sup> <a href="#fn-details">details</a>'
+    + ' <a href="#fn-2">2</a></p><h2 id="fn-details">Fn details</h2>'
+    + '<section class="an-rich-md-footnotes"><ol><li id="fn-1"><p>The note.</p></li></ol></section>';
+  let focused = null;
+  const note = reader.querySelector("li");
+  note.focus = () => { focused = note; };
+  const click = (href) => {
+    const event = { target: reader.querySelector(`a[href="${href}"]`), currentTarget: reader, prevented: false,
+      preventDefault() { this.prevented = true; } };
+    return [focusFootnote(event), event.prevented];
+  };
+  assert.deepEqual(click("#fn-details"), [false, false]);
+  assert.deepEqual(click("#fn-2"), [false, false], "a note link without a rendered note is not taken over");
+  assert.equal(focused, null);
+  assert.deepEqual(click("#fn-1"), [true, true]);
+  assert.equal(focused, note);
+});
+
 test.after(() => {
   rmSync(folder, { recursive: true, force: true });
   return esbuild.stop();

@@ -456,10 +456,10 @@ index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493
       * `false` so existing embedders are unchanged. When `true`, images
 diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf8504aa61
+index 0000000000000000000000000000000000000000..d3b08c82a49356698ba6cd1c0aa4e7ef7ff814f6
 --- /dev/null
 +++ b/dist/editor/footnotes.js
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,282 @@
 +import { mergeAttributes, Node } from "@tiptap/core";
 +/**
 + * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
@@ -469,7 +469,9 @@ index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf
 + * an inline rule for references, and a core rule that moves the definitions
 + * into one notes list at the end of the document, in order of first reference.
 + * This follows GFM: a reference without a definition stays text, and a
-+ * definition that nothing references is not shown.
++ * definition that nothing references is not shown. Labels match the way link
++ * reference labels do, ignoring case, and each reference and note keeps the
++ * label it was written with for serialization.
 + *
 + * Opt in with `features.footnotes`. It is off by default so editable documents
 + * keep their existing schema and saved Markdown. The serializers write the
@@ -503,11 +505,12 @@ index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf
 +    if (silent)
 +        return true;
 +    const env = state.env;
++    const key = state.md.utils.normalizeReference(found.label);
 +    env.footnotes ??= { refs: new Map(), list: [] };
-+    if (!env.footnotes.refs.has(found.label))
-+        env.footnotes.refs.set(found.label, -1);
++    if (!env.footnotes.refs.has(key))
++        env.footnotes.refs.set(key, -1);
 +    const open = new state.Token("footnote_definition_open", "", 1);
-+    open.meta = { label: found.label };
++    open.meta = { label: found.label, key };
 +    open.level = state.level++;
 +    state.tokens.push(open);
 +    // Parse the rest of the line and the indented lines after it as the
@@ -553,14 +556,17 @@ index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf
 +    if (!footnotes)
 +        return false;
 +    const found = readLabel(state.src, state.pos, state.posMax);
-+    if (!found || !footnotes.refs.has(found.label))
++    if (!found)
++        return false;
++    const key = state.md.utils.normalizeReference(found.label);
++    if (!footnotes.refs.has(key))
 +        return false;
 +    if (!silent) {
-+        let index = footnotes.refs.get(found.label);
++        let index = footnotes.refs.get(key);
 +        if (index < 0) {
 +            index = footnotes.list.length;
-+            footnotes.list.push(found.label);
-+            footnotes.refs.set(found.label, index);
++            footnotes.list.push(key);
++            footnotes.refs.set(key, index);
 +        }
 +        const token = state.push("footnote_reference", "", 0);
 +        token.meta = { label: found.label, number: index + 1 };
@@ -573,31 +579,38 @@ index 0000000000000000000000000000000000000000..a3d163c107cb7755c68f467da9cdd4cf
 +    if (!footnotes)
 +        return;
 +    // Lift each definition's tokens out of the flow, then append the referenced
-+    // ones in order of first reference.
++    // ones in order of first reference. Definitions can nest, so the open ones
++    // form a stack: a nested definition becomes its own note, and the blocks
++    // after it stay with the definition that contains it. The first definition
++    // of a label wins.
 +    const definitions = new Map();
-+    let current = null;
++    const open = [];
 +    state.tokens = state.tokens.filter((token) => {
 +        if (token.type === "footnote_definition_open") {
-+            current = [];
-+            if (!definitions.has(token.meta.label))
-+                definitions.set(token.meta.label, current);
++            const tokens = [];
++            open.push(tokens);
++            if (!definitions.has(token.meta.key))
++                definitions.set(token.meta.key, { label: token.meta.label, tokens });
 +            return false;
 +        }
 +        if (token.type === "footnote_definition_close") {
-+            current = null;
++            open.pop();
 +            return false;
 +        }
-+        if (current)
-+            current.push(token);
-+        return !current;
++        if (open.length > 0) {
++            open[open.length - 1].push(token);
++            return false;
++        }
++        return true;
 +    });
 +    if (footnotes.list.length === 0)
 +        return;
 +    state.tokens.push(new state.Token("footnote_block_open", "", 1));
-+    footnotes.list.forEach((label, index) => {
-+        const open = new state.Token("footnote_open", "", 1);
-+        open.meta = { label, number: index + 1 };
-+        state.tokens.push(open, ...(definitions.get(label) ?? []), new state.Token("footnote_close", "", -1));
++    footnotes.list.forEach((key, index) => {
++        const definition = definitions.get(key);
++        const item = new state.Token("footnote_open", "", 1);
++        item.meta = { label: definition?.label ?? key, number: index + 1 };
++        state.tokens.push(item, ...(definition?.tokens ?? []), new state.Token("footnote_close", "", -1));
 +    });
 +    state.tokens.push(new state.Token("footnote_block_close", "", -1));
 +}

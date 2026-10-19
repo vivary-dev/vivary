@@ -715,6 +715,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Footnote review fixes (PR #259 review). Four parser and link cases in
+the read-only footnote support were wrong, and the design described below still
+holds. Labels now match ignoring case, the way link reference labels do, and each
+reference and note keeps the label it was written with when it serializes. A
+definition nested inside another becomes its own note, and the blocks after it
+stay in the outer note, where before they leaked into the document body.
+`focusFootnote` now handles only a `#fn-<number>` link whose note is rendered in
+the reader's notes section, so a heading link such as `#fn-details` keeps its
+normal handling. A note continued on the next line after two trailing spaces
+already kept its continuation, with or without indentation, and a test now pins
+it. Editable documents still get no footnote nodes. Evidence: four new cases in
+`tests/markdown-reader.test.mjs` and the unchanged editable pin.
+
 2026-10-19 Footnotes in the read-only Markdown readers. The owner saw a
 document's footnote definitions run together as one paragraph in the Files
 reader. Toolkit's shared editor parses Markdown with plain markdown-it, which has

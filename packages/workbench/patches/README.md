@@ -3406,11 +3406,16 @@ definitions and references through tiptap-markdown's parse setup hook.
 `footnoteItem` renders the note as the list item with that id. Following GFM,
 notes appear once in a list at the end in order of first reference, a reference
 with no definition stays text, and a definition that nothing references is not
-shown. Each node has a serializer that writes the footnote syntax back, so a
-read-only reconcile that reads Markdown never falls back to placeholder text.
+shown. Labels match ignoring case, through markdown-it's `normalizeReference`
+as for link references, and the first definition of a label wins. A definition
+nested inside another becomes its own note, and the outer note keeps the blocks
+after it. Each node has a serializer that writes the footnote syntax back with
+the label as written, so a read-only reconcile that reads Markdown never falls
+back to placeholder text.
 
 Only Workbench's two read-only routes pass `footnotes: true`, and their
-`focusFootnote` helper moves focus to a note without changing the route. An
+`focusFootnote` helper moves focus to a rendered note without changing the
+route. Any other `#fn-` link keeps its normal handling. An
 editable document gets no footnote nodes, so its parse and save path is
 unchanged. That path already escapes `[^id]` as `\[^id\]` and joins
 consecutive definitions when it saves. `tests/markdown-reader.test.mjs` pins
