@@ -82,6 +82,10 @@ Windows Explorer can reject a deeply nested destination before the application s
 ### First launch
 
 1. Choose a project, use **Open folder**, or create a disposable project with **New project**.
+   Both ask whether the project is **Coding** or **Personal**. Coding opens new
+   conversations with a coding agent. Personal opens them as API chat. Either kind
+   of conversation stays available in every project. Cancel after Open folder
+   leaves the kind **Not set**, and you can set it later in Project details.
 2. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
 
 Both downloads hold the same application. It bundles Node, Python, and the
