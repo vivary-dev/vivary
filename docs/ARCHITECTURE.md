@@ -890,6 +890,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Exports for the Code conversation inbox, on PR #261.
+`local-code-agent.ts` exports `listOwnedVivaryCodeRuns`, which returns every
+listed Code run the caller owns in any project, most recently updated first, from
+one directory scan, plus the existing `engineLabelFromRun` and `modelFromRun`.
+`VIVARY_OWNER_ACTIONS` names `vivary-code-conversation-meta`, the owner-only
+action the inbox adds for Code rename and archive. No behavior changes.
+`tests/code-concurrency.test.ts` covers the list.
+
 2026-10-19 Review fix for concurrent Code conversations (PR #261). `folderRuns`
 returned other owners' run IDs to every caller, and a send checked the
 conversation's active run before ownership, so another owner's working run ID

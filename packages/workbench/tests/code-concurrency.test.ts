@@ -263,6 +263,30 @@ test("another owner's run in the folder shows no run ID, and its ID refuses as a
   }
 });
 
+test("listOwnedVivaryCodeRuns lists the caller's runs in every project, most recently updated first", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { folder } = await ipcFixture("owned-list");
+  const other = { ownerEmail: "list-other@example.test", orgId: owner.orgId };
+  const finished = async (state: Awaited<ReturnType<typeof send>>) => {
+    const runId = state.run!.id;
+    await waitFor(() => !host().activeRuns.has(runId), "the turn to finish");
+    return runId;
+  };
+  const first = await finished(await send(project(folder, "owned_one"), "Finish in one project"));
+  const second = await finished(await send(project(folder, "owned_two"), "Finish in another", codex));
+  const theirs = await finished(await send(project(folder, "owned_one"), "Finish as another owner", other));
+  const listed = agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId);
+  const ids = listed.map(run => run.id);
+  assert.ok(ids.includes(first) && ids.includes(second), "runs from both projects");
+  assert.equal(ids.includes(theirs), false, "another owner's run is not listed");
+  assert.ok(listed.every(run => run.metadata?.ownerEmail === owner.ownerEmail && run.metadata?.orgId === owner.orgId));
+  assert.deepEqual(listed.map(run => run.updatedAt), listed.map(run => run.updatedAt).sort().reverse());
+  assert.equal(agent.listOwnedVivaryCodeRuns(owner.ownerEmail, "another-org").some(run => ids.includes(run.id)), false);
+  assert.deepEqual(agent.listOwnedVivaryCodeRuns(other.ownerEmail, other.orgId).map(run => run.id), [theirs]);
+  const codexRun = listed.find(run => run.id === second)!;
+  assert.deepEqual([agent.engineLabelFromRun(codexRun), agent.modelFromRun(codexRun)], ["Codex CLI", "gpt-6-astra"]);
+});
+
 test("folders that overlap warn, while separate projects and Git worktrees run without a warning", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { fixture, folder } = await ipcFixture("folders");

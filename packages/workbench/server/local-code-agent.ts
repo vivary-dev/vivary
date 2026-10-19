@@ -1686,6 +1686,14 @@ function isListedRun(run: CodeAgentRunRecord): boolean {
   return !run.metadata?.linkedCreationPending;
 }
 
+/**
+ * Every listed Code run the caller owns, in any project or none, most recently updated first (the order
+ * listCodeAgentRunRecords returns). One directory scan, no runtime probes.
+ */
+export function listOwnedVivaryCodeRuns(ownerEmail: string, orgId?: string): CodeAgentRunRecord[] {
+  return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
     (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
@@ -1881,14 +1889,14 @@ function pendingSwitchFromRun(run: CodeAgentRunRecord): VivaryCodeRunSummary["pe
     ? { engine: pending.engine, model: pending.model } : null;
 }
 
-function engineLabelFromRun(run: CodeAgentRunRecord): string {
+export function engineLabelFromRun(run: CodeAgentRunRecord): string {
   const engine = metadataString(run, "engine");
   if (engine === "claude-cli") return "Claude Code";
   if (engine === "codex-cli") return "Codex CLI";
   return "Local code agent";
 }
 
-function modelFromRun(run: CodeAgentRunRecord): string {
+export function modelFromRun(run: CodeAgentRunRecord): string {
   return metadataString(run, "model")
     ?? (metadataString(run, "engine") === "claude-cli"
       ? "sonnet"
