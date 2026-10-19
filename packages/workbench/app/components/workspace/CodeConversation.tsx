@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -226,6 +226,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   // mounted while the accepted send settles.
   const openingSavedRun = !!selection?.runId && selection.key === selection.runId && !run;
   const activeRun = codeState?.activeRun;
+  const otherActiveRun = activeRun && activeRun.id !== selection?.runId ? activeRun : null;
+  const busyNoticeId = useId();
   const error = notice ?? codeState?.error
     ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
     ?? (state.data && !codeState ? "The project changed. Refresh this workspace before continuing." : undefined)
@@ -344,11 +346,11 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     {error && <div className="local-agent-notice" role="alert">
       <span>{error}</span><Button variant="ghost" size="sm" onClick={() => { void state.refetch(); if (selection?.runId) void selectedState.refetch(); }}>Retry</Button>
     </div>}
-    {activeRun && activeRun.id !== selection?.runId && <div className="local-agent-notice" role="status">
+    {otherActiveRun && <div id={busyNoticeId} className="local-agent-notice" role="status">
       <span>An agent is working in another conversation.</span>
       <Button variant="ghost" size="sm" onClick={() => {
-        if (activeRun.projectId === projectId) selectConversation(activeRun.id);
-        else void onOpenActive(activeRun).then(opened => {
+        if (otherActiveRun.projectId === projectId) selectConversation(otherActiveRun.id);
+        else void onOpenActive(otherActiveRun).then(opened => {
           if (!opened) setNotice("The active conversation's project could not be opened. You can still stop the agent here.");
         });
       }}>Open conversation</Button>
@@ -389,7 +391,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     <div className="local-agent-layout">
       <div className="local-agent-chat">
         {selection && codeState && !openingSavedRun ? <LocalCodeConversation key={selection.key}
-          notices={conversationNotices} projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
+          notices={conversationNotices} busyNoticeId={otherActiveRun ? busyNoticeId : undefined}
+          onNewConversation={newConversation} projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
@@ -491,10 +494,19 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
   </Popover>;
 }
 
+function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, model: string) {
+  return engine?.modelCatalog?.status === "ready"
+    ? engine.modelCatalog.models.find(item => item.id === model)?.label ?? model
+    : engine?.claudeModels?.find(item => item.id === model)?.label ?? model;
+}
+
 type LocalCodeConversationProps = PreviewChatProps & {
   viewingMatch?: boolean;
   matchedEventId?: string | null;
   notices: ReactNode;
+  /** The rendered notice that another conversation's agent is working, which also locks the selectors. */
+  busyNoticeId?: string;
+  onNewConversation: () => void;
   ownerKey: string;
   projectId: string | null;
   workspaceAvailable: boolean;
@@ -591,6 +603,12 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
+  // A conversation with a run keeps its runtime and model, because its provider session and
+  // resume depend on them. The server refuses a change, so the selectors say why they are locked.
+  const routeLockId = useId();
+  const keptRoute = props.selection.runId && props.run
+    ? `${selectedEngine?.label ?? props.run.engineLabel} and ${modelLabel(selectedEngine, choice.model)}` : null;
+  const selectorReasonIds = [keptRoute ? routeLockId : null, props.busyNoticeId].filter(Boolean).join(" ") || undefined;
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
   const viewKey = useRef(snapshotKey);
@@ -698,6 +716,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       {!selectedClaudeModel && choice.engine === "claude-cli" && <div className="local-agent-notice" role="status">
         <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model for a new conversation.</span>
       </div>}
+      {keptRoute && <p id={routeLockId} className="local-agent-route-note">
+        <span>This conversation keeps {keptRoute}. Start a new conversation to use a different runtime or model.</span>
+        <Button variant="link" size="sm" disabled={!props.workspaceAvailable} onClick={props.onNewConversation}>New conversation</Button>
+      </p>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
         ? selectedEngine.modelCatalog.message : runtime?.message ?? "Choose a local runtime in Settings."}</p></div>
@@ -707,7 +729,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     composerToolbarSlot={<div className="local-agent-composer-controls">
         <label className="local-agent-composer-runtime">
           Runtime
-          <select aria-label="Conversation runtime" value={choice.engine}
+          <select aria-label="Conversation runtime" value={choice.engine} aria-describedby={selectorReasonIds}
             className="local-agent-composer-select"
             disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming}
             onChange={event => chooseRuntime(event.target.value)}>
@@ -718,7 +740,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         </label>
         <label className="local-agent-composer-model">
           Model
-          <select aria-label="Conversation model" value={choice.model}
+          <select aria-label="Conversation model" value={choice.model} aria-describedby={selectorReasonIds}
             className="local-agent-composer-select"
             disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
             onChange={event => {
@@ -731,9 +753,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             {!modelChoices.includes(choice.model) && <option value={choice.model}>{choice.model} (saved, unavailable)</option>}
             {modelChoices.map(model => <option key={model} value={model}
               disabled={selectedEngine?.claudeModels?.find(item => item.id === model)?.support === "upgrade-required"}>
-              {selectedEngine?.modelCatalog?.status === "ready"
-                ? selectedEngine.modelCatalog.models.find(item => item.id === model)?.label ?? model
-                : selectedEngine?.claudeModels?.find(item => item.id === model)?.label ?? model}
+              {modelLabel(selectedEngine, model)}
             </option>)}
           </select>
         </label>

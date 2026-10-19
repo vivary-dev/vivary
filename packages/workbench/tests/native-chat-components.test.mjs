@@ -57,19 +57,25 @@ import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
 import * as chatHistory from "@proof/chat-history";
 
-export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false, version = "2.1.296", prefill = false }) {
+export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", active = false, history = false, version = "2.1.296", prefill = false,
+  busyNotice = false, startNew = false }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const choices = [];
+  let newConversations = 0;
   const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
     runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
     models: claudeCodeModelChoices(version).map(model => model.id),
     claudeModels: claudeCodeModelChoices(version) };
   const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null };
   const selection = { key: "composer-review", runId: history ? "retained-run" : null, choice: { engine: "claude-cli", model } };
+  // The busy case passes the parent's notice and its id, as CodeConversation does when another run is active.
+  const notices = busyNotice ? <div id="fixture-busy-notice" className="local-agent-notice" role="status">
+    <span>An agent is working in another conversation.</span></div> : <div data-testid="preserved-notice">Existing notice</div>;
   const props = { state, selection, ownerKey: "fixture-owner", projectId: null, workspaceAvailable: true,
-    previewScope: "fixture", notices: <div data-testid="preserved-notice">Existing notice</div>, active, streaming: false,
-    stopping: false, run: history ? { id: "retained-run", engine: "claude-cli", model, events: [], status: "completed" } : null,
+    previewScope: "fixture", notices, busyNoticeId: busyNotice ? "fixture-busy-notice" : undefined, active, streaming: false,
+    stopping: false, run: history ? { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model, events: [], status: "completed" } : null,
     onChoice: choice => choices.push(choice), onStarted() {}, onStreaming() {}, onSettled() {},
+    onNewConversation() { newConversations += 1; },
     onStop: async () => false, onSettings() {} };
   const view = await mount(<QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation {...props} /></MemoryRouter></QueryClientProvider>);
   if (prefill) {
@@ -82,12 +88,21 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
   const toolbar = view.host.querySelector('[data-agent-composer-slot="toolbar"]');
   const send = view.host.querySelector('[data-agent-composer-slot="send-button"]');
   const nodes = toolbar ? [...toolbar.querySelectorAll("select,button")] : [];
+  const newConversation = [...view.host.querySelectorAll("button")].find(button => button.textContent === "New conversation");
+  if (startNew && newConversation) {
+    await act(async () => { newConversation.dispatchEvent(new window.Event("click", { bubbles: true })); });
+  }
+  const describedBy = [runtime, select].map(control => control?.getAttribute("aria-describedby") ?? null);
+  const reasons = [...new Set(describedBy)].filter(Boolean).flatMap(ids => ids.split(" "))
+    .map(id => document.getElementById(id)?.textContent ?? null);
   const snapshot = { embedded: !!toolbar?.contains(runtime) && !!toolbar?.contains(select),
     beforeSend: nodes.indexOf(runtime) < nodes.indexOf(send) && nodes.indexOf(select) < nodes.indexOf(send),
     noticesOutsideToolbar: !toolbar?.contains(view.host.querySelector('[data-testid="preserved-notice"]')),
     model: select?.value, labels: [runtime?.getAttribute("aria-label"), select?.getAttribute("aria-label")],
     disabled: [runtime?.disabled, select?.disabled, send?.disabled], choices,
     exampleDisabled: [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
+    describedBy, reasons, modelLabel: select?.querySelector("option[value=\"" + model + "\"]")?.textContent ?? null,
+    newConversation: newConversation ? { disabled: newConversation.disabled, clicks: newConversations } : null,
     text: view.host.textContent };
   await view.unmount(); client.clear();
   return snapshot;
@@ -675,6 +690,44 @@ test("Native chat controls", async t => {
         assert.equal(snapshot.embedded, true);
         assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
       }
+    } finally { server(); }
+  });
+
+  await t.test("a retained conversation names the runtime and model it keeps and offers a new conversation", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({ history: true, startNew: true });
+      assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
+      const reason = `This conversation keeps Claude Code and ${snapshot.modelLabel}. `
+        + "Start a new conversation to use a different runtime or model.";
+      assert.ok(snapshot.modelLabel, "the fixture model has a listed label");
+      assert.ok(snapshot.text.includes(reason), "the locked selectors show their reason");
+      // Both selectors point at that line, and nothing else describes them.
+      assert.equal(snapshot.describedBy[0], snapshot.describedBy[1]);
+      assert.deepEqual(snapshot.reasons, [reason + "New conversation"]);
+      assert.deepEqual(snapshot.newConversation, { disabled: false, clicks: 1 }, "the line starts a new conversation through the parent's action");
+    } finally { server(); }
+  });
+
+  await t.test("a new conversation shows no kept-route line and its selectors carry no reason", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({});
+      assert.deepEqual(snapshot.disabled.slice(0, 2), [false, false]);
+      assert.doesNotMatch(snapshot.text, /This conversation keeps/);
+      assert.deepEqual(snapshot.describedBy, [null, null]);
+      assert.equal(snapshot.newConversation, null);
+    } finally { server(); }
+  });
+
+  await t.test("selectors locked by another conversation's run point at the busy notice", async () => {
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.renderWorkbenchComposer({ active: true, busyNotice: true });
+      assert.deepEqual(snapshot.disabled.slice(0, 2), [true, true]);
+      assert.deepEqual(snapshot.describedBy, ["fixture-busy-notice", "fixture-busy-notice"]);
+      assert.deepEqual(snapshot.reasons, ["An agent is working in another conversation."]);
+      assert.doesNotMatch(snapshot.text, /This conversation keeps/);
     } finally { server(); }
   });
 
