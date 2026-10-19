@@ -399,7 +399,11 @@ the old conversation route when the project changes, and the new project then
 restores its saved conversation onto the bare route. The inbox navigates once the
 old route is gone, navigates again with replace if a restore lands after it, and
 releases the target once it has held for 750 ms or the owner presses a key or the
-pointer. New conversation in another project uses the same hold. Native rename, pin and archive use Native's own thread
+pointer. This hold is `useConversationRouteHold` in
+[`conversation-route-hold.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-route-hold.ts), which the Agent
+work strip also uses. New conversation in another project uses the same hold. An
+API chat created after the project change is held on a bare route and replaces a
+route the new project already restored. Native rename, pin and archive use Native's own thread
 routes with the row's scope. Restore uses `vivary-native-archive`.
 
 Code rename, archive and pin go through the owner action
@@ -999,6 +1003,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Conversation inbox on the shared route hold (W5). The inbox now imports
+`useConversationRouteHold` from #261 instead of its own copy. The Conversation
+inbox section names the hook and how an API chat created after a project change
+opens. Evidence inspected: the inbox component tests, including an API chat over a
+restored saved conversation, and `tests/conversation-route-hold.test.mjs`.
 
 2026-10-19 Conversation inbox follow-up (W5). The Conversation inbox section now
 says the filter only scopes the list and names the New conversation destination,

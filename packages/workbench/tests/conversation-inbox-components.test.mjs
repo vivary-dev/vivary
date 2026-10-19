@@ -224,8 +224,9 @@ test("New conversation starts in the filtered project, shown with its folder bef
     "with All projects, the open conversation's project is the destination");
 });
 
-test("an API chat for another project is created in that project after it is selected", async () => {
+for (const restores of [false, true]) test(`an API chat for another project is created in that project after it is selected${restores ? ", over a restored saved conversation" : ""}`, async () => {
   inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+  if (restores) inboxFixture.savedRoutes = { alpha: "run=a3", personal: "runtime=native&history=project&thread=saved" };
   inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
     return { changed: true, record: { status: "cleared" } }; };
   await render("/?run=a1");

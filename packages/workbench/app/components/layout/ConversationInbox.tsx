@@ -19,6 +19,7 @@ import { useChatDraftList, type DraftListItem } from "@/lib/chat-draft";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import { focusAfterRemoval } from "@/lib/row-focus";
+import { hasWorkspaceRoute, useConversationRouteHold } from "@/lib/conversation-route-hold";
 import { useAppStateWriter } from "@/lib/native-state";
 import { CreateProjectForm } from "../projects/CreateProjectForm";
 import { useOpenProjectFolder } from "../projects/open-project-folder";
@@ -40,19 +41,6 @@ const FILTER_KEY = "vivary-conversation-filter-v1";
 const ALL_PROJECTS = "all";
 const PERSONAL = "personal";
 const filterProjectId = (filter: InboxFilter) => filter === PERSONAL ? null : filter;
-/** How long an opened conversation's route must hold before a later restore may replace it. */
-const OPEN_SETTLE_MS = 750;
-/** `from` is the route the click left. Until it goes, Workspace would clear a target that lands first. */
-type PendingOpen = { projectId: string | null; href: string; from: string | null; landed: boolean };
-/** The route keys `Workspace.tsx` clears when the selected project changes. */
-const WORKSPACE_ROUTE_KEYS = ["panel", "path", "project", "runtime", "thread", "history", "run", "draft", "line", "message",
-  "event", "eventOffset"];
-/** Workspace renders only on the home route, so another page has no conversation route to clear. */
-function hasWorkspaceRoute(pathname: string, search: string): boolean {
-  const params = new URLSearchParams(search);
-  return pathname === "/" && WORKSPACE_ROUTE_KEYS.some(key => params.has(key));
-}
-
 const ATTENTION: Record<InboxAttention, { label: string; icon: ReactNode } | null> = {
   "needs-approval": { label: "Needs approval", icon: <IconHandStop size={13} aria-hidden /> },
   stopping: { label: "Stopping", icon: <IconLoader2 size={13} aria-hidden /> },
@@ -203,35 +191,14 @@ export function ConversationInbox() {
     };
   }, [refetchInbox]);
 
-  // A conversation in another project opens after its project is selected. Workspace.tsx clears the old conversation
-  // route when the project changes, then the new project restores its saved conversation onto the bare route. Either
-  // can land after this navigation, so the target is held: applied once the old route is gone, applied again if a
-  // restore replaces it, and released once it has held for a moment or the owner presses a key or the pointer.
+  // A conversation in another project opens through the shared route hold, which outlasts the project change's route
+  // reset and the new project's saved-view restore.
   const location = useLocation();
-  const [pendingOpen, setPendingOpen] = useState<PendingOpen>();
-  const route = location.pathname + location.search;
-  useEffect(() => {
-    if (!pendingOpen || checking || activeProjectId !== pendingOpen.projectId) return;
-    if (route === pendingOpen.href) {
-      if (!pendingOpen.landed) { setPendingOpen({ ...pendingOpen, landed: true }); return; }
-      const release = setTimeout(() => setPendingOpen(current => current === pendingOpen ? undefined : current),
-        OPEN_SETTLE_MS);
-      return () => clearTimeout(release);
-    }
-    if (!pendingOpen.landed && pendingOpen.from !== null && route === pendingOpen.from
-      && hasWorkspaceRoute(location.pathname, location.search)) return;
-    navigate(pendingOpen.href, { replace: pendingOpen.landed });
-  }, [pendingOpen, checking, activeProjectId, route, location.pathname, location.search, navigate]);
-  useEffect(() => {
-    if (!pendingOpen) return;
-    const ownerActed = () => setPendingOpen(undefined);
-    document.addEventListener("keydown", ownerActed, true);
-    document.addEventListener("pointerdown", ownerActed, true);
-    return () => {
-      document.removeEventListener("keydown", ownerActed, true);
-      document.removeEventListener("pointerdown", ownerActed, true);
-    };
-  }, [pendingOpen !== undefined]);
+  const routeHold = useConversationRouteHold({ activeProjectId, checking });
+  // An API chat is created after an await, so it reads the route as it is then, not as it was when creation began.
+  const latestRoute = useRef(location);
+  latestRoute.current = location;
+  const startedFrom = useRef<string | null>(null);
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
     setNotice(undefined);
@@ -252,9 +219,9 @@ export function ConversationInbox() {
       navigate(href);
       return;
     }
-    setPendingOpen({ projectId: row.projectId, href, from: route, landed: false });
+    routeHold.hold(row.projectId, href);
     if (!await selectProject(row.projectId)) {
-      setPendingOpen(undefined);
+      routeHold.release();
       setNotice("That project is unavailable. Its conversations are retained.");
     }
   }
@@ -284,17 +251,27 @@ export function ConversationInbox() {
     }
   }
 
+  // A conversation created right after a project change. The route left behind and a bare route are held: Workspace
+  // still clears the first, and the new project's restore can still fill the second. A route the restore already filled
+  // stays put, so it is replaced directly.
   function hold(href: string) {
-    setPendingOpen({ projectId: activeProjectId, href, from: null, landed: false });
+    const { pathname, search } = latestRoute.current;
+    const route = pathname + search;
+    if (route !== startedFrom.current && hasWorkspaceRoute(pathname, search)) navigate(href, { replace: true });
+    else routeHold.hold(activeProjectId, href);
+    startedFrom.current = null;
   }
   // New conversation in another project is the explicit action that selects it.
   const [pendingNative, setPendingNative] = useState<string | null>();
   async function startIn(projectId: string | null, kind: "code" | "native") {
     setNotice(undefined);
-    if (kind === "code") setPendingOpen({ projectId, href: "/?run=new&draft=" + crypto.randomUUID(), from: route, landed: false });
-    else setPendingNative(projectId);
+    if (kind === "code") routeHold.hold(projectId, "/?run=new&draft=" + crypto.randomUUID());
+    else {
+      startedFrom.current = location.pathname + location.search;
+      setPendingNative(projectId);
+    }
     if (!await selectProject(projectId)) {
-      setPendingOpen(undefined);
+      routeHold.release();
       setPendingNative(undefined);
       setNotice("That project is unavailable. Choose another destination.");
     }
