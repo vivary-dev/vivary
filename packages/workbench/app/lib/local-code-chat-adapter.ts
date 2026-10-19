@@ -34,6 +34,8 @@ type LocalCodeChatOptions = {
   engines: () => VivaryCodeState["engines"];
   /** The owner chose Proceed on the shared-folder warning for this conversation. */
   acknowledgeSharedFolder: () => boolean;
+  /** The server refused a send beside other agents in this folder, so the warning asks again. */
+  onSharedFolderRefused?: () => void;
   onStarted: (runId: string) => void;
   onStreaming: (streaming: boolean) => void;
   onSettled: () => void;
@@ -84,6 +86,8 @@ export function createLocalCodeChatAdapter(
           return state;
         } catch (error) {
           if (draftSubmitId && isPreAppendCodeRejection(error)) await options.onKnownRejected(draftSubmitId);
+          if (error !== null && typeof error === "object" && "errorCode" in error
+            && error.errorCode === "vivary_code_shared_folder_active") options.onSharedFolderRefused?.();
           // A late project or host refusal can follow linked preparation, which the server already recorded.
           // Refresh only the linked-history notice. The request was not accepted, so no thread update is sent.
           if (typeof window !== "undefined") window.dispatchEvent(new Event("vivary:linked-history-updated"));

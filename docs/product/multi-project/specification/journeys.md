@@ -171,6 +171,8 @@ stateDiagram-v2
   Idle --> Warning: another agent works in an overlapping folder
   Warning --> Proceeded: Proceed
   Warning --> Elsewhere: Use another folder
+  Warning --> Idle: Cancel or Escape, nothing sent, draft kept
+  Idle --> Warning: send after Cancel, refused, warning again
   Warning --> Idle: the other agents finish
   Proceeded --> Warning: another agent starts here
   Proceeded --> Busy: send with acknowledgement

@@ -139,11 +139,12 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
     return { run };
   };
   const opened = [];
+  let currentFolderRuns = folderRuns;
   const folderIsolation = { ...FOLDER_ISOLATION, available: folderPicker, async openFolder() { opened.push("open-folder"); } };
   const element = () => <QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation state={state}
     selection={retained ? { key: "retained-run", runId: "retained-run" } : { key: "new-draft", runId: null }}
     ownerKey="fixture-owner" projectId={null} workspaceAvailable
-    previewScope="fixture" viewingMatch={viewingMatch} notices={null} folderRuns={folderRuns} folderIsolation={folderIsolation}
+    previewScope="fixture" viewingMatch={viewingMatch} notices={null} folderRuns={currentFolderRuns} folderIsolation={folderIsolation}
     onOpenRun={target => opened.push(target.id)} pendingApprovals={0}
     active={running} streaming={false} stopping={false} run={run}
     onChoice={choice => choices.push(choice)} onStarted={() => {}} onStreaming={() => {}} onSettled={() => { settled += 1; }}
@@ -176,6 +177,17 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
     sharedButtons: () => [...(shared()?.querySelectorAll("button") ?? [])].map(button => button.textContent),
     sharedRuns: () => [...(shared()?.querySelectorAll("li") ?? [])].map(item => item.textContent),
     command: () => shared()?.querySelector("code")?.textContent ?? null,
+    composerText: () => view.host.querySelector(".ProseMirror")?.textContent ?? null,
+    async escape() {
+      await act(async () => { shared().dispatchEvent(Object.assign(new window.Event("keydown", { bubbles: true, cancelable: true }),
+        { key: "Escape" })); });
+      await settle();
+    },
+    async setFolderRuns(next) {
+      currentFolderRuns = next;
+      await act(async () => { view.root.render(element()); });
+      await settle();
+    },
     composerLocked: () => [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
     panel: () => panel()?.textContent ?? null,
     buttons: () => [...(panel()?.querySelectorAll("button") ?? [])].map(button => button.textContent),
@@ -1029,7 +1041,7 @@ test("Native chat controls", async t => {
       assert.equal(view.composerLocked(), true, "Send waits for a choice");
       assert.equal(view.disabled(), false, "the runtime and model stay open");
       assert.deepEqual(view.sharedRuns(), ["Write the parser testsOpen"]);
-      assert.deepEqual(view.sharedButtons(), ["Open", "Proceed", "Use another folder", "Copy"]);
+      assert.deepEqual(view.sharedButtons(), ["Open", "Proceed", "Use another folder", "Cancel", "Copy"]);
       assert.equal(view.command(), "git worktree add ../Fixture-project-worktree");
       await view.click("Use another folder");
       await view.click("Open");
@@ -1042,12 +1054,44 @@ test("Native chat controls", async t => {
     } finally { await view.unmount(); server(); }
   });
 
+  await t.test("Cancel or Escape closes the warning, sends nothing, keeps the draft, and returns focus to the composer", async () => {
+    const server = installChatServer();
+    const originalFocus = window.HTMLElement.prototype.focus;
+    let focused = null;
+    window.HTMLElement.prototype.focus = function focus() { focused = this; };
+    const inComposer = () => !!focused && (focused.classList?.contains("ProseMirror") || !!focused.closest?.(".ProseMirror"));
+    const view = await proof.renderCodeSwitch({ folderRuns: [OTHER_RUN] });
+    try {
+      assert.deepEqual(view.sharedButtons(), ["Open", "Proceed", "Cancel", "Copy"]);
+      assert.equal(view.composerLocked(), true);
+      await view.click("Cancel");
+      assert.equal(view.warning(), null, "Cancel closes the warning");
+      assert.equal(view.composerLocked(), false, "the composer is usable again");
+      assert.ok(inComposer(), "Cancel returns focus to the composer");
+      await view.click("Try a file change");
+      const draft = view.composerText();
+      assert.ok(draft, "the composer holds a draft");
+      focused = null;
+      await view.setFolderRuns([OTHER_RUN, { id: "later-run", title: "Update the changelog", projectId: null }]);
+      assert.equal(view.warning(), SHARED_FOLDER_WARNING, "a conversation that starts later asks again");
+      assert.equal(view.composerLocked(), true);
+      await view.escape();
+      assert.equal(view.warning(), null, "Escape closes the warning");
+      assert.equal(view.composerText(), draft, "the draft stays");
+      assert.ok(inComposer(), "Escape returns focus to the composer");
+      assert.deepEqual(view.calls, [], "Cancel and Escape send nothing");
+    } finally {
+      window.HTMLElement.prototype.focus = originalFocus;
+      await view.unmount(); server();
+    }
+  });
+
   await t.test("the warning names no title for another owner's run and offers only the worktree hint without a folder picker", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ folderRuns: [{ id: "foreign-run", title: null, projectId: null }] });
     try {
       assert.deepEqual(view.sharedRuns(), ["A conversation of another user"]);
-      assert.deepEqual(view.sharedButtons(), ["Proceed", "Copy"]);
+      assert.deepEqual(view.sharedButtons(), ["Proceed", "Cancel", "Copy"]);
       assert.match(view.text(), /connect the new folder as a project/);
     } finally { await view.unmount(); server(); }
   });

@@ -287,6 +287,27 @@ test("listOwnedVivaryCodeRuns lists the caller's runs in every project, most rec
   assert.deepEqual([agent.engineLabelFromRun(codexRun), agent.modelFromRun(codexRun)], ["Codex CLI", "gpt-6-astra"]);
 });
 
+test("a second send into a working conversation is refused, with or without the shared-folder acknowledgement",
+  { timeout: 60_000, skip: process.platform === "win32" }, async () => {
+    const { fixture, folder } = await ipcFixture("second-send");
+    const workspace = project(folder, "second_send_project");
+    const runId = (await send(workspace, "Work until stopped")).run!.id;
+    try {
+      const starts = async () => (await readFile(path.join(fixture, "starts.jsonl"), "utf8").catch(() => "")).trim().split("\n")
+        .filter(Boolean).length;
+      await waitFor(async () => await starts() >= 1, "the first turn's worker");
+      for (const extra of [{}, { acknowledgeSharedFolder: true }]) {
+        await assert.rejects(send(workspace, "Overlapping send", { runId, ...extra }),
+          { errorCode: "vivary_code_conversation_active", statusCode: 409 });
+      }
+      assert.ok(host().activeRuns.has(runId), "the first turn keeps working");
+      assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.message),
+        ["Work until stopped"]);
+      await delay(250);
+      assert.equal(await starts(), 1, "no second worker started");
+    } finally { await settle(runId); }
+  });
+
 test("folders that overlap warn, while separate projects and Git worktrees run without a warning", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { fixture, folder } = await ipcFixture("folders");
