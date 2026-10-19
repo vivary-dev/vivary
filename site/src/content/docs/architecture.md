@@ -899,6 +899,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 One runtime and model picker in the Code composer, stacked on PR #261.
+The owner asked for the runtime choice as one dropdown inside the prompt box,
+like other harnesses, instead of the Runtime and Model selects and the Linked
+conversation select above the composer. The Coding model selection section now
+describes `CodeModelPicker`. The switch flow, its confirm, Stop and switch, the
+host-recorded pending switch and every server refusal are unchanged. Only the
+control that starts them changed. The Linked runtime conversations section now
+says the Code conversation offers its links in the conversation actions menu,
+built from `LinkedConversationMenuItems` and `useLinkedConversationOpener` in
+`LinkedConversation.tsx` so another menu can reuse them. Native keeps its chooser.
+The composer slot scrolls on its own above 35 percent of the viewport height, and
+each "Loaded project context" note is its own muted row in
+`code-match-repository.ts`, with no reply actions. No server, action or storage
+contract changed. Evidence: `tests/native-chat-components.test.mjs` drives the
+picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
+opens a linked conversation from the header action, and a headless Chrome run of
+the built app on the server measured 74 layouts. The B1 whole-window scroll the
+owner reported did not reproduce in those runs, so this change makes no layout fix.
+
 2026-10-19 Merge of PR #258's review fixes into the concurrency branch. Both
 behaviors hold together. A switch refuses only for the switched conversation's
 own active or stopping run, and Stop and switch records `pendingSwitch` on that

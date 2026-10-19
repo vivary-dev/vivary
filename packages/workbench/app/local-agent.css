@@ -39,8 +39,10 @@
 .local-agent-composer-notices .local-agent-notice p { margin: 0; }
 .local-agent-composer-notices .local-agent-notice button { height: 26px; padding-inline: 8px; font-size: 12px; }
 .local-agent-composer-notices .local-agent-runtime-setup { margin: 6px 16px; padding: 8px 12px; font-size: 12px; }
-/* A "Loaded project context" note is its own short row (code-match-repository.ts), muted like a status line. */
-.local-agent-transcript [data-message-id^="code-context-"] { font-size: 12px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
+/* A "Loaded project context" note is its own short row (code-match-repository.ts), muted like a status line.
+   Core's Markdown sets the text size on the paragraph, so the rule names it. A status line takes no reply actions. */
+.local-agent-transcript [data-message-id^="code-context-"] :is(p, li, span) { font-size: 12px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
+.local-agent-transcript [data-message-id^="code-context-"] button { display: none; }
 .local-agent-limits { color: hsl(var(--muted-foreground)); font-size: 11px; text-align: center; padding: 8px; }
 .local-agent-output { display: none; flex-direction: column; width: min(40%, 460px); min-width: 280px; min-height: 0; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
 .local-agent-layout.is-viewing-files .local-agent-output { display: flex; }
