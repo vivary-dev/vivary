@@ -222,8 +222,11 @@ test("install writes the new list after removing the old files and before extrac
   const list = position(install, 'File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"');
   const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
   // The list is written under a temporary name and moved into place in one step.
-  assert.deepEqual(install.slice(list + 1, list + 5), [
+  assert.deepEqual(install.slice(list + 1, list + 8), [
     "IfErrors write_failed",
+    "StrCmp $R8 2 owned_checked",
+    "Call RequireNoUnownedFiles",
+    "owned_checked:",
     "System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'",
     "IntCmp $0 0 write_failed",
     'File /r "${PAYLOAD_DIR}/*"',
@@ -267,6 +270,95 @@ test("an uninstall that keeps added files leaves setup's marker for the next set
  * the step order the script itself has. Fails when an uninstall can leave
  * Vivary files that no list names, or when the next setup would refuse the folder.
  */
+test("setup refuses a file it does not own at a payload path before replacing anything", () => {
+  const install = sectionBody("Vivary");
+  assert.deepEqual(install.slice(0, 2), ["SectionIn RO", "StrCpy $R8 0"], "a new folder never looks like a damaged list");
+  const removal = position(install, "Call RemoveInstalledFiles");
+  const temp = position(install, 'File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"');
+  const skip = position(install, "StrCmp $R8 2 owned_checked");
+  const check = position(install, "Call RequireNoUnownedFiles");
+  const move = position(install, "System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'");
+  const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
+  assert.ok(removal < temp && temp < skip && skip + 1 === check && check < move && move < payload,
+    "after removal and the temporary list, before the move and extraction");
+  assert.equal(install.filter(line => line === "Call RequireNoUnownedFiles").length, 1);
+
+  const owned = functionBody("RequireNoUnownedFiles");
+  assert.deepEqual(owned.slice(0, 13), [
+    "ClearErrors",
+    'FileOpen $R3 "$INSTDIR\\${INSTALL_LIST_TEMP}" r',
+    "IfErrors unreadable",
+    "next_line:",
+    "Call ReadListLine",
+    'StrCmp $R9 "eof" checked',
+    'StrCmp $R9 "truncated" invalid',
+    "Call CheckListLine",
+    'StrCmp $R5 "" 0 invalid',
+    "StrCpy $2 $R4 1 -1",
+    'StrCmp $2 "\\" next_line',
+    'IfFileExists "$INSTDIR\\$R4" unowned next_line',
+    "checked:",
+  ], "every file line of the new list is checked, folder lines are skipped");
+  const unowned = position(owned, "unowned:");
+  assert.deepEqual(owned.slice(unowned + 1, unowned + 6), [
+    "FileClose $R3",
+    'Delete "$INSTDIR\\${INSTALL_LIST_TEMP}"',
+    'MessageBox MB_OK|MB_ICONSTOP "$INSTDIR\\$R4 is not a Vivary file, so setup did not replace it. Move it out of $INSTDIR, then run setup again." /SD IDOK',
+    "SetErrorLevel 2",
+    'Abort "$INSTDIR\\$R4 is not a Vivary file. Nothing was changed."',
+  ]);
+  // Only the temporary list is deleted, so the old list, entry, uninstaller and marker stay.
+  const deletes = owned.filter(line => /^(Delete|RMDir|DeleteReg)/.test(line));
+  assert.deepEqual([...new Set(deletes)], ['Delete "$INSTDIR\\${INSTALL_LIST_TEMP}"']);
+  assert.ok(!owned.some(line => line.includes("MoveFileExW") || line.startsWith("File ")));
+  for (const label of ["invalid:", "unreadable:"]) {
+    assert.ok(owned.slice(position(owned, label)).some(line => line.startsWith("Abort ")), `${label} aborts`);
+  }
+});
+
+test("a user file at a new payload path survives an upgrade or a reinstall beside kept files", () => {
+  const install = sectionBody("Vivary");
+  const at = line => position(install, line);
+  const steps = [
+    ["remove", at("Call RemoveInstalledFiles")],
+    ["check", at("Call RequireNoUnownedFiles")],
+    ["list", at("System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'")],
+    ["extract", at('File /r "${PAYLOAD_DIR}/*"')],
+  ].sort((a, b) => a[1] - b[1]).map(([name]) => name);
+  const newFiles = ["vivary.exe", "shared.dll", "new-only.dll"];
+  const cases = [
+    { name: "upgrade", disk: ["vivary.exe", "shared.dll", "new-only.dll"], list: ["vivary.exe", "shared.dll"] },
+    { name: "reinstall beside kept files", disk: ["new-only.dll"], list: null },
+  ];
+  for (const { name, disk: start, list: oldList } of cases) {
+    // new-only.dll is the user's own file in both cases.
+    const disk = new Map(start.map(file => [file, oldList?.includes(file) ? "vivary" : "user"]));
+    let list = oldList;
+    let stopped = false;
+    for (const step of steps) {
+      if (stopped) break;
+      if (step === "remove" && list) for (const file of list) disk.delete(file);
+      if (step === "check") stopped = newFiles.some(file => disk.has(file));
+      if (step === "list") list = [...newFiles];
+      if (step === "extract") for (const file of newFiles) disk.set(file, "vivary");
+    }
+    assert.equal(disk.get("new-only.dll"), "user", `${name}: the user's file is not replaced`);
+    assert.ok(stopped, `${name}: setup stops`);
+    assert.deepEqual(list, oldList, `${name}: the old list stays`);
+    // After the user moves the file, a rerun finishes: listed files already gone count as removed.
+    disk.delete("new-only.dll");
+    stopped = false;
+    for (const step of steps) {
+      if (step === "remove" && list) for (const file of list) disk.delete(file);
+      if (step === "check") stopped = newFiles.some(file => disk.has(file));
+      if (stopped) break;
+      if (step === "list") list = [...newFiles];
+      if (step === "extract") for (const file of newFiles) disk.set(file, "vivary");
+    }
+    assert.ok(!stopped && newFiles.every(file => disk.get(file) === "vivary"), `${name}: the rerun installs`);
+  }
+});
+
 test("an interrupted upgrade, then uninstall, then setup recovers with the script's step order", () => {
   const install = sectionBody("Vivary");
   const at = line => position(install, line);
