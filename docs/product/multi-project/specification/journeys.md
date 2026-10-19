@@ -183,6 +183,38 @@ stateDiagram-v2
 
 A cleanup refusal after a failed stop still holds every Code send on the host, as the Cancellation chart's Uncertain state shows. Runs already working keep their requests and Stop.
 
+### Conversation inbox rows
+
+Implemented as a component, not yet mounted in the sidebar ([HLDD](../../../ARCHITECTURE.md#conversation-inbox)). Each row shows one state, the first that applies in this order: Needs approval, Stopping, Running, Failed, Completed, then no label. Archive and pin are list properties beside that state, so changing them never changes the run.
+
+```mermaid
+stateDiagram-v2
+  state "Needs approval" as NeedsApproval
+  [*] --> Idle
+  Idle --> Running: a turn starts
+  Running --> NeedsApproval: this run asks for approval
+  NeedsApproval --> Running: this run's request answered
+  Running --> Stopping: this run's Stop
+  NeedsApproval --> Stopping: this run's Stop
+  Stopping --> Idle: stopped
+  Running --> Completed: turn completes
+  Running --> Failed: turn fails
+  Completed --> Running: next turn
+  Failed --> Running: next turn
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Listed
+  Listed --> Pinned: Pin
+  Pinned --> Listed: Unpin
+  Listed --> Archived: Archive, refused while Code work runs
+  Pinned --> Archived: Archive, refused while Code work runs
+  Archived --> Listed: Restore, or open an archived API chat
+```
+
+Rename keeps the row's identity, place and update time. A row sorts pinned first, then by creation time, so no state change moves it. Opening a row in another project selects that project, then opens exactly that conversation.
+
 This is a user-visible normalized state model, not a replacement Native lifecycle table. Map existing owner states without fabricating transitions. Approval shows the request, project, harness and effect scope. Denial starts nothing. Each follow-up follows its actual approval policy. Runtime completion and workflow acceptance remain separate. A terminal denied outcome belongs in its conversation rather than a permanent banner over unrelated work.
 
 Closing a browser does not cancel already approved background work when the selected mode supports it. Reopening shows the actual state and result. Closing panels never removes the activity/Stop path. A host restart must not reinterpret pending work as approved or blindly replay a possibly completed operation.
