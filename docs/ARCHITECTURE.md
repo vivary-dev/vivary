@@ -810,8 +810,29 @@ refresh. Preview grants expire on restart and revocation cuts their streams with
 stopping unrelated host work. Shared review/start/status/stop controls remain in
 BrowserPreview. After opening, setup collapses behind a disclosure so the page
 fills the available height. The shared work panel has a visible drag grip with
-keyboard resizing. Full page and Back to workspace controls expand and restore
-the same mounted panel on desktop and phone. The iframe stays in its DOM position,
+keyboard resizing. Where the conversation and the panel cannot sit side by side, a
+window under 768 pixels or a split under 620, `Workspace.tsx` switches views: a
+Conversation and panel switch (a tab list named Workspace view, with the panel's
+name, such as Files) sits above the work area, and the chosen view takes the full
+height. Opening a panel shows it, and the switch keeps Conversation one click or
+one key press away. Closing the panel shows the conversation. Choosing the open
+panel's header tool again from the Conversation view shows the panel instead of
+closing it. Both views stay mounted, so a draft, a stream and a preview page
+survive each switch. While the panel view covers a Code conversation, the
+Conversation option shows Working or Needs approval when any conversation in the
+project has an active run or a pending approval, read from the same
+`vivary-code-state` query the conversation uses. That indicator is project-wide,
+and an API chat shows none. A stacked layout was tried first and dropped: at 150
+percent a 700 to 800 pixel window leaves about 470 to 530 CSS pixels, and the
+fixed chrome left no readable transcript beside a panel. In a window under 600 CSS
+pixels tall, `local-agent.css` tightens the conversation chrome: one header row,
+the runtime line on one line (hover or keyboard focus shows all of it), and the
+state-document notice on one line with Show more. Side by side, the panel's first
+width leaves the conversation its 360 pixel minimum, so a split between 620 and
+840 pixels never starts with the conversation squeezed out. Maximize panel and
+Full page still hide the conversation by the owner's choice, and each has a
+visible way back. Full page and Back to workspace controls expand and restore the same
+mounted panel on desktop and phone. The iframe stays in its DOM position,
 so display changes preserve page state, navigation and live connections. Covered
 workspace controls are inert during full-page display. A compact header preserves
 project identity and Back to workspace. Setup, Stop, Refresh and Close share one
@@ -927,7 +948,12 @@ It reads the same scoped `useChatThreads` list as the history and refreshes on
 store. A thread outside the history's loaded page, such as one opened from search
 or a link, is read directly by its ID through Core's thread read, so its header
 names it too. The shared header stylesheet keeps an h2 title on one line, as it
-does an h1. No server, action or storage contract changed. Evidence:
+does an h1. Owner decision on #264: with a work panel open the composer stays reachable.
+Under 620 pixels of split, the panel had taken the whole area and hidden the
+composer in 16 of the 90 measured layouts. There the conversation and the panel
+now switch views with a visible Conversation option, and wide windows keep the
+side-by-side layout. No server,
+action or storage contract changed. Evidence:
 `tests/native-chat-components.test.mjs` drives the picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
 opens a linked conversation from the header action, and a headless Chrome run of
 the built app on the server measured 90 layouts (three window sizes, three zooms,

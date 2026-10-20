@@ -78,3 +78,25 @@
 .local-agent-shared-folder-hint { color: hsl(var(--muted-foreground)); }
 /* A long conversation title truncates. Hover shows it through the title attribute, and keyboard focus wraps it in full. */
 .local-agent-header .local-agent-heading h2:focus-visible { white-space: normal; overflow: visible; border-radius: 2px; outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+/* The state-document notice's Show more control appears only in a short window, where the notice keeps one line. */
+.local-agent-one-line-toggle { display: none; }
+/* A short window, such as 150 percent zoom on a laptop, tightens the conversation chrome so the transcript keeps
+   readable lines: one header row, the runtime line on one line (hover or focus shows all of it), and the
+   state-document notice on one line with Show more beside it. */
+@media (max-height: 600px) {
+  .local-agent-header { min-height: 0; padding: 4px 8px 4px 16px; gap: 4px; }
+  .local-agent-heading p { display: none; }
+  .local-agent-header-actions button { height: 28px; min-width: 28px; padding-inline: 6px; font-size: 12px; }
+  .local-agent-limits { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 8px; }
+  .local-agent-composer-notices .local-agent-notice { padding-block: 4px; }
+  .local-agent-limits:hover, .local-agent-limits:focus-visible { white-space: normal; overflow: visible; }
+  .local-agent-limits:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+  .local-agent-one-line { display: flex; align-items: flex-start; border-bottom: 1px solid hsl(var(--border)); }
+  .local-agent-one-line:not(:has(.local-agent-notice)) { display: none; }
+  .local-agent-one-line > .local-agent-notice { flex: 1; min-width: 0; border-bottom: 0; }
+  .local-agent-one-line:not([data-expanded]) > .local-agent-notice:not(:focus-within) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .local-agent-one-line:not([data-expanded]) > .local-agent-notice:not(:focus-within) > * { display: inline; margin-left: 8px; }
+  .local-agent-one-line:not([data-expanded]) > .local-agent-notice:not(:focus-within) > :first-child { margin-left: 0; }
+  .local-agent-one-line-toggle { display: inline-flex; flex-shrink: 0; align-items: center; height: 25px; padding: 0 12px; font-size: 12px; color: hsl(var(--primary)); }
+  .local-agent-one-line-toggle:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+}

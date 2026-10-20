@@ -18,7 +18,25 @@ On a wide display, a project/conversation navigation rail sits beside the active
 +------------------+--------------------------------+-----------------------+
 ```
 
-The diagram shows available regions, not mandatory open columns. Close each side independently. Reopening restores that client's prior selection and safe width. A document can expand for focused work, then return beside the conversation. Phone preferences must not overwrite desktop widths. At 390 px, navigation and work panels start closed and open as focused views with a clear return to the conversation.
+The diagram shows available regions, not mandatory open columns. Close each side independently. Reopening restores that client's prior selection and safe width. A document can expand for focused work, then return beside the conversation. Phone preferences must not overwrite desktop widths. At 390 px, navigation and work panels start closed. Where the conversation and a work panel cannot sit side by side (a window under 768 px or a split under 620 px), they switch views: a visible Conversation and panel switch above the work area chooses which one fills it. Opening a panel shows it, Conversation is one click or key press away, and closing the panel shows the conversation. While the panel covers a Code conversation, the Conversation option shows Working or Needs approval for the project's runs. Maximize panel and Full page also hide the conversation by choice, each with a visible way back.
+
+```mermaid
+stateDiagram-v2
+  [*] --> NoPanel
+  NoPanel --> SideBySide: open panel, split 620 px or wider
+  NoPanel --> PanelView: open panel, narrow window or split under 620 px
+  SideBySide --> PanelView: window narrows
+  PanelView --> SideBySide: window widens
+  PanelView --> ConversationView: choose Conversation
+  ConversationView --> PanelView: choose the panel, or its header tool
+  ConversationView --> SideBySide: window widens
+  SideBySide --> Maximized: Maximize panel or Full page
+  PanelView --> Maximized: Full page (Preview)
+  Maximized --> SideBySide: Restore or Back to workspace
+  Maximized --> PanelView: Back to workspace, narrow window or split under 620 px
+  SideBySide --> NoPanel: close panel
+  PanelView --> NoPanel: close panel
+```
 
 Acceptance: keyboard and pointer resize, close/reopen, maximize/restore, theme, 200% zoom, loading/empty/error states and long labels. Opening a panel must not remount an active chat, interrupt its stream, change project, approve work or lose a draft. Relevant actions: A001-A009 and M06.
 

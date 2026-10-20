@@ -516,6 +516,19 @@ function worktreeCommand(folderLabel: string): string {
 }
 
 /**
+ * A notice that keeps one line in a short window (local-agent.css), with Show more to read all of it. Focus inside
+ * the notice also shows all of it. In a taller window the notice shows in full and the control is hidden.
+ */
+function OneLineNotice({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  return <div className="local-agent-one-line" data-expanded={expanded || undefined}>
+    {children}
+    <button type="button" className="local-agent-one-line-toggle" aria-expanded={expanded}
+      onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Show more"}</button>
+  </div>;
+}
+
+/**
  * The owner's warning before sending in a folder where other conversations' agents work. Proceed sends here anyway.
  * Use another folder opens a separate folder or a Git worktree the owner made. Vivary does not manage worktrees.
  */
@@ -844,6 +857,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, [sharedFolderHeld]);
 
   const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
+  const limitsDetail = `${choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.`;
+  const limitsText = `${selectedEngine?.label ?? choice.engine} · ${choice.model}. ${limitsDetail}`;
   useEffect(() => {
     // A turn that finished while the owner was choosing needs only the plain confirm now.
     if (pendingSwitch?.step === "working" && runStopped) setPendingSwitch({ ...pendingSwitch, step: "confirm" });
@@ -890,7 +905,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
           sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
           workspaceAvailable={props.workspaceAvailable} menuSlot={props.actionsSlot ?? null}
           saveDraft={sourceDraftSaver(draft, draftThreadId)} />
-        {props.projectId && <HandoffControl key={"handoff:" + props.run.id} projectId={props.projectId}
+        {props.projectId && <OneLineNotice key={"handoff:" + props.run.id}><HandoffControl projectId={props.projectId}
           conversation={{ kind: "code", id: props.run.id }} disabled={disabled}
           submit={async message => {
             // Core's window submit reaches only Native chats. This chat's own handle
@@ -898,7 +913,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             if (!chatRef.current) return false;
             chatRef.current.sendMessage(message);
             return true;
-          }} />}
+          }} /></OneLineNotice>}
       </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">
         <span>{draft.draftSaveStatusForThread(draftThreadId) === "saved"
@@ -975,6 +990,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
           <IconSquare size={14} /> Stop
         </Button>}
     </>}
-    threadFooterSlot={<p className="local-agent-limits"><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.</p>}
+    // A short window keeps this line to one line (local-agent.css). Hover shows all of it through the title, and
+    // keyboard focus wraps it in full.
+    threadFooterSlot={<p className="local-agent-limits" tabIndex={0} title={limitsText}><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {limitsDetail}</p>}
   />;
 }

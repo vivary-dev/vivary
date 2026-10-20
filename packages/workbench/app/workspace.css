@@ -3,7 +3,7 @@
 .workspace-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 20px; border-bottom:1px solid hsl(var(--border)); }
 .workspace-identity { min-width:0; }
 .workspace-identity h1 { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workspace-identity p { font-size:12px; color:hsl(var(--muted-foreground)); margin-top:4px; }
+.workspace-identity p { font-size:12px; color:hsl(var(--muted-foreground)); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .workspace-tools { display:flex; align-items:center; flex-shrink:0; gap:4px; }
 .workspace-tools button { gap:6px; }
 .workspace-split { min-height:0; min-width:0; flex:1; }
@@ -15,7 +15,7 @@
 .workspace-surface-toolbar { display:flex; align-items:center; gap:4px; padding:8px 10px; border-bottom:1px solid hsl(var(--border)); }
 .workspace-surface-toolbar h2 { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
 .workspace-file-surface { display:flex; flex:1; min-height:0; min-width:0; flex-direction:column; }
-.workspace-file-tree { max-height:240px; overflow:auto; border-bottom:1px solid hsl(var(--border)); flex-shrink:0; }
+.workspace-file-tree { max-height:min(240px, 45%); overflow:auto; border-bottom:1px solid hsl(var(--border)); flex-shrink:0; }
 .workspace-file-document { flex:1; min-height:0; overflow:auto; }
 .workspace-file-document .file-document { min-height:100%; height:auto; }
 .workspace-preview { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
@@ -67,10 +67,12 @@
 .local-agent-heading h2 { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .local-agent-intro { max-width:480px; }
 @media (max-width:767px) {
-  .workspace-header { flex-wrap:wrap; padding:10px 12px; gap:8px; }
-  .workspace-tools { width:100%; }
+  /* One header row on a narrow window: the tools keep their icons, names and titles, and the labels hide. */
+  .workspace-header { padding:8px 12px; gap:8px; }
+  .workspace-identity p { display:none; }
+  .workspace-tools button > span { display:none; }
   .workspace-recovery { padding:8px 12px; flex-wrap:wrap; }
-  .workspace-file-tree { max-height:180px; }
+  .workspace-file-tree { max-height:min(180px, 45%); }
   .workspace-file-document .file-document-toolbar { flex-wrap:wrap; }
 }
 .project-read-section { margin-top:18px; min-width:0; }
@@ -141,4 +143,20 @@
   .project-memory-roles { grid-template-columns:minmax(0,1fr); }
   .project-memory-roles dd { margin-bottom:6px !important; }
   .project-memory-form input { min-height:44px; }
+}
+/* The Conversation and panel switch, shown when the two cannot sit side by side. Each view takes the full area. */
+.workspace-view-switch { display:flex; flex-shrink:0; gap:4px; padding:4px 12px; border-bottom:1px solid hsl(var(--border)); background:hsl(var(--card)); }
+.workspace-view-switch button { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:2px 12px; border-radius:calc(var(--radius) - 2px); font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)); }
+.workspace-view-switch button:hover { background:hsl(var(--accent) / .5); color:hsl(var(--foreground)); }
+.workspace-view-switch button[aria-selected="true"] { background:hsl(var(--secondary)); color:hsl(var(--foreground)); }
+.workspace-view-switch button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:1px; }
+.workspace-view-activity { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:400; color:hsl(var(--muted-foreground)); }
+.workspace-view-activity::before { content:""; width:6px; height:6px; border-radius:50%; background:hsl(var(--ring)); }
+.workspace-view-activity[data-attention]::before { background:hsl(var(--destructive)); }
+/* A short window, such as 150 percent zoom, drops the header's second line so the work area keeps its height. */
+@media (max-height:600px) {
+  .workspace-header { padding:8px 20px; }
+  .workspace-identity p { display:none; }
+  .workspace-view-switch { padding:2px 12px; }
+  .workspace-view-switch button { min-height:26px; }
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { readClientAppState } from "@agent-native/core/client/hooks";
+import { readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { useAppStateWriter } from "@/lib/native-state";
 import { registerSelectionCloseFlush, trackSelectionWrite, useOrphanedDrafts } from "@/lib/chat-draft";
 import { conversationSurfaceStateKey, requestedConversationSurface, restoredConversationSurface, savedNativeHistoryKind, type NativeHistoryKind } from "@/lib/conversation-surface";
@@ -19,6 +19,7 @@ import CodeConversation from "./CodeConversation";
 import NativeConversation from "./NativeConversation";
 import { BrowserPreview } from "../workbench/BrowserPreview";
 import type { PreviewChatTarget } from "@/lib/workbench-preview";
+import type { VivaryCodeState } from "../../../server/local-code-agent";
 import { readPanelWidth, savePanelWidth, useNarrowLayout, type PanelHandle } from "../layout/use-workspace-layout";
 import "../../workspace.css";
 
@@ -27,6 +28,11 @@ function surface(value: string | null): Surface | null {
   return value === "files" || value === "details" || value === "preview" || value === "search" ? value : null;
 }
 const WIDTH_KEY = "vivary.surface.width";
+const SURFACE_NAMES: Record<Surface, string> = { files: "Files", details: "Details", preview: "Preview", search: "Search" };
+// Side by side needs room for both minimum widths in CSS pixels. Below it the conversation and the panel switch views.
+const CONVERSATION_MIN_WIDTH = 360;
+const PANEL_MIN_WIDTH = 260;
+const SIDE_BY_SIDE_MIN = CONVERSATION_MIN_WIDTH + PANEL_MIN_WIDTH;
 
 export function Workspace() {
   const { activeProject, catalog, checking, workspaceAvailable, error: projectError, refresh } = useProjects();
@@ -156,7 +162,26 @@ export function Workspace() {
   const [searchVisited, setSearchVisited] = useState(opened === "search");
   const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const fullPage = opened === "preview" && maximized;
-  const showOnlySurface = Boolean(opened) && (narrow || maximized || (splitWidth > 0 && splitWidth < 620));
+  // Where the conversation and the panel cannot both be usable side by side (a narrow window, or a split under
+  // 360 + 260 pixels), each takes the full area in turn. A visible Conversation and panel switch above them chooses
+  // the view, so reading and sending stay one click away. Opening a panel shows it, and closing it shows the conversation.
+  const switchable = narrow || (splitWidth > 0 && splitWidth < SIDE_BY_SIDE_MIN);
+  const switched = Boolean(opened) && !maximized && switchable;
+  // The panels' limits follow the window, not the open panel or the chosen view. A limit change registers a panel
+  // again and can undo a resize made in the same render, so opening a panel or switching views changes no limit.
+  const unconstrained = switchable || maximized;
+  const [view, setView] = useState<"conversation" | "panel">(opened ? "panel" : "conversation");
+  useEffect(() => { if (opened) setView("panel"); }, [opened]);
+  const showOnlySurface = Boolean(opened) && (maximized || (switched && view === "panel"));
+  const showOnlyConversation = switched && view === "conversation";
+  // The switch names the conversation's state while the panel covers it, so a working agent or a pending approval
+  // is never silent. The query shares the Code conversation's cache entry.
+  const watchActivity = switched && view === "panel" && !native && !changingProject;
+  const activity = useActionQuery<VivaryCodeState>("vivary-code-state", { projectId: activeProject?.projectId ?? undefined },
+    { enabled: watchActivity, refetchInterval: 1000 });
+  const activeRuns = watchActivity && activity.data?.projectId === (activeProject?.projectId ?? null) ? activity.data.activeRuns ?? [] : [];
+  const conversationActivity = activeRuns.some(run => run.pendingApprovals.length > 0) ? "Needs approval"
+    : activeRuns.length > 0 ? "Working" : null;
 
   useEffect(() => {
     if (!fullPage || !surfaceElement.current) return;
@@ -180,6 +205,7 @@ export function Workspace() {
   function changeSurface(next: Surface | null, trigger?: HTMLButtonElement) {
     if (trigger) opener.current = trigger;
     setMaximized(false);
+    setView(next ? "panel" : "conversation");
     setParams(current => {
       const nextParams = new URLSearchParams(current);
       if (next) nextParams.set("panel", next);
@@ -222,15 +248,38 @@ export function Workspace() {
   }, [checking, readyProjectKey, currentProjectKey, params.toString(), setParams]);
 
   useEffect(() => {
-    if (!panel.current || !conversation.current) return;
-    if (!opened) { conversation.current.expand(); panel.current.collapse(); return; }
-    if (showOnlySurface) { conversation.current.collapse(); panel.current.resize("100%"); }
-    else {
-      conversation.current.expand();
-      const available = split.current?.clientWidth ?? window.innerWidth;
-      panel.current.resize(Math.min(width, Math.max(260, available - 360)));
-    }
-  }, [opened, showOnlySurface, width, splitWidth]);
+    const apply = () => {
+      if (!panel.current || !conversation.current) return;
+      if (!opened) { conversation.current.expand(); panel.current.collapse(); return; }
+      if (showOnlySurface) { conversation.current.collapse(); panel.current.resize("100%"); }
+      else if (showOnlyConversation) { conversation.current.expand(); panel.current.collapse(); }
+      else {
+        conversation.current.expand();
+        const available = split.current?.clientWidth ?? window.innerWidth;
+        panel.current.resize(Math.min(width, Math.max(PANEL_MIN_WIDTH, available - CONVERSATION_MIN_WIDTH)));
+      }
+    };
+    apply();
+    // A change to a panel's limits or default size registers it again, and the group can lay out once more after
+    // this effect, such as when a side-by-side window first switches views. Apply the view again on the next frame.
+    const frame = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(frame);
+  }, [opened, showOnlySurface, showOnlyConversation, width, splitWidth]);
+
+  /** A header tool opens its panel, shows it again from the Conversation view, or closes it. */
+  function toggleSurface(next: Surface, trigger: HTMLButtonElement) {
+    if (opened !== next) changeSurface(next, trigger);
+    else if (showOnlyConversation) setView("panel");
+    else changeSurface(null, trigger);
+  }
+  /** The Conversation and panel switch: Left and Right arrow keys move between its two options, as in a tab list. */
+  function switchKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "conversation" : event.key === "End" ? "panel" : view === "panel" ? "conversation" : "panel";
+    setView(next);
+    event.currentTarget.querySelector<HTMLButtonElement>(`[data-view="${next}"]`)?.focus();
+  }
 
   return <section className="workspace-page" aria-label="Project workspace">
     <header className="workspace-header">
@@ -239,17 +288,17 @@ export function Workspace() {
         <p>{unassigned ? "No project assigned" : native ? "Native chat" : "Project conversation"} / Connected host</p>
       </div>
       <div className="workspace-tools">
-        <Button ref={detailsTrigger} size="sm" variant={opened === "details" ? "secondary" : "ghost"} aria-label="Project details"
-          aria-pressed={opened === "details"} onClick={e => changeSurface(opened === "details" ? null : "details", e.currentTarget)}>
+        <Button ref={detailsTrigger} size="sm" variant={opened === "details" ? "secondary" : "ghost"} aria-label="Project details" title="Project details"
+          aria-pressed={opened === "details"} onClick={e => toggleSurface("details", e.currentTarget)}>
           <IconInfoCircle size={17} aria-hidden /><span>Details</span></Button>
-        <Button ref={filesTrigger} size="sm" variant={opened === "files" ? "secondary" : "ghost"} aria-label="Open project files"
-          aria-pressed={opened === "files"} onClick={e => changeSurface(opened === "files" ? null : "files", e.currentTarget)}>
+        <Button ref={filesTrigger} size="sm" variant={opened === "files" ? "secondary" : "ghost"} aria-label="Open project files" title="Open project files"
+          aria-pressed={opened === "files"} onClick={e => toggleSurface("files", e.currentTarget)}>
           <IconFiles size={17} aria-hidden /><span>Files</span></Button>
-        <Button ref={previewTrigger} size="sm" variant={opened === "preview" ? "secondary" : "ghost"} aria-label="Open page preview"
-          aria-pressed={opened === "preview"} onClick={e => changeSurface(opened === "preview" ? null : "preview", e.currentTarget)}>
+        <Button ref={previewTrigger} size="sm" variant={opened === "preview" ? "secondary" : "ghost"} aria-label="Open page preview" title="Open page preview"
+          aria-pressed={opened === "preview"} onClick={e => toggleSurface("preview", e.currentTarget)}>
           <IconWorld size={17} aria-hidden /><span>Preview</span></Button>
-        <Button ref={searchTrigger} size="sm" variant={opened === "search" ? "secondary" : "ghost"} aria-label="Search project files"
-          aria-pressed={opened === "search"} onClick={e => changeSurface(opened === "search" ? null : "search", e.currentTarget)}>
+        <Button ref={searchTrigger} size="sm" variant={opened === "search" ? "secondary" : "ghost"} aria-label="Search project files" title="Search project files"
+          aria-pressed={opened === "search"} onClick={e => toggleSurface("search", e.currentTarget)}>
           <IconSearch size={17} aria-hidden /><span>Search</span></Button>
       </div>
     </header>
@@ -273,37 +322,49 @@ export function Workspace() {
       <span>{projectError ?? "This project folder is unavailable. Saved conversations remain separate from folder access."}</span>
       <Button size="sm" variant="outline" onClick={() => void refresh()}>Retry project</Button>
     </div>}
+    {switched && opened && <div className="workspace-view-switch" role="tablist" aria-label="Workspace view" onKeyDown={switchKey}>
+      <button type="button" role="tab" data-view="conversation" aria-selected={view === "conversation"} aria-controls="workspace-conversation-view"
+        onClick={() => setView("conversation")}>
+        Conversation
+        {view === "panel" && conversationActivity && <span className="workspace-view-activity" role="status"
+          data-attention={conversationActivity === "Needs approval" || undefined}>{conversationActivity}</span>}
+      </button>
+      <button type="button" role="tab" data-view="panel" aria-selected={view === "panel"} aria-controls="workspace-panel-view"
+        onClick={() => setView("panel")}>{SURFACE_NAMES[opened]}</button>
+    </div>}
     <div ref={split} className="workspace-split">
       <ResizablePanelGroup orientation="horizontal" onLayoutChanged={(layout, meta) => {
-        if (meta.isUserInteraction && !showOnlySurface && opened && panel.current && conversation.current) {
+        if (meta.isUserInteraction && !showOnlySurface && !showOnlyConversation && opened && panel.current && conversation.current) {
           // Keyboard callbacks precede DOM sizing. Apply the new layout to the stable panel total.
           const available = panel.current.getSize().inPixels + conversation.current.getSize().inPixels;
           const pixels = layout.surface / 100 * available;
-          if (pixels >= 260) { savePanelWidth(WIDTH_KEY, pixels); setWidth(pixels); }
+          if (pixels >= PANEL_MIN_WIDTH) { savePanelWidth(WIDTH_KEY, pixels); setWidth(pixels); }
           if (panel.current.isCollapsed()) changeSurface(null);
         }
       }}>
-        <ResizablePanel id="conversation" panelRef={conversation} minSize={showOnlySurface ? 0 : narrow ? 0 : 360}
-          collapsible collapsedSize={0}>
-          <div className="workspace-conversation" hidden={showOnlySurface}>
+        <ResizablePanel id="conversation" panelRef={conversation}
+          minSize={unconstrained ? 0 : CONVERSATION_MIN_WIDTH}
+          collapsible={unconstrained} collapsedSize={0}>
+          <div id="workspace-conversation-view" className="workspace-conversation" hidden={showOnlySurface}>
             {changingProject || openingSurface || (!explicitSurface && surfaceQuery.isError) ? <div className="local-agent-chat-skeleton" aria-busy="true">
               <Skeleton className="h-8 w-48" /><Skeleton className="h-5 w-3/4" />
               <Skeleton className="mt-auto h-28 w-full" />
             </div> : native ? <NativeConversation /> : <CodeConversation previewScope={previewScope} onPreviewChatTarget={setPreviewChatTarget} />}
           </div>
         </ResizablePanel>
-        <ResizableHandle withHandle title="Drag to resize the work panel, or use the arrow keys" disabled={!opened || showOnlySurface} hidden={!opened || showOnlySurface}
+        <ResizableHandle withHandle title="Drag to resize the work panel, or use the arrow keys" disabled={!opened || showOnlySurface || switched} hidden={!opened || showOnlySurface || switched}
           className="workspace-resize-handle workspace-work-panel-resize-handle" aria-label="Resize work panel" />
-        <ResizablePanel id="surface" panelRef={panel} defaultSize={opened ? width : 0}
-          minSize={showOnlySurface ? 0 : 260} collapsible collapsedSize={0}>
-          <aside ref={surfaceElement} className={`workspace-surface${fullPage ? " workspace-surface-fullpage" : ""}`} hidden={!opened} aria-label="Work panel">
+        <ResizablePanel id="surface" panelRef={panel} defaultSize={opened ? Math.min(width, Math.max(PANEL_MIN_WIDTH, (splitWidth || window.innerWidth) - CONVERSATION_MIN_WIDTH)) : 0}
+          minSize={unconstrained ? 0 : PANEL_MIN_WIDTH} collapsible collapsedSize={0}>
+          <aside ref={surfaceElement} id="workspace-panel-view" className={`workspace-surface${fullPage ? " workspace-surface-fullpage" : ""}`}
+            hidden={!opened || showOnlyConversation} aria-label="Work panel">
             <header className="workspace-surface-toolbar">
               <h2>{opened === "files" ? "Files" : opened === "preview" ? `Preview · ${activeProject?.displayName ?? "Personal workspace"}` : opened === "search" ? "Search" : "Project details"}</h2>
               {opened === "files" && <Button variant="ghost" size="sm" aria-expanded={fileTreeOpen}
                 onClick={() => setFileTreeOpen(value => !value)}>{fileTreeOpen ? "Hide file list" : "Show file list"}</Button>}
               {opened === "preview" && <Button size="sm" variant="outline" aria-expanded={fullPage}
                 onClick={() => setMaximized(value => !value)}>{fullPage ? <IconArrowsMinimize size={17} aria-hidden /> : <IconArrowsMaximize size={17} aria-hidden />}{fullPage ? "Back to workspace" : "Full page"}</Button>}
-              {opened !== "preview" && !narrow && splitWidth >= 620 && <Button size="icon" variant="ghost" aria-label={maximized ? "Restore panel" : "Maximize panel"}
+              {opened !== "preview" && !narrow && splitWidth >= SIDE_BY_SIDE_MIN && <Button size="icon" variant="ghost" aria-label={maximized ? "Restore panel" : "Maximize panel"}
                 onClick={() => setMaximized(value => !value)}>{maximized ? <IconArrowsMinimize size={17} /> : <IconArrowsMaximize size={17} />}</Button>}
               <Button size="icon" variant="ghost" aria-label="Close work panel" onClick={() => changeSurface(null)}><IconX size={18} /></Button>
             </header>
