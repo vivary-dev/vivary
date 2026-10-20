@@ -446,6 +446,8 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       <p>Conversations could not be loaded. Your history is preserved.</p>
       <Button size="sm" variant="ghost" onClick={() => void shared.refetchInbox()}>Retry</Button>
     </div>}
+    {inbox.data?.limited && <p className="conversation-inbox__notice">
+      Only the newest API chats are listed. Message search still finds older ones.</p>}
     {unavailable > 0 && <p className="conversation-inbox__notice">
       Code conversations of {unavailable === 1 ? "one project" : `${unavailable} projects`} are hidden until the
       project's folder is reconnected.</p>}

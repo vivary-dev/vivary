@@ -1060,6 +1060,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox truncated API chat history (W5b, review thread 4317586786). When the inbox read returns
+`limited`, the inbox says only the newest API chats are listed and that message search, which reads the server,
+still finds older ones. Paging the list is not added. Evidence inspected: the new component test.
+
 2026-10-20 Inbox message search and Code archive (W5b, review thread 4321225646). `chat-content-search.ts`
 ignores `metadata.archivedAt`, which this PR adds, so the inbox leaves out a hit whose Code row it lists as archived.
 The search server itself still returns archived Code hits to other callers, and the root fix there needs an owner.

@@ -171,7 +171,7 @@ test.beforeEach(() => {
       } }),
     read: async (name, input) => {
       if (name === "vivary-conversation-inbox") return { rows: inboxFixture.rows, drafts: inboxFixture.serverDrafts ?? [],
-        unavailableProjects: [], limited: false };
+        unavailableProjects: [], limited: inboxFixture.limited ?? false };
       if (name === "vivary-project-location") return { folderName: `${input.projectId ?? "home"}-folder`,
         path: `/work/${input.projectId ?? "home"}-folder` };
       throw new Error("Unexpected read " + name);
@@ -625,6 +625,17 @@ test("a title match is not repeated as a message, since the title filter already
   await searchFor("table");
   assert.deepEqual(hitTitles(), ["Session a3"]);
   assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
+});
+
+test("a list cut at the newest API chats says so and points to message search", async () => {
+  await render("/?run=a1");
+  assert.doesNotMatch(host.textContent, /Only the newest API chats are listed/);
+  await act(async () => root.unmount());
+  inboxFixture.client.clear();
+  root = createRoot(host);
+  inboxFixture.limited = true;
+  await render("/?run=a1");
+  assert.match(host.textContent, /Only the newest API chats are listed\. Message search still finds older ones\./);
 });
 
 test("message search leaves out a Code conversation the inbox lists as archived", async () => {
