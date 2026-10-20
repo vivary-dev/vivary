@@ -389,7 +389,8 @@ test("a nested footnote definition becomes its own note and the outer note keeps
   assert.deepEqual(notes, [["outer", ["Outer start.", "Outer continues."]], ["inner", ["Inner note."]]]);
 });
 
-// Only a link to a rendered note moves focus. A heading link such as #fn-details keeps its normal handling.
+// Only a rendered reference's link to a rendered note moves focus. Heading links such as #fn-details or #fn-1
+// keep their normal handling, even when a note with that number exists.
 test("note links move focus only to a rendered note and leave other #fn- links alone", async () => {
   await loadProof();
   const built = await esbuild.build({ entryPoints: [join(WORKBENCH, "app", "lib", "footnote-links.ts")], bundle: true,
@@ -399,18 +400,19 @@ test("note links move focus only to a rendered note and leave other #fn- links a
   const { focusFootnote } = await import(pathToFileURL(helper).href);
   const reader = document.createElement("div");
   reader.innerHTML = '<p><sup class="an-rich-md-footnote-ref"><a href="#fn-1">1</a></sup> <a href="#fn-details">details</a>'
-    + ' <a href="#fn-2">2</a></p><h2 id="fn-details">Fn details</h2>'
+    + ' <a href="#fn-2">2</a> <a class="heading-link" href="#fn-1">section</a></p><h2 id="fn-details">Fn details</h2>'
     + '<section class="an-rich-md-footnotes"><ol><li id="fn-1"><p>The note.</p></li></ol></section>';
   let focused = null;
   const note = reader.querySelector("li");
   note.focus = () => { focused = note; };
-  const click = (href) => {
-    const event = { target: reader.querySelector(`a[href="${href}"]`), currentTarget: reader, prevented: false,
+  const click = (href, selector = `a[href="${href}"]`) => {
+    const event = { target: reader.querySelector(selector), currentTarget: reader, prevented: false,
       preventDefault() { this.prevented = true; } };
     return [focusFootnote(event), event.prevented];
   };
   assert.deepEqual(click("#fn-details"), [false, false]);
   assert.deepEqual(click("#fn-2"), [false, false], "a note link without a rendered note is not taken over");
+  assert.deepEqual(click("#fn-1", "a.heading-link"), [false, false], "an ordinary #fn-1 link is not a note link");
   assert.equal(focused, null);
   assert.deepEqual(click("#fn-1"), [true, true]);
   assert.equal(focused, note);

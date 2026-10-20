@@ -715,6 +715,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Note links come only from rendered references (PR #259 review). The
+previous fix still let an ordinary heading link such as `#fn-1` be taken over when
+note 1 existed. `focusFootnote` now handles only the link inside
+`sup.an-rich-md-footnote-ref`, the element the reader renders for a reference, so
+every other `#fn-` link keeps its normal handling. The design below still holds.
+Evidence: `tests/markdown-reader.test.mjs` adds an ordinary `#fn-1` link beside a
+rendered note 1, and that assertion fails with the previous selector.
+
 2026-10-19 Footnote review fixes (PR #259 review). Four parser and link cases in
 the read-only footnote support were wrong, and the design described below still
 holds. Labels now match ignoring case, the way link reference labels do, and each
