@@ -349,6 +349,8 @@ type QueuedTurn = Omit<StoredQueuedTurn, "state"> & {
   starting?: Promise<void>;
   /** Stop or Cancel arrived while the turn was starting. Its claim refuses, so the turn is held instead of started. */
   stopRequested?: boolean;
+  /** Cancel is putting the message back in the draft. The turn stays queued but does not start meanwhile. */
+  cancelling?: boolean;
 };
 
 // Nitro bundles plugins while Native loads action source modules. Both must own
@@ -1522,7 +1524,7 @@ export async function stopVivaryCodeRun(input: {
   runId: string;
   projectId?: string;
   /** Stop on a queued message cancels it. The action restores the message to the conversation's draft here. */
-  onQueuedCancelled?: (cancelled: CancelledQueuedTurn) => Promise<unknown>;
+  onQueuedCancelled?: (cancelled: CancelledQueuedTurn) => Promise<boolean>;
 }): Promise<VivaryCodeState> {
   await ensureVivaryCodeHostInitialized();
   const record = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).find(run =>
@@ -1542,8 +1544,7 @@ export async function stopVivaryCodeRun(input: {
 
   if (!activeRuns.has(input.runId) && queuedTurnFor(input.runId)) {
     try {
-      const cancelled = await cancelQueuedVivaryCodeTurn(input);
-      await input.onQueuedCancelled?.(cancelled);
+      await cancelQueuedVivaryCodeTurn({ ...input, restore: input.onQueuedCancelled });
       return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
     } catch (error) {
       // A turn that started between the check above and its cancellation is stopped below like any running turn.
@@ -2017,7 +2018,7 @@ function takeQueuedSlot(item: QueuedTurn): void {
 function drainCodeRunQueue(): void {
   if (hostState.closing) return;
   while (freeCodeRunSlots() > 0) {
-    const next = hostState.queue.find(item => item.state === "queued" && item.input);
+    const next = hostState.queue.find(item => item.state === "queued" && item.input && !item.cancelling);
     if (!next?.input) return;
     next.state = "starting";
     hostState.reserved += 1;
@@ -2080,12 +2081,14 @@ function requireOwnedQueuedTurn(input: { ownerEmail: string; orgId?: string; run
 }
 
 /**
- * Removes a queued message. Nothing starts. A turn that is starting is stopped before it claims its slot. A conversation
- * that never started is no longer listed.
+ * Removes a queued message. Nothing starts. A turn that is starting is stopped before it claims its slot. `restore` puts
+ * the message back in the conversation's draft first, and if it fails the message stays queued. A conversation that
+ * never started is no longer listed.
  */
 export async function cancelQueuedVivaryCodeTurn(input: {
   ownerEmail: string; orgId?: string; runId: string; projectId?: string;
-}): Promise<CancelledQueuedTurn> {
+  restore?: (cancelled: CancelledQueuedTurn) => Promise<boolean>;
+}): Promise<CancelledQueuedTurn & { restored: boolean }> {
   await ensureVivaryCodeHostInitialized();
   const { item, run } = requireOwnedQueuedTurn(input);
   if (item.state === "starting") {
@@ -2095,12 +2098,25 @@ export async function cancelQueuedVivaryCodeTurn(input: {
       fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
     }
   }
+  if (item.cancelling) {
+    fail("That queued message is already being cancelled.", { errorCode: "vivary_code_queue_cancelling", statusCode: 409 });
+  }
+  const cancelled: CancelledQueuedTurn = { runId: item.runId, projectId: metadataString(run, "projectId"),
+    message: item.message, draftThreadId: item.draftThreadId, draftSubmitId: item.draftSubmitId };
+  item.cancelling = true;
+  let restored = false;
+  try { restored = input.restore ? await input.restore(cancelled) : false; }
+  catch (error) {
+    item.cancelling = false;
+    item.stopRequested = false;
+    drainCodeRunQueue();
+    throw error;
+  }
   hostState.queue.splice(hostState.queue.indexOf(item), 1);
   updateCodeAgentRunRecord(item.runId, { status: item.restore?.status ?? "paused", phase: item.restore?.phase ?? "paused",
     needsApproval: false, metadata: { queuedTurn: undefined, ...(item.restore ? {} : { discarded: true }) } });
   drainCodeRunQueue();
-  return { runId: item.runId, projectId: metadataString(run, "projectId"), message: item.message,
-    draftThreadId: item.draftThreadId, draftSubmitId: item.draftSubmitId };
+  return { ...cancelled, restored };
 }
 
 /** The stored message of a queued turn, which the action sends again with fresh project checks. */

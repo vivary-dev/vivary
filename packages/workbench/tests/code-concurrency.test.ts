@@ -555,6 +555,30 @@ test("Stop on a queued message that is starting stops it before it claims its sl
   } finally { open(); await endAll(runs); }
 });
 
+test("Cancel keeps a queued message queued when its draft cannot be restored", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-restore-fails");
+  const [a, b] = await folders(fixture, "a", "b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "restore_a"), "Work in a")).run!.id);
+    const queued = (await send(project(b, "restore_b"), "Keep these words")).run!.id;
+    runs.push(queued);
+    await assert.rejects(agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "restore_b",
+      restore: async () => { throw new Error("The draft could not be saved."); } }), /draft could not be saved/);
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual(state.queuedRuns.map(run => [run.id, run.state]), [[queued, "queued"]], "the message is still queued");
+    const stored = getCodeAgentRunRecord(queued)?.metadata?.queuedTurn as { message?: string } | undefined;
+    assert.equal(stored?.message, "Keep these words", "the record still holds the message");
+    assert.equal(agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId).some(run => run.id === queued), true);
+    const cancelled = await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "restore_b",
+      restore: async () => true });
+    assert.deepEqual([cancelled.message, cancelled.restored], ["Keep these words", true]);
+    assert.deepEqual((await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns, []);
+  } finally { await endAll(runs); }
+});
+
 test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { folder } = await ipcFixture("capacity-mixed");

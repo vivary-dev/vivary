@@ -372,7 +372,9 @@ the owner's request with fresh closures. Cancel removes a turn, starts nothing,
 and restores the run's earlier status. A conversation that never started is
 marked `discarded` and leaves history. [`code-queue-draft.ts`](../packages/workbench/server/code-queue-draft.ts)
 turns its pending draft back into a draft, fills an empty one, and leaves a draft
-the owner typed since. Stop on a queued conversation cancels it the same way.
+the owner typed since. The turn leaves the queue only after its draft is
+restored. If the draft write fails, the turn stays queued and listed, and it does
+not start meanwhile. Stop on a queued conversation cancels it the same way.
 Cancel or Stop on a turn that is starting marks it and waits for its start
 attempt. The claim refuses a marked turn with `vivary_code_queue_stopped`, so the
 turn is held and then cancelled, never started.

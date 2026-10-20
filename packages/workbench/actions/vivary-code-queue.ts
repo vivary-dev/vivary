@@ -19,8 +19,9 @@ export default defineAction({
     const ownerEmail = requireVivaryCodeUser(ctx);
     const orgId = ctx?.orgId ?? undefined;
     if (operation === "cancel") {
-      const cancelled = await cancelQueuedVivaryCodeTurn({ ownerEmail, orgId, runId, projectId });
-      const restored = await restoreQueuedCodeDraft(ownerEmail, orgId, cancelled);
+      // The message leaves the queue only after it is back in the draft, so a failed draft write loses nothing.
+      const { restored } = await cancelQueuedVivaryCodeTurn({ ownerEmail, orgId, runId, projectId,
+        restore: cancelled => restoreQueuedCodeDraft(ownerEmail, orgId, cancelled) });
       return { ...await getVivaryCodeHostState(ownerEmail, orgId), restored };
     }
     // Start and Proceed send the stored message again from this request, so every project check runs fresh.
