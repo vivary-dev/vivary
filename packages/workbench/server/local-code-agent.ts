@@ -345,6 +345,10 @@ type QueuedTurn = Omit<StoredQueuedTurn, "state"> & {
   state: VivaryCodeQueueState | "starting";
   /** The original send, with the closures that check the project again. Null after a restart, until the owner starts it. */
   input: VivaryCodeSendInput | null;
+  /** The start attempt of a `starting` turn. It settles once the turn started or was held. */
+  starting?: Promise<void>;
+  /** Stop or Cancel arrived while the turn was starting. Its claim refuses, so the turn is held instead of started. */
+  stopRequested?: boolean;
 };
 
 // Nitro bundles plugins while Native loads action source modules. Both must own
@@ -1181,6 +1185,9 @@ export async function sendVivaryCodeMessage(input: {
   // from `activeRuns.set` in startVivaryCodeRun, so of two simultaneous sends into one conversation only one starts.
   assertCodeHostAvailable();
   assertConversationCanStart(input, canonicalRoot);
+  if (input.queued?.stopRequested) {
+    fail("This queued message was stopped before it started.", { errorCode: "vivary_code_queue_stopped", statusCode: 409 });
+  }
   // A switch can land while this send awaits its checks. Launch only the route the record still names, and build the
   // prompt from the record as it is now. A switch away and back keeps the route but clears the provider sessions, so
   // the new session must get the quoted conversation.
@@ -1533,12 +1540,17 @@ export async function stopVivaryCodeRun(input: {
     bindingRevision: metadataNumber(record, "bindingRevision") ?? undefined,
   };
 
-  const activeRun = activeRuns.get(input.runId);
-  if (!activeRun && queuedTurnFor(input.runId)) {
-    const cancelled = await cancelQueuedVivaryCodeTurn(input);
-    await input.onQueuedCancelled?.(cancelled);
-    return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
+  if (!activeRuns.has(input.runId) && queuedTurnFor(input.runId)) {
+    try {
+      const cancelled = await cancelQueuedVivaryCodeTurn(input);
+      await input.onQueuedCancelled?.(cancelled);
+      return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
+    } catch (error) {
+      // A turn that started between the check above and its cancellation is stopped below like any running turn.
+      if (!activeRuns.has(input.runId)) throw error;
+    }
   }
+  const activeRun = activeRuns.get(input.runId);
   if (!activeRun || activeRun.ownerEmail !== input.ownerEmail) {
     fail("That local Vivary code run is not active.", {
       errorCode: "vivary_code_run_not_active",
@@ -2009,7 +2021,7 @@ function drainCodeRunQueue(): void {
     if (!next?.input) return;
     next.state = "starting";
     hostState.reserved += 1;
-    void startQueuedTurn(next, next.input);
+    next.starting = startQueuedTurn(next, next.input);
   }
 }
 
@@ -2067,14 +2079,21 @@ function requireOwnedQueuedTurn(input: { ownerEmail: string; orgId?: string; run
   return { item, run };
 }
 
-/** Removes a queued message. Nothing starts. A conversation that never started is no longer listed. */
+/**
+ * Removes a queued message. Nothing starts. A turn that is starting is stopped before it claims its slot. A conversation
+ * that never started is no longer listed.
+ */
 export async function cancelQueuedVivaryCodeTurn(input: {
   ownerEmail: string; orgId?: string; runId: string; projectId?: string;
 }): Promise<CancelledQueuedTurn> {
   await ensureVivaryCodeHostInitialized();
   const { item, run } = requireOwnedQueuedTurn(input);
   if (item.state === "starting") {
-    fail("That message is starting now. Stop it instead.", { errorCode: "vivary_code_queue_starting", statusCode: 409 });
+    item.stopRequested = true;
+    await item.starting;
+    if (!hostState.queue.includes(item)) {
+      fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
+    }
   }
   hostState.queue.splice(hostState.queue.indexOf(item), 1);
   updateCodeAgentRunRecord(item.runId, { status: item.restore?.status ?? "paused", phase: item.restore?.phase ?? "paused",
@@ -2109,6 +2128,7 @@ export async function resumeQueuedVivaryCodeTurn(input: VivaryCodeSendInput & { 
   }
   const { proceed, ...send } = input;
   if (proceed) item.acknowledgedTurns = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId).map(run => run.turnId);
+  item.stopRequested = false;
   item.input = { ...send, workspace, runId: item.runId };
   item.state = "queued";
   item.reason = null;

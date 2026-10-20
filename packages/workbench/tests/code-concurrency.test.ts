@@ -525,6 +525,36 @@ test("a queued turn whose folder gained an agent since it queued waits for confi
   } finally { await endAll(runs); }
 });
 
+test("Stop on a queued message that is starting stops it before it claims its slot", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-stop-starting");
+  const [a, b] = await folders(fixture, "a", "b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const workspace = project(b, "starting_b");
+  // The queued turn's fresh checks wait here, so the test can press Stop while it is starting.
+  let gate: Promise<void> | null = null;
+  let open = () => {};
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "starting_a"), "Work in a")).run!.id);
+    const queued = (await send(workspace, "Queued in b", { revalidateWorkspace: async () => { await gate; return workspace; } })).run!.id;
+    runs.push(queued);
+    gate = new Promise(resolve => { open = resolve; });
+    const queue = () => capacityHost().queue as { runId: string; state: string }[];
+    await settle(runs[0]);
+    await waitFor(() => queue().find(item => item.runId === queued)?.state === "starting", "the queued turn to start its checks");
+    const stopping = agent.stopVivaryCodeRun({ ...owner, runId: queued, projectId: "starting_b" });
+    open();
+    await stopping;
+    await delay(250);
+    assert.equal(capacityHost().activeRuns.has(queued), false, "the stopped turn did not start");
+    assert.deepEqual(await startedRuns(fixture), [runs[0]]);
+    assert.deepEqual(userMessages(queued), []);
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual([state.queuedRuns, capacityHost().reserved], [[], 0], "the message left the queue and freed its slot");
+  } finally { open(); await endAll(runs); }
+});
+
 test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { folder } = await ipcFixture("capacity-mixed");
