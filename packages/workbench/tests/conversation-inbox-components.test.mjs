@@ -82,6 +82,14 @@ const bundle = await build({ stdin: { contents: `
   import { MemoryRouter, useLocation, useSearchParams } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { ConversationInbox } from "./app/components/layout/ConversationInbox";
+  import { useConversationRouteHold } from "./app/lib/conversation-route-hold";
+  // The layout applies the page's route hold through CodeRunControl. The fixture applies it the same way.
+  function HoldApplier() {
+    useSyncExternalStore(${fixture}.subscribe, () => ${fixture}.version);
+    const projects = ${fixture}.projects();
+    useConversationRouteHold({ activeProjectId: projects.activeProject?.projectId ?? null, checking: projects.checking });
+    return null;
+  }
   export { visibleInboxRows, inboxRowHref, selectedInboxRowId, sortInboxRows, messageSearchScopes } from "./app/components/layout/ConversationInbox";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   // The route reset Workspace.tsx applies when the project changes, copied so the inbox's open sequence meets it.
@@ -113,7 +121,7 @@ const bundle = await build({ stdin: { contents: `
   export function view(route) {
     const client = ${fixture}.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: [route] },
-      createElement(ConversationInbox), createElement(ProjectRouteReset), createElement(Location)));
+      createElement(HoldApplier), createElement(ConversationInbox), createElement(ProjectRouteReset), createElement(Location)));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", loader: { ".css": "empty" }, external: ["react", "react/*", "react-dom/*", "react-router", "@tanstack/react-query"],
   plugins: [{ name: "host-services", setup(build) {

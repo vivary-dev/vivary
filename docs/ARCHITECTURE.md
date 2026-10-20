@@ -284,8 +284,12 @@ same `vivary_code_run_not_found` (404) as any unknown ID.
 [`CodeRunControl.tsx`](../packages/workbench/app/components/layout/CodeRunControl.tsx)
 lists each running conversation with Open conversation, its own Stop, and its
 own request cards, so an answer or a Stop acts on that run only. Open
-conversation in another project goes through `useConversationRouteHold` in
+conversation in another project, from the strip or from the shared-folder
+warning, goes through the page's route hold in
 [`conversation-route-hold.ts`](../packages/workbench/app/lib/conversation-route-hold.ts).
+The hold lives outside any component, because the Code conversation that asks
+for the open unmounts while the project changes. `CodeRunControl`, which stays
+mounted in the layout, runs `useConversationRouteHold` to apply it.
 Workspace clears the conversation route when the project changes, and the new
 project then restores its saved Code conversation or Native chat onto the bare
 route, so a plain navigation could open the restored view instead of the clicked
@@ -413,9 +417,10 @@ the old conversation route when the project changes, and the new project then
 restores its saved conversation onto the bare route. The inbox navigates once the
 old route is gone, navigates again with replace if a restore lands after it, and
 releases the target once it has held for 750 ms or the owner presses a key or the
-pointer. This hold is `useConversationRouteHold` in
+pointer. This hold is `holdConversationRoute` in
 [`conversation-route-hold.ts`](../packages/workbench/app/lib/conversation-route-hold.ts), which the Agent
-work strip also uses. New conversation in another project uses the same hold. An
+work strip also uses. `CodeRunControl` in the layout applies the page's one hold, so the inbox
+only calls it. New conversation in another project uses the same hold. An
 API chat created after the project change is held on a bare route and replaces a
 route the new project already restored. Native rename, pin and archive use Native's own thread
 routes with the row's scope. Restore uses `vivary-native-archive`.
@@ -1039,6 +1044,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Inbox on the page-wide route hold (W5). The inbox calls
+`holdConversationRoute` and no longer mounts the hook, which `CodeRunControl` applies
+once for the page. Evidence inspected: the inbox component and route-hold tests.
+
 2026-10-19 Inbox owner actions (W5). Merging #261's review fixes moved
 `vivary-code-conversation-meta` and `vivary-conversation-archive` out of #261's
 allowlist. This PR, which adds both actions, lists them in `VIVARY_OWNER_ACTIONS`
@@ -1098,6 +1107,15 @@ not mounted yet, so the existing project history, Native archive and concurrency
 sections still describe the running sidebar. Evidence inspected: the new server
 and component tests, `isOwnedRun`, `listOwnedVivaryCodeRuns`, the content search
 predicates, and the route reset in `Workspace.tsx`.
+2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
+another project selected the project without a route hold, so Workspace's route
+reset and the new project's saved view could open another conversation or Native
+chat. The route hold moves out of component state into one hold for the page,
+set with `holdConversationRoute` and applied by `useConversationRouteHold` in
+`CodeRunControl`, and the warning's Open uses it.
+`tests/conversation-route-hold.test.mjs` covers a view that unmounts during the
+project change.
+
 2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
 conversation, so a later turn of an acknowledged conversation did not ask again.
 `folderRuns` entries now carry a per-turn `turnId`, and the composer keys Proceed

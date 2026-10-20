@@ -20,7 +20,7 @@ import { chatSearchHref } from "@/lib/chat-search-location";
 import { highlightedExcerpt } from "@/lib/chat-search-excerpt";
 import type { ChatSearchHit, ChatSearchPage } from "@/lib/chat-search-schema";
 import { focusAfterRemoval } from "@/lib/row-focus";
-import { hasWorkspaceRoute, useConversationRouteHold } from "@/lib/conversation-route-hold";
+import { hasWorkspaceRoute, holdConversationRoute } from "@/lib/conversation-route-hold";
 import { useAppStateWriter } from "@/lib/native-state";
 import { CreateProjectForm } from "../projects/CreateProjectForm";
 import { useOpenProjectFolder } from "../projects/open-project-folder";
@@ -181,10 +181,9 @@ export function ConversationInbox() {
     };
   }, [refetchInbox]);
 
-  // A conversation in another project opens through the shared route hold, which outlasts the project change's route
-  // reset and the new project's saved-view restore.
+  // A conversation in another project opens through the page's route hold, which outlasts the project change's route
+  // reset and the new project's saved-view restore. CodeRunControl in the layout applies it.
   const location = useLocation();
-  const routeHold = useConversationRouteHold({ activeProjectId, checking });
   // An API chat is created after an await, so it reads the route as it is then, not as it was when creation began.
   const latestRoute = useRef(location);
   latestRoute.current = location;
@@ -212,7 +211,7 @@ export function ConversationInbox() {
       navigate(href);
       return;
     }
-    const release = routeHold.hold(projectId, href);
+    const release = holdConversationRoute(projectId, href);
     // A newer open owns the route by now, so a slow failure here neither releases it nor reports over it.
     if (!await selectProject(projectId) && release()) {
       setNotice("That project is unavailable. Its conversations are retained.");
@@ -252,14 +251,14 @@ export function ConversationInbox() {
     const { pathname, search } = latestRoute.current;
     const route = pathname + search;
     if (route !== startedFrom.current && hasWorkspaceRoute(pathname, search)) navigate(href, { replace: true });
-    else routeHold.hold(activeProjectId, href);
+    else holdConversationRoute(activeProjectId, href);
     startedFrom.current = null;
   }
   // New conversation in another project is the explicit action that selects it.
   const [pendingNative, setPendingNative] = useState<string | null>();
   async function startIn(projectId: string | null, kind: "code" | "native") {
     setNotice(undefined);
-    const release = kind === "code" ? routeHold.hold(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
+    const release = kind === "code" ? holdConversationRoute(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
     if (kind === "native") {
       startedFrom.current = location.pathname + location.search;
       setPendingNative(projectId);
