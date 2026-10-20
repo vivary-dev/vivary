@@ -8,7 +8,7 @@ import * as esbuild from "esbuild";
 import { SHARED_FOLDER_WARNING } from "../shared/code-concurrency.ts";
 
 // Another conversation's run in the same folder, as the Code state lists it.
-const OTHER_RUN = { id: "other-run", title: "Write the parser tests", projectId: null };
+const OTHER_RUN = { id: "other-run", title: "Write the parser tests", projectId: null, turnId: "turn-other-1" };
 
 // Native chat controls rendered from Core's and Toolkit's installed, patched modules, bundled with
 // esbuild and mounted on linkedom as builder-offers-component.test.mjs does.
@@ -987,7 +987,7 @@ test("Native chat controls", async t => {
       const draft = view.composerText();
       assert.ok(draft, "the composer holds a draft");
       focused = null;
-      await view.setFolderRuns([OTHER_RUN, { id: "later-run", title: "Update the changelog", projectId: null }]);
+      await view.setFolderRuns([OTHER_RUN, { id: "later-run", title: "Update the changelog", projectId: null, turnId: "turn-later-1" }]);
       assert.equal(view.warning(), SHARED_FOLDER_WARNING, "a conversation that starts later asks again");
       assert.equal(view.composerLocked(), true);
       await view.escape();
@@ -1001,9 +1001,24 @@ test("Native chat controls", async t => {
     }
   });
 
+  await t.test("a later turn of a conversation that was acknowledged asks again", async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch({ folderRuns: [OTHER_RUN] });
+    try {
+      await view.click("Proceed");
+      assert.equal(view.composerLocked(), false, "Proceed covers the first turn");
+      await view.setFolderRuns([]);
+      assert.equal(view.warning(), null, "the other conversation finished");
+      await view.setFolderRuns([{ ...OTHER_RUN, turnId: "turn-other-2" }]);
+      assert.equal(view.warning(), SHARED_FOLDER_WARNING, "its next turn asks again");
+      assert.equal(view.composerLocked(), true);
+      assert.ok(view.sharedButtons().includes("Proceed"));
+    } finally { await view.unmount(); server(); }
+  });
+
   await t.test("the warning names no title for another owner's run and offers only the worktree hint without a folder picker", async () => {
     const server = installChatServer();
-    const view = await proof.renderCodeSwitch({ folderRuns: [{ id: "foreign-run", title: null, projectId: null }] });
+    const view = await proof.renderCodeSwitch({ folderRuns: [{ id: "foreign-run", title: null, projectId: null, turnId: "turn-foreign-1" }] });
     try {
       assert.deepEqual(view.sharedRuns(), ["A conversation of another user"]);
       assert.deepEqual(view.sharedButtons(), ["Proceed", "Cancel", "Copy"]);

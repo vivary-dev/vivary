@@ -212,9 +212,9 @@ export function ConversationInbox() {
       navigate(href);
       return;
     }
-    routeHold.hold(projectId, href);
-    if (!await selectProject(projectId)) {
-      routeHold.release();
+    const release = routeHold.hold(projectId, href);
+    // A newer open owns the route by now, so a slow failure here neither releases it nor reports over it.
+    if (!await selectProject(projectId) && release()) {
       setNotice("That project is unavailable. Its conversations are retained.");
     }
   }
@@ -259,14 +259,14 @@ export function ConversationInbox() {
   const [pendingNative, setPendingNative] = useState<string | null>();
   async function startIn(projectId: string | null, kind: "code" | "native") {
     setNotice(undefined);
-    if (kind === "code") routeHold.hold(projectId, "/?run=new&draft=" + crypto.randomUUID());
-    else {
+    const release = kind === "code" ? routeHold.hold(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
+    if (kind === "native") {
       startedFrom.current = location.pathname + location.search;
       setPendingNative(projectId);
     }
     if (!await selectProject(projectId)) {
-      routeHold.release();
-      setPendingNative(undefined);
+      if (release && !release()) return;
+      setPendingNative(current => current === projectId ? undefined : current);
       setNotice("That project is unavailable. Choose another destination.");
     }
   }

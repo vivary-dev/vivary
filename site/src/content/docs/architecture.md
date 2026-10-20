@@ -277,7 +277,9 @@ pending requests. This replaces the single `activeRun` and `pendingApproval`
 fields, and every caller moved in the same change. `busy` counts only the
 caller's runs. In `getVivaryCodeState`, `busy` means the selected conversation is
 running, and `folderRuns` lists active runs, any owner's, whose folder overlaps
-the workspace. Only the caller's runs carry their run ID and title. Another
+the workspace. Each entry carries a `turnId` that is new for every turn, so a
+Proceed or Cancel covers one turn and a later turn of the same conversation asks
+again. Only the caller's runs carry their run ID and title. Another
 owner's run carries a random placeholder ID, kept for the life of the run so an
 earlier Proceed still covers it, and no title. A send that names a run checks
 ownership before the per-conversation refusal, so another owner's run ID gets the
@@ -437,7 +439,9 @@ messages in the thread for API chat, and for both a send from the draft that is
 still pending. Archive never stops, approves, sends or discards anything. The inbox
 archives an API chat only through the owner action
 [`vivary-conversation-archive`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-conversation-archive.ts),
-which runs these checks on the server before `setThreadArchived`. Restore uses
+which runs these checks on the server before `setThreadArchived`. `VIVARY_OWNER_ACTIONS` in
+[`owner-actions.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/owner-actions.ts) names this action and
+`vivary-code-conversation-meta`, so both accept the private proxy session on a POST. Restore uses
 `vivary-native-archive` and returns the row to its place, since rows sort by
 creation time. The Unassigned conversations list (`ChatHistory.tsx`) and the
 project history this inbox replaces still call Core's archive route directly.
@@ -1039,6 +1043,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-19 Inbox owner actions (W5). Merging #261's review fixes moved
+`vivary-code-conversation-meta` and `vivary-conversation-archive` out of #261's
+allowlist. This PR, which adds both actions, lists them in `VIVARY_OWNER_ACTIONS`
+again, and the Conversation inbox section says so. The inbox releases a failed open
+through the release its own hold returns. Evidence inspected: `local-access` and
+`native-actions` tests, and the inbox component tests.
+
 2026-10-19 Inbox tests in CI (W5). `test:conversation-inbox` runs the inbox server and
 component tests, and `test:maintained` now includes it, so the maintained workbench
 job covers the inbox. The Conversation inbox section already names both test files.
@@ -1091,14 +1102,25 @@ not mounted yet, so the existing project history, Native archive and concurrency
 sections still describe the running sidebar. Evidence inspected: the new server
 and component tests, `isOwnedRun`, `listOwnedVivaryCodeRuns`, the content search
 predicates, and the route reset in `Workspace.tsx`.
+2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
+conversation, so a later turn of an acknowledged conversation did not ask again.
+`folderRuns` entries now carry a per-turn `turnId`, and the composer keys Proceed
+and Cancel by it. A personal-workspace run in the folder opened in the selected
+project, because a null project fell back to it. `folderRunTargets` in
+`app/lib/code-folder-runs.ts` keeps a matched run's null project. The route hold's
+`hold` now returns a release for that hold only, so a slow, failed open no longer
+releases a newer click's hold or shows its error. Stop, switch, and a pending
+switch now check the run's own cleanup refusal, not only the host's oldest one.
+The inbox's two owner actions, `vivary-code-conversation-meta` and
+`vivary-conversation-archive`, move from this PR's allowlist to the inbox PR #263.
+
 2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
 three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape
 close the warning without acknowledging it, send nothing, keep the draft, and
 return focus to the composer. A later send meets the server's
 `vivary_code_shared_folder_active` refusal, which restores the draft and opens
 the warning again through the adapter's `onSharedFolderRefused`. Isolation stays
-optional. `VIVARY_OWNER_ACTIONS` also names `vivary-conversation-archive` for the
-conversation inbox. Tests: the warning case in `native-chat-components.test.mjs`,
+optional. Tests: the warning case in `native-chat-components.test.mjs`,
 the refusal case in `local-code-chat-adapter.test.mjs`, and a second send into a
 working conversation in `code-concurrency.test.ts`.
 
@@ -1115,8 +1137,7 @@ saved view, a saved Code conversation, and a saved Native chat, and runs in
 `local-code-agent.ts` exports `listOwnedVivaryCodeRuns`, which returns every
 listed Code run the caller owns in any project, most recently updated first, from
 one directory scan, plus the existing `engineLabelFromRun` and `modelFromRun`.
-`VIVARY_OWNER_ACTIONS` names `vivary-code-conversation-meta`, the owner-only
-action the inbox adds for Code rename and archive. No behavior changes.
+No behavior changes.
 `tests/code-concurrency.test.ts` covers the list.
 
 2026-10-19 Review fix for concurrent Code conversations (PR #261). `folderRuns`

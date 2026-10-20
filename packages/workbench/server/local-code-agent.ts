@@ -77,7 +77,10 @@ type ActiveRun = {
   workspace: VivaryCodeWorkspace;
   /** The workspace folder's real path, compared with other runs' folders for the shared-folder warning. */
   canonicalRoot: string;
-  /** Names this run in another owner's shared-folder list. It is random and is not the run ID. */
+  /**
+   * Identifies this turn in shared-folder lists. It is random and is not the run ID. Each turn of a conversation starts
+   * a new active run with a new token, so a Proceed for one turn does not cover the next.
+   */
   folderToken: string;
   permissionMode: CodePermissionMode;
   requests: Map<string, { request: CodexActionRequest; resolve: (response: Record<string, unknown>) => void }>;
@@ -170,8 +173,9 @@ export type VivaryCodeActiveRun = Pick<CodeAgentRunRecord, "id" | "title" | "sta
 /**
  * An active run, any owner's, whose folder overlaps the workspace. The caller's own run carries its run ID and title.
  * Another owner's run carries a stable placeholder ID and no title, so the list never reveals another owner's run ID.
+ * `turnId` names the turn: a Proceed or Cancel applies to it, and the next turn of the same conversation asks again.
  */
-export type VivaryCodeFolderRun = { id: string; title: string | null };
+export type VivaryCodeFolderRun = { id: string; title: string | null; turnId: string };
 
 export type VivaryCodeHostState = {
   /** The caller's running conversations, in the order their turns started. Several can run at once, in any projects. */
@@ -888,8 +892,8 @@ function runsInFolder(root: string, ownerEmail: string, orgId?: string): VivaryC
   for (const [runId, active] of activeRuns) {
     if (!foldersOverlap(active.canonicalRoot, root)) continue;
     const owned = active.ownerEmail === ownerEmail && active.orgId === orgId;
-    found.push(owned ? { id: runId, title: getCodeAgentRunRecord(runId)?.title ?? null }
-      : { id: `other-${active.folderToken}`, title: null });
+    found.push(owned ? { id: runId, title: getCodeAgentRunRecord(runId)?.title ?? null, turnId: active.folderToken }
+      : { id: `other-${active.folderToken}`, title: null, turnId: active.folderToken });
   }
   return found;
 }
@@ -1476,7 +1480,7 @@ export async function stopVivaryCodeRun(input: {
 function requestUserStop(runId: string, activeRun: ActiveRun): void {
   // Issue #121. A run whose failed stop is still checking is already ending, and a Stop then would record the worker's
   // failure as the owner's stop.
-  if (activeRun.stopReason !== null || hostState.cleanup?.runId === runId) return;
+  if (activeRun.stopReason !== null || hasOwnCleanupRefusal(runId)) return;
   activeRun.stopReason = "user";
   recordStoppingRun(runId, "Stop requested from the Vivary workbench.", "user");
   activeRun.controller.abort();
@@ -1557,6 +1561,16 @@ function assertNoReconnection(): void {
   }
 }
 
+/**
+ * Whether this run's own cleanup refusal is in force. `hostState.cleanup` holds only the oldest refusal, and with
+ * concurrent runs a newer one can belong to another run, so the run's record and the unsaved refusals are checked too.
+ */
+function hasOwnCleanupRefusal(runId: string): boolean {
+  if (hostState.cleanup?.runId === runId || hostState.unsaved.has(runId)) return true;
+  const run = getCodeAgentRunRecord(runId);
+  return !!run && cleanupRefusalFromRun(run) !== null;
+}
+
 /** `stopFirst` admits an active or stopping run for Stop and switch. A cleanup refusal still holds every switch. */
 function assertRunCanSwitch(run: CodeAgentRunRecord, stopFirst = false): void {
   const active = stopFirst ? undefined : activeRuns.get(run.id);
@@ -1570,7 +1584,7 @@ function assertRunCanSwitch(run: CodeAgentRunRecord, stopFirst = false): void {
       errorCode: "vivary_code_switch_run_active", statusCode: 409,
     });
   }
-  if (hostState.cleanup?.runId === run.id || run.metadata?.cleanupRefusal) {
+  if (hasOwnCleanupRefusal(run.id)) {
     fail(hostState.cleanup?.runId === run.id ? cleanupRefusalMessage(hostState.cleanup)
       : "Coding processes from this conversation may still be running. Resolve them before switching.", {
       errorCode: "vivary_code_cleanup_required", statusCode: 409,
@@ -1612,7 +1626,7 @@ function applyPendingSwitch(runId: string): void {
   const pending = run.metadata.pendingSwitch as { label?: unknown };
   const target = pendingSwitchFromRun(run);
   updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
-  if (!target || hostState.cleanup?.runId === runId || run.metadata.cleanupRefusal) {
+  if (!target || hasOwnCleanupRefusal(runId)) {
     appendCodeAgentTranscriptEvent({ runId, kind: "note",
       message: "The runtime switch did not happen, because Vivary could not confirm that this conversation's coding "
         + "processes stopped. Choose it again after they stop.",

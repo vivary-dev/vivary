@@ -69,8 +69,8 @@ const bundle = await build({ stdin: { contents: `
     const navigate = useNavigate();
     return createElement("div", null,
       createElement("button", { id: "open", onClick: async () => {
-        routeHold.hold(${fixture}.target.projectId, ${fixture}.target.href);
-        if (!await projects.selectProject(${fixture}.target.projectId)) routeHold.release();
+        const release = routeHold.hold(${fixture}.target.projectId, ${fixture}.target.href);
+        if (!await projects.selectProject(${fixture}.target.projectId)) release();
       } }),
       createElement("button", { id: "elsewhere", onClick: () => navigate("/?run=elsewhere", { replace: true }) }));
   }
@@ -87,7 +87,8 @@ const bundle = await build({ stdin: { contents: `
 const module = { exports: {} };
 compileFunction(bundle.outputFiles[0].text, ["require", "module", "exports"])(require, module, module.exports);
 
-const catalog = { scopeKey: "scope", projects: [{ projectId: "alpha", displayName: "Alpha" }, { projectId: "beta", displayName: "Beta" }] };
+const catalog = { scopeKey: "scope", projects: [{ projectId: "alpha", displayName: "Alpha" },
+  { projectId: "beta", displayName: "Beta" }, { projectId: "gamma", displayName: "Gamma" }] };
 const activeRun = (id, projectId, title) => ({ id, projectId, title, status: "running", phase: "running",
   workspaceLabel: projectId ?? "home", engineLabel: "Claude Code", model: "claude-sonnet-5-5", stopping: false, pendingApprovals: [] });
 let host, root;
@@ -97,15 +98,15 @@ test.beforeEach(() => {
   globalThis.routeHoldFixture = {
     version: 0, active: "alpha", calls: [], savedRoutes: {}, target: { projectId: "beta", href: "/?run=b1" },
     host: { activeRuns: [activeRun("b1", "beta", "Review onboarding")], recentRun: null, busy: true, cleanup: null },
-    selectResult: true,
+    selectResult: true, delays: {}, failing: [],
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     notify() { routeHoldFixture.version++; for (const listener of listeners) listener(); },
     projects: () => ({ catalog, checking: false,
       activeProject: catalog.projects.find(project => project.projectId === routeHoldFixture.active) ?? null,
       selectProject: async projectId => {
         routeHoldFixture.calls.push(["selectProject", projectId]);
-        await new Promise(resolve => setTimeout(resolve, 5));
-        if (!routeHoldFixture.selectResult) return false;
+        await new Promise(resolve => setTimeout(resolve, routeHoldFixture.delays[projectId] ?? 5));
+        if (!routeHoldFixture.selectResult || routeHoldFixture.failing.includes(projectId)) return false;
         routeHoldFixture.active = projectId; routeHoldFixture.notify(); return true;
       } }),
   };
@@ -148,6 +149,20 @@ test("the strip opens a run in the selected project directly", async () => {
   await settle();
   assert.deepEqual(routeHoldFixture.calls, [], "no project change");
   assert.equal(route(), "?run=a2");
+});
+
+test("a slow failed open neither releases a newer open's hold nor shows its error", async () => {
+  routeHoldFixture.host.activeRuns = [activeRun("b1", "beta", "Review onboarding"), activeRun("g1", "gamma", "Ship gamma")];
+  routeHoldFixture.failing = ["beta"];
+  routeHoldFixture.delays = { beta: 5, gamma: 40 };
+  routeHoldFixture.savedRoutes = { gamma: "run=g-saved" };
+  await render("/?run=a1", true);
+  const openRun = title => host.querySelector(`li[aria-label="${title}"] button`);
+  await act(async () => { openRun("Review onboarding").click(); openRun("Ship gamma").click(); });
+  await settle(150);
+  assert.equal(routeHoldFixture.active, "gamma");
+  assert.equal(route(), "?run=g1", "the newer click lands");
+  assert.equal(host.querySelector('[role="alert"]'), null, "the older failure says nothing");
 });
 
 test("an unavailable project releases the hold and keeps the route", async () => {
