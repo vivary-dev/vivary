@@ -365,7 +365,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} model={run.model} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -422,19 +422,22 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId, engine, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; active: boolean }) {
+function CodeSessionDetails({ runId, projectId, engine, model, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; model: string; active: boolean }) {
   const [open, setOpen] = useState(false);
   // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
   }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
-  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  const route = engine + ":" + model;
+  const finalRefresh = useRef({ runId, projectId, route, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;
     const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
-    const settled = !scopeChanged && refresh.wasActive && !active;
+    // A runtime or model switch clears the provider session, so an open panel reloads instead of showing the old one.
+    const settled = !scopeChanged && ((refresh.wasActive && !active) || refresh.route !== route);
     refresh.runId = runId;
     refresh.projectId = projectId;
+    refresh.route = route;
     refresh.wasActive = active;
     if (!open || scopeChanged || active) refresh.pending = false;
     else if (settled) refresh.pending = true;
@@ -444,7 +447,7 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
       refresh.pending = false;
       void details.refetch();
     }
-  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
+  }, [active, open, runId, projectId, route, details.isFetching, details.refetch]);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"

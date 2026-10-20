@@ -39,13 +39,28 @@ const stubs = new Map([
     export function useBuilderStatus() { return { status: null, refetch() {} }; }
     export function withBuilderConnectTrackingParams(url) { return url; }
     export function openBuilderConnectPopup() { throw new Error("No account connection expected"); }`],
+  // Radix's positioned popover never settles on linkedom, so opening one exhausts the heap. This keeps the open state
+  // and renders open content in place, which is all Session details needs. No other proof opens a popover.
+  [join(TOOLKIT, "dist", "ui", "popover.js"), `
+    import { cloneElement, createContext, createElement, forwardRef, useContext } from "react";
+    const State = createContext({ open: false, toggle() {} });
+    export function Popover({ open = false, onOpenChange = () => {}, children }) {
+      return createElement(State.Provider, { value: { open, toggle: () => onOpenChange(!open) } }, children);
+    }
+    export function PopoverTrigger({ children }) {
+      const state = useContext(State);
+      return cloneElement(children, { onClick: state.toggle, "aria-expanded": state.open });
+    }
+    export function PopoverAnchor({ children }) { return children; }
+    export const PopoverContent = forwardRef(({ align, sideOffset, portalled, container, ...props }, ref) =>
+      useContext(State).open ? createElement("div", { ref, ...props }) : null);`],
 ]);
 
 const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
-import { LocalCodeConversation } from "@proof/workbench-code";
+import { CodeSessionDetails, LocalCodeConversation } from "@proof/workbench-code";
 import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
 import { useState } from "react";
@@ -183,6 +198,39 @@ async function mount(element) {
 // Issue #131. A sidebar row menu opened from the keyboard, with the Toolkit's Rename and Pin and Vivary's Archive,
 // which Vivary adds through renderAdditionalRowActions. Radix's arrow keys, typeahead, and Enter reach only entries
 // registered as Radix menu items, which carry data-radix-collection-item.
+// Session details for one run, open, while its route changes as a switch changes it.
+export async function renderSessionDetails() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let route = { engine: "claude-cli", model: "claude-sonnet-5-5", label: "Claude Code", sessionId: "claude-session-before" };
+  const reads = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    if (!url.pathname.endsWith("/vivary-code-state")) return originalFetch(input);
+    reads.push(route.engine);
+    return Response.json({ runId: "retained-run", engineLabel: route.label, continuity: "not-recorded", sessionId: route.sessionId,
+      nextTurn: "reconstruct", log: { reference: "native:retained-run", status: "available", excerpt: "", truncated: false },
+      providerLog: { reference: null, status: "unavailable", excerpt: "", truncated: false } });
+  };
+  const element = () => <QueryClientProvider client={client}><CodeSessionDetails runId="retained-run" projectId={null}
+    engine={route.engine} model={route.model} active={false} /></QueryClientProvider>;
+  const view = await mount(element());
+  const settle = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 5)); });
+  const panel = () => view.host.querySelector('[aria-label="Session details"]')?.textContent ?? null;
+  const trigger = [...view.host.querySelectorAll("button")].find(item => item.textContent.trim() === "Session details");
+  await act(async () => { trigger.dispatchEvent(new window.Event("click", { bubbles: true })); });
+  await settle();
+  return {
+    reads, panel,
+    async switchTo(next) {
+      route = next;
+      await act(async () => { view.root.render(element()); });
+      await settle();
+    },
+    async unmount() { await view.unmount(); client.clear(); globalThis.fetch = originalFetch; },
+  };
+}
+
 export async function renderRowMenu() {
   const { ChatHistoryList, ChatHistoryMenuItem } = chatHistory;
   const archive = ChatHistoryMenuItem
@@ -562,14 +610,14 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
           if (args.path === "@assistant-ui/react" && args.resolveDir !== COMPOSER) {
             return build.resolve(args.path, { kind: args.kind, resolveDir: COMPOSER });
           }
-          if (args.path.startsWith(".") && args.importer.startsWith(CORE)) {
+          if (args.path.startsWith(".") && (args.importer.startsWith(CORE) || args.importer.startsWith(TOOLKIT))) {
             const target = resolve(dirname(args.importer), args.path);
             if (stubs.has(target)) return { path: target, namespace: "stub" };
           }
           return undefined;
         });
         build.onLoad({ filter: /.*/, namespace: "workbench-code" }, args => ({
-          contents: readFileSync(args.path, "utf8") + "\nexport { LocalCodeConversation };",
+          contents: readFileSync(args.path, "utf8") + "\nexport { CodeSessionDetails, LocalCodeConversation };",
           loader: "tsx", resolveDir: dirname(args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "stub" }, args => (
@@ -818,6 +866,23 @@ test("Native chat controls", async t => {
       assert.equal(view.panel(), null);
       assert.equal(view.settled, 1, "the parent reloads the conversation");
     } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("open Session details reload after a switch changes the run's runtime and model", async () => {
+    const view = await proof.renderSessionDetails();
+    try {
+      assert.deepEqual(view.reads, ["claude-cli"]);
+      assert.match(view.panel(), /Claude Code · retained-run/);
+      assert.match(view.panel(), /Provider session: claude-session-before/);
+      // A switch clears both provider sessions. The open panel must not keep the previous runtime's session.
+      await view.switchTo({ engine: "codex-cli", model: "gpt-fixture", label: "Codex", sessionId: null });
+      assert.deepEqual(view.reads, ["claude-cli", "codex-cli"]);
+      assert.match(view.panel(), /Codex · retained-run/);
+      assert.match(view.panel(), /Provider session: Not reported/);
+      // A model change inside one runtime also clears the session, so it reloads too.
+      await view.switchTo({ engine: "codex-cli", model: "gpt-other", label: "Codex", sessionId: null });
+      assert.deepEqual(view.reads, ["claude-cli", "codex-cli", "codex-cli"]);
+    } finally { await view.unmount(); }
   });
 
   await t.test("Cancel, or choosing the current route again, sends nothing", async () => {
