@@ -307,7 +307,10 @@ Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
 bookkeeping and private reasoning are excluded. For Code, only a completed tool
-result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. An assistant reply that exactly
+repeats the reply recorded just before it is one entry, the later copy. Claude Code conversations recorded before
+2026-10-19 hold every reply twice that way, and handoff, linked history and content search apply the same rule.
+A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder
 that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
@@ -353,14 +356,19 @@ notice. **Prepare handoff** records the project facts in one pending row and
 submits a request message to that conversation. A Code conversation sends it
 through its own chat handle and adapter. Native sends it with Core's same-window
 submit, which only Native chats receive. Neither path changes the composer draft.
-The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+The agent replies with one fenced `vivary-handoff` JSON block. The conversation
+shows the request as one line and the reply as a readable preview that states its
+save status, with the raw text behind disclosures. **Save handoff**
 is a second owner click. `handoff.ts` reads the reply from the conversation's
 completed history, never from the client. It reads a conversation only through
 the linked conversation service: a linked target's own link is checked as every
 linked read checks it, and retained history the linked reader cannot parse is
 refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
 block, another request ID, an unknown key, or a passed or failed check without a
-completed evidence event. It fills every fact itself, redacts held credentials,
+completed evidence event. A check the agent runs while writing the reply cites
+`tool:` and its tool call ID, because that turn has no completed event ID yet. Save
+accepts it only when a completed tool call with that ID belongs to the reply turn,
+and records the completed event that holds it. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state
 document through `projectFileService.save` with the prepared version and
 binding. An update moves the block back to the end when text was added after
@@ -714,6 +722,93 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Older handoff replies are not called unsaved (PR #262 review). A reply
+preview whose request is neither pending, failed nor the covered one said "Not
+saved", which was wrong for an earlier reply that Vivary saved and a newer handoff
+later replaced. `handoffSaveStatus` in `handoff-status.ts` now says the reply is not
+the latest handoff request and that Save handoff applies only to the latest one,
+claiming nothing about its save. The design below still holds. Evidence:
+`tests/handoff-display-components.test.mjs` adds a replaced-reply case that fails
+with the previous wording.
+
+2026-10-19 Handoff checks from the reply turn. In an API chat, Save handoff refused
+a reply whose passed check came from a `vivary-project-read` call the agent made
+while writing it. The request listed only earlier completed events, and the reply's
+own tool call had a tool call ID but no completed event ID until the turn ended, so
+the agent cited none. The request now says to cite such a check as `tool:` plus its
+tool call ID. `nativeHistoryItems` and `codeHistoryItems` in `linked-history.ts`
+attach the IDs of completed tool calls to their items: a Native tool-call part's
+`toolCallId`, and the `toolCallId` that Claude Code and both Codex routes record
+on a Code `tool_done` event.
+History digests are taken over the stored entries and events, so existing links
+keep their bindings. `proposalFrom` in `server/handoff.ts` resolves a `tool:` citation
+only against tool calls in the reply turn, after the request and before any later
+user message, and records the completed event that holds it. The reply preview labels such a
+citation as a tool call. A completed event ID
+is still checked first and kept as cited. A made-up ID, or a
+call from an earlier turn, is refused with a problem that names it. Every other
+validation rule is unchanged. `tests/handoff.test.ts` covers Native and Code saves
+with a fresh tool check, refuses an earlier turn's call in both, and refuses a
+made-up ID in Native.
+
+2026-10-19 Readable handoff request and reply. After Prepare handoff, an API chat
+showed the whole request prompt and the agent's `vivary-handoff` JSON block as raw
+text. The maintained Core patch adds two display registries in
+`dist/client/chat/message-text-renderers.js`, exported from
+`@agent-native/core/client/chat`. `registerMarkdownFenceRenderer` lets an app render
+a fenced code language in chat Markdown, and `registerUserMessageTextRenderer` lets
+it render a matching user message. Core's `pre` component and `UserMessageText`
+consult them before their defaults. Vivary's
+[`HandoffDisplay.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/HandoffDisplay.tsx)
+registers both. A `vivary-handoff` block reads as goal, decisions, changes, checks,
+unfinished work, risks and next action, with the block itself under a closed Raw
+details disclosure. A block that is not valid JSON, such as one still streaming,
+says so and keeps its text there. The Prepare handoff request shows as one
+"Handoff requested" line with the full prompt under a closed disclosure. Each Code
+and Native conversation view creates one status hub from
+[`handoff-status.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/handoff-status.ts).
+`HandoffControl` publishes its freshness read and the last refused Save to it, and
+publishes no status while its freshness check has failed, so a preview never keeps
+an older status beside the control's failed check. Each preview states its own
+reply's status: not saved yet, refused with the
+parser's reasons, saved and Fresh, out of date, failed, or not the latest request.
+Only a Save that read the reply and refused it (`replyRefused` in the result, for a
+block that fails validation or a conversation that continued past it) marks the
+reply refused. A Save clicked before the reply finished shows its reason in the
+control, and the preview stays at not saved yet.
+A read-only history view has no control, so its previews state no status. The
+stored message text, the parser and schema in `server/handoff.ts`, its validation,
+and clipboard copies are unchanged. `tests/handoff-display-components.test.mjs`
+covers the preview, both disclosures, each status and the request matcher.
+
+2026-10-19 Claude Code replies recorded once. Every Claude Code reply was stored
+twice in a Code transcript, about 0.6 seconds apart with the same text. Core's
+`executeClaudeCliRun` records each streamed assistant message through
+`appendClaudeParticipantTranscriptEvents` (`source: "claude-cli"`), then recorded
+the result text again with the engine and model. The result repeats the last
+streamed message. Save handoff joins every assistant entry after the request, so it
+found two `vivary-handoff` blocks and refused. The maintained Core patch now puts
+the engine, model and effort on each streamed reply and records the result only
+when nothing streamed or the result differs from the last streamed message. Codex
+already recorded one event per message. Existing transcripts keep their pairs.
+`repeatsAssistantReply` in
+[`linked-history.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/linked-history.ts) is now the one
+rule for an exact repeat of the previous assistant event, with the same phase and
+item. `codeHistoryItems` keeps the later copy, so handoff, linked history and the
+quoted send block count each old reply once. The Code conversation view's existing
+dedupe in [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts)
+uses the same rule and stays for old transcripts. Content search in
+[`chat-content-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/chat-content-search.ts)
+reports the first copy only. Its search cursor carries the digest of the last
+assistant reply it read (`assistantReplyKey`), so a result page that ends between
+the two copies does not report the second one on the next page. Core's own display
+dedupe is unchanged. The linked
+history paragraph above now states the rule. `tests/claude-session-continuity.test.mjs`
+drives the real executor with an offline Claude CLI that repeats its last message as
+the result, and checks one stored event per reply, each with engine and model.
+`tests/handoff.test.ts`, `tests/linked-history.test.ts` and
+`tests/chat-content-search.test.ts` cover old transcripts with the repeated pair.
 
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime

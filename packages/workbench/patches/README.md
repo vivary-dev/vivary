@@ -11,6 +11,27 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude replies recorded once
+
+Claude Code streams each assistant message and then repeats the last one as its
+result text. Core recorded both, so every reply was stored twice. The patch puts
+the engine, model and effort on each streamed reply event and records the result
+only when nothing streamed or the result differs from the last streamed message.
+`tests/claude-session-continuity.test.mjs` covers a single reply, a reply after a
+tool call, and a result with no streamed text. Workbench readers treat an exact
+repeat in older transcripts as one reply.
+
+## Message display renderers
+
+`dist/client/chat/message-text-renderers.js` holds two display registries,
+exported from `@agent-native/core/client/chat`. `registerMarkdownFenceRenderer`
+renders a fenced code language in chat Markdown with an app component, and
+`registerUserMessageTextRenderer` renders a matching user message. The `pre`
+component in `markdown-renderer.js` and `UserMessageText` in
+`message-components.js` consult them before their defaults. Stored message text
+and clipboard copies are unchanged. Vivary registers the handoff request and
+reply renderers in `app/components/workspace/HandoffDisplay.tsx`.
+
 ## Claude launcher and provider errors
 
 The optional `claudeCli` executor options preserve the resolved executable,
