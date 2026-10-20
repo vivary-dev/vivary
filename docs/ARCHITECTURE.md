@@ -341,7 +341,7 @@ guarantee. [`code-run-capacity.ts`](../packages/workbench/server/code-run-capaci
 stores one host-wide Core setting, `vivary-code-run-capacity-v1`: a limit from 1
 to 16, default 3, and When full, Queue (the default) or Refuse. The default has
 not been validated as safe for any computer. Runtime settings show both, with the
-running, queued, and held counts. API chat has no coding worker and does not
+running, queued, and held counts, refreshed every second while the page is open. API chat has no coding worker and does not
 count. Same-project, shared-folder, and mixed-runtime concurrency are unchanged
 below the limit.
 

@@ -13,6 +13,7 @@ import * as esbuild from "esbuild";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKBENCH = resolve(HERE, "..");
 const CONTROL = join(WORKBENCH, "app", "components", "layout", "CodeRunControl.tsx");
+const SETTINGS = join(WORKBENCH, "app", "components", "settings", "LocalRuntimeSettings.tsx");
 const CORE = dirname(realpathSync(join(WORKBENCH, "node_modules", "@agent-native", "core", "package.json")));
 
 const stubs = new Map([
@@ -20,14 +21,20 @@ const stubs = new Map([
     import { useSyncExternalStore } from "react";
     let state = { data: undefined, error: null };
     const listeners = new Set();
-    export const hostProof = { set(data) { state = { data, error: null }; for (const listener of listeners) listener(); } };
-    export function useActionQuery() {
+    // The host strip reads the host state. Runtime settings reads other actions, which answer from byName.
+    export const hostProof = { queries: [], byName: new Map(),
+      set(data) { state = { data, error: null }; for (const listener of listeners) listener(); },
+      answer(name, data) { this.byName.set(name, data); state = { ...state }; for (const listener of listeners) listener(); } };
+    export function useActionQuery(name, params, options) {
+      hostProof.queries.push({ name, options });
       const current = useSyncExternalStore(listener => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       }, () => state);
-      return { ...current, refetch: async () => current };
+      const read = hostProof.byName.has(name) ? { data: hostProof.byName.get(name), error: null } : current;
+      return { ...read, isPending: false, refetch: async () => read };
     }
+    export async function callAction() { return {}; }
     export function actionErrorMessage(failure) { return failure?.message; }`],
   ["../../lib/native-actions", `
     export const callProof = { calls: [], answer: null };
@@ -49,7 +56,14 @@ const stubs = new Map([
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
       return <button ref={ref} type="button" {...props} />;
-    });`],
+    });
+    export function Badge({ variant, ...props }) { return <span {...props} />; }
+    export function Skeleton(props) { return <span {...props} />; }`],
+  ["@agent-native/core/client/settings", `
+    export function SettingsGroup({ title, children }) { return <section aria-label={title}>{children}</section>; }
+    export function SettingsRow({ label, children }) { return <div aria-label={label}>{children}</div>; }`],
+  ["@tabler/icons-react", `export function IconExternalLink() { return null; }
+    export function IconRefresh() { return null; }`],
 ]);
 
 const proofSource = String.raw`
@@ -57,6 +71,7 @@ import assert from "node:assert/strict";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { CodeRunControl } from "@proof/CodeRunControl";
+import { LocalRuntimeSettings } from "@proof/LocalRuntimeSettings";
 import { hostProof } from "@agent-native/core/client/hooks";
 import { callProof } from "../../lib/native-actions";
 import { folderProof } from "../projects/open-project-folder";
@@ -343,6 +358,30 @@ export async function useAnotherFolderOpensThePickerOnlyAfterTheCancel() {
   }
 }
 
+export async function runtimeSettingsCountsRefreshWhileOpen() {
+  hostProof.queries.length = 0;
+  hostProof.answer("vivary-runtime-status", { runtimes: [] });
+  hostProof.answer("vivary-code-permissions", { mode: "normal" });
+  hostProof.answer("vivary-code-capacity", { limit: 2, whenFull: "queue", running: 1, queued: 0, held: 0 });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => { root.render(<LocalRuntimeSettings />); });
+  const counts = () => [...host.querySelectorAll('[role="status"]')].map(item => item.textContent).find(text => / running, /.test(text));
+  try {
+    assert.equal(counts(), "1 running, 0 queued.");
+    const reads = hostProof.queries.filter(query => query.name === "vivary-code-capacity");
+    assert.ok(reads.length > 0);
+    assert.equal(reads.at(-1).options?.refetchInterval, 1000, "the counts refresh on the strip's interval while the page is open");
+    await act(async () => { hostProof.answer("vivary-code-capacity", { limit: 2, whenFull: "queue", running: 2, queued: 1, held: 1 }); });
+    assert.equal(counts(), "2 running, 1 queued, 1 waiting for you.");
+  } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    hostProof.byName.clear();
+  }
+}
+
 export async function aStoppingRunHoldsItsStopOnly() {
   const runs = [activeRun(CLAUDE_RUN, { stopping: true }), activeRun(CODEX_RUN, { engineLabel: "Codex CLI" })];
   const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
@@ -374,6 +413,7 @@ async function buildProof() {
       setup(build) {
         build.onResolve({ filter: /.*/ }, args => {
           if (args.path === "@proof/CodeRunControl") return { path: CONTROL };
+          if (args.path === "@proof/LocalRuntimeSettings") return { path: SETTINGS };
           if (stubs.has(args.path)) return { path: args.path, namespace: "stub" };
           return undefined;
         });
@@ -384,6 +424,7 @@ async function buildProof() {
   });
   const inputs = Object.keys(result.metafile.inputs).map(input => resolve(WORKBENCH, input));
   assert.ok(inputs.includes(CONTROL), "the proof bundles the real CodeRunControl");
+  assert.ok(inputs.includes(SETTINGS), "the proof bundles the real LocalRuntimeSettings");
   return result.outputFiles[0].text;
 }
 
@@ -425,6 +466,7 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
     ["queued conversations show the counts and their own Cancel, Start, and Proceed", proof.queuedConversationsShowCountsAndTheirOwnChoices],
+    ["Runtime settings refreshes the run counts while it is open", proof.runtimeSettingsCountsRefreshWhileOpen],
     ["Use another folder opens the folder picker only after the cancel succeeds", proof.useAnotherFolderOpensThePickerOnlyAfterTheCancel],
   ]) await t.test(name, () => run());
 });

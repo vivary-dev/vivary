@@ -62,7 +62,8 @@ export function LocalRuntimeSettings() {
     } catch (failure) { setRefreshError(actionErrorMessage(failure) ?? "Permissions could not be saved."); }
     finally { setSaving(false); }
   }
-  const capacity = useActionQuery<VivaryCodeCapacityView>("vivary-code-capacity", {}, { retry: false });
+  // The counts change as runs start, finish and queue, so they refresh on the agent work strip's interval.
+  const capacity = useActionQuery<VivaryCodeCapacityView>("vivary-code-capacity", {}, { retry: false, refetchInterval: 1000 });
   async function saveCapacity(next: CodeRunCapacity) {
     setSaving(true);
     setRefreshError(undefined);
