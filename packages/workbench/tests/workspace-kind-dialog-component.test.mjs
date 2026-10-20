@@ -148,7 +148,9 @@ test.beforeEach(() => {
     refresh: async () => { kindFixture.events.push(["refresh"]); } };
   kindFixture.queryClient = new module.exports.QueryClient();
 });
-test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+// Clearing the client removes its queries and their five-minute garbage collection timers, which
+// otherwise keep the test process running after the last test.
+test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); kindFixture.queryClient.clear(); });
 const settle = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
 const cards = () => [...host.querySelectorAll(".workspace-kind-card")];
 const props = (patch = {}) => ({ open: true, description: "Fixture description.",
