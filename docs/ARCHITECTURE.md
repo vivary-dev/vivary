@@ -360,7 +360,7 @@ acknowledgement does not cover moves it to `needs-confirmation`, with the
 owner's warning. Any other refusal moves it to `held` with its reason, so the
 message is never lost. Approvals and Stop stay per run.
 
-A host start never starts queued work. Every queued record becomes `held`
+A host start or shutdown never starts queued work. Every queued record becomes `held`
 (status `paused`, phase `held`), shown as Held after restart. The
 `vivary-code-queue` owner action starts a held turn, or with `proceed` accepts
 the agents working in its folder now. Both send the stored message again from
@@ -375,6 +375,7 @@ and `queuedRuns`, each with its `state`, host-wide `position`, `reason`, and
 `queuedAt`. A run summary carries `queue`. The agent work strip in
 [`CodeRunControl.tsx`](../packages/workbench/app/components/layout/CodeRunControl.tsx)
 shows the counts and each queued conversation with Cancel, Start for a held one,
+and lists a queued or held conversation there rather than as the recent run,
 and Proceed or Use another folder for one that needs confirmation. Use another
 folder cancels the message back into its draft and opens the folder picker.
 `tests/code-concurrency.test.ts` covers the queue with the IPC worker: first in,
@@ -967,7 +968,10 @@ and queued Cancel. The new section "Concurrent Code run limit" describes the
 setting, the claim, the queue record, the fresh checks before a queued turn
 starts, the owner actions, and the strip. `vivary-code-send` and the new
 `vivary-code-queue` build their send input in `code-send-input.ts`. The
-Concurrent Code conversations chart gains the queued states.
+Concurrent Code conversations chart gains the queued states. A review pass then
+stopped the queue from draining during shutdown, kept queued conversations out of
+the recent run, and gave `local-code-chat-adapter.ts` an optional `readState` so a
+test can show that a queued send keeps its turn open until the turn ends.
 
 2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
 conversation, so a later turn of an acknowledged conversation did not ask again.

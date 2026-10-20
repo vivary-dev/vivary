@@ -903,7 +903,8 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
     const run = ownedById.get(runId);
     return run ? [activeRunView(run, activeRun)] : [];
   });
-  const recent = owned.find(run => !activeRuns.has(run.id));
+  // A queued conversation is listed under the queue, not as the most recent finished run.
+  const recent = owned.find(run => !activeRuns.has(run.id) && !queuedTurnFor(run.id));
   return {
     activeRuns: active,
     recentRun: recent ? {
@@ -1998,9 +1999,11 @@ function takeQueuedSlot(item: QueuedTurn): void {
 /**
  * Starts queued turns, oldest first, while slots are free. A slot is reserved before the first await of the turn's
  * fresh checks, so a new send cannot take it meanwhile. Called when a run leaves, a turn is cancelled or started by the
- * owner, a start fails, or the limit changes. Never at host start, so a restart starts nothing on its own.
+ * owner, a start fails, or the limit changes. Never at host start or during shutdown, so neither starts queued work,
+ * and the next host start holds what is still queued.
  */
 function drainCodeRunQueue(): void {
+  if (hostState.closing) return;
   while (freeCodeRunSlots() > 0) {
     const next = hostState.queue.find(item => item.state === "queued" && item.input);
     if (!next?.input) return;

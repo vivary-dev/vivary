@@ -484,6 +484,7 @@ test("a restart holds the queue until the owner starts it", { timeout: 60_000, s
     const restarted = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
     assert.deepEqual(restarted.queuedRuns.map(run => [run.id, run.state, run.position, run.reason]),
       [[queued, "held", null, null]]);
+    assert.notEqual(restarted.recentRun?.id, queued, "a held conversation is listed under the queue, not as the recent run");
     assert.deepEqual([getCodeAgentRunRecord(queued)?.status, getCodeAgentRunRecord(queued)?.phase], ["paused", "held"]);
     await settle(runs[0]);
     await delay(250);
