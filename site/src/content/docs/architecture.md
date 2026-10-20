@@ -1068,6 +1068,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox Code creation needs a folder (W5b, review thread 4324883739). With Personal workspace as the
+destination from another project, Code conversation is offered only when Personal's folder resolves. Otherwise New
+conversation starts an API chat, matching the server, which lists only Personal API chats without a folder.
+Evidence inspected: the new component test.
+
 2026-10-20 Inbox archive rechecks after its write (W5b, review threads 4324883731 and 4325071865). Code and API
 chat archive run their refusal checks again after the write and undo the archive when work was admitted in
 between. The Conversation inbox section says so and names the remaining gap: sends do not read archive. Evidence

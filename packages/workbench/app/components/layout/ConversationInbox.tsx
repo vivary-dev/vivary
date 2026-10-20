@@ -343,6 +343,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
 
   const creatingNative = useRef(false);
   function newCode() {
+    if (!codeReady) return;
     if (elsewhere) return void shared.startIn(destinationId, "code");
     navigate("/?run=new&draft=" + crypto.randomUUID());
   }
@@ -378,7 +379,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     }
   }
   const params = new URLSearchParams(location.search);
-  const startDefault = () => params.get("runtime") === "native" && params.get("history") !== "unassigned"
+  const startDefault = () => !codeReady || (params.get("runtime") === "native" && params.get("history") !== "unassigned")
     ? void newNative() : newCode();
 
   const loading = checking || inbox.isPending;
@@ -388,6 +389,8 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     : search ? "No conversations match this search." : "No conversations yet. Start one with New conversation.";
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
   const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
+  // Code runs in a folder. Personal workspace may have none, and then only its API chats exist, as the server lists.
+  const codeReady = canStart && (!elsewhere || destinationId !== null || folder.data !== undefined);
   const section = useRef<HTMLElement>(null);
   const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
     // A section that loses its last row hands focus to New conversation, as the project history does.
@@ -405,7 +408,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
               <IconChevronDown size={14} aria-hidden /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={newCode}>Code conversation</DropdownMenuItem>
+            <DropdownMenuItem disabled={!codeReady} onSelect={newCode}>Code conversation</DropdownMenuItem>
             <DropdownMenuItem disabled={!elsewhere && !scope} onSelect={() => void newNative()}>API chat (separate billing)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

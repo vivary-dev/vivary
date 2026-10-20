@@ -172,6 +172,9 @@ test.beforeEach(() => {
     read: async (name, input) => {
       if (name === "vivary-conversation-inbox") return { rows: inboxFixture.rows, drafts: inboxFixture.serverDrafts ?? [],
         unavailableProjects: [], limited: inboxFixture.limited ?? false };
+      if (name === "vivary-project-location" && !input.projectId && inboxFixture.noPersonalFolder) {
+        throw new Error("Personal workspace has no folder.");
+      }
       if (name === "vivary-project-location") return { folderName: `${input.projectId ?? "home"}-folder`,
         path: `/work/${input.projectId ?? "home"}-folder` };
       throw new Error("Unexpected read " + name);
@@ -307,6 +310,22 @@ test("a filter chosen while the saved one loads stays chosen, and the last choic
   await act(async () => write.release());
   await settle();
   assert.deepEqual(inboxFixture.state.get(FILTER), { scopeKey: "scope", filter: "all" }, "the newest choice is saved last");
+});
+
+test("Personal workspace without a folder offers only API chat from another project", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+  inboxFixture.noPersonalFolder = true;
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  assert.equal(button("Code conversation").disabled, true, "Code needs Personal workspace's folder");
+  assert.equal(button("API chat (separate billing)").disabled, false);
+  await act(async () => button("New conversation").click());
+  await settle();
+  assert.equal(inboxFixture.active, null);
+  assert.doesNotMatch(route(), /run=new/, "no Code draft that cannot run");
+  assert.equal(route(), "?runtime=native&history=project&thread=new-native");
 });
 
 test("a saved project filter is restored after a restart, and a project that left the catalog lists everything", async () => {
