@@ -34,7 +34,8 @@ const stubs = new Map([
     const reader = (name, params) => ${fixture}.search(name, Object.fromEntries(params));
     export const useNativeActionReader = () => reader;`],
   ["@/lib/native-state", `export const useAppStateWriter = () => ({ ready: true,
-    writeAppState: async (key, value) => { ${fixture}.state.set(key, value); return value; } });`],
+    writeAppState: async (key, value) => { await ${fixture}.writeDelay?.(value);
+      ${fixture}.state.set(key, value); return value; } });`],
   ["@/lib/chat-draft", `export const useChatDraftList = scope => ({ data: { drafts: ${fixture}.drafts[scope.kind] ?? [] } });`],
   ["./use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: ${fixture}.identity() });`],
   ["@agent-native/core/client/agent-chat", `export const useChatThreads = () => ({ createThread: async () => "new-native",
@@ -42,7 +43,8 @@ const stubs = new Map([
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
   ["@agent-native/core/client/hooks", `import { useQuery } from "@tanstack/react-query";
     export const actionErrorMessage = failure => failure?.message;
-    export const readClientAppState = async key => ${fixture}.state.get(key) ?? null;
+    export const readClientAppState = async key => { const value = ${fixture}.state.get(key) ?? null;
+      await ${fixture}.readDelay; return value; };
     export function useActionQuery(name, input, options = {}) {
       return useQuery({ queryKey: ["action", name, input], queryFn: () => ${fixture}.read(name, input),
         enabled: options.enabled !== false, retry: false, staleTime: Infinity });
@@ -203,6 +205,12 @@ async function type(input, value) {
     input[Object.keys(input).find(key => key.startsWith("__reactProps$"))].onChange({ target: input });
   });
 }
+// A deferred answer the test releases after the owner has moved on.
+function gate() {
+  let release;
+  const wait = new Promise(resolve => { release = resolve; });
+  return { wait, release: () => release() };
+}
 async function chooseFilter(value) {
   const select = host.querySelector(".conversation-inbox__filter select");
   Object.defineProperty(select, "value", { value, configurable: true });
@@ -279,6 +287,23 @@ test("a deferred API chat is dropped when the owner selects another project befo
   await settle();
   assert.equal(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"), false, "the old request created nothing");
   assert.doesNotMatch(host.querySelector("#route").textContent, /thread=new-native/);
+});
+
+test("a filter chosen while the saved one loads stays chosen, and the last choice is the one saved", async () => {
+  const read = gate();
+  inboxFixture.readDelay = read.wait;
+  await render("/?run=a1");
+  await chooseFilter("beta");
+  await act(async () => read.release());
+  await settle();
+  assert.deepEqual(titles(), ["Review onboarding"], "the older saved filter does not come back");
+  const write = gate();
+  inboxFixture.writeDelay = value => value.filter === "personal" ? write.wait : undefined;
+  await chooseFilter("personal");
+  await chooseFilter("all");
+  await act(async () => write.release());
+  await settle();
+  assert.deepEqual(inboxFixture.state.get(FILTER), { scopeKey: "scope", filter: "all" }, "the newest choice is saved last");
 });
 
 test("a saved project filter is restored after a restart, and a project that left the catalog lists everything", async () => {
@@ -414,12 +439,6 @@ test("API chat rename and pin go through the owner action a private-proxy browse
   } finally { globalThis.fetch = realFetch; }
 });
 
-// A deferred answer the test releases after the owner has moved on.
-function gate() {
-  let release;
-  const wait = new Promise(resolve => { release = resolve; });
-  return { wait, release: () => release() };
-}
 const route = () => host.querySelector("#route").textContent;
 const openRow = id => act(async () => host.querySelector(`[data-row-id="${id}"]`).click());
 

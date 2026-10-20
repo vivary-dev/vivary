@@ -1064,6 +1064,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox filter ordering (W5b, review thread 4317666060). A filter chosen while the saved one loads
+cancels the load, and filter saves run one after another, so the newest choice is the one restored. No section
+changes, since the section already says the filter is saved. Evidence inspected: the new component test with a
+slow read and a slow first save.
+
 2026-10-20 Inbox Code archive closes the open conversation (W5b, review thread 4317586797). Archiving the open
 Code conversation closes its route, and opening an archived Code row restores it before it opens. The Conversation
 inbox section says so. Evidence inspected: the new component test.

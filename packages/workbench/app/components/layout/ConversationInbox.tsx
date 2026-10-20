@@ -99,6 +99,8 @@ export function inboxDraftRows(drafts: readonly InboxDraft[]): InboxListRow[] {
 function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) {
   const queryClient = useQueryClient();
   const { writeAppState, ready } = useAppStateWriter();
+  // Saves run one after another, so a slow earlier save never lands after a newer choice.
+  const saving = useRef<Promise<unknown>>(Promise.resolve());
   const saved = useQuery({
     queryKey: [FILTER_KEY, scopeKey], enabled: scopeKey !== null, retry: false, staleTime: Infinity,
     queryFn: async ({ signal }) => {
@@ -111,9 +113,14 @@ function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) 
   const filter: InboxFilter = stored === ALL_PROJECTS || stored === PERSONAL || projectIds.includes(stored)
     ? stored : ALL_PROJECTS;
   async function setFilter(next: InboxFilter) {
+    // A choice made while the saved filter still loads wins, so the load is cancelled rather than applied after it.
+    void queryClient.cancelQueries({ queryKey: [FILTER_KEY, scopeKey] });
     queryClient.setQueryData([FILTER_KEY, scopeKey], next);
     // The filter is a view preference. A failed save keeps the shown filter and retries on the next change.
-    if (ready && scopeKey) await writeAppState(FILTER_KEY, { scopeKey, filter: next }).catch(() => {});
+    if (!ready || !scopeKey) return;
+    const save = saving.current.then(() => writeAppState(FILTER_KEY, { scopeKey, filter: next })).catch(() => {});
+    saving.current = save;
+    await save;
   }
   return { filter, setFilter };
 }
