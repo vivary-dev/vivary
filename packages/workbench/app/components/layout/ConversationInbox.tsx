@@ -382,6 +382,10 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     ? void newNative() : newCode();
 
   const loading = checking || inbox.isPending;
+  // The empty message speaks for the whole inbox, so it waits while drafts or archived rows match, and the load error
+  // already says why nothing is listed.
+  const emptyLabel = inbox.isError || drafts.length || visible.archived.length ? ""
+    : search ? "No conversations match this search." : "No conversations yet. Start one with New conversation.";
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
   const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
   const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
@@ -458,8 +462,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     </section>}
     {loading ? <div className="vivary-history-skeleton" role="status"><span className="sr-only">Opening conversations</span>
       <span /><span /><span /></div>
-      : <InboxList label="Conversations" rows={visible.active} {...listProps}
-        emptyLabel={search ? "No conversations match this search." : "No conversations yet. Start one with New conversation."} />}
+      : <InboxList label="Conversations" rows={visible.active} {...listProps} emptyLabel={emptyLabel} />}
     {visible.archived.length > 0 && <details className="conversation-inbox__archived">
       <summary>Archived ({visible.archived.length})</summary>
       <InboxList label="Archived conversations" rows={visible.archived} {...listProps} emptyLabel="" />

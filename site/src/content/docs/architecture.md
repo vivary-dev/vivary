@@ -1064,6 +1064,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox empty message (W5b, review thread 4319908314). The empty message now waits while a draft or
+archived row matches, and never follows the load error. Evidence inspected: the new component test with only an
+archived match and with a failed inbox read.
+
 2026-10-20 Inbox message search follows project access (W5b, review thread 4319908334). The search key now
 holds the catalog scope, its policy revision and each project's binding revision, so a rebinding or grant change
 starts message search again and drops hits from the old binding. Evidence inspected: the new component test.

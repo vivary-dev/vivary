@@ -334,6 +334,23 @@ test("search filters by title and archived conversations stay in a collapsed sec
   assert.deepEqual(titles(archived.querySelector("ul")), ["Finished cleanup"]);
 });
 
+test("the empty message appears only when no section has a matching row, and never beside a load error", async () => {
+  inboxFixture.rows = [row("code:a4", "alpha", "Finished cleanup", 20, { archived: true })];
+  await render("/?run=a1");
+  assert.ok(host.querySelector(".conversation-inbox__archived"), "the archived match is listed");
+  assert.equal(host.querySelector(".conversation-inbox__empty")?.textContent, undefined, "so the inbox does not claim to be empty");
+  await act(async () => root.unmount());
+  inboxFixture.client.clear();
+  root = createRoot(host);
+  const read = inboxFixture.read;
+  inboxFixture.read = async (name, input) => name === "vivary-conversation-inbox"
+    ? Promise.reject(new Error("The server is down.")) : read(name, input);
+  await render("/?run=a1");
+  assert.match(host.querySelector('[role="alert"]').textContent, /could not be loaded/);
+  assert.equal(host.querySelector(".conversation-inbox__empty")?.textContent, undefined,
+    "the error is not followed by a claim of no history");
+});
+
 test("each state is text with an icon, idle shows none, and no state is a live region", async () => {
   await render();
   await chooseFilter("all");
@@ -665,7 +682,7 @@ test("message search reads past the first page and offers Search more while matc
   await settle();
   assert.deepEqual(hitTitles().sort(), ["Session a1", "Session a3", "Session n9"]);
   assert.match(messages(), /3 matching messages\./);
-  assert.equal(button("Search more"), undefined, "nothing remains to search");
+  assert.equal(button("Search more")?.textContent, undefined, "nothing remains to search");
   assert.deepEqual(inboxFixture.searches.map(search => search.params.after ?? null), [null, "c1", "c2"]);
 });
 
