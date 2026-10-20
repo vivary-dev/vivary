@@ -1054,6 +1054,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox timestamps from numeric strings (W5b, review thread 4317666066). The inbox reads a numeric
+string time, as a Postgres driver returns a `BIGINT`, as epoch milliseconds instead of a date string. No section
+changes, since the section already describes epoch ordering. Evidence inspected: the new server test.
+
 2026-10-20 Inbox Code archive and legacy drafts (W5b, review thread 4321225650). Code archive finds a pending
 send through `linkedCodeDraftRuns`, the same link that marks the row Review send, so an older run whose draft ID
 is only in its transcript is not archived. Evidence inspected: the new server test with a transcript-only draft ID.

@@ -371,3 +371,12 @@ test("Code archive resolves a legacy draft ID from the transcript, so a row show
     (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /still being sent/.test(error.message));
   assert.equal(getCodeAgentRunRecord("legacy-draft")?.metadata?.archivedAt, undefined, "nothing was archived");
 });
+
+test("database timestamps read as epoch milliseconds whether the driver returns numbers or numeric strings", () => {
+  assert.equal(inbox.epochMilliseconds(1_700_000_000_000), 1_700_000_000_000);
+  assert.equal(inbox.epochMilliseconds("1700000000000"), 1_700_000_000_000, "a Postgres BIGINT string is not a date string");
+  assert.equal(inbox.epochMilliseconds("2024"), 2024, "a short numeric string is not a calendar year");
+  assert.equal(inbox.epochMilliseconds("2026-10-20T00:00:00.000Z"), Date.parse("2026-10-20T00:00:00.000Z"));
+  assert.equal(inbox.epochMilliseconds(null), 0);
+  assert.equal(inbox.epochMilliseconds("not a time"), 0);
+});

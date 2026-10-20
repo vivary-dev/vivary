@@ -104,8 +104,8 @@ export function compareInboxRows(left: InboxRow, right: InboxRow): number {
 export function codeAttention(run: Pick<CodeAgentRunRecord, "status" | "updatedAt">, active: VivaryCodeActiveRun | undefined,
   now = Date.now()): InboxAttention {
   if (active) return active.pendingApprovals.length ? "needs-approval" : active.stopping ? "stopping" : "running";
-  if (run.status === "errored") return recentResult("failed", timestamp(run.updatedAt), now);
-  if (run.status === "completed") return recentResult("completed", timestamp(run.updatedAt), now);
+  if (run.status === "errored") return recentResult("failed", epochMilliseconds(run.updatedAt), now);
+  if (run.status === "completed") return recentResult("completed", epochMilliseconds(run.updatedAt), now);
   return "idle";
 }
 
@@ -117,8 +117,13 @@ export function nativeAttention(latest: { status: string; endedAt: number } | un
   return "idle";
 }
 
-function timestamp(value: unknown): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : Number.NaN;
+/**
+ * A stored time as milliseconds since the epoch. Native's columns hold epoch numbers, which some drivers (Postgres
+ * `BIGINT`) return as numeric strings, and Code records hold ISO strings. A numeric string is a number, never a date.
+ */
+export function epochMilliseconds(value: unknown): number {
+  const parsed = typeof value === "number" ? value : typeof value !== "string" ? Number.NaN
+    : /^\d+$/.test(value.trim()) ? Number(value) : Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -138,7 +143,7 @@ export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; owne
     if (!scope || !isOwnedRun(run, input.ownerEmail, input.orgId, scope)) return [];
     return [{
       id: `code:${run.id}`, kind: "code" as const, projectId, projectLabel: project?.label ?? PERSONAL_LABEL,
-      title: run.title || "Untitled conversation", createdAt: timestamp(run.createdAt), updatedAt: timestamp(run.updatedAt),
+      title: run.title || "Untitled conversation", createdAt: epochMilliseconds(run.createdAt), updatedAt: epochMilliseconds(run.updatedAt),
       runtime: engineLabelFromRun(run), model: modelFromRun(run),
       pinned: typeof run.metadata?.pinnedAt === "string", archived: typeof run.metadata?.archivedAt === "string",
       attention: codeAttention(run, active.get(run.id), input.now), nativeScopeId: null, draft: null,
@@ -177,7 +182,7 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
   const latest = new Map<string, { status: string; endedAt: number }>();
   for (const run of runs.rows) {
     const threadId = String(run.thread_id);
-    if (!latest.has(threadId)) latest.set(threadId, { status: String(run.status), endedAt: timestamp(run.ended_at) });
+    if (!latest.has(threadId)) latest.set(threadId, { status: String(run.status), endedAt: epochMilliseconds(run.ended_at) });
   }
   const rows = (threads.rows.slice(0, MAX_NATIVE_ROWS) as NativeRow[]).flatMap(thread => {
     const scope = input.scopes.get(String(thread.scope_id));
@@ -186,7 +191,7 @@ export async function readNativeRows(input: { ownerEmail: string; orgId: string;
     return [{
       id: `native:${id}`, kind: "native" as const, projectId: scope.projectId, projectLabel: scope.label,
       title: String(thread.title || thread.preview || "") || "Untitled conversation",
-      createdAt: timestamp(thread.created_at), updatedAt: timestamp(thread.updated_at), runtime: null, model: null,
+      createdAt: epochMilliseconds(thread.created_at), updatedAt: epochMilliseconds(thread.updated_at), runtime: null, model: null,
       pinned: thread.pinned_at != null, archived: thread.archived_at != null, attention: nativeAttention(latest.get(id), input.now),
       nativeScopeId: String(thread.scope_id), draft: null,
     }];
