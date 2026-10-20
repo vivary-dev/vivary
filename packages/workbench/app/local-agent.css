@@ -1,7 +1,9 @@
 .local-agent-page { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .local-agent-header { min-height: 64px; display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); gap: 16px; }
 .local-agent-heading { flex: 1; min-width: 0; }
-.local-agent-heading h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+/* Code and API chat titles are h2, older headers h1. Each keeps one line and truncates wherever the header is used. */
+.local-agent-heading :is(h1, h2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-agent-heading h1 { font-size: 14px; font-weight: 600; }
 .local-agent-heading p { color: hsl(var(--muted-foreground)); font-size: 12px; margin-top: 3px; }
 .local-agent-header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .local-agent-history { width: min(380px, calc(100vw - 24px)); padding: 0; }

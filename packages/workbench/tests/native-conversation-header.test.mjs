@@ -121,3 +121,10 @@ test("a thread outside the loaded list page, opened from search or a link, shows
   assert.equal(heading().textContent, "New conversation", "a thread the host cannot read falls back");
 });
 
+test("the shared header stylesheet truncates the h2 title to one line, not only an h1", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../app/local-agent.css", import.meta.url), "utf8");
+  const rule = /\.local-agent-heading :is\(h1, h2\) \{([^}]*)\}/.exec(css);
+  assert.ok(rule, "one base rule names both heading levels");
+  for (const declaration of ["overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"]) assert.ok(rule[1].includes(declaration), declaration);
+});

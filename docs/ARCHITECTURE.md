@@ -926,7 +926,8 @@ It reads the same scoped `useChatThreads` list as the history and refreshes on
 `agent-chat:threads-updated`, so a rename or switch shows at once. It adds no title
 store. A thread outside the history's loaded page, such as one opened from search
 or a link, is read directly by its ID through Core's thread read, so its header
-names it too. No server, action or storage contract changed. Evidence:
+names it too. The shared header stylesheet keeps an h2 title on one line, as it
+does an h1. No server, action or storage contract changed. Evidence:
 `tests/native-chat-components.test.mjs` drives the picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
 opens a linked conversation from the header action, and a headless Chrome run of
 the built app on the server measured 90 layouts (three window sizes, three zooms,
