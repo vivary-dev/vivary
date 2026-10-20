@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync, realpathSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -68,6 +70,7 @@ import { getRunErrorMetadata, RunErrorRecoveryCard } from "@proof/run-recovery";
 import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
 import { AssistantRuntimeProvider, ThreadPrimitive, useLocalRuntime } from "@assistant-ui/react";
+import { isCodeAgentRunActive } from "@agent-native/core/client/agent-chat";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { TiptapComposer } from "@proof/tiptap-composer";
@@ -122,7 +125,7 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
 
 // A retained Code conversation with both runtimes ready, driven through its selectors and switch panel.
 export async function renderCodeSwitch({ running = false, otherActive = false, viewingMatch = false, events = [], refuse,
-  pendingSwitch = null } = {}) {
+  pendingSwitch = null, recordSend = false } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const version = "2.1.300";
   const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
@@ -137,10 +140,22 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
   let settled = 0;
   let run = { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
     status: running ? "running" : "completed", phase: running ? "running" : "complete", pendingSwitch };
+  const originalFetch = globalThis.fetch;
+  if (recordSend) globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    // The real Code adapter reads the retained run before sending a follow-up. Answer only that read here.
+    if (url.pathname.endsWith("/vivary-code-state")) return Response.json({ projectId: null, run });
+    return originalFetch(input, init);
+  };
   globalThis.codeActionFixture = async (name, params) => {
     // Linked history and handoff controls read their own actions on mount. They stay refused, as in the other cases.
-    if (name !== "vivary-code-switch" && name !== "vivary-code-stop") throw new Error("No Code action expected");
+    if (name !== "vivary-code-switch" && name !== "vivary-code-stop" && !(recordSend && name === "vivary-code-send")) {
+      throw new Error("No Code action expected");
+    }
     calls.push({ name, params });
+    // Record the actual component/composer/adapter submission. A returned refusal gives Native a terminal error
+    // result without throwing into the async composer callback, appending a transcript, or doing provider work.
+    if (name === "vivary-code-send") return { projectId: null, run: null, error: "Synthetic recorded-send refusal" };
     if (refuse && name === "vivary-code-switch") throw Object.assign(new Error(refuse), { errorCode: "vivary_code_switch_run_stopping" });
     return { run };
   };
@@ -149,7 +164,7 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
   const element = () => <QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation state={state}
     selection={{ key: "retained-run", runId: "retained-run" }} ownerKey="fixture-owner" projectId={null} workspaceAvailable
     previewScope="fixture" viewingMatch={viewingMatch} notices={notices} busyNoticeId={otherActive ? "fixture-busy-notice" : undefined}
-    active={running || otherActive} streaming={false} stopping={false} run={run}
+    active={isCodeAgentRunActive(run) || otherActive} streaming={false} stopping={run.phase === "stopping"} run={run}
     onChoice={choice => choices.push(choice)} onStarted={() => {}} onStreaming={() => {}} onSettled={() => { settled += 1; }}
     onStop={async () => false} onSettings={() => {}} /></MemoryRouter></QueryClientProvider>;
   const view = await mount(element());
@@ -157,14 +172,37 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
   await settle();
   const control = label => view.host.querySelector('[aria-label="' + label + '"]');
   const panel = () => view.host.querySelector('[aria-label="Switch runtime or model"]');
+  const sendButton = () => view.host.querySelector('[data-agent-composer-slot="send-button"]');
   return {
     calls, choices, get settled() { return settled; },
     text: () => view.host.textContent,
     panel: () => panel()?.textContent ?? null,
+    panelMessage: () => panel()?.querySelector("span")?.textContent ?? null,
     buttons: () => [...(panel()?.querySelectorAll("button") ?? [])].map(button => button.textContent),
     disabled: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.disabled),
     describedBy: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.getAttribute("aria-describedby") ?? null),
     options: label => [...control(label).querySelectorAll("option")].map(option => option.getAttribute("value")),
+    route: () => ({ engine: control("Conversation runtime")?.value, model: control("Conversation model")?.value }),
+    draft: () => view.host.querySelector(".ProseMirror")?.textContent ?? null,
+    sendDisabled: () => sendButton()?.disabled ?? null,
+    async prefill() {
+      const example = [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change");
+      if (!example || example.disabled) throw new Error("native runtime did not enable the composer");
+      await act(async () => { example.dispatchEvent(new window.Event("click", { bubbles: true })); });
+      await settle();
+    },
+    async send() {
+      const button = sendButton();
+      if (!button || button.disabled) throw new Error("No enabled native Send button");
+      const before = settled;
+      await act(async () => { button.dispatchEvent(new window.Event("click", { bubbles: true })); });
+      await act(async () => {
+        for (let i = 0; i < 100 && settled === before; i++) await new Promise(resolve => setTimeout(resolve, 10));
+      });
+      if (settled === before || !calls.some(call => call.name === "vivary-code-send")) {
+        throw new Error("enabled native Send did not reach and settle the real Code adapter within one second");
+      }
+    },
     async choose(label, value) {
       const select = control(label);
       Object.defineProperty(select, "value", { value, configurable: true });
@@ -183,7 +221,12 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
       await act(async () => { view.root.render(element()); });
       await settle();
     },
-    async unmount() { await view.unmount(); client.clear(); delete globalThis.codeActionFixture; },
+    async unmount() {
+      try { await view.unmount(); } finally {
+        client.clear(); delete globalThis.codeActionFixture;
+        if (recordSend) globalThis.fetch = originalFetch;
+      }
+    },
   };
 }
 
@@ -774,8 +817,13 @@ function installSelectionServer(rows) {
 test("Native chat controls", async t => {
   // Tiptap reads the DOM when its module loads, so the DOM goes in first.
   const closeChannels = installDom();
-  const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
+  const proofDirectory = await mkdtemp(join(tmpdir(), "vivary-native-chat-proof-"));
+  t.after(() => rm(proofDirectory, { recursive: true, force: true }));
+  const proofFile = join(proofDirectory, "native-chat-proof.mjs");
+  await writeFile(proofFile, await buildProof(), "utf8");
+  // The same bundle gets an ordinary filename, so unexpected error stacks cannot include its entire data URL.
+  const proof = await import(pathToFileURL(proofFile).href);
 
   await t.test("the Workbench selectors render inside the actual composer before Send, with notices outside", async () => {
     const server = installChatServer();
@@ -900,6 +948,77 @@ test("Native chat controls", async t => {
     } finally { await view.unmount(); server(); }
   });
 
+  await t.test("cancelling a route choice preserves the native draft and Send submits the current route", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch({ recordSend: true });
+    try {
+      await view.prefill();
+      const draft = view.draft();
+      assert.match(draft ?? "", /Read README\.md/);
+      assert.equal(view.sendDisabled(), false, "a real draft enables the installed composer");
+      const current = view.route();
+      assert.deepEqual(current, { engine: "claude-cli", model: "claude-sonnet-5-5" });
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Cancel");
+      assert.equal(view.panel(), null);
+      assert.deepEqual(view.route(), current);
+      assert.equal(view.draft(), draft, "Cancel preserves the composed text");
+      await view.choose("Conversation model", "claude-opus-5-5");
+      await view.choose("Conversation model", current.model);
+      assert.equal(view.panel(), null);
+      assert.equal(view.draft(), draft, "returning to the current model preserves the draft");
+      assert.deepEqual([view.calls, view.choices], [[], []], "unconfirmed choices perform no action or saved choice change");
+      await view.send();
+      assert.equal(view.calls.length, 1, "one real adapter submission");
+      assert.equal(view.calls[0].name, "vivary-code-send");
+      assert.deepEqual({ engine: view.calls[0].params.engine, model: view.calls[0].params.model }, current);
+      assert.equal(view.calls[0].params.runId, "retained-run");
+      assert.equal(view.calls[0].params.message, draft);
+    } finally { await view.unmount(); server(); }
+  });
+
+  for (const change of [
+    { label: "runtime", control: "Conversation runtime", value: "codex-cli", target: { engine: "codex-cli", model: "gpt-fixture" } },
+    { label: "model", control: "Conversation model", value: "claude-opus-5-5", target: { engine: "claude-cli", model: "claude-opus-5-5" } },
+  ]) {
+    await t.test(`a pending ${change.label} choice cannot leave enabled Send using the previous route`, { timeout: 10_000 }, async () => {
+      const server = installChatServer();
+      const view = await proof.renderCodeSwitch({ recordSend: true });
+      try {
+        await view.prefill();
+        const draft = view.draft();
+        assert.match(draft ?? "", /Read README\.md/);
+        assert.equal(view.sendDisabled(), false, "the composer starts enabled with a real draft");
+        await view.choose(change.control, change.value);
+        assert.match(view.panel() ?? "", /^Switch this conversation from /);
+        assert.deepEqual(view.route(), change.target, "the selectors visibly show the target");
+        assert.equal(view.draft(), draft, "choosing a route preserves the draft");
+        assert.deepEqual([view.calls, view.choices], [[], []], "showing a target authorizes no action");
+        assert.equal(typeof view.sendDisabled(), "boolean", "the real native Send control exists");
+        if (view.sendDisabled()) {
+          // A confirmation may disable Send. Cancelling must restore it with the same draft and original choice.
+          await view.click("Cancel");
+          assert.equal(view.panel(), null);
+          assert.deepEqual(view.route(), { engine: "claude-cli", model: "claude-sonnet-5-5" });
+          assert.equal(view.draft(), draft);
+          assert.equal(view.sendDisabled(), false);
+          assert.deepEqual([view.calls, view.choices], [[], []]);
+        }
+        const visibleAtSend = view.route();
+        // Click the installed composer's Send. The actual local adapter reaches the recorder and gets an inert
+        // returned refusal. This exercises route submission, not thrown pre-append rejection handling.
+        await view.send();
+        assert.equal(view.calls.length, 1, "one real adapter submission and no premature switch");
+        assert.equal(view.calls[0].name, "vivary-code-send");
+        const submitted = view.calls[0].params;
+        assert.deepEqual({ engine: submitted.engine, model: submitted.model }, visibleAtSend,
+          "enabled Send must use the runtime and model the selectors show");
+        assert.equal(submitted.runId, "retained-run");
+        assert.equal(submitted.message, draft);
+      } finally { await view.unmount(); server(); }
+    });
+  }
+
   await t.test("while this conversation works, Wait does nothing and Stop and switch confirms, then hands the switch to the host", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
@@ -949,6 +1068,53 @@ test("Native chat controls", async t => {
       await view.update({ status: "completed", phase: "complete" });
       assert.match(view.panel(), /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
       assert.deepEqual(view.calls, []);
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("a finished turn clears its Stop confirmation before another turn starts", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch({ running: true });
+    try {
+      await view.choose("Conversation model", "claude-opus-5-5");
+      await view.click("Stop and switch");
+      assert.match(view.panel() ?? "", /^Stop and switch to Claude Code Opus 5\.5\?/);
+      await view.update({ status: "completed", phase: "complete" });
+      assert.match(view.panel() ?? "", /^Switch this conversation from Claude Code Sonnet 5\.5 to Claude Code Opus 5\.5\?/);
+      assert.deepEqual(view.buttons(), ["Switch", "Cancel"]);
+      await view.update({ status: "running", phase: "running" });
+      assert.match(view.panel() ?? "", /^This conversation is working\./);
+      assert.deepEqual(view.buttons(), ["Wait", "Stop and switch"], "the next turn needs a new Stop choice");
+      assert.deepEqual([view.calls, view.choices], [[], []], "polling never confirms a switch");
+      await view.click("Wait");
+      assert.equal(view.panel(), null);
+      assert.deepEqual([view.calls, view.choices], [[], []], "Wait leaves the current route alone");
+    } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("a turn that starts during an idle choice changes the legal confirmation actions", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const view = await proof.renderCodeSwitch();
+    try {
+      await view.choose("Conversation runtime", "codex-cli");
+      assert.match(view.panel() ?? "", /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
+      assert.deepEqual(view.buttons(), ["Switch", "Cancel"]);
+      // Polling can reveal a turn started by another window after the owner made this choice.
+      await view.update({ status: "running", phase: "running" });
+      assert.equal(view.panelMessage(), "This conversation is working. Wait for the current request to finish, or stop it and switch to "
+        + "Codex GPT Fixture.");
+      assert.deepEqual(view.buttons(), ["Wait", "Stop and switch"], "an idle Switch is no longer legal");
+      assert.deepEqual([view.calls, view.choices], [[], []], "polling changes disclosure without issuing an action");
+      await view.click("Wait");
+      assert.equal(view.panel(), null);
+      assert.deepEqual(view.route(), { engine: "claude-cli", model: "claude-sonnet-5-5" });
+      assert.deepEqual([view.calls, view.choices], [[], []], "Wait leaves the running route alone");
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Stop and switch");
+      assert.match(view.panel() ?? "", /^Stop and switch to Codex GPT Fixture\? The current request will be cancelled\./);
+      assert.deepEqual(view.calls, [], "stopping requires its own confirmation");
+      await view.click("Stop and switch");
+      assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
+        params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture", stop: true } }]);
     } finally { await view.unmount(); server(); }
   });
 

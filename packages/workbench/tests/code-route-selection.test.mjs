@@ -68,6 +68,11 @@ function fixture() {
     requestUserStop: (runId, active) => { stops.push(runId); active.stopReason ??= "user"; },
     recordProjectContextLoad() { writes.push("context"); },
     activeRuns, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
+    // This slice stubs the collection boundary; local-code-cleanup-refusal.test.ts exercises its real store and parser.
+    cleanupRefusalsInForce: () => [
+      ...(hostState.cleanup ? [hostState.cleanup] : []),
+      ...[...records.values()].filter(run => run.metadata?.cleanupRefusal).map(run => ({ runId: run.id })),
+    ],
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };

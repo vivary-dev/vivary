@@ -155,7 +155,13 @@ with the same project resolution a send uses.
 The switch refuses while this conversation's run is active
 (`vivary_code_switch_run_active`), while it is stopping
 (`vivary_code_switch_run_stopping`), and while a cleanup refusal names it
-(`vivary_code_cleanup_required`). Another conversation's active run does not
+(`vivary_code_cleanup_required`). Switch admission and pending application find
+this run's refusal in `cleanupRefusalsInForce`, the canonical collection that also
+supplies the host strip. It includes parsed persisted refusals and legacy
+`cleanupUnverified` markers, with unsaved failed-write refusals taking precedence
+for their run. A different run in the strip's oldest slot cannot hide the target
+run's refusal. A refused immediate switch writes no route, session, or transcript
+change. Another conversation's active run does not
 block it, because a switch only edits this run's record. The target runtime must
 be ready, and the target model must be one that runtime lists now: a Claude Code
 catalog ID the installed version supports, or a model from Codex's live
@@ -181,8 +187,10 @@ run was stopping applies the target when the next host start marks the run
 interrupted. A host that ended after it saved the stopped state, but before it
 applied the target, leaves a settled record with `pendingSwitch`. The next host
 start applies that target too, under the same cleanup refusal check, so the
-selectors and composer do not stay locked. A run that ends under a cleanup refusal keeps its route, and a
-transcript note says the switch did not happen. A run that already ended when
+selectors and composer do not stay locked. A run that ends under a cleanup refusal
+keeps its route, provider-session IDs, and earlier transcript entries. Pending
+application consumes the target and appends a note saying the switch did not
+happen, under the same per-run refusal lookup. A run that already ended when
 the request arrives switches at once. When the run already has the target route,
 because another window switched it and started a turn, Stop and switch still stops
 the run and records no switch, since the owner confirmed that Stop.
@@ -215,14 +223,24 @@ After the new session's first turn, follow-ups resume that session as before.
 
 In the composer, choosing another runtime or model on an idle retained
 conversation shows a short confirm that states what transfers. Switch calls the
-action, and the selectors then show the new route. While this conversation's run
-works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
-switch asks again and says the current request will be cancelled and completed
-work stays. Confirming sends one `vivary-code-switch` request with `stop`, and the
-composer then shows the recorded target until the host applies it. Leaving or
-reloading the view does not cancel the switch. If the turn finishes during the choice, the plain
-confirm replaces it. A refused switch keeps the route and shows the server's
-reason. The [journeys state chart](product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
+action, and the run then uses the new route. Before confirmation, the selectors
+show the chosen target while Native's existing composer gate pauses editing and
+Send. The mounted composer keeps the typed draft. Choosing a target changes
+neither the saved route nor the adapter's route. Cancel leaves the current route
+and draft intact, and the composer resumes subject to the existing run and
+readiness gates. The selectors remain available to change or cancel the choice.
+
+The panel derives its legal actions from the latest observed phase of this
+conversation's run on every render. A turn that starts while an idle choice is
+open replaces Switch and Cancel with Wait and Stop and switch. Wait changes
+nothing. Stop and switch asks again and says the current request will be
+cancelled and completed work stays. If the turn finishes while either working
+panel is open, the plain confirm replaces it. A Stop confirmation belongs only to
+that turn, so a later turn needs a new Stop choice. Confirming Stop and switch
+sends one `vivary-code-switch` request with `stop`, and the composer then shows
+the recorded target until the host applies it. Leaving or reloading the view
+does not cancel the recorded switch. A refused switch keeps the route and shows
+the server's reason. The [journeys state chart](product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
 draws these states. A linked conversation, described next, remains the way to
 continue in a separate conversation that keeps the source unchanged.
 
@@ -805,6 +823,54 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Target cleanup refusal lookup and confirmation behavior for PR #258.
+An old-code run against
+`ef05b753` completed the six cases in `local-code-cleanup-refusal.test.ts` with two
+passes and four assertion failures. The persisted-refusal controls passed, but
+legacy markers and memory-only failed-write refusals behind another run's oldest
+cleanup slot let both direct switching and pending host-start application change
+the route. Pending application also cleared the prior provider-session ID.
+Both paths now consult the existing canonical refusal collection for the target
+run, preserving its legacy parser and unsaved-over-persisted precedence. The
+switch section records the unchanged-route/session contract and the pending
+target's dropped-switch note. The coordinator then passed all 31 cleanup tests,
+including those four regressions, all 20 route-selection tests, and typecheck
+with the backend repair before the UI changes below.
+
+The component proof now returns an inert recorded-send refusal through the real
+adapter's terminal-error result and imports the same bundle from a temporary
+file, keeping unexpected stack filenames bounded. This does not test thrown
+pre-append rejection handling. Against production UI and adapter files identical
+to `ef05b753`, the corrected suite completed with 40 passes and three failing
+child assertions plus their parent failure. The failures showed both pending
+runtime and model targets sending through the previous route, and a newly active
+run retaining the idle confirmation. The cancellation/draft and working
+Wait/Stop controls passed, classifying the earlier Stop failure as fixture
+fallout.
+
+`LocalCodeConversation` now derives the confirmation actions from the latest run
+phase in both directions and clears a Stop confirmation after its turn ends.
+The existing composer gate blocks Send and pauses editing while a target is
+unconfirmed, preserving the mounted draft and leaving selectors and confirmation
+buttons available. The actual composer/adapter route assertions remain intact.
+One added lifecycle case checks that a finished turn's Stop confirmation cannot
+authorize stopping a later turn.
+
+The first combined component/model run with `tsx` reported 46 passes and two
+failures, including a file abort at the unchanged 1 GiB V8 heap limit. One
+assertion had read the whole panel text, including button labels, instead of its
+message span. After that minimal assertion correction, the direct Node component
+suite passed 45/45 without the extra `tsx` loader. Exact message and legal action
+assertions remain intact. The separate model-choice suite passed 8/8 with `tsx`
+for extensionless TypeScript imports. This sequence does not establish the
+loader as the sole cause of the heap abort. The coordinator also recorded 10/10
+test preflight and passing typecheck on the prepared product source.
+
+Full server CI against the integrated head and required final reviews remain
+pending. Real provider switching, screenshots, installed Windows acceptance with
+preserved profiles, and production release remain unrun. Dev integration and the
+PR merge require separate approval.
 
 2026-10-20 Codex review fixes for PR #258 at `8d359579`. Stop and switch to the
 route a run already has returned before requesting Stop, so a stale window's

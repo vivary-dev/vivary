@@ -504,7 +504,7 @@ function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, mode
 }
 
 /** A runtime or model the owner chose for a retained conversation, waiting on a confirm or on its run to stop. */
-type PendingSwitch = ModelChoice & { step: "confirm" | "working" | "confirm-stop" | "stopping" | "switching" };
+type PendingSwitch = ModelChoice & { step: "confirm" | "confirm-stop" | "stopping" | "switching" };
 
 const SWITCH_TRANSFER = "The new session gets the visible conversation text, up to the last 24 messages. "
   + "Tool output and the previous runtime's private session do not transfer.";
@@ -582,7 +582,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const [switchError, setSwitchError] = useState<string>();
   const shown = pendingSwitch ?? choice;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
-  const runWorking = props.streaming || (!!props.run && isCodeAgentRunActive(props.run));
+  const runWorking = props.streaming || (!!props.run && (isCodeAgentRunActive(props.run) || props.run.phase === "stopping"));
+  // Polling can start or settle a turn while a choice is open. Derive its legal actions on every render.
+  const switchStep = pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
+    : pendingSwitch?.step === "confirm-stop" && !runWorking ? "confirm" : pendingSwitch?.step;
 
   const createAdapter = useCallback<NonNullable<AssistantChatProps["createAdapter"]>>(context =>
     createLocalCodeChatAdapter({
@@ -658,9 +661,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     && events.findLast(event => event.kind === "status")?.metadata?.reason === "user";
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
+  // Selectors show the unconfirmed target. Keep the draft, but pause the composer until the choice is resolved.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
     || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable
-    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || !!props.run?.pendingSwitch;
+    || !!pendingSwitch || !!props.run?.pendingSwitch;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -686,7 +690,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return;
     }
     setPendingSwitch(current => ({ ...target,
-      step: current?.step === "confirm-stop" ? "confirm-stop" : runWorking ? "working" : "confirm" }));
+      step: current?.step === "confirm-stop" && runWorking ? "confirm-stop" : "confirm" }));
   }
 
   async function completeSwitch({ engine, model }: ModelChoice) {
@@ -727,11 +731,12 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     }
   }
 
-  const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
   useEffect(() => {
-    // A turn that finished while the owner was choosing needs only the plain confirm now.
-    if (pendingSwitch?.step === "working" && runStopped) setPendingSwitch({ ...pendingSwitch, step: "confirm" });
-  }, [pendingSwitch?.step, runStopped]);
+    // A Stop confirmation belongs to the current turn. A later turn needs the owner's Stop choice again.
+    if (pendingSwitch?.step === "confirm-stop" && !runWorking) {
+      setPendingSwitch(current => current?.step === "confirm-stop" ? { ...current, step: "confirm" } : current);
+    }
+  }, [pendingSwitch?.step, runWorking]);
 
   return <AssistantChat key={viewKey.current} ref={chatRef}
     tabId={draftThreadId}
@@ -749,7 +754,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : pendingSwitch ? "Resolve the runtime or model choice above before sending another message." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
@@ -825,25 +830,25 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <Button variant="ghost" size="sm" onClick={() => setSwitchError(undefined)}>Dismiss</Button>
       </div>}
       {pendingSwitch && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
-        role={pendingSwitch.step === "stopping" || pendingSwitch.step === "switching" ? "status" : "group"}
+        role={switchStep === "stopping" || switchStep === "switching" ? "status" : "group"}
         aria-label="Switch runtime or model">
-        {pendingSwitch.step === "confirm" && <>
+        {switchStep === "confirm" && <>
           <span>Switch this conversation from {routeLabel(props.run)} to {routeLabel(pendingSwitch)}? {SWITCH_TRANSFER}</span>
           <Button variant="outline" size="sm" onClick={() => void completeSwitch(pendingSwitch)}>Switch</Button>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Cancel</Button>
         </>}
-        {pendingSwitch.step === "working" && <>
+        {switchStep === "working" && <>
           <span>This conversation is working. Wait for the current request to finish, or stop it and switch to {routeLabel(pendingSwitch)}.</span>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Wait</Button>
           <Button variant="outline" size="sm" onClick={() => setPendingSwitch({ ...pendingSwitch, step: "confirm-stop" })}>Stop and switch</Button>
         </>}
-        {pendingSwitch.step === "confirm-stop" && <>
+        {switchStep === "confirm-stop" && <>
           <span>Stop and switch to {routeLabel(pendingSwitch)}? The current request will be cancelled. Completed work stays in this conversation and the workspace. {SWITCH_TRANSFER}</span>
           <Button variant="outline" size="sm" onClick={() => void stopThenSwitch(pendingSwitch)}>Stop and switch</Button>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Keep working</Button>
         </>}
-        {pendingSwitch.step === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
-        {pendingSwitch.step === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
+        {switchStep === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
+        {switchStep === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
       </div>}
       {!pendingSwitch && serverPending && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
         role="status" aria-label="Switch runtime or model">

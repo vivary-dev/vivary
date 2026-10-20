@@ -1507,9 +1507,10 @@ function assertRunCanSwitch(run: CodeAgentRunRecord, stopFirst = false): void {
       errorCode: "vivary_code_switch_run_active", statusCode: 409,
     });
   }
-  if (hostState.cleanup?.runId === run.id || run.metadata?.cleanupRefusal) {
-    fail(hostState.cleanup?.runId === run.id ? cleanupRefusalMessage(hostState.cleanup)
-      : "Coding processes from this conversation may still be running. Resolve them before switching.", {
+  // The host strip shows only the oldest refusal. This run may have a later persisted, legacy, or unsaved refusal.
+  const refusal = cleanupRefusalsInForce().find(refusal => refusal.runId === run.id);
+  if (refusal) {
+    fail(cleanupRefusalMessage(refusal), {
       errorCode: "vivary_code_cleanup_required", statusCode: 409,
     });
   }
@@ -1549,7 +1550,7 @@ function applyPendingSwitch(runId: string): void {
   const pending = run.metadata.pendingSwitch as { label?: unknown };
   const target = pendingSwitchFromRun(run);
   updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
-  if (!target || hostState.cleanup?.runId === runId || run.metadata.cleanupRefusal) {
+  if (!target || cleanupRefusalsInForce().some(refusal => refusal.runId === runId)) {
     appendCodeAgentTranscriptEvent({ runId, kind: "note",
       message: "The runtime switch did not happen, because Vivary could not confirm that this conversation's coding "
         + "processes stopped. Choose it again after they stop.",
