@@ -225,18 +225,26 @@ export const renderUnmarked = markdown => render(markdown, { table: markdownComp
 export const copiedHtml = markdown => new Promise(resolve => onMarkdownReady(() => resolve(renderMarkdownToClipboardHtml(markdown))));
 `;
 
-test("chat table cells and links mark long unbroken text without changing text, links, or code", async () => {
-  const bundle = await esbuild.build({
-    stdin: { contents: chatProofSource, resolveDir: join(CORE, "dist", "client", "chat"), sourcefile: "chat-table-proof.js", loader: "js" },
-    bundle: true, write: false, platform: "node", format: "esm", target: "node22", logLevel: "silent",
-    loader: { ".css": "empty" }, define: { "process.env.NODE_ENV": '"production"' },
-    // react-dom/server's CommonJS build requires Node built-ins.
-    banner: { js: `import { createRequire as createProofRequire } from "node:module";
+let chatProofReady;
+function loadChatProof() {
+  chatProofReady ??= (async () => {
+    const bundle = await esbuild.build({
+      stdin: { contents: chatProofSource, resolveDir: join(CORE, "dist", "client", "chat"), sourcefile: "chat-table-proof.js", loader: "js" },
+      bundle: true, write: false, platform: "node", format: "esm", target: "node22", logLevel: "silent",
+      loader: { ".css": "empty" }, define: { "process.env.NODE_ENV": '"production"' },
+      // react-dom/server's CommonJS build requires Node built-ins.
+      banner: { js: `import { createRequire as createProofRequire } from "node:module";
 const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.json"))});` },
-  });
-  const file = join(folder, "chat-table-proof.mjs");
-  writeFileSync(file, bundle.outputFiles[0].text);
-  const chat = await import(pathToFileURL(file).href);
+    });
+    const file = join(folder, "chat-table-proof.mjs");
+    writeFileSync(file, bundle.outputFiles[0].text);
+    return import(pathToFileURL(file).href);
+  })();
+  return chatProofReady;
+}
+
+test("chat table cells and links mark long unbroken text without changing text, links, or code", async () => {
+  const chat = await loadChatProof();
 
   const url = "https://github.com/vivary-dev/vivary/releases/download/desktop-preview-20261019/Vivary-Setup.exe.receipt.json?download=1&check=sha256";
   const hash = "abc123def456abc123def456abc123def456abc123def456abc123def456abcd";
@@ -281,6 +289,48 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
   const copied = await chat.copiedHtml(source);
   assert.ok(copied.includes(`href="${url.replaceAll("&", "&amp;")}"`));
   assert.ok(!copied.includes("agent-markdown-long-token"));
+});
+
+// Review of #259: a long run inside bold or struck text still sets the cell's minimum width, so it is
+// marked as well. Inline code stays whole, a link inside bold text is marked once by Core's link
+// component, and the text and hrefs stay what they would be without the marks.
+test("chat table cells mark long unbroken text inside bold and struck text", async () => {
+  const chat = await loadChatProof();
+  const bold = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const struck = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+  const url = "https://example.test/a/very/long/path/without/any/spaces/in/it";
+  const path = "packages/workbench/app/components/chat/a-very-long-file-name.tsx";
+  const source = [
+    "| Kind | Value |",
+    "| --- | --- |",
+    `| bold | **${bold}** |`,
+    `| struck | ~~${struck}~~ |`,
+    `| nested | ***${bold}*** and ~~**${struck}**~~ |`,
+    `| bold link | **[${url}](${url})** |`,
+    `| bold code | **\`${path}\`** |`,
+  ].join("\n");
+  const html = chat.renderChat(source);
+  const before = chat.renderUnmarked(source);
+  const linkedom = createRequire(join(CORE, "package.json"))("linkedom");
+  const parse = (markup) => linkedom.parseHTML(`<!doctype html><html><body>${markup}</body></html>`).document;
+  const marked = parse(html);
+  const unmarked = parse(before);
+  const spans = (selector) => [...marked.querySelectorAll(selector)].map((span) => span.textContent);
+
+  assert.deepEqual(spans(".agent-markdown-long-token"), [bold, struck, bold, struck, url]);
+  assert.deepEqual(spans("strong > .agent-markdown-long-token"), [bold, bold, struck]);
+  assert.deepEqual(spans("del > .agent-markdown-long-token"), [struck]);
+  assert.deepEqual(spans("em > strong > .agent-markdown-long-token"), [bold]);
+  assert.deepEqual(spans("strong > a > .agent-markdown-long-token"), [url], "the link inside bold text is marked once");
+  assert.equal(marked.querySelectorAll(".agent-markdown-long-token .agent-markdown-long-token").length, 0);
+  assert.equal(marked.querySelectorAll("code .agent-markdown-long-token").length, 0);
+  assert.deepEqual([...marked.querySelectorAll("code")].map((code) => code.innerHTML), [path]);
+  // The text of every cell and the link destination are byte-identical.
+  const cells = (doc) => [...doc.querySelectorAll("th, td")].map((cell) => cell.textContent);
+  assert.deepEqual(cells(marked), cells(unmarked));
+  assert.deepEqual([...marked.querySelectorAll("a")].map((a) => a.getAttribute("href")), [url]);
+  const withoutMarks = html.replace(/<span class="agent-markdown-long-token">([^<]*)<\/span>/g, "$1");
+  assert.equal(withoutMarks.replaceAll(' node="[object Object]"', ""), before.replaceAll(' node="[object Object]"', ""));
 });
 
 // The owner saw a document's footnote definitions run together as one paragraph in the reader.

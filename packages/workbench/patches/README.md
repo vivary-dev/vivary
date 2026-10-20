@@ -3376,10 +3376,13 @@ be narrower than its longest unbroken string, so a long URL, hash, or identifier
 made the table scroll. The patch adds `th` and `td` to `markdownComponents` in
 `dist/client/chat/markdown-renderer.js`, and the plain branch of its `a` component
 applies the same helper to its children. `markLongTokens` wraps each run of 20 or
-more non-whitespace characters in a direct string child in
-`<span class="agent-markdown-long-token">`. Element children, including inline
-code, pass through unchanged. The span adds no characters, so DOM text, selection,
-and hrefs match the unpatched rendering. The cells drop react-markdown's `node`
+more non-whitespace characters in a cell's text in
+`<span class="agent-markdown-long-token">`. It descends into plain elements such as
+`strong`, `em`, and `del`, since a long run in bold or struck text widens the
+column the same way. Inline `code`, `kbd`, `samp`, and `pre` stay whole. An element
+rendered by a component passes through unchanged, and the `a` component marks its
+own text, so a link inside bold text is marked once. The span adds no characters,
+so DOM text, selection, and hrefs match the unpatched rendering. The cells drop react-markdown's `node`
 prop and pass every other prop, so column alignment is kept. The new-chat and
 Builder link branches and `clipboardMarkdownComponents` are unchanged.
 `dist/client/chat/markdown-renderer.d.ts` declares the two components.

@@ -8172,6 +8172,18 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Chat table long tokens inside bold or struck text (PR #259 review).
+`markLongTokens` in the maintained Core patch marked only a cell's direct string
+children, so a long hash in `**bold**` or `~~struck~~` text got no
+`agent-markdown-long-token` span and could still make a chat table scroll. It now
+descends into plain elements such as `strong`, `em`, and `del`. Inline `code`,
+`kbd`, `samp`, and `pre` stay whole, and an element rendered by a component, such
+as Core's link, is left to that component, so a link inside bold text is marked
+once. The Core patch hash moves from `b680f535` to `b54ac9e3`. The chat rendering
+described below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+renders bold, struck, nested, linked, and code cells and checks the spans, cell
+text, hrefs, and the HTML without the spans. It failed before the change.
+
 2026-10-20 Note links come only from rendered references (PR #259 review). The
 previous fix still let an ordinary heading link such as `#fn-1` be taken over when
 note 1 existed. `focusFootnote` now handles only the link inside
