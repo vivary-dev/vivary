@@ -1,7 +1,8 @@
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
-import { changeNativeConversation, MAX_TITLE_LENGTH } from "../server/conversation-inbox";
+import { changeNativeConversation, MAX_TITLE_LENGTH, requireCatalogProject } from "../server/conversation-inbox";
 import { requireVivaryCodeUser } from "../server/local-code-agent";
+import { getLocalProjectAccess } from "../server/project-services.mjs";
 
 const target = {
   projectId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).nullable(),
@@ -23,6 +24,7 @@ export default defineAction({
     const ownerEmail = requireVivaryCodeUser(ctx);
     const orgId = ctx?.orgId;
     if (!orgId) fail("The conversation owner could not be verified.", { statusCode: 403 });
+    if (input.projectId !== null) requireCatalogProject(await getLocalProjectAccess(ctx), input.projectId);
     return changeNativeConversation({ ownerEmail, orgId, projectId: input.projectId, threadId: input.threadId,
       change: input.operation === "rename" ? { operation: "rename", title: input.title } : { operation: input.operation } });
   },

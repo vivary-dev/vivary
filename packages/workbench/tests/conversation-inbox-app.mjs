@@ -99,15 +99,30 @@ try {
   db.prepare("UPDATE chat_threads SET thread_data = ? WHERE id = ?")
     .run(JSON.stringify({ ...saved, queuedMessages: [{ id: "q1", text: "Next" }] }), "inbox-queued");
   const refused = await api.raw("POST", "/_agent-native/actions/vivary-conversation-archive",
-    { projectId, threadId: "inbox-queued" });
+    { operation: "archive", projectId, threadId: "inbox-queued" });
   assert.equal(refused.status, 409, refused.body);
   assert.match(refused.body, /queued messages/);
   db.prepare("UPDATE chat_threads SET thread_data = ? WHERE id = ?")
     .run(JSON.stringify({ ...saved, queuedMessages: [] }), "inbox-queued");
   db.close();
-  await api.request("POST", "/_agent-native/actions/vivary-conversation-archive", { projectId, threadId: "inbox-queued" });
+  await api.request("POST", "/_agent-native/actions/vivary-conversation-archive",
+    { operation: "archive", projectId, threadId: "inbox-queued" });
   assert.equal((await api.getAction("vivary-conversation-inbox")).rows.find(row => row.id === "native:inbox-queued")?.archived, true);
   console.log("PASS: archive refuses queued messages and archives once they are gone.");
+
+  // Rename and pin reach the same owner action, which a private-proxy browser can authenticate on a POST.
+  await api.request("POST", "/_agent-native/actions/vivary-conversation-archive",
+    { operation: "rename", projectId, threadId: "inbox-a5", title: "Owner action name" });
+  await api.request("POST", "/_agent-native/actions/vivary-conversation-archive",
+    { operation: "pin", projectId, threadId: "inbox-a5" });
+  const renamed = (await api.getAction("vivary-conversation-inbox")).rows.find(row => row.id === "native:inbox-a5");
+  assert.deepEqual([renamed?.title, renamed?.pinned], ["Owner action name", true]);
+  assert.equal(await titleNow(), "Owner action name");
+  // A project that is not in the owner's catalog is not writable, whatever its derived scope.
+  const outside = await api.raw("POST", "/_agent-native/actions/vivary-conversation-archive",
+    { operation: "pin", projectId: "not-in-catalog", threadId: "inbox-a5" });
+  assert.equal(outside.status, 403, outside.body);
+  console.log("PASS: API chat rename and pin go through the owner action, which checks the current catalog.");
 
   const seed = Number(values.seed ?? 0);
   if (seed > 0) {

@@ -17,6 +17,7 @@ const { ensureRunTables } = await import(new URL("../../agent/run-store.js", cor
 const inbox = await import("../server/conversation-inbox.ts");
 const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
 const metaAction = (await import("../actions/vivary-code-conversation-meta.ts")).default;
+const archiveAction = (await import("../actions/vivary-conversation-archive.ts")).default;
 const { changeIndexedChatDraft, createCodeDraftIdentity } = await import("../server/chat-draft.ts");
 const { codeDraftThreadId } = await import("../shared/code-draft.ts");
 async function saveDraft(identity: { storageKey: string }, threadId: string, text: string, pending = false, user = owner) {
@@ -30,6 +31,11 @@ const history = (projectId: string) => ({ label: projectId === "alpha" ? "Alpha"
 const projects = [{ projectId: "alpha", label: "Alpha", code: history("alpha") },
   { projectId: "beta", label: "Beta", code: history("beta") }];
 const personal = { root: personalRoot, label: "personal" };
+// The scope the meta action resolves for a project's current binding, or for Personal workspace.
+const codeChange = (runId: string, projectId: string | null, change: Parameters<typeof inbox.changeCodeConversation>[0]["change"],
+  input: Partial<Parameters<typeof inbox.changeCodeConversation>[0]> = {}) => asUser(owner, orgId,
+  () => inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId, projectId,
+    scope: projectId === null ? personal : history(projectId), change, ...input }));
 const { runWithRequestContext } = await import("@agent-native/core/server");
 // Drafts live in application state, which Native scopes to the request's user, as an action's request does.
 const asUser = <T>(userEmail: string, org: string, work: () => Promise<T>) => runWithRequestContext({ userEmail, orgId: org }, work);
@@ -211,10 +217,9 @@ test("rows are ordered pinned first, then newest created, and live updates never
 test("rename, pin and archive keep the conversation's identity, updatedAt and order, and are reversible", async () => {
   const before = getCodeAgentRunRecord("alpha-old")!;
   const order = (await load()).rows.filter(row => !row.pinned).map(row => row.id);
-  const ctx = { userEmail: owner, orgId };
-  await metaAction.run({ operation: "rename", runId: "alpha-old", projectId: "alpha", title: "  Release plan  " }, ctx as never);
-  await metaAction.run({ operation: "rename", runId: "alpha-old", projectId: "alpha", title: "Release plan v2" }, ctx as never);
-  await metaAction.run({ operation: "archive", runId: "alpha-old", projectId: "alpha" }, ctx as never);
+  await codeChange("alpha-old", "alpha", { operation: "rename", title: "  Release plan  " });
+  await codeChange("alpha-old", "alpha", { operation: "rename", title: "Release plan v2" });
+  await codeChange("alpha-old", "alpha", { operation: "archive" });
   let after = getCodeAgentRunRecord("alpha-old")!;
   assert.equal(after.updatedAt, before.updatedAt);
   assert.equal(after.title, "Release plan v2", "the header, Agent work and search read the record's title");
@@ -225,12 +230,12 @@ test("rename, pin and archive keep the conversation's identity, updatedAt and or
   assert.equal(row.title, "Release plan v2");
   assert.equal(row.archived, true);
   assert.deepEqual((await load()).rows.filter(item => !item.pinned).map(item => item.id), order, "archive changes no order");
-  await metaAction.run({ operation: "restore", runId: "alpha-old", projectId: "alpha" }, ctx as never);
-  await metaAction.run({ operation: "pin", runId: "alpha-old", projectId: "alpha" }, ctx as never);
+  await codeChange("alpha-old", "alpha", { operation: "restore" });
+  await codeChange("alpha-old", "alpha", { operation: "pin" });
   row = (await load()).rows.find(item => item.id === "code:alpha-old")!;
   assert.deepEqual([row.archived, row.pinned], [false, true]);
   assert.equal((await load()).rows[0].id, "code:alpha-old", "pinned rows lead");
-  await metaAction.run({ operation: "unpin", runId: "alpha-old", projectId: "alpha" }, ctx as never);
+  await codeChange("alpha-old", "alpha", { operation: "unpin" });
   after = getCodeAgentRunRecord("alpha-old")!;
   assert.equal(after.updatedAt, before.updatedAt);
   assert.deepEqual((await load()).rows.filter(item => !item.pinned).map(item => item.id), order);
@@ -239,22 +244,22 @@ test("rename, pin and archive keep the conversation's identity, updatedAt and or
 test("archive refuses a working conversation and never stops it", async () => {
   activate("beta-one");
   try {
-    await assert.rejects(inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta",
+    await assert.rejects(inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
       change: { operation: "archive" } }), (error: { statusCode?: number; message: string }) =>
       error.statusCode === 409 && /working\. Stop it or let it finish/.test(error.message));
     assert.ok(host.activeRuns.has("beta-one"), "the run is untouched");
     assert.equal(getCodeAgentRunRecord("beta-one")?.metadata?.archivedAt, undefined);
-    await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta",
+    await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
       change: { operation: "rename", title: "Renamed while working" } });
   } finally { host.activeRuns.clear(); }
-  await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta",
+  await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
     change: { operation: "archive" } });
   assert.equal(typeof getCodeAgentRunRecord("beta-one")?.metadata?.archivedAt, "string");
 });
 
 test("changes refuse another owner's run, another project's run and invalid titles", async () => {
   const refuse = (input: Partial<Parameters<typeof inbox.changeCodeConversation>[0]>) => assert.rejects(
-    inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "alpha-failed", projectId: "alpha",
+    inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "alpha-failed", projectId: "alpha", scope: history("alpha"),
       change: { operation: "pin" }, ...input }), (error: { statusCode?: number }) => error.statusCode === 404);
   await refuse({ runId: "foreign-owner" });
   await refuse({ runId: "foreign-org" });
@@ -301,7 +306,7 @@ test("API chat archive waits for a running turn, queued messages and a pending s
 
 test("Code archive also waits for an approval and a pending send", async () => {
   const change = () => asUser(owner, orgId, () => inbox.changeCodeConversation({ ownerEmail: owner, orgId,
-    runId: "alpha-failed", projectId: "alpha", change: { operation: "archive" } }));
+    runId: "alpha-failed", projectId: "alpha", scope: history("alpha"), change: { operation: "archive" } }));
   activate("alpha-failed", { requests: new Map([["r1", { request: { requestId: "r1", kind: "command" } }]]) });
   try {
     await assert.rejects(change(), (error: { statusCode?: number; message: string }) =>
@@ -334,4 +339,24 @@ test("API chat rename and pin keep its messages, survive a generated title and r
   row = (await load()).rows.find(item => item.id === "native:native-personal")!;
   assert.equal(row.pinned, false);
   await assert.rejects(change({ operation: "pin" }, "alpha"), (error: { statusCode?: number }) => error.statusCode === 404);
+});
+
+test("a Code change follows the project's current binding, so a replaced binding's conversation is read-only", async () => {
+  const refused = (error: { statusCode?: number }) => error.statusCode === 404;
+  await assert.rejects(codeChange("stale-binding", "alpha", { operation: "archive" }), refused);
+  await assert.rejects(codeChange("stale-binding", "alpha", { operation: "rename", title: "Kept" }), refused);
+  assert.equal(getCodeAgentRunRecord("stale-binding")?.metadata?.archivedAt, undefined);
+  await assert.rejects(codeChange("alpha-failed", "alpha", { operation: "pin" },
+    { scope: { ...history("alpha"), bindingId: "binding-replaced" } }), refused, "a rebound project refuses its old runs");
+  await codeChange("personal-one", null, { operation: "pin" });
+  await codeChange("personal-one", null, { operation: "unpin" });
+});
+
+test("an API chat change needs the project in the owner's current catalog", () => {
+  const catalog = { code: "catalog", projects: [{ projectId: "beta" }] };
+  const denied = (error: { statusCode?: number }) => error.statusCode === 403;
+  assert.throws(() => inbox.requireCatalogProject(catalog, "alpha"), denied, "a project that left the catalog is not writable");
+  assert.throws(() => inbox.requireCatalogProject({ code: "registry-unavailable" }, "beta"), denied);
+  inbox.requireCatalogProject(catalog, "beta");
+  assert.equal(typeof archiveAction.run, "function");
 });

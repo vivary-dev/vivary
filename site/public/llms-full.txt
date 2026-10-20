@@ -7908,7 +7908,12 @@ Rename writes the record's `title`, which the Code header, Agent work and search
 read, and keeps the first generated title as `metadata.generatedTitle`. Archive
 and pin write `metadata.archivedAt` and `metadata.pinnedAt`. Every change runs on
 the owner's run record in the named project, under Core's file lock, and keeps
-`updatedAt`, so no list reorders. Every change is reversible and no migration runs.
+`updatedAt`, so no list reorders. The action resolves the project's current history
+(or Personal workspace's folder) and the run must pass `isOwnedRun` against it, so a
+revoked grant or a replaced binding leaves its old conversations unchangeable. An API
+chat change instead needs the project in the owner's current catalog, because its
+scope follows from the project ID alone and a project whose Code history cannot
+resolve still lists its API chats. Every change is reversible and no migration runs.
 
 Archive waits for unresolved work, for Code and API chat alike, and refuses with
 `vivary_conversation_archive_pending` (409) and a message naming what to resolve:
@@ -8522,6 +8527,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox changes follow current project access (W5b, review threads 4317586775 and 4319908290).
+Code rename, archive and pin check the run against the project's current history scope, and API chat changes
+check the project against the owner's current catalog. The Conversation inbox section says so. Evidence
+inspected: the server tests for a stale and a replaced binding and for the catalog check, and the built-app test
+that refuses a project outside the catalog.
 
 2026-10-20 Inbox API chat changes through the owner action (W5b, review thread 4317586764). Rename and pin
 of an API chat no longer post to Native's thread routes, which a private-proxy browser cannot authenticate.

@@ -11,7 +11,7 @@ import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-id
 import { projectChatScopeId } from "./chat-project-scope.mjs";
 import {
   engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, linkedCodeDraftRuns, listOwnedVivaryCodeRuns, modelFromRun,
-  type VivaryCodeActiveRun, type VivaryCodeProjectHistory, type VivaryCodeWorkspace,
+  type VivaryCodeActiveRun, type VivaryCodeProjectHistory, type VivaryCodeReadScope, type VivaryCodeWorkspace,
 } from "./local-code-agent";
 
 /**
@@ -268,6 +268,18 @@ function refuseArchive(message: string): never {
   fail(message, { errorCode: "vivary_conversation_archive_pending", statusCode: 409 });
 }
 
+/**
+ * An API chat's scope follows from the project ID alone, so the project's place in the owner's current catalog is the
+ * grant a change checks. A project whose Code history cannot resolve stays in the catalog, so its API chats stay
+ * changeable while the inbox lists them.
+ */
+export function requireCatalogProject(catalog: { code: string; projects?: readonly { projectId: string }[] },
+  projectId: string): void {
+  if (catalog.code !== "catalog" || !catalog.projects?.some(project => project.projectId === projectId)) {
+    fail("Project access changed. Reload the app.", { statusCode: 403 });
+  }
+}
+
 export type NativeConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "pin" | "unpin" };
 
 /**
@@ -332,9 +344,12 @@ export type CodeConversationChange =
  * hidden run would keep its approvals out of sight.
  */
 export async function changeCodeConversation(input: { ownerEmail: string; orgId?: string; runId: string;
-  projectId: string | null; change: CodeConversationChange }): Promise<{ changed: true }> {
+  projectId: string | null; scope: VivaryCodeReadScope; change: CodeConversationChange }): Promise<{ changed: true }> {
+  // `scope` is the project's current history, or Personal workspace's folder, resolved for this request. A run from a
+  // revoked grant or a replaced binding fails `isOwnedRun`, as it does when the conversation is opened.
   const owned = listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId).find(run => run.id === input.runId
-    && (typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null) === input.projectId);
+    && (typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null) === input.projectId
+    && isOwnedRun(run, input.ownerEmail, input.orgId, input.scope));
   if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   if (input.change.operation === "archive") {
     const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
