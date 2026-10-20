@@ -39,7 +39,7 @@ const bundle = await build({ stdin: { contents: `
   import { createElement, useEffect, useState, useSyncExternalStore } from "react";
   import { MemoryRouter, useLocation, useNavigate, useSearchParams } from "react-router";
   import { CodeRunControl } from "./app/components/layout/CodeRunControl";
-  import { useConversationRouteHold, WORKSPACE_ROUTE_KEYS } from "./app/lib/conversation-route-hold";
+  import { holdConversationRoute, useConversationRouteHold, WORKSPACE_ROUTE_KEYS } from "./app/lib/conversation-route-hold";
   function Location() { return createElement("output", { id: "route" }, useLocation().search); }
   function ProjectRouteReset() {
     const [params, setParams] = useSearchParams();
@@ -76,10 +76,27 @@ const bundle = await build({ stdin: { contents: `
       } }),
       createElement("button", { id: "elsewhere", onClick: () => navigate("/?run=elsewhere", { replace: true }) }));
   }
-  export function view(route, withStrip) {
+  // The layout's driver, mounted for the whole page, as CodeRunControl mounts it.
+  function Driver() {
+    useSyncExternalStore(${fixture}.subscribe, () => ${fixture}.version);
+    useConversationRouteHold({ activeProjectId: ${fixture}.active, checking: false });
+    return null;
+  }
+  // A view that exists only in its own project, as the Code conversation does, and opens a run in another one.
+  function TransientOpener() {
+    useSyncExternalStore(${fixture}.subscribe, () => ${fixture}.version);
+    if (${fixture}.active !== "alpha") return null;
+    return createElement("button", { id: "transient-open", onClick: async () => {
+      const release = holdConversationRoute(${fixture}.target.projectId, ${fixture}.target.href);
+      if (!await ${fixture}.projects().selectProject(${fixture}.target.projectId)) release();
+    } });
+  }
+  export function view(route, mode) {
+    const opener = mode === "strip" ? [createElement(CodeRunControl, { key: "strip" })]
+      : mode === "transient" ? [createElement(Driver, { key: "driver" }), createElement(TransientOpener, { key: "transient" })]
+        : [createElement(Opener, { key: "opener" })];
     return createElement(MemoryRouter, { initialEntries: [route] },
-      withStrip ? createElement(CodeRunControl) : createElement(Opener),
-      createElement(ProjectRouteReset), createElement(Location));
+      ...opener, createElement(ProjectRouteReset), createElement(Location));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", loader: { ".css": "empty" }, external: ["react", "react/*", "react-dom/*", "react-router"],
   plugins: [{ name: "host-services", setup(build) {
@@ -113,9 +130,17 @@ test.beforeEach(() => {
       } }),
   };
 });
-test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+// The hold belongs to the page, so a test ends it with a key press before the next test's page starts.
+test.afterEach(async () => {
+  await act(async () => document.dispatchEvent(new window.Event("keydown", { bubbles: true })));
+  await act(async () => root.unmount());
+  host.remove();
+});
 const settle = (ms = 50) => act(async () => { for (let i = 0; i < ms / 10; i++) await new Promise(resolve => setTimeout(resolve, 10)); });
-async function render(route, withStrip = false) { await act(async () => root.render(module.exports.view(route, withStrip))); await settle(); }
+async function render(route, mode = "opener") {
+  await act(async () => root.render(module.exports.view(route, mode === true ? "strip" : mode)));
+  await settle();
+}
 const route = () => host.querySelector("#route").textContent;
 const click = element => act(async () => element.click());
 const openInStrip = () => click([...host.querySelectorAll("button")].find(item => item.textContent === "Open conversation"));
@@ -140,6 +165,18 @@ for (const [label, saved] of RESTORES) {
     await openInStrip();
     await settle();
     assert.deepEqual(routeHoldFixture.calls, [["selectProject", "beta"]]);
+    assert.equal(route(), "?run=b1");
+  });
+}
+
+for (const [label, saved] of RESTORES) {
+  test(`a view that unmounts during the project change still opens the held run over ${label}`, async () => {
+    routeHoldFixture.savedRoutes = { beta: saved };
+    await render("/?run=a1", "transient");
+    await click(host.querySelector("#transient-open"));
+    await settle();
+    assert.equal(host.querySelector("#transient-open"), null, "the view that asked is gone");
+    assert.equal(routeHoldFixture.active, "beta");
     assert.equal(route(), "?run=b1");
   });
 }
