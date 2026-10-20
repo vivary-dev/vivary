@@ -181,9 +181,12 @@ test.beforeEach(() => {
     search: async (name, params) => {
       inboxFixture.searches.push({ name, params });
       if (inboxFixture.searchFails) return new Response("{}", { status: 503 });
-      const hits = (inboxFixture.hits ?? []).filter(hit => hit.projectId === (params.projectId ?? null));
-      return Response.json({ results: hits, continueAfter: null, scannedSessions: 1, scannedMessages: 1, searchedSessions: 1,
-        readBytes: 0, limited: false, limits: { sessions: 25, messages: 500, bytes: 1, results: 25 } });
+      // pages, when set, answers by cursor and stops each request after one hit, as a long search would.
+      const page = inboxFixture.pages?.[params.after ?? ""];
+      const hits = (page?.results ?? inboxFixture.hits ?? []).filter(hit => hit.projectId === (params.projectId ?? null));
+      return Response.json({ results: hits, continueAfter: page?.continueAfter ?? null, scannedSessions: 1,
+        scannedMessages: 1, searchedSessions: 1, readBytes: 0, limited: false,
+        limits: { sessions: 25, messages: 500, bytes: 1, results: page ? 1 : 25 } });
     },
   };
   // Most tests read the selected project's rows. The filter tests start from All projects.
@@ -644,6 +647,26 @@ test("message search leaves out a Code conversation the inbox lists as archived"
   await searchFor("table");
   assert.deepEqual(hitTitles(), ["Session a3"]);
   assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
+});
+
+test("message search reads past the first page and offers Search more while matches may remain", async () => {
+  inboxFixture.pages = { "": { results: [hit("alpha", "a1", "table one")], continueAfter: "c1" },
+    c1: { results: [hit("alpha", "a3", "table two")], continueAfter: "c2" },
+    c2: { results: [hit("alpha", "n9", "table three")], continueAfter: null } };
+  await render("/?run=a1");
+  await searchFor("table");
+  const messages = () => host.querySelector(".conversation-inbox__messages").textContent;
+  assert.deepEqual(hitTitles(), ["Session a1"]);
+  assert.match(messages(), /1 matching message so far\./);
+  await act(async () => button("Search more").click());
+  await settle();
+  assert.deepEqual(hitTitles().sort(), ["Session a1", "Session a3"]);
+  await act(async () => button("Search more").click());
+  await settle();
+  assert.deepEqual(hitTitles().sort(), ["Session a1", "Session a3", "Session n9"]);
+  assert.match(messages(), /3 matching messages\./);
+  assert.equal(button("Search more"), undefined, "nothing remains to search");
+  assert.deepEqual(inboxFixture.searches.map(search => search.params.after ?? null), [null, "c1", "c2"]);
 });
 
 test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {

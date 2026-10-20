@@ -15,6 +15,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { ConversationInbox as InboxData, InboxAttention, InboxDraft, InboxRow } from "../../../server/conversation-inbox";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { useNativeActionCaller, useNativeActionReader } from "@/lib/native-actions";
+import { continueChatSearch } from "@/lib/chat-search-client";
 import { chatSearchHref } from "@/lib/chat-search-location";
 import { highlightedExcerpt } from "@/lib/chat-search-excerpt";
 import type { ChatSearchHit, ChatSearchPage } from "@/lib/chat-search-schema";
@@ -491,12 +492,32 @@ export function messageSearchScopes(filter: InboxFilter, projects: readonly { pr
     total: all.length };
 }
 
+/** A scope whose search stopped with more to read, and the cursor to read from. */
+type MoreToSearch = { scope: SearchScope; after: string };
 type MessageSearchState = { key: string; status: "loading" | "ready" | "unavailable"; hits: ChatSearchHit[];
-  failed: number };
+  failed: number; more: MoreToSearch[] };
+type ScopeResult = PromiseSettledResult<{ scope: SearchScope; hits: ChatSearchHit[]; after?: string }>;
+const hitKey = (hit: ChatSearchHit) => JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]);
+
+/** Adds one round of scope results to the hits found so far. */
+function mergeMessageSearch(key: string, previous: ChatSearchHit[], results: ScopeResult[]): MessageSearchState {
+  const found = new Map(previous.map(hit => [hitKey(hit), hit]));
+  const more: MoreToSearch[] = [];
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    for (const hit of result.value.hits) found.set(hitKey(hit), hit);
+    if (result.value.after) more.push({ scope: result.value.scope, after: result.value.after });
+  }
+  const failed = results.filter(result => result.status === "rejected").length;
+  return { key, status: failed === results.length && !found.size ? "unavailable" : "ready", failed, more,
+    hits: [...found.values()].sort((a, b) => (b.sessionUpdatedAt ?? 0) - (a.sessionUpdatedAt ?? 0)) };
+}
 
 /**
- * Searches user messages and agent replies through the existing `vivary-chat-search` owner action, one first page per
- * scope. The title filter above stays instant. Selection and the list stay as they are while results load.
+ * Searches user messages and agent replies through the existing `vivary-chat-search` owner action. Each scope reads
+ * pages as `ChatSessionSearch` does, within `continueChatSearch`'s page and time budget, and Search more continues a
+ * scope that stopped early. The title filter above stays instant. Selection and the list stay as they are while
+ * results load.
  */
 function InboxMessageSearch({ term, scopes, total, rows, onOpen }: { term: string; scopes: SearchScope[]; total: number;
   rows: readonly Pick<InboxRow, "id" | "archived">[]; onOpen: (hit: ChatSearchHit) => void }) {
@@ -505,33 +526,47 @@ function InboxMessageSearch({ term, scopes, total, rows, onOpen }: { term: strin
   const [retry, setRetry] = useState(0);
   const key = JSON.stringify([term, scopes.map(scope => scope.projectId), retry]);
   const [state, setState] = useState<MessageSearchState>();
+  // The current search's abort, which a later term or scope change aborts, Search more included.
+  const running = useRef<AbortController | null>(null);
+  function searchScopes(targets: { scope: SearchScope; after?: string }[], signal: AbortSignal): Promise<ScopeResult[]> {
+    return Promise.allSettled(targets.map(async ({ scope, after }) => {
+      const hits: ChatSearchHit[] = [];
+      let next = after;
+      await continueChatSearch({ after, signal, onRequest: () => {},
+        fetchPage: async from => {
+          const params = new URLSearchParams({ query: term, unassigned: "false", includeArchived: "false" });
+          if (scope.projectId) params.set("projectId", scope.projectId);
+          if (from) params.set("after", from);
+          const response = await readAction("vivary-chat-search", params, signal);
+          if (!response.ok) throw new Error("Search could not finish.");
+          return await response.json() as ChatSearchPage;
+        },
+        onPage: page => {
+          // A title match is already a row in the list above, so Messages holds message matches only.
+          hits.push(...page.results.filter(hit => hit.match === "content"));
+          next = page.continueAfter ?? undefined;
+        } });
+      return { scope, hits, after: next };
+    }));
+  }
   useEffect(() => {
     if (term.length < 2) return;
     const abort = new AbortController();
-    setState({ key, status: "loading", hits: [], failed: 0 });
+    running.current = abort;
+    setState({ key, status: "loading", hits: [], failed: 0, more: [] });
     const timer = setTimeout(async () => {
-      const pages = await Promise.allSettled(scopes.map(async scope => {
-        const params = new URLSearchParams({ query: term, unassigned: "false", includeArchived: "false" });
-        if (scope.projectId) params.set("projectId", scope.projectId);
-        const response = await readAction("vivary-chat-search", params, abort.signal);
-        if (!response.ok) throw new Error("Search could not finish.");
-        return await response.json() as ChatSearchPage;
-      }));
-      if (abort.signal.aborted) return;
-      const found = new Map<string, ChatSearchHit>();
-      for (const page of pages) {
-        if (page.status !== "fulfilled") continue;
-        // A title match is already a row in the list above, so Messages holds message matches only.
-        for (const hit of page.value.results) {
-          if (hit.match === "content") found.set(JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]), hit);
-        }
-      }
-      const failed = pages.filter(page => page.status === "rejected").length;
-      setState({ key, status: failed === pages.length ? "unavailable" : "ready", failed,
-        hits: [...found.values()].sort((a, b) => (b.sessionUpdatedAt ?? 0) - (a.sessionUpdatedAt ?? 0)) });
+      const results = await searchScopes(scopes.map(scope => ({ scope })), abort.signal);
+      if (!abort.signal.aborted) setState(mergeMessageSearch(key, [], results));
     }, 300);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [key, readAction]);
+  async function searchMore(from: MessageSearchState) {
+    const abort = running.current;
+    if (!abort || abort.signal.aborted) return;
+    setState({ ...from, status: "loading" });
+    const results = await searchScopes(from.more, abort.signal);
+    if (!abort.signal.aborted) setState(mergeMessageSearch(key, from.hits, results));
+  }
   if (term.length < 2) return null;
   const current = state?.key === key ? state : undefined;
   const status = current?.status ?? "loading";
@@ -544,8 +579,11 @@ function InboxMessageSearch({ term, scopes, total, rows, onOpen }: { term: strin
     <p role="status" className="conversation-inbox__notice">
       {status === "loading" ? "Searching messages…"
         : status === "unavailable" ? "Message search is unavailable. Titles are still filtered."
-          : hits.length ? `${hits.length} matching message${hits.length === 1 ? "" : "s"}.` : "No messages match."}
+          : `${hits.length ? `${hits.length} matching message${hits.length === 1 ? "" : "s"}` : "No messages match"}${
+            current?.more.length ? " so far" : ""}.`}
     </p>
+    {current?.status === "ready" && current.more.length > 0 && <Button size="sm" variant="ghost"
+      onClick={() => void searchMore(current)}>Search more</Button>}
     {status === "unavailable" && <Button size="sm" variant="ghost" onClick={() => setRetry(value => value + 1)}>Retry search</Button>}
     {current?.status === "ready" && current.failed > 0 && <p className="conversation-inbox__notice">
       {current.failed === 1 ? "One project" : `${current.failed} projects`} could not be searched.</p>}

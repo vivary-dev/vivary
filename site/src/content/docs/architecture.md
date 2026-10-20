@@ -1064,6 +1064,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox message search pages (W5b, review thread 4318949371). Message search reads each scope through
+`continueChatSearch`, as the project history search does, and offers Search more while a scope stopped with a
+cursor. The count says so far until nothing remains. Evidence inspected: the new component test with three
+one-hit pages, and `chat-search-client.ts`.
+
 2026-10-20 Inbox truncated API chat history (W5b, review thread 4317586786). When the inbox read returns
 `limited`, the inbox says only the newest API chats are listed and that message search, which reads the server,
 still finds older ones. Paging the list is not added. Evidence inspected: the new component test.
