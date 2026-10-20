@@ -22,7 +22,7 @@ const stubs = new Map([["@agent-native/core/client/agent-chat", `import { useCal
     const [threads, setThreads] = useState(() => globalThis.headerFixture.threads);
     const refreshThreads = useCallback(() => setThreads(globalThis.headerFixture.threads), []);
     return { threads, refreshThreads };
-  }`]]);
+  }`], ["@agent-native/core/client/api-path", "export const agentNativePath = path => path;"]]);
 const bundle = await build({ stdin: { contents: `
   import { createElement } from "react";
   import { NativeConversationHeader } from "./app/components/workspace/NativeConversationHeader";
@@ -42,7 +42,14 @@ test.beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   globalThis.headerFixture = { calls: [], threads: [
     { id: "tide", title: "Tide pools survey", preview: "Count the sea stars" },
-    { id: "kelp", title: "", preview: "Kelp forest notes" }] };
+    { id: "kelp", title: "", preview: "Kelp forest notes" }], direct: {}, reads: [] };
+  // Core's thread read by ID: the fixture answers threads that are outside the loaded list page.
+  globalThis.fetch = async url => {
+    globalThis.headerFixture.reads.push(String(url));
+    const id = decodeURIComponent(/\/threads\/([^?]+)/.exec(String(url))?.[1] ?? "");
+    const thread = globalThis.headerFixture.direct[id];
+    return thread ? { ok: true, status: 200, json: async () => thread } : { ok: false, status: 404, json: async () => ({}) };
+  };
 });
 test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 const render = threadId => act(async () => root.render(module.exports.view(threadId)));
@@ -91,3 +98,26 @@ test("a rename in another window shows when this window regains focus, and an un
   await act(async () => window.dispatchEvent(new window.Event("focus")));
   assert.equal(globalThis.headerFixture.calls.length, refreshes, "no render after the header unmounts");
 });
+
+test("a thread outside the loaded list page, opened from search or a link, shows its title from a direct read", async () => {
+  globalThis.headerFixture.direct.reef = { id: "reef", title: "Reef survey from search", preview: "Count the corals" };
+  await render("reef");
+  await act(async () => {});
+  assert.equal(heading().textContent, "Reef survey from search");
+  assert.equal(heading().getAttribute("title"), "Reef survey from search");
+  const read = globalThis.headerFixture.reads.find(url => url.includes("/threads/reef"));
+  assert.ok(read, "the header reads the selected thread by its ID");
+  assert.match(read, /scopeType=workspace-app&scopeId=alpha/, "the read uses the header's scope");
+  globalThis.headerFixture.direct.reef = { ...globalThis.headerFixture.direct.reef, title: "Renamed reef survey" };
+  await act(async () => window.dispatchEvent(new window.Event("agent-chat:threads-updated")));
+  await act(async () => {});
+  assert.equal(heading().textContent, "Renamed reef survey", "a rename reaches a directly read thread too");
+  const reads = globalThis.headerFixture.reads.length;
+  await render("tide");
+  assert.equal(heading().textContent, "Tide pools survey");
+  assert.equal(globalThis.headerFixture.reads.length, reads, "a listed thread needs no direct read");
+  await render("missing");
+  await act(async () => {});
+  assert.equal(heading().textContent, "New conversation", "a thread the host cannot read falls back");
+});
+
