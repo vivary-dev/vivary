@@ -63,7 +63,9 @@ test("local project grants register real folders and reopen without content snap
     provider = await createLocalRootProvider({ ownerEmail: email, defaultFolder: alpha });
     registry = createNativeRegistry({ provider, resolveGrant: provider.resolveGrant,
       evaluate: evaluateRegistryOperation, deriveMutationKeys });
-    catalog = createProjectCatalog({ readScope: registry.readScope, provider, locationLabels: provider.locationLabels });
+    // The same arguments project-services passes on the local host.
+    catalog = createProjectCatalog({ readScope: registry.readScope, provider, locationLabels: provider.locationLabels,
+      kindEditable: true });
     globalThis[Symbol.for("vivary.local-project-services.v1")] = {
       provider, registry, catalog, controller: { snapshot: () => ({ status: "open" }) },
     };
@@ -240,6 +242,16 @@ test("local project grants register real folders and reopen without content snap
       assert.deepEqual(await readdir(beta), [], "registration created nothing in the folder");
       const before = await catalog.run({}, context);
       assert.deepEqual(before.projects.map(project => project.workspaceKind), [null, null], "new registrations are Not set");
+      assert.equal(before.kindEditable, true, "the local catalog shows the kind controls");
+      // A configured installation has no local service. The action refuses there, and its catalog hides the controls.
+      const localService = globalThis[Symbol.for("vivary.local-project-services.v1")];
+      delete globalThis[Symbol.for("vivary.local-project-services.v1")];
+      try {
+        await assert.rejects(setLocalProjectKind(actionContext, betaResult.projectId, "coding"),
+          { statusCode: 503, message: "Local project folders are not ready." });
+      } finally {
+        globalThis[Symbol.for("vivary.local-project-services.v1")] = localService;
+      }
       const records = async () => ({ bindings: await getDb().select().from(bindings),
         revisions: await getDb().select().from(revisions) });
       const recordsBefore = await records();

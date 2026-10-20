@@ -25,8 +25,11 @@ function contextSnapshot(context) {
     .filter(key => typeof context[key] === "string").map(key => [key, context[key]])));
 }
 
-/** Installation-only arguments. Browser input cannot supply a resolver or root label map. */
-export function createProjectCatalog({ readScope, provider, locationLabels, canReconnect }) {
+/**
+ * Installation-only arguments. Browser input cannot supply a resolver or root label map. `kindEditable` says whether
+ * this host can save a project's Coding or Personal kind, so the client shows the kind controls only where they work.
+ */
+export function createProjectCatalog({ readScope, provider, locationLabels, canReconnect, kindEditable = false }) {
   if (typeof readScope !== "function" || typeof provider?.inspect !== "function") {
     throw new TypeError("project catalog requires the current native scope and trusted root provider");
   }
@@ -91,7 +94,7 @@ export function createProjectCatalog({ readScope, provider, locationLabels, canR
     }
     return { code: "catalog", scopeKey: fingerprint({ actorId: scope.actorId,
       collectionId: scope.collectionId, deviceId: scope.deviceId }), policyRevision: scope.policyRevision,
-      registryRevision: snapshot.registryRevision,
+      registryRevision: snapshot.registryRevision, kindEditable: kindEditable === true,
       locations: scope.locationRefs.map(locationRef => ({ locationRef, displayName: labels[locationRef],
         status: observed.get(locationRef)?.code === "available" ? "available" : "unavailable" })),
       projects: [...byProject.values()].sort((left, right) => left.displayName.localeCompare(right.displayName)

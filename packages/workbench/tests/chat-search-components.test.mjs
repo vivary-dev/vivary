@@ -53,7 +53,7 @@ const stubs = new Map([
   ["../projects/ProjectContext", `export const useProjects = () => globalThis.searchFixture.projects;`],
   // The Coding or Personal dialog stays closed in these proofs. Its own test renders it.
   ["../projects/WorkspaceKindDialog", `export const WorkspaceKindDialog = () => null;
-    export const useSaveProjectKind = () => async () => {};`],
+    export const ProjectKindDetail = () => null; export const useSaveProjectKind = () => async () => {};`],
   ["@/lib/chat-draft", `export const registerSelectionCloseFlush = () => () => {};
     export const trackSelectionWrite = promise => promise;
     export const useOrphanedDrafts = () => [];

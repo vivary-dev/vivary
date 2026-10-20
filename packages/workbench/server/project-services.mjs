@@ -316,6 +316,8 @@ export function startProjectServices(nitroApp, dependencies) {
         locationLabels: local ? provider.locationLabels : installation.locationLabels,
         canReconnect: local
           ? () => true : undefined,
+        // vivary-set-project-kind writes through the local service only. A configured installation has none.
+        kindEditable: local,
       });
       const readiness = runtime.createProjectRuntimeReadiness({
         readScope: registry.readScope,

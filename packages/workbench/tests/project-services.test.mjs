@@ -256,6 +256,7 @@ test("actual plugin gates cold requests, mounts one shared registry once and lea
   assert.equal(catalog.readScope, readiness.readScope);
   assert.equal(catalog.readScope, activity.readScope);
   assert.equal(catalog.provider, runtime.provider);
+  assert.equal(catalog.kindEditable, false, "a configured installation has no local service the kind action writes through");
   assert.equal(Object.hasOwn(readiness, "runtime"), false);
   assert.equal(Object.hasOwn(activity, "runtime"), false);
 });
@@ -383,5 +384,7 @@ test("default local startup installs the Node provider without Python configurat
   assert.equal(runtime.calls.some(([name]) => name === "startRootProvider"), false);
   const setup = runtime.calls.find(([name]) => name === "createLocalRootProvider")[1];
   assert.deepEqual(setup, { ownerEmail: "owner@local.vivary.test", defaultFolder: "/srv/projects/alpha" });
+  assert.equal(runtime.calls.find(([name]) => name === "createProjectCatalog")[1].kindEditable, true,
+    "the local host can save a project's kind");
   await controller.close();
 });

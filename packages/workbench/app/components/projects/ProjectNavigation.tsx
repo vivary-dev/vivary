@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useActionQuery } from "@agent-native/core/client/hooks";
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { IconFolderPlus } from "@tabler/icons-react";
@@ -11,7 +12,8 @@ import { ReconnectProjectForm } from "./ReconnectProjectForm";
 import { WorkspaceKindDialog, useSaveProjectKind } from "./WorkspaceKindDialog";
 import type { WorkspaceKind } from "../../../shared/workspace-kind.ts";
 import { useProjects } from "./ProjectContext";
-import type { ProjectCatalog, RegistrationAttempt, RegistrationResult } from "@/lib/project-catalog-schema";
+import { CATALOG_QUERY_KEY, openedFolderNeedsKind } from "@/lib/project-catalog-schema";
+import type { CatalogResult, ProjectCatalog, RegistrationAttempt, RegistrationResult } from "@/lib/project-catalog-schema";
 
 function registrationMessage(code: RegistrationResult["code"]) {
   if (code === "denied") return "Your folder access changed. Refresh the project list.";
@@ -122,6 +124,7 @@ export function ProjectNavigation() {
   const [newProjectKind, setNewProjectKind] = useState<WorkspaceKind | null>(null);
   const saveProjectKind = useSaveProjectKind();
   const { call } = useNativeActionCaller();
+  const queryClient = useQueryClient();
   const [choosing, setChoosing] = useState(false);
   const [folderError, setFolderError] = useState<string>();
   const desktop = useActionQuery<{ folderPicker: boolean }>("vivary-desktop-status", {}, {
@@ -136,10 +139,14 @@ export function ProjectNavigation() {
       );
       if (result.code === "cancelled") return;
       await refresh();
-      if (result.code === "registered") {
-        setKindPrompt({ purpose: "open", projectId: result.projectId, displayName: result.displayName ?? "This folder" });
-      } else if (result.code === "already-registered") {
-        if (!await selectProject(result.projectId)) setFolderError("Folder connected. Select it from Projects.");
+      if (result.code === "registered" || result.code === "already-registered") {
+        // A retry of an earlier Open folder returns already-registered. It asks again while the kind is still Not set.
+        const refreshed = queryClient.getQueryData<CatalogResult>(CATALOG_QUERY_KEY);
+        if (openedFolderNeedsKind(result.code, result.projectId, refreshed)) {
+          setKindPrompt({ purpose: "open", projectId: result.projectId, displayName: result.displayName ?? "This folder" });
+        } else {
+          await selectOpenedFolder(result.projectId);
+        }
       } else {
         setFolderError(registrationMessage(result.code));
       }

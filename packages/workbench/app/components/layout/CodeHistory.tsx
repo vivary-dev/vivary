@@ -9,6 +9,7 @@ import { IconDots, IconPlus } from "@tabler/icons-react";
 import { useLocation, useNavigate } from "react-router";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import { useProjects } from "@/components/projects/ProjectContext";
+import { newConversationSurface } from "@/lib/conversation-surface";
 import { Button } from "@/components/ui/button";
 
 export function CodeHistory() {
@@ -84,7 +85,10 @@ export function CodeHistory() {
               size="compact"
               leadingIcon={<IconPlus size={13} strokeWidth={1.8} aria-hidden />}
               onPress={history.onNewChat}
-              disabled={!workspaceAvailable}
+              // This rail shows while chat identity loads and can start only a Code conversation. Where New
+              // conversation opens API chat, it stays disabled until the full history replaces this rail.
+              disabled={!workspaceAvailable
+                || newConversationSurface(activeProject?.workspaceKind, "code") === "native"}
             >
               <span>{history.newChatLabel}</span>
             </ActionButton>

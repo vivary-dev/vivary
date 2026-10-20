@@ -224,7 +224,8 @@ registered. The choice is saved in Vivary's project registry and writes no files
 in the folder. Cancel leaves the kind **Not set**. Projects registered before
 this choice existed also show **Not set**, and Vivary never sets a kind for you.
 Not set keeps the Code default. Project details shows the kind and lets you set
-or change it.
+or change it on the local host. A configured installation shows the kind without
+that control. Opening a registered folder again asks while its kind is Not set.
 
 New project offers a workspace type and optional Capture, Sources, Navigation,
 and Project brief guidance. Names and file locations are editable. It previews

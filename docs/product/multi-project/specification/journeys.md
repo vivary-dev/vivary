@@ -165,6 +165,7 @@ stateDiagram-v2
   Form --> Personal: create with Personal
   Form --> [*]: cancel, nothing created
   [*] --> Registered: Open folder registers the folder, no files written
+  NotSet --> Registered: Open folder finds the folder already registered
   Registered --> Coding: choose Coding, registry row only
   Registered --> Personal: choose Personal, registry row only
   Registered --> NotSet: cancel
@@ -175,7 +176,7 @@ stateDiagram-v2
   Personal --> Coding: owner changes kind
 ```
 
-The project is selected after the Open folder choice or cancel, so its first conversation already follows the kind. A saved or requested conversation surface still wins over the kind. No path sets a kind without the owner's choice. Acceptance: both kinds from New project and Open folder, cancel at each step, keyboard-only choice, an upgraded profile whose projects show Not set, and a folder whose files are unchanged after Open folder and a kind choice.
+The project is selected after the Open folder choice or cancel, so its first conversation already follows the kind. A saved or requested conversation surface still wins over the kind. No path sets a kind without the owner's choice. Only the local host saves a kind. A configured installation shows the kind in Project details without a control, and its Open folder does not ask. Acceptance: both kinds from New project and Open folder, cancel at each step, keyboard-only choice, an upgraded profile whose projects show Not set, and a folder whose files are unchanged after Open folder and a kind choice.
 
 Skip VCS, repository host, template and Brain independently. Adoption preserves existing instructions/tooling and makes conflicts visible. A built-in pattern is editable workspace content, not a mandatory agent personality. External templates remain held until their separate prerequisites and owner decision pass. Test empty/populated/no-VCS folders, changed files after preview, duplicate submit and partial application.
 

@@ -73,6 +73,7 @@ test("real native catalog, scoped registry and non-enrolling custody compose", a
       const result = await call();
       assert.equal(result.status, 200); assert.equal(result.body.code, "catalog");
       assert.deepEqual(result.body.projects, []);
+      assert.equal(result.body.kindEditable, false, "a configured installation's catalog hides the kind controls");
       assert.deepEqual(result.body.locations, [ { locationRef: "a", displayName: "Documents", status: "available" },
         { locationRef: "b", displayName: "Research", status: "available" } ]);
       assert.deepEqual(await snapshot(), before);

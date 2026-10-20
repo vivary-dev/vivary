@@ -51,11 +51,17 @@ portable project record, bindings, receipts, and the registry revision do not
 carry it. `vivary-set-project-kind` is an owner-only action (no agent, MCP, or
 chat tool route). [`setLocalProjectKind`](../packages/workbench/server/project-services.mjs)
 admits the owner's project scope and writes only that row, never project files.
-The catalog returns the kind. New project asks for it in
+It writes through the local project service, so only the local host can save a
+kind. The catalog returns the kind and `kindEditable`, which is true only there,
+and Project details offers the kind control only when it is true. New project asks for it in
 [`WorkspaceKindDialog`](../packages/workbench/app/components/projects/WorkspaceKindDialog.tsx)
 before the form, which fills the matching preset, and saves it after
 registration. Open folder registers the folder unchanged, asks, then selects the
-project. The [conversation surface owner](../packages/workbench/app/lib/conversation-surface.ts)
+project. A repeated Open folder that finds the folder registered asks again while
+its kind is Not set. A saved kind is written into the cached project list before
+the list is refreshed, so a failed refresh cannot show the stale Not set. While
+chat identity loads, the fallback Code history cannot start a conversation in a
+Personal project. The [conversation surface owner](../packages/workbench/app/lib/conversation-surface.ts)
 maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
 when no surface is requested or saved. New conversation follows a chosen kind.
 Both conversation kinds remain available in every project. The
@@ -729,6 +735,18 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Project kind review fixes (PR #260 review). The kind action writes
+only through the local project service, so a configured installation refused it
+while Project details still offered the control. The catalog now carries
+`kindEditable`, set from the local mode in `project-services.mjs`, and the control
+shows only when it is true. A failed project list refetch after a saved kind
+kept the stale Not set, so the save hook writes the kind into the cached list
+first. A repeated Open folder now asks while the kind is Not set. The fallback
+Code history disables New conversation in a Personal project while chat identity
+loads. System structure above describes each. Evidence:
+`tests/project-services.test.mjs`, `tests/local-root-provider.test.mjs`,
+`tests/project-catalog.test.mjs`, and `tests/workspace-kind-dialog-component.test.mjs`.
 
 2026-10-19 Project kind save after creation (PR #260 review). New project saves
 the kind after its files are applied and the folder is registered. When that

@@ -14,8 +14,7 @@ import { ProjectAdoption } from "../projects/ProjectAdoption";
 import { ProjectMemoryPanel } from "../projects/ProjectMemoryPanel";
 import { ProjectReadPanel } from "../projects/ProjectReadPanel";
 import { ProjectEvaluatePanel } from "../projects/ProjectEvaluatePanel";
-import { WorkspaceKindDialog, useSaveProjectKind } from "../projects/WorkspaceKindDialog";
-import { workspaceKindLabel } from "../../../shared/workspace-kind.ts";
+import { ProjectKindDetail, WorkspaceKindDialog, useSaveProjectKind } from "../projects/WorkspaceKindDialog";
 import FilesView from "../../routes/files";
 import CodeConversation from "./CodeConversation";
 import NativeConversation from "./NativeConversation";
@@ -333,10 +332,8 @@ export function Workspace() {
               <h3>{activeProject?.displayName ?? "Personal workspace"}</h3>
               <dl><dt>Execution</dt><dd>The connected Vivary host</dd>
                 <dt>Project folder</dt><dd>{activeProject ? workspaceAvailable ? "Connected and available" : "Unavailable" : "Personal host workspace"}</dd>
-                {activeProject && <><dt>Project kind</dt><dd className="workspace-kind-detail">
-                  <span>{workspaceKindLabel(activeProject.workspaceKind)}</span>
-                  <Button size="sm" variant="outline" onClick={() => setChoosingKind(true)}>
-                    {activeProject.workspaceKind ? "Change kind" : "Set kind"}</Button></dd></>}
+                {activeProject && <ProjectKindDetail kind={activeProject.workspaceKind}
+                  editable={catalog?.kindEditable === true} onChange={() => setChoosingKind(true)} />}
                 <dt>Files and history</dt><dd>Stay on this host. Opening a file does not send it to a model.</dd></dl>
               {activeProject && <ProjectMemoryPanel projectId={activeProject.projectId} disabled={!workspaceAvailable}
                 visible={opened === "details"} />}

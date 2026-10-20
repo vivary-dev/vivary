@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@agent-native/toolkit/ui";
 import { IconCode, IconNotes } from "@tabler/icons-react";
 import { useNativeActionCaller } from "@/lib/native-actions";
+import { CATALOG_QUERY_KEY, type CatalogResult, withProjectKind } from "@/lib/project-catalog-schema";
 import { useProjects } from "./ProjectContext";
-import type { WorkspaceKind } from "../../../shared/workspace-kind.ts";
+import { workspaceKindLabel, type WorkspaceKind } from "../../../shared/workspace-kind.ts";
 
 const CHOICES: ReadonlyArray<{ kind: WorkspaceKind; title: string; body: string; Icon: typeof IconCode }> = [
   { kind: "coding", title: "Coding", Icon: IconCode,
@@ -85,12 +87,31 @@ export function WorkspaceKindDialog({ open, description, current = null, onChoos
   </Dialog>;
 }
 
-/** Saves a registered project's kind and refreshes the project list so every view reads the new value. */
+/**
+ * Saves a registered project's kind and refreshes the project list so every view reads the new value. A failed
+ * refetch does not reject and keeps the cached list, so the saved kind is written into that list first. Otherwise a
+ * new Personal project would open with the stale Not set and keep the Code surface.
+ */
 export function useSaveProjectKind() {
   const { call } = useNativeActionCaller();
   const { refresh } = useProjects();
+  const queryClient = useQueryClient();
   return async (projectId: string, kind: WorkspaceKind) => {
     await call("vivary-set-project-kind", { projectId, workspaceKind: kind });
+    await queryClient.cancelQueries({ queryKey: CATALOG_QUERY_KEY, exact: true });
+    queryClient.setQueryData<CatalogResult>(CATALOG_QUERY_KEY, current => withProjectKind(current, projectId, kind));
     await refresh();
   };
+}
+
+/** The Project details row for the kind. Its button shows only where the host can save a kind. */
+export function ProjectKindDetail({ kind, editable, onChange }: {
+  kind: WorkspaceKind | null;
+  editable: boolean;
+  onChange: () => void;
+}) {
+  return <><dt>Project kind</dt><dd className="workspace-kind-detail">
+    <span>{workspaceKindLabel(kind)}</span>
+    {editable && <Button size="sm" variant="outline" onClick={onChange}>{kind ? "Change kind" : "Set kind"}</Button>}
+  </dd></>;
 }
