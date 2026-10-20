@@ -69,9 +69,9 @@ export function CodeRunControl() {
       return;
     }
     // The project change clears the route and the new project restores its saved view, so the target route is held.
-    routeHold.hold(target.projectId, href);
-    if (!await selectProject(target.projectId)) {
-      routeHold.release();
+    const release = routeHold.hold(target.projectId, href);
+    // An older click that fails late leaves a newer click's hold and says nothing, because the owner moved on.
+    if (!await selectProject(target.projectId) && release()) {
       setError(runs.some(run => run.id === target.id) ? "The project is unavailable. You can still deny or stop its work here." : "The project is unavailable. Its conversation history is retained.");
     }
   }

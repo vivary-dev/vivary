@@ -22,6 +22,7 @@ import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
 import { codeConversationModelChoices } from "../../lib/code-conversation-model-choices";
 import { useProjects } from "../projects/ProjectContext";
 import { useOpenProjectFolder } from "../projects/open-project-folder";
+import { folderRunTargets, type FolderRun } from "../../lib/code-folder-runs";
 import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
@@ -41,7 +42,6 @@ type ModelChoice = { engine: VivaryCodeState["defaultEngine"]; model: string };
 /** A conversation to open, possibly in another project. */
 type RunTarget = { id: string; projectId: string | null };
 /** Another conversation working in this conversation's folder. Another owner's has no title and cannot be opened. */
-type FolderRun = { id: string; title: string | null; projectId: string | null };
 const conversationSelectionSchema = z.object({
   key: z.string().min(1).max(128),
   runId: z.string().min(1).max(128).nullable(),
@@ -235,8 +235,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const activeRuns = codeState?.activeRuns ?? [];
   const ownActiveRun = activeRuns.find(item => item.id === selection?.runId) ?? null;
   const otherWorking = activeRuns.filter(item => item.id !== selection?.runId).length;
-  const folderRuns: FolderRun[] = (codeState?.folderRuns ?? []).filter(item => item.id !== selection?.runId)
-    .map(item => ({ ...item, projectId: activeRuns.find(active => active.id === item.id)?.projectId ?? projectId }));
+  const folderRuns = folderRunTargets(codeState?.folderRuns ?? [], activeRuns, selection?.runId, projectId);
   const folderIsolation = useOpenProjectFolder();
   const error = notice ?? codeState?.error
     ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
@@ -655,13 +654,14 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const shown = pendingSwitch ?? choice;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
   const runWorking = props.streaming || (!!props.run && isCodeAgentRunActive(props.run));
-  // Proceed acknowledges the conversations working in this folder now. One that starts later asks again.
+  // Proceed acknowledges the turns working in this folder now, keyed by turn. One that starts later asks again, including
+  // a later turn of a conversation that was acknowledged before.
   const [acknowledgedRuns, setAcknowledgedRuns] = useState<ReadonlySet<string>>(() => new Set());
-  const unacknowledged = props.folderRuns.filter(item => !acknowledgedRuns.has(item.id));
+  const unacknowledged = props.folderRuns.filter(item => !acknowledgedRuns.has(item.turnId));
   // Cancel and Escape close the warning for these conversations without acknowledging it. Nothing is sent and the draft
   // stays. A later send meets the server's shared-folder refusal, which opens the warning again.
   const [cancelledRuns, setCancelledRuns] = useState<ReadonlySet<string>>(() => new Set());
-  const undecided = unacknowledged.filter(item => !cancelledRuns.has(item.id));
+  const undecided = unacknowledged.filter(item => !cancelledRuns.has(item.turnId));
   const sharedFolderHeld = undecided.length > 0 && !runWorking;
   const focusComposerAfterCancel = useRef(false);
   const sharedFolderAcknowledged = useRef(false);
@@ -811,7 +811,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }
 
   function cancelSharedFolder() {
-    setCancelledRuns(new Set(unacknowledged.map(item => item.id)));
+    setCancelledRuns(new Set(unacknowledged.map(item => item.turnId)));
     focusComposerAfterCancel.current = true;
   }
   // The composer is disabled while the warning asks, so focus moves once Cancel has enabled it.
@@ -871,7 +871,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       {props.folderRuns.length > 0 && !runWorking && !props.viewingMatch && (undecided.length > 0 || !unacknowledged.length)
         && <SharedFolderNotice runs={props.folderRuns} onCancel={cancelSharedFolder}
         acknowledged={!sharedFolderHeld} folderLabel={props.state.workspaceLabel} isolation={props.folderIsolation}
-        onProceed={() => setAcknowledgedRuns(new Set(props.folderRuns.map(item => item.id)))} onOpen={props.onOpenRun} />}
+        onProceed={() => setAcknowledgedRuns(new Set(props.folderRuns.map(item => item.turnId)))} onOpen={props.onOpenRun} />}
       {!props.viewingMatch && props.run && <>
         <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
         <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}

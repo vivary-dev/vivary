@@ -36,7 +36,8 @@ after(async () => {
 const agent = await import("../server/local-code-agent.ts");
 const { getVivaryRuntimeStatus } = await import("../server/local-runtime-setup.ts");
 const { SHARED_FOLDER_WARNING } = await import("../shared/code-concurrency.ts");
-const { getCodeAgentRunRecord, listCodeAgentRunRecords, listCodeAgentTranscriptEvents } = await import("@agent-native/core/code-agents");
+const { getCodeAgentRunRecord, listCodeAgentRunRecords, listCodeAgentTranscriptEvents, updateCodeAgentRunRecord } =
+  await import("@agent-native/core/code-agents");
 type Workspace = { root: string; label: string; projectId?: string; bindingId?: string; rootId?: string; bindingRevision?: number };
 const host = () => Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")) as {
   activeRuns: Map<string, { execution: Promise<void> | null }> };
@@ -301,12 +302,46 @@ test("a second send into a working conversation is refused, with or without the 
           { errorCode: "vivary_code_conversation_active", statusCode: 409 });
       }
       assert.ok(host().activeRuns.has(runId), "the first turn keeps working");
+      const turnOf = async () => (await agent.getVivaryCodeState(owner.ownerEmail, undefined, workspace, owner.orgId))
+        .folderRuns.find(run => run.id === runId)?.turnId;
+      const firstTurn = await turnOf();
+      assert.ok(firstTurn);
+      assert.equal(await turnOf(), firstTurn, "a turn keeps its identity while it works");
       assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.message),
         ["Work until stopped"]);
       await delay(250);
       assert.equal(await starts(), 1, "no second worker started");
+      await settle(runId);
+      await send(workspace, "Work again until stopped", { runId });
+      const secondTurn = await turnOf();
+      assert.ok(secondTurn && secondTurn !== firstTurn, "the next turn of the same conversation has a new turn identity");
     } finally { await settle(runId); }
   });
+
+test("Stop leaves alone a run whose own cleanup refusal is in force while an older refusal is the host's", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { folder } = await ipcFixture("refusals");
+  const older = (await send(project(folder, "refusal_one"), "Work one")).run!.id;
+  const newer = (await send(project(folder, "refusal_two"), "Work two", { acknowledgeSharedFolder: true })).run!.id;
+  const refusal = (refusedAt: string) => ({ target: null, remaining: [], total: 0, fingerprint: null, hidden: false,
+    scan: "unavailable", step: null, refusedAt, checkedAt: refusedAt, ends: [] });
+  const state = Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")) as { cleanup: unknown;
+    activeRuns: Map<string, { stopReason: string | null }> };
+  try {
+    updateCodeAgentRunRecord(older, { metadata: { cleanupRefusal: refusal("2026-01-01T00:00:00.000Z") } });
+    updateCodeAgentRunRecord(newer, { metadata: { cleanupRefusal: refusal("2026-01-02T00:00:00.000Z") } });
+    // The host holds the oldest refusal only, as reloadCleanup sets it.
+    state.cleanup = { runId: older, ...refusal("2026-01-01T00:00:00.000Z") };
+    await agent.stopVivaryCodeRun({ ...owner, runId: newer, projectId: "refusal_two" });
+    assert.equal(state.activeRuns.get(newer)?.stopReason, null, "the newer run's own refusal holds its Stop");
+    assert.notEqual(getCodeAgentRunRecord(newer)?.phase, "stopping");
+  } finally {
+    for (const runId of [older, newer]) updateCodeAgentRunRecord(runId, { metadata: { cleanupRefusal: undefined } });
+    state.cleanup = null;
+    await settle(older);
+    await settle(newer);
+  }
+});
 
 test("folders that overlap warn, while separate projects and Git worktrees run without a warning", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {

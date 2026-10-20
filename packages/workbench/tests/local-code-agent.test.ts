@@ -484,7 +484,8 @@ process.send({type:"vivary:code-worker:ready"});
         .run?.draftThreadId, "vivary-code:project:immediate:draft-1");
       assert.deepEqual(state.activeRuns.map(run => [run.id, run.pendingApprovals.length]), [[runId, 0]]);
       assert.equal(state.busy, true);
-      assert.deepEqual(state.folderRuns, [{ id: runId, title: "Inspect this fixture" }]);
+      assert.deepEqual(state.folderRuns.map(({ id, title }) => ({ id, title })), [{ id: runId, title: "Inspect this fixture" }]);
+      assert.match(state.folderRuns[0].turnId, /^[0-9a-f-]{36}$/, "a random turn identity, not the run ID");
       assert.equal(getCodeAgentRunRecord(runId)?.metadata?.pendingLaunch, undefined);
       assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
       assert.equal(hasOwnedVivaryCodeSubmit("immediate@example.com", "immediate-org", workspace,

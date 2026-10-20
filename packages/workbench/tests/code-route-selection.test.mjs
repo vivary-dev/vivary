@@ -38,7 +38,7 @@ function fixture() {
   let codex = { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" };
   let statusGate = null, reconnecting = false;
   const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [];
-  const activeRuns = new Map(), hostState = { cleanup: null };
+  const activeRuns = new Map(), hostState = { cleanup: null, unsaved: new Map() };
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace, ensureVivaryCodeHostInitialized: async () => {},
@@ -69,6 +69,8 @@ function fixture() {
     recordProjectContextLoad() { writes.push("context"); },
     activeRuns, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
+    // A stored refusal on the record, as cleanupRefusalFromRun reads it.
+    cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));

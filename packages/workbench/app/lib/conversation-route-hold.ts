@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 /** How long an opened conversation's route must hold before a later restore may replace it. */
@@ -14,7 +14,7 @@ export function hasWorkspaceRoute(pathname: string, search: string): boolean {
   return pathname === "/" && WORKSPACE_ROUTE_KEYS.some(key => params.has(key));
 }
 
-type HeldRoute = { projectId: string | null; href: string; from: string; landed: boolean };
+type HeldRoute = { id: number; projectId: string | null; href: string; from: string; landed: boolean };
 
 /**
  * Opens a conversation route in another project and keeps it there. `Workspace.tsx` clears the old conversation route
@@ -24,15 +24,17 @@ type HeldRoute = { projectId: string | null; href: string; from: string; landed:
  * replace if a restore replaces it, and released after it holds for CONVERSATION_ROUTE_SETTLE_MS or when the owner
  * presses a key or the pointer.
  *
- * Call `hold` before `selectProject`, and `release` when the selection fails. `activeProjectId` and `checking` come from
- * `useProjects()`.
+ * Call `hold` before `selectProject`. It returns a release for that hold only: when the selection fails, the release ends
+ * the hold if no newer hold replaced it, and returns whether it was still the newest. A slow, failed open therefore never
+ * releases a later click's hold. `activeProjectId` and `checking` come from `useProjects()`.
  */
 export function useConversationRouteHold({ activeProjectId, checking }: {
   activeProjectId: string | null; checking: boolean;
-}): { hold: (projectId: string | null, href: string) => void; release: () => void } {
+}): { hold: (projectId: string | null, href: string) => () => boolean } {
   const location = useLocation();
   const navigate = useNavigate();
   const [held, setHeld] = useState<HeldRoute>();
+  const newest = useRef(0);
   const route = location.pathname + location.search;
   useEffect(() => {
     if (!held || checking || activeProjectId !== held.projectId) return;
@@ -57,8 +59,13 @@ export function useConversationRouteHold({ activeProjectId, checking }: {
     };
   }, [held !== undefined]);
   const hold = useCallback((projectId: string | null, href: string) => {
-    setHeld({ projectId, href, from: route, landed: false });
+    const id = ++newest.current;
+    setHeld({ id, projectId, href, from: route, landed: false });
+    return () => {
+      if (newest.current !== id) return false;
+      setHeld(current => current?.id === id ? undefined : current);
+      return true;
+    };
   }, [route]);
-  const release = useCallback(() => setHeld(undefined), []);
-  return { hold, release };
+  return { hold };
 }
