@@ -7,7 +7,7 @@ export default defineAction({
   schema: codeRunCapacitySchema,
   requiresAuth: true, agentTool: false, mcpTool: false, toolCallable: false,
   run: async (input, ctx?: ActionRunContext) => {
-    requireVivaryCodeUser(ctx);
-    return setVivaryCodeRunCapacity(input);
+    const ownerEmail = requireVivaryCodeUser(ctx);
+    return setVivaryCodeRunCapacity(input, { ownerEmail, orgId: ctx?.orgId ?? undefined });
   },
 });

@@ -8,7 +8,7 @@ export default defineAction({
   http: { method: "GET" }, readOnly: true,
   requiresAuth: true, agentTool: false, mcpTool: false, toolCallable: false,
   run: async (_input, ctx?: ActionRunContext) => {
-    requireVivaryCodeUser(ctx);
-    return getVivaryCodeRunCapacity();
+    const ownerEmail = requireVivaryCodeUser(ctx);
+    return getVivaryCodeRunCapacity({ ownerEmail, orgId: ctx?.orgId ?? undefined });
   },
 });

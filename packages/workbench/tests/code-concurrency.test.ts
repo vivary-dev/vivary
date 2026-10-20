@@ -634,6 +634,32 @@ test("a send into a conversation whose only queued message was cancelled lists i
   } finally { await endAll(runs); }
 });
 
+test("waiting for you counts only the caller's held turns", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-held-owner");
+  const [a, b] = await folders(fixture, "a", "b");
+  const other = { ownerEmail: "someone-else@example.test", orgId: owner.orgId };
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  let theirs: string | undefined;
+  try {
+    runs.push((await send(project(a, "held_a"), "Work in a")).run!.id);
+    theirs = (await send(project(b, "held_b"), "Their words", other)).run!.id;
+    // A restart holds the other owner's queued turn.
+    const state = capacityHost();
+    state.queue.length = 0;
+    state.initialization = null;
+    const mine = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual([mine.queuedRuns, mine.capacity.held], [[], 0], "the caller has nothing waiting");
+    assert.equal((await agent.getVivaryCodeRunCapacity(owner)).held, 0);
+    assert.equal((await agent.getVivaryCodeHostState(other.ownerEmail, other.orgId)).capacity.held, 1);
+    assert.equal((await agent.getVivaryCodeRunCapacity(other)).held, 1);
+  } finally {
+    if (theirs) await agent.cancelQueuedVivaryCodeTurn({ ...other, runId: theirs, projectId: "held_b" }).catch(() => undefined);
+    await endAll(runs);
+  }
+});
+
 test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { folder } = await ipcFixture("capacity-mixed");

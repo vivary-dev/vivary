@@ -386,7 +386,8 @@ turn is held and then cancelled, never started.
 
 Host state carries `capacity` (`limit`, `whenFull`, `running`, `queued`, `held`)
 and `queuedRuns`, each with its `state`, host-wide `position`, `reason`, and
-`queuedAt`. A run summary carries `queue`. The agent work strip in
+`queuedAt`. A run summary carries `queue`. `running` and `queued` count the whole host. `held`
+counts only the caller's held turns, shown as waiting for you. The agent work strip in
 [`CodeRunControl.tsx`](../packages/workbench/app/components/layout/CodeRunControl.tsx)
 shows the counts and each queued conversation with Cancel, Start for a held one,
 and lists a queued or held conversation there rather than as the recent run,

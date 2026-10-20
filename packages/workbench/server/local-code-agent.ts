@@ -923,7 +923,7 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
     busy: active.length > 0,
     // Every user of the host sees the refusal, because it refuses them all.
     cleanup: hostState.cleanup ? cleanupView(hostState.cleanup, runs, ownerEmail, orgId) : null,
-    capacity: capacityView(),
+    capacity: capacityView({ ownerEmail, orgId }),
     queuedRuns: hostState.queue.flatMap(item => {
       const run = ownedById.get(item.runId);
       return run ? [{ id: run.id, title: run.title, projectId: metadataString(run, "projectId"),
@@ -1939,9 +1939,15 @@ function assertConversationCanStart(input: { runId?: string; ownerEmail: string;
 
 export type VivaryCodeSendInput = Parameters<typeof sendVivaryCodeMessage>[0];
 
-function capacityView(): VivaryCodeCapacityView {
+/**
+ * The limit with the host-wide running and queued counts. `held` counts only the owner's held turns, because only the
+ * owner can start or cancel them. Without an owner it is 0.
+ */
+function capacityView(owner?: { ownerEmail: string; orgId?: string }): VivaryCodeCapacityView {
   const waiting = hostState.queue.filter(item => item.state === "queued" || item.state === "starting").length;
-  return { ...hostState.capacity, running: activeRuns.size, queued: waiting, held: hostState.queue.length - waiting };
+  const held = owner ? hostState.queue.filter(item => item.state !== "queued" && item.state !== "starting"
+    && item.ownerEmail === owner.ownerEmail && (item.orgId ?? null) === (owner.orgId ?? null)).length : 0;
+  return { ...hostState.capacity, running: activeRuns.size, queued: waiting, held };
 }
 
 /** The limit minus the running turns and the queued turns already starting. */
@@ -2160,17 +2166,18 @@ export async function resumeQueuedVivaryCodeTurn(input: VivaryCodeSendInput & { 
   return getVivaryCodeState(input.ownerEmail, item.runId, workspace, input.orgId);
 }
 
-export async function getVivaryCodeRunCapacity(): Promise<VivaryCodeCapacityView> {
+export async function getVivaryCodeRunCapacity(owner: { ownerEmail: string; orgId?: string }): Promise<VivaryCodeCapacityView> {
   await ensureVivaryCodeHostInitialized();
-  return capacityView();
+  return capacityView(owner);
 }
 
 /** Saves the host-wide limit. A higher limit starts queued turns at once, and a lower one stops nothing. */
-export async function setVivaryCodeRunCapacity(next: CodeRunCapacity): Promise<VivaryCodeCapacityView> {
+export async function setVivaryCodeRunCapacity(next: CodeRunCapacity,
+  owner?: { ownerEmail: string; orgId?: string }): Promise<VivaryCodeCapacityView> {
   await ensureVivaryCodeHostInitialized();
   hostState.capacity = await writeCodeRunCapacity(next);
   drainCodeRunQueue();
-  return capacityView();
+  return capacityView(owner);
 }
 
 /** Names the caller's conversations working in the folder and counts any other owner's. */
