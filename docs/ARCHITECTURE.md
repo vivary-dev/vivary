@@ -1060,6 +1060,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox Messages holds message matches only (W5b, review thread 4318543019). A title match from the
+search action is already a row in the title-filtered list, so Messages no longer repeats it as a matching message.
+Evidence inspected: the new component test with one title and one content hit.
+
 2026-10-20 Inbox filter ordering (W5b, review thread 4317666060). A filter chosen while the saved one loads
 cancels the load, and filter saves run one after another, so the newest choice is the one restored. No section
 changes, since the section already says the filter is saved. Evidence inspected: the new component test with a

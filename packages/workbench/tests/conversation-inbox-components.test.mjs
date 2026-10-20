@@ -616,6 +616,17 @@ test("search filters titles at once and also searches messages in the filtered p
   assert.equal(host.querySelector("#route").textContent, "?history=project&run=a1&event=ref-a1&eventOffset=3");
 });
 
+const hitTitles = () => [...host.querySelectorAll(".conversation-inbox__messages .conversation-inbox__hit .conversation-inbox__title")]
+  .map(node => node.textContent);
+
+test("a title match is not repeated as a message, since the title filter already lists that conversation", async () => {
+  inboxFixture.hits = [{ ...hit("alpha", "a1", "Fix table wrapping"), match: "title" }, hit("alpha", "a3", "a table in the plan")];
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.deepEqual(hitTitles(), ["Session a3"]);
+  assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
+});
+
 test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {
   inboxFixture.hits = [];
   await render("/?run=a1");

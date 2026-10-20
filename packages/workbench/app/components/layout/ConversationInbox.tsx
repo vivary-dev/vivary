@@ -519,7 +519,10 @@ function InboxMessageSearch({ term, scopes, total, onOpen }: { term: string; sco
       const found = new Map<string, ChatSearchHit>();
       for (const page of pages) {
         if (page.status !== "fulfilled") continue;
-        for (const hit of page.value.results) found.set(JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]), hit);
+        // A title match is already a row in the list above, so Messages holds message matches only.
+        for (const hit of page.value.results) {
+          if (hit.match === "content") found.set(JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]), hit);
+        }
       }
       const failed = pages.filter(page => page.status === "rejected").length;
       setState({ key, status: failed === pages.length ? "unavailable" : "ready", failed,
