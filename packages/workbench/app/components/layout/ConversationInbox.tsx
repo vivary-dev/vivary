@@ -211,7 +211,7 @@ export function ConversationInbox() {
       const from = currentRoute();
       try {
         if (row.kind === "native") {
-          await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
+          await call("vivary-conversation-archive", { operation: "restore", projectId: row.projectId,
             threadId: row.id.slice("native:".length) });
           window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
         } else {
@@ -252,7 +252,7 @@ export function ConversationInbox() {
           projectId: row.projectId, ...(operation === "rename" ? { title } : {}) });
       } else if (row.kind === "native") {
         if (operation === "restore") {
-          await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
+          await call("vivary-conversation-archive", { operation: "restore", projectId: row.projectId,
             threadId: row.id.slice("native:".length) });
         } else {
           // One owner action, which a private-proxy browser can reach. Archive refuses while a turn runs, messages are

@@ -506,11 +506,26 @@ test("a slow API chat creation does not replace a conversation opened meanwhile"
   assert.equal(route(), "?run=a3");
 });
 
+test("an archived API chat is restored through the owner action that does not need Code history", async () => {
+  inboxFixture.rows = [...rows(), row("native:a5", "alpha", "Old API chat", 5, { archived: true })];
+  await render("/?run=a1");
+  await openRow("native:a5");
+  await settle();
+  assert.deepEqual(inboxFixture.calls[0], { name: "vivary-conversation-archive",
+    input: { operation: "restore", projectId: "alpha", threadId: "a5" } });
+  assert.equal(route(), "?runtime=native&history=project&thread=a5");
+  await act(async () => host.querySelector('[aria-label="Actions for Old API chat"]').click());
+  await act(async () => button("Restore").click());
+  await settle();
+  assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive",
+    input: { operation: "restore", projectId: "alpha", threadId: "a5" } });
+});
+
 test("a slow restore of an archived API chat does not replace a conversation opened meanwhile", async () => {
   inboxFixture.rows = [...rows(), row("native:a5", "alpha", "Old API chat", 5, { archived: true })];
   const slow = gate();
   inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
-    if (name === "vivary-native-archive") await slow.wait; return { restored: true }; };
+    if (input.operation === "restore") await slow.wait; return { changed: true }; };
   await render("/?run=a1");
   await openRow("native:a5");
   await openRow("code:a3");

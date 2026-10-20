@@ -14,10 +14,10 @@ const target = {
  * authenticate a POST only to an owner action, not to Native's thread routes.
  */
 export default defineAction({
-  description: "Archive, rename, pin or unpin one of the owner's API chats. Archive waits for unresolved work.",
+  description: "Archive, restore, rename, pin or unpin one of the owner's API chats. Archive waits for unresolved work.",
   schema: z.discriminatedUnion("operation", [
     z.object({ operation: z.literal("rename"), ...target, title: z.string().trim().min(1).max(MAX_TITLE_LENGTH) }).strict(),
-    z.object({ operation: z.enum(["archive", "pin", "unpin"]), ...target }).strict(),
+    z.object({ operation: z.enum(["archive", "restore", "pin", "unpin"]), ...target }).strict(),
   ]),
   requiresAuth: true, agentTool: false, mcpTool: false, toolCallable: false,
   run: async (input, ctx?: ActionRunContext) => {

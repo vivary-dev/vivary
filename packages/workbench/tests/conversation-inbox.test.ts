@@ -338,6 +338,10 @@ test("API chat rename and pin keep its messages, survive a generated title and r
   row = (await load()).rows.find(item => item.id === "native:native-personal")!;
   assert.equal(row.pinned, false);
   await assert.rejects(change({ operation: "pin" }, "alpha"), (error: { statusCode?: number }) => error.statusCode === 404);
+  await change({ operation: "archive" });
+  assert.equal((await load()).rows.find(item => item.id === "native:native-personal")?.archived, true);
+  assert.deepEqual(await change({ operation: "restore" }), { changed: true }, "restore needs no Code history");
+  assert.equal((await load()).rows.find(item => item.id === "native:native-personal")?.archived, false);
 });
 
 test("a Code change follows the project's current binding, so a replaced binding's conversation is read-only", async () => {

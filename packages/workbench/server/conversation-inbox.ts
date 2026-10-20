@@ -285,12 +285,13 @@ export function requireCatalogProject(catalog: { code: string; projects?: readon
   }
 }
 
-export type NativeConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "pin" | "unpin" };
+export type NativeConversationChange = { operation: "rename"; title: string }
+  | { operation: "archive" | "restore" | "pin" | "unpin" };
 
 /**
- * Renames, pins or archives the owner's API chat in one project. The inbox sends these through an owner action rather
+ * Renames, pins, archives or restores the owner's API chat in one project. The inbox sends these through an owner action rather
  * than Native's thread routes, because a private-proxy browser can authenticate a POST only to an owner action. Restore
- * stays with `vivary-native-archive`.
+ * is here too, because `vivary-native-archive` needs the project's Code history, which the inbox does not require.
  */
 export async function changeNativeConversation(input: { ownerEmail: string; orgId: string; projectId: string | null;
   threadId: string; change: NativeConversationChange }): Promise<{ changed: true }> {
@@ -304,6 +305,7 @@ export async function changeNativeConversation(input: { ownerEmail: string; orgI
   let changed: boolean;
   if (change.operation === "archive") changed = await archiveNativeThread(identity, thread);
   else if (change.operation === "rename") changed = await renameNativeThread(thread, change.title);
+  else if (change.operation === "restore") changed = await setThreadArchived(input.threadId, false, { ownerEmail: thread.ownerEmail });
   // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
   else changed = await setThreadPinned(input.threadId, change.operation === "pin", { ownerEmail: thread.ownerEmail });
   if (!changed) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
