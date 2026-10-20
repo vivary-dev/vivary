@@ -392,7 +392,8 @@ counts only the caller's held turns, shown as waiting for you. The agent work st
 shows the counts and each queued conversation with Cancel, Start for a held one,
 and lists a queued or held conversation there rather than as the recent run,
 and Proceed or Use another folder for one that needs confirmation. Use another
-folder cancels the message back into its draft and opens the folder picker.
+folder cancels the message back into its draft and opens the folder picker
+only after the cancel succeeds.
 `tests/code-concurrency.test.ts` covers the queue with the IPC worker: first in,
 first out, Cancel and its draft, Refuse, a queued conversation's refusal and
 Stop, held after restart, a fresh shared-folder check, and mixed runtimes under

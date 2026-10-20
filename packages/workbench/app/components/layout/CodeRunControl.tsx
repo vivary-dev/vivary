@@ -43,10 +43,11 @@ export function CodeRunControl() {
     ? catalog?.projects.find(project => project.projectId === projectId)?.displayName ?? "Unavailable project"
     : "Personal workspace";
 
-  async function settle(action: Promise<unknown>) {
+  /** Runs an owner action and refreshes the strip. True when the action succeeded. */
+  async function settle(action: Promise<unknown>): Promise<boolean> {
     setError(undefined);
-    try { await action; }
-    catch (failure) { setError(failureMessage(failure)); }
+    try { await action; return true; }
+    catch (failure) { setError(failureMessage(failure)); return false; }
     finally { await status.refetch(); }
   }
 
@@ -106,7 +107,7 @@ export function CodeRunControl() {
         onOpen={() => void openConversation(item)}
         onCancel={() => queueCall("cancel", item)}
         onStart={proceed => queueCall(proceed ? "proceed" : "start", item)}
-        onOtherFolder={async () => { await queueCall("cancel", item); await isolation.openFolder(); }} />)}
+        onOtherFolder={async () => { if (await queueCall("cancel", item)) await isolation.openFolder(); }} />)}
     </ul>}
     {cleanup ? <div className={`flex flex-col gap-2${runs.length ? " mt-3" : ""}`} role="region" aria-label="Leftover coding processes">
       <h2 className="font-semibold">{cleanup.heading}</h2>

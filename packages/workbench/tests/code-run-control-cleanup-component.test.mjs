@@ -41,8 +41,10 @@ const stubs = new Map([
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
   ["react-router", `export function useNavigate() { return () => {}; }
     export function useLocation() { return { pathname: "/", search: "" }; }`],
-  ["../projects/open-project-folder", `export function useOpenProjectFolder() {
-    return { available: false, choosing: false, error: undefined, async openFolder() {} }; }`],
+  ["../projects/open-project-folder", `export const folderProof = { available: false, opened: 0 };
+    export function useOpenProjectFolder() {
+      return { available: folderProof.available, choosing: false, error: undefined,
+        async openFolder() { folderProof.opened += 1; } }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
@@ -57,6 +59,7 @@ import { createRoot } from "react-dom/client";
 import { CodeRunControl } from "@proof/CodeRunControl";
 import { hostProof } from "@agent-native/core/client/hooks";
 import { callProof } from "../../lib/native-actions";
+import { folderProof } from "../projects/open-project-folder";
 
 const HOST = { activeRuns: [], recentRun: null, busy: false };
 const NAMED = {
@@ -311,6 +314,35 @@ export async function queuedConversationsShowCountsAndTheirOwnChoices() {
   } finally { await dispose(); }
 }
 
+export async function useAnotherFolderOpensThePickerOnlyAfterTheCancel() {
+  const item = { id: "run-check", title: "Fix the tests", projectId: null, workspaceLabel: "fixture", engineLabel: "Claude Code",
+    model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z", state: "needs-confirmation", position: null,
+    reason: "Other agents are working in this folder." };
+  folderProof.available = true;
+  folderProof.opened = 0;
+  const { host, dispose } = await mount(null, { queuedRuns: [item],
+    capacity: { limit: 1, whenFull: "queue", running: 0, queued: 0, held: 1 } });
+  const flush = () => act(async () => { for (let turn = 0; turn < 5; turn += 1) await Promise.resolve(); });
+  try {
+    // The cancel fails, for example because the turn started meanwhile. The message may still run in this folder.
+    callProof.answer = { then(_resolve, reject) { reject(new Error("That queued message was not found.")); } };
+    await click(button(host, "Use another folder"));
+    await flush();
+    assert.equal(folderProof.opened, 0, "a failed cancel opens no folder picker");
+    assert.equal(alertText(host), "That queued message was not found.");
+    callProof.answer = null;
+    await click(button(host, "Use another folder"));
+    await flush();
+    assert.equal(folderProof.opened, 1, "a confirmed cancel opens the picker");
+    assert.deepEqual(callProof.calls.map(call => [call.name, call.params.operation]),
+      [["vivary-code-queue", "cancel"], ["vivary-code-queue", "cancel"]]);
+  } finally {
+    folderProof.available = false;
+    callProof.answer = null;
+    await dispose();
+  }
+}
+
 export async function aStoppingRunHoldsItsStopOnly() {
   const runs = [activeRun(CLAUDE_RUN, { stopping: true }), activeRun(CODEX_RUN, { engineLabel: "Codex CLI" })];
   const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
@@ -393,6 +425,7 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
     ["queued conversations show the counts and their own Cancel, Start, and Proceed", proof.queuedConversationsShowCountsAndTheirOwnChoices],
+    ["Use another folder opens the folder picker only after the cancel succeeds", proof.useAnotherFolderOpensThePickerOnlyAfterTheCancel],
   ]) await t.test(name, () => run());
 });
 
