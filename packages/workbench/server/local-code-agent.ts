@@ -2,7 +2,7 @@ import { getCodePermissionMode, type CodePermissionMode } from "./code-permissio
 import { readCodeTranscriptWindow } from "./code-transcript-page";
 import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
 import type { CodexActionRequest } from "./code-execution-protocol";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, realpath, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -90,6 +90,10 @@ export type VivaryCodeRunSummary = Pick<
 };
 
 export type VivaryCodeRunState = VivaryCodeRunSummary & {
+  /** Latest accepted user event in full canonical history, including outside the rendered transcript window. */
+  turnId: string | null;
+  /** Durable route commit identity, with the last canonical switch note's ID as the legacy fallback. */
+  switchGeneration: string | null;
   events: CodeAgentTranscriptEvent[];
 };
 
@@ -900,6 +904,13 @@ export async function getVivaryCodeState(
       configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
 
+  // A search link opens a retained page after the same ownership check as the default transcript.
+  // Finish its asynchronous read before taking the final run and host snapshot below.
+  const anchored = selected && anchor ? await readCodeTranscriptWindow(selected.id, anchor.eventOffset, MAX_TRANSCRIPT_EVENTS) : null;
+  if (anchor && (!runId || anchored?.anchor?.id !== anchor.eventId)) {
+    fail("This matching event is no longer available. Search again.", { statusCode: 404 });
+  }
+
   const permissionMode = await getCodePermissionMode(ownerEmail, orgId);
   let selectedEngine: VivaryCodeEngine;
   let runtime: VivaryRuntimeStatus;
@@ -927,12 +938,8 @@ export async function getVivaryCodeState(
   selectedRuntime.configured = runtime.status === "ready"
     && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
 
-  // A search link opens a retained page after the same ownership check as the default transcript.
-  // The stable ID checks the byte hint against edits or deletion; a stale link never opens a different event.
-  const anchored = selected && anchor ? await readCodeTranscriptWindow(selected.id, anchor.eventOffset, MAX_TRANSCRIPT_EVENTS) : null;
-  if (anchor && (!runId || anchored?.anchor?.id !== anchor.eventId)) {
-    fail("This matching event is no longer available. Search again.", { statusCode: 404 });
-  }
+  // Load full history only for the selected run. Identities must survive both tail caps and anchored search windows.
+  const events = selected ? listCodeAgentTranscriptEvents(selected.id) : [];
 
   return {
     ...host,
@@ -949,8 +956,11 @@ export async function getVivaryCodeState(
     run: selected
       ? {
           ...toRunSummary(selected),
+          turnId: events.findLast(event => event.kind === "user")?.id ?? null,
+          switchGeneration: metadataString(selected, "switchGeneration")
+            ?? events.findLast(event => event.kind === "note" && event.metadata?.source === VIVARY_CODE_SWITCH_SOURCE)?.id ?? null,
           events: anchored ? dedupeAdjacentAssistantEvents(anchored.entries.map(entry => entry.event), anchor?.eventId) : dedupeAdjacentAssistantEvents(
-            listCodeAgentTranscriptEvents(selected.id),
+            events,
           ).slice(-MAX_TRANSCRIPT_EVENTS),
         }
       : null,
@@ -1447,18 +1457,14 @@ export async function switchVivaryCodeRuntime(input: {
   assertRunCanSwitch(run, input.stop === true);
   const fromEngine = metadataString(run, "engine");
   const fromModel = modelFromRun(run);
-  if (fromEngine === input.engine && fromModel === input.model) {
-    // Another window may already have switched to this route and started a turn. The owner confirmed that Stop and
-    // switch cancels the current request, so the Stop still applies when no switch is needed.
-    const active = input.stop ? activeRuns.get(run.id) : undefined;
-    if (active) requestUserStop(run.id, active);
-    return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+  let target: { id: string; label: string } | undefined;
+  if (fromEngine !== input.engine || fromModel !== input.model) {
+    const runtime = await getVivaryRuntimeStatus(input.engine);
+    if (runtime.status !== "ready") {
+      fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
+    }
+    target = await switchTargetModel(input.engine, input.model, runtime, workspace);
   }
-  const runtime = await getVivaryRuntimeStatus(input.engine);
-  if (runtime.status !== "ready") {
-    fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
-  }
-  const target = await switchTargetModel(input.engine, input.model, runtime, workspace);
   if (input.revalidateWorkspace) {
     const current = await input.revalidateWorkspace();
     if (!current || !sameWorkspace(current, workspace)) {
@@ -1475,8 +1481,13 @@ export async function switchVivaryCodeRuntime(input: {
       errorCode: "vivary_code_switch_conflict", statusCode: 409,
     });
   }
-  const to = { engine: input.engine, model: target.id, label: target.label };
   const active = activeRuns.get(current.id);
+  if (!target) {
+    // Even a matching route needs the fresh grant and reconnection checks before its confirmed Stop.
+    if (input.stop && active) requestUserStop(current.id, active);
+    return getVivaryCodeState(input.ownerEmail, current.id, workspace, input.orgId);
+  }
+  const to = { engine: input.engine, model: target.id, label: target.label };
   if (active) {
     updateCodeAgentRunRecord(current.id, { metadata: { pendingSwitch: { ...to, requestedAt: new Date().toISOString() } } });
     requestUserStop(current.id, active);
@@ -1549,15 +1560,15 @@ function applyPendingSwitch(runId: string): void {
   if (!run?.metadata?.pendingSwitch) return;
   const pending = run.metadata.pendingSwitch as { label?: unknown };
   const target = pendingSwitchFromRun(run);
-  updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
   if (!target || cleanupRefusalsInForce().some(refusal => refusal.runId === runId)) {
+    updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
     appendCodeAgentTranscriptEvent({ runId, kind: "note",
       message: "The runtime switch did not happen, because Vivary could not confirm that this conversation's coding "
         + "processes stopped. Choose it again after they stop.",
       metadata: { source: `${VIVARY_CODE_SWITCH_SOURCE}-dropped`, to: target } });
     return;
   }
-  applyVivaryCodeRuntimeSwitch(getCodeAgentRunRecord(runId)!, { ...target,
+  applyVivaryCodeRuntimeSwitch(run, { ...target,
     label: typeof pending.label === "string" ? pending.label : target.model });
 }
 
@@ -1573,9 +1584,13 @@ export function applyVivaryCodeRuntimeSwitch(run: CodeAgentRunRecord,
   const fromSession = fromEngine === "claude-cli" || fromEngine === "codex-cli" ? providerSessionId(run, fromEngine) : null;
   const earlier = Array.isArray(run.metadata?.previousProviderSessions) ? run.metadata.previousProviderSessions : [];
   const switchedAt = at.toISOString();
+  const switchGeneration = randomUUID();
   updateCodeAgentRunRecord(run.id, { metadata: {
     engine: to.engine,
     model: to.model,
+    // Route, session reset, pending consumption and generation form one durable record update.
+    pendingSwitch: undefined,
+    switchGeneration,
     claudeSessionId: undefined,
     codexSessionId: undefined,
     providerSessionMode: undefined,
@@ -1589,7 +1604,7 @@ export function applyVivaryCodeRuntimeSwitch(run: CodeAgentRunRecord,
     message: `Switched from ${engineLabelFromRun(run)} ${fromLabel} to ${toEngineLabel} ${to.label}. `
       + `The next message starts a new ${toEngineLabel} session with the visible conversation text.`,
     metadata: { source: VIVARY_CODE_SWITCH_SOURCE, from: { engine: fromEngine, model: fromModel },
-      to: { engine: to.engine, model: to.model }, switchedAt } });
+      to: { engine: to.engine, model: to.model }, switchedAt, switchGeneration } });
 }
 
 export async function getVivaryCodeFiles(

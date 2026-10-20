@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
 import test from "node:test";
@@ -37,6 +38,8 @@ function fixture() {
   let runtime = { status: "ready", version: "2.1.300" };
   let codex = { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" };
   let statusGate = null, reconnecting = false;
+  let afterRecordPersist = null, writeFault = null;
+  const allowWrite = () => { if (writeFault) throw writeFault; };
   const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [];
   const activeRuns = new Map(), hostState = { cleanup: null };
   const workspace = { root: "/fixture", label: "Fixture" };
@@ -58,16 +61,25 @@ function fixture() {
     getCodePermissionMode: async () => "normal", refreshHeldCredentials: async () => {},
     VIVARY_CODE_GOAL_ID: "vivary-local-code", VIVARY_CODE_APP_MARKER: "vivary-workbench-local-code",
     titleFromMessage: message => message,
-    createCodeAgentRunRecord: input => { writes.push("create"); const run = { ...input, id: "new-run" }; records.set(run.id, run); return run; },
+    createCodeAgentRunRecord: input => { allowWrite(); writes.push("create"); const run = { ...input, id: "new-run" }; records.set(run.id, run); return run; },
     buildVivaryCodeExecutionPrompt: (run, engine, message) => { prompts.push(run); return message; },
-    appendCodeAgentTranscriptEvent: event => { writes.push("transcript"); events.push(event); },
-    updateCodeAgentRunRecord: (id, change) => { writes.push("record"); const run = records.get(id); records.set(id, { ...run, ...change, metadata: { ...run.metadata, ...change.metadata } }); },
-    startVivaryCodeRun: input => { launches.push(input); },
+    appendCodeAgentTranscriptEvent: event => { allowWrite(); writes.push("transcript"); events.push(event); },
+    updateCodeAgentRunRecord: (id, change) => {
+      allowWrite();
+      writes.push("record");
+      const run = records.get(id);
+      records.set(id, { ...run, ...change, metadata: { ...run.metadata, ...change.metadata } });
+      // The hook runs AFTER this logical record is persisted. Once it interrupts, all later writes fail too,
+      // so a production catch cannot repair the boundary being inspected and conceal an unsafe intermediate state.
+      try { afterRecordPersist?.(id, change, structuredClone(records.get(id))); }
+      catch (error) { writeFault = error; throw error; }
+    },
+    startVivaryCodeRun: input => { allowWrite(); launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
     projectReconnectionPending: () => reconnecting,
-    requestUserStop: (runId, active) => { stops.push(runId); active.stopReason ??= "user"; },
-    recordProjectContextLoad() { writes.push("context"); },
-    activeRuns, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
+    requestUserStop: (runId, active) => { allowWrite(); stops.push(runId); active.stopReason ??= "user"; },
+    recordProjectContextLoad() { allowWrite(); writes.push("context"); },
+    activeRuns, randomUUID, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
     // This slice stubs the collection boundary; local-code-cleanup-refusal.test.ts exercises its real store and parser.
     cleanupRefusalsInForce: () => [
       ...(hostState.cleanup ? [hostState.cleanup] : []),
@@ -83,6 +95,7 @@ function fixture() {
   return { send, switchRoute, applyPendingSwitch, records, events, launches, writes, prompts, stops, workspace, activeRuns, hostState,
     snapshot, setReconnecting(value) { reconnecting = value; },
     setRuntime(value) { runtime = value; }, setCodex(value) { codex = value; },
+    onRecordPersist(callback) { afterRecordPersist = callback; },
     holdStatus(gate) { statusGate = gate; } };
 }
 
@@ -184,6 +197,9 @@ test("a switch moves Claude to Codex and back in place, clears both sessions, an
   assert.equal(note.kind, "note");
   assert.equal(note.runId, runId);
   assert.equal(note.metadata.source, "vivary-runtime-switch");
+  const firstGeneration = run.metadata.switchGeneration;
+  assert.equal(typeof firstGeneration, "string");
+  assert.equal(note.metadata.switchGeneration, firstGeneration, "the note carries its durable route commit identity");
   assert.deepEqual([note.metadata.from, note.metadata.to], [{ engine: "claude-cli", model: "claude-fable-5-1" },
     { engine: "codex-cli", model: "gpt-fixture" }]);
   assert.match(note.metadata.switchedAt, /^\d{4}-\d\d-\d\dT/);
@@ -197,6 +213,8 @@ test("a switch moves Claude to Codex and back in place, clears both sessions, an
   run = value.records.get(runId);
   assert.equal(run.metadata.claudeSessionId, undefined);
   assert.equal(run.metadata.codexSessionId, undefined);
+  assert.notEqual(run.metadata.switchGeneration, firstGeneration, "a later switch gets a different opaque generation");
+  assert.equal(value.events.at(-1).metadata.switchGeneration, run.metadata.switchGeneration);
   assert.deepEqual(run.metadata.previousProviderSessions.map(item => item.sessionId), [claudeSession, "fixture-thread"]);
   await value.send({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", message: "Third", workspace: value.workspace });
   assert.deepEqual(value.launches.map(launch => [launch.runId, launch.engine, launch.model]), [
@@ -391,6 +409,90 @@ test("Stop and switch to the route a run already has still stops it", async () =
   await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace }),
     { errorCode: "vivary_code_switch_run_active" });
   assert.deepEqual(value.stops, [runId]);
+});
+
+for (const grant of ["revoked", "replaced"]) {
+  test(`PR258 4330509896 source slice: same-route Stop revalidates a ${grant} workspace grant`, { timeout: 5_000 }, async () => {
+    const value = fixture();
+    const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5",
+      workspace: value.workspace });
+    const runId = first.run.id;
+    value.activeRuns.set(runId, { stopReason: null });
+    const before = value.snapshot();
+    let revalidations = 0;
+    await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5",
+      workspace: value.workspace, stop: true, revalidateWorkspace: async () => {
+        revalidations += 1;
+        return grant === "revoked" ? undefined : { root: "/replacement-project", label: "Replacement" };
+      } }), { errorCode: "vivary_code_project_changed", statusCode: 409 });
+    assert.equal(revalidations, 1, "the final grant resolver ran even though the route already matched");
+    assert.deepEqual(value.stops, [], "a rejected grant cannot stop the active turn");
+    assert.equal(value.activeRuns.get(runId).stopReason, null);
+    assert.equal(value.snapshot(), before, "no route, transcript, or other record write");
+  });
+}
+
+test("PR258 4330509896 source slice: reconnection during same-route final revalidation refuses Stop", { timeout: 5_000 }, async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5",
+    workspace: value.workspace });
+  const runId = first.run.id;
+  value.activeRuns.set(runId, { stopReason: null });
+  const before = value.snapshot();
+  let revalidations = 0;
+  await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5",
+    workspace: value.workspace, stop: true, revalidateWorkspace: async () => {
+      revalidations += 1;
+      // Reconnection starts inside the awaited final resolver, after admission's initial reconnection check.
+      await Promise.resolve();
+      value.setReconnecting(true);
+      return value.workspace;
+    } }), { errorCode: "vivary_code_project_reconnecting", statusCode: 409 });
+  assert.equal(revalidations, 1);
+  assert.deepEqual(value.stops, [], "a newly reconnecting project cannot be stopped through the stale route");
+  assert.equal(value.activeRuns.get(runId).stopReason, null);
+  assert.equal(value.snapshot(), before);
+});
+
+test("PR258 4330509909 source slice: pending application retains a recoverable after-persist boundary", { timeout: 5_000 }, async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5",
+    workspace: value.workspace });
+  const runId = first.run.id;
+  value.records.get(runId).metadata.claudeSessionId = claudeSession;
+  value.activeRuns.set(runId, { stopReason: null });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture",
+    workspace: value.workspace, stop: true });
+  value.activeRuns.delete(runId);
+  const pending = structuredClone(value.records.get(runId).metadata.pendingSwitch);
+  const interruption = new Error("Synthetic after-persist interruption");
+  let boundary = null;
+  value.onRecordPersist((id, change, persisted) => {
+    if (id === runId && Object.hasOwn(change.metadata ?? {}, "pendingSwitch") && change.metadata.pendingSwitch === undefined) {
+      boundary = persisted;
+      throw interruption;
+    }
+  });
+  // This is a fault at a real function's injected record-write boundary, not a killed host or filesystem test.
+  assert.throws(() => value.applyPendingSwitch(runId), error => error === interruption);
+  assert.ok(boundary !== null, "the interruption follows the record that clears the pending marker");
+  assert.deepEqual(value.records.get(runId), boundary, "fail-stop policy prevents post-interruption repair writes");
+  const metadata = boundary.metadata;
+  const oldRoute = metadata.engine === "claude-cli" && metadata.model === "claude-sonnet-5-5";
+  const newRoute = metadata.engine === "codex-cli" && metadata.model === "gpt-fixture";
+  assert.ok((oldRoute && metadata.pendingSwitch !== undefined) || (newRoute && metadata.pendingSwitch === undefined),
+    "persisted boundary must retain the old route's target or atomically commit the new route without it: "
+      + JSON.stringify({ engine: metadata.engine, model: metadata.model, pendingSwitch: metadata.pendingSwitch ?? null }));
+  if (oldRoute) {
+    assert.deepEqual(metadata.pendingSwitch, pending);
+    assert.equal(metadata.claudeSessionId, claudeSession);
+  } else {
+    assert.equal(metadata.claudeSessionId, undefined);
+    assert.equal(typeof metadata.switchGeneration, "string", "the route commit persists its opaque switch generation");
+    assert.ok(metadata.switchGeneration.length > 0);
+    assert.equal(value.events.filter(event => event.metadata?.source === "vivary-runtime-switch").length, 0,
+      "the committed generation is observable before a later switch note can append");
+  }
 });
 
 test("a recorded switch is dropped with a visible note when the run ends under a cleanup refusal", async () => {

@@ -365,7 +365,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} model={run.model} active={isCodeAgentRunActive(run)} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} model={run.model}
+          switchGeneration={run.switchGeneration} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -422,18 +423,21 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId, engine, model, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; model: string; active: boolean }) {
+function CodeSessionDetails({ runId, projectId, engine, model, switchGeneration, active }: {
+  runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; model: string;
+  switchGeneration?: string | null; active: boolean;
+}) {
   const [open, setOpen] = useState(false);
   // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
   }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
-  const route = engine + ":" + model;
+  const route = JSON.stringify([engine, model, switchGeneration ?? null]);
   const finalRefresh = useRef({ runId, projectId, route, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;
     const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
-    // A runtime or model switch clears the provider session, so an open panel reloads instead of showing the old one.
+    // A committed switch clears the provider session even when two switches return to the same route between polls.
     const settled = !scopeChanged && ((refresh.wasActive && !active) || refresh.route !== route);
     refresh.runId = runId;
     refresh.projectId = projectId;
@@ -504,7 +508,10 @@ function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, mode
 }
 
 /** A runtime or model the owner chose for a retained conversation, waiting on a confirm or on its run to stop. */
-type PendingSwitch = ModelChoice & { step: "confirm" | "confirm-stop" | "stopping" | "switching" };
+type PendingSwitch = ModelChoice & {
+  step: "confirm" | "confirm-stop" | "stopping" | "switching";
+  turnId?: string | null;
+};
 
 const SWITCH_TRANSFER = "The new session gets the visible conversation text, up to the last 24 messages. "
   + "Tool output and the previous runtime's private session do not transfer.";
@@ -539,7 +546,27 @@ type LocalCodeConversationProps = PreviewChatProps & {
   onSettings: () => void;
 };
 
-function LocalCodeConversation(props: LocalCodeConversationProps) {
+function LocalCodeConversation(observed: LocalCodeConversationProps) {
+  const queryClient = useQueryClient();
+  const [acceptedRun, setAcceptedRun] = useState<VivaryCodeRunState | null>(null);
+  const stateQueryKeys = [
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined }],
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined, runId: observed.selection.runId ?? undefined }],
+  ];
+  // After acceptance, both caches contain the reply and all earlier requests have been cancelled. A later snapshot
+  // read from those caches is fresh even if another switch happened before the parent could render our generation.
+  const observedFromCache = stateQueryKeys.some(queryKey =>
+    queryClient.getQueryData<VivaryCodeState>(queryKey)?.run === observed.run);
+  const caughtUp = !!acceptedRun && observed.run?.id === acceptedRun.id
+    && (observedFromCache || (observed.run.switchGeneration === acceptedRun.switchGeneration
+      && observed.run.engine === acceptedRun.engine && observed.run.model === acceptedRun.model));
+  // Keep the action's full run while parent polling still presents a previous route generation.
+  // Its old query requests are cancelled before the accepted state enters either owner cache below.
+  const props = acceptedRun && observed.selection.runId === acceptedRun.id && !caughtUp
+    ? { ...observed, run: acceptedRun } : observed;
+  useEffect(() => {
+    if (caughtUp || observed.selection.runId !== acceptedRun?.id) setAcceptedRun(null);
+  }, [caughtUp, observed.selection.runId, acceptedRun?.id]);
   const chatRef = useRef<AssistantChatHandle>(null);
   const { call } = useNativeActionCaller();
   const latest = useRef(props);
@@ -585,7 +612,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const runWorking = props.streaming || (!!props.run && (isCodeAgentRunActive(props.run) || props.run.phase === "stopping"));
   // Polling can start or settle a turn while a choice is open. Derive its legal actions on every render.
   const switchStep = pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
-    : pendingSwitch?.step === "confirm-stop" && !runWorking ? "confirm" : pendingSwitch?.step;
+    : pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)
+      ? (runWorking ? "working" : "confirm") : pendingSwitch?.step;
 
   const createAdapter = useCallback<NonNullable<AssistantChatProps["createAdapter"]>>(context =>
     createLocalCodeChatAdapter({
@@ -690,7 +718,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return;
     }
     setPendingSwitch(current => ({ ...target,
-      step: current?.step === "confirm-stop" && runWorking ? "confirm-stop" : "confirm" }));
+      step: current?.step === "confirm-stop" && runWorking && current.turnId === props.run?.turnId ? "confirm-stop" : "confirm",
+      turnId: props.run?.turnId }));
   }
 
   async function completeSwitch({ engine, model }: ModelChoice) {
@@ -703,8 +732,17 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
         projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model });
       if (state.error) throw new Error(state.error);
-      setChoice(target);
-      props.onChoice(target);
+      if (!state.run || state.run.id !== runId || state.projectId !== props.projectId) {
+        throw new Error("The switched conversation could not be loaded. Refresh before continuing.");
+      }
+      // Cancel pre-action polling before seeding these exact owner queries. Opaque generations have no order,
+      // so a late response must not be treated as newer just because it arrives after this action.
+      await Promise.all(stateQueryKeys.map(queryKey => queryClient.cancelQueries({ queryKey, exact: true })));
+      setAcceptedRun(state.run);
+      for (const queryKey of stateQueryKeys) queryClient.setQueryData(queryKey, state);
+      const accepted = { engine: state.run.engine, model: state.run.model };
+      setChoice(accepted);
+      props.onChoice(accepted);
       setPendingSwitch(null);
       props.onSettled();
     } catch (failure) {
@@ -717,7 +755,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
   async function stopThenSwitch({ engine, model }: ModelChoice) {
     const runId = props.run?.id;
-    if (!runId) return;
+    if (!runId || switchStep !== "confirm-stop" || pendingSwitch?.turnId !== props.run?.turnId) return;
     setPendingSwitch({ engine, model, step: "stopping" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
@@ -733,10 +771,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
 
   useEffect(() => {
     // A Stop confirmation belongs to the current turn. A later turn needs the owner's Stop choice again.
-    if (pendingSwitch?.step === "confirm-stop" && !runWorking) {
+    if (pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)) {
       setPendingSwitch(current => current?.step === "confirm-stop" ? { ...current, step: "confirm" } : current);
     }
-  }, [pendingSwitch?.step, runWorking]);
+  }, [pendingSwitch?.step, pendingSwitch?.turnId, runWorking, props.run?.turnId]);
 
   return <AssistantChat key={viewKey.current} ref={chatRef}
     tabId={draftThreadId}
@@ -840,7 +878,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         {switchStep === "working" && <>
           <span>This conversation is working. Wait for the current request to finish, or stop it and switch to {routeLabel(pendingSwitch)}.</span>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Wait</Button>
-          <Button variant="outline" size="sm" onClick={() => setPendingSwitch({ ...pendingSwitch, step: "confirm-stop" })}>Stop and switch</Button>
+          <Button variant="outline" size="sm" onClick={() => setPendingSwitch({ ...pendingSwitch, step: "confirm-stop", turnId: props.run?.turnId })}>Stop and switch</Button>
         </>}
         {switchStep === "confirm-stop" && <>
           <span>Stop and switch to {routeLabel(pendingSwitch)}? The current request will be cancelled. Completed work stays in this conversation and the workspace. {SWITCH_TRANSFER}</span>

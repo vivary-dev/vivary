@@ -62,7 +62,7 @@ const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
-import { CodeSessionDetails, LocalCodeConversation } from "@proof/workbench-code";
+import { CodeSessionDetails, LocalCodeConversation, ProjectCodeWorkspace } from "@proof/workbench-code";
 import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
 import { useState } from "react";
@@ -71,7 +71,7 @@ import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
 import { AssistantRuntimeProvider, ThreadPrimitive, useLocalRuntime } from "@assistant-ui/react";
 import { isCodeAgentRunActive } from "@agent-native/core/client/agent-chat";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { isCancelledError, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
@@ -123,9 +123,16 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
   return snapshot;
 }
 
+// Raw fixtures supply the selected-run identities the server derives before transcript windowing.
+function fixtureRunSnapshot(run) {
+  return { ...run, turnId: run.events.findLast(event => event.kind === "user")?.id ?? null,
+    switchGeneration: run.switchGeneration
+      ?? run.events.findLast(event => event.kind === "note" && event.metadata?.source === "vivary-runtime-switch")?.id ?? null };
+}
+
 // A retained Code conversation with both runtimes ready, driven through its selectors and switch panel.
 export async function renderCodeSwitch({ running = false, otherActive = false, viewingMatch = false, events = [], refuse,
-  pendingSwitch = null, recordSend = false } = {}) {
+  pendingSwitch = null, recordSend = false, switchReply = null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const version = "2.1.300";
   const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
@@ -140,11 +147,13 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
   let settled = 0;
   let run = { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
     status: running ? "running" : "completed", phase: running ? "running" : "complete", pendingSwitch };
+  let repliedRun = null;
+  let ownerSnapshot = null;
   const originalFetch = globalThis.fetch;
   if (recordSend) globalThis.fetch = async (input, init) => {
     const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
     // The real Code adapter reads the retained run before sending a follow-up. Answer only that read here.
-    if (url.pathname.endsWith("/vivary-code-state")) return Response.json({ projectId: null, run });
+    if (url.pathname.endsWith("/vivary-code-state")) return Response.json({ projectId: null, run: fixtureRunSnapshot(repliedRun ?? run) });
     return originalFetch(input, init);
   };
   globalThis.codeActionFixture = async (name, params) => {
@@ -157,14 +166,22 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
     // result without throwing into the async composer callback, appending a transcript, or doing provider work.
     if (name === "vivary-code-send") return { projectId: null, run: null, error: "Synthetic recorded-send refusal" };
     if (refuse && name === "vivary-code-switch") throw Object.assign(new Error(refuse), { errorCode: "vivary_code_switch_run_stopping" });
-    return { run };
+    if (name === "vivary-code-switch") {
+      // The action may return another window's newer route. Parent polling deliberately still supplies the old run.
+      repliedRun = switchReply ? { ...run, switchGeneration: "fixture-accepted-switch", ...switchReply }
+        : params.stop && isCodeAgentRunActive(run) ? { ...run, pendingSwitch: { engine: params.engine, model: params.model } }
+        : { ...run, engine: params.engine, engineLabel: params.engine === "codex-cli" ? "Codex" : "Claude Code",
+          model: params.model, switchGeneration: "fixture-accepted-switch" };
+      return { projectId: null, run: fixtureRunSnapshot(repliedRun) };
+    }
+    return { projectId: null, run: fixtureRunSnapshot(run) };
   };
   const notices = otherActive ? <div className="local-agent-notice" role="status">
     <span id="fixture-busy-notice">An agent is working in another conversation.</span></div> : null;
   const element = () => <QueryClientProvider client={client}><MemoryRouter><LocalCodeConversation state={state}
     selection={{ key: "retained-run", runId: "retained-run" }} ownerKey="fixture-owner" projectId={null} workspaceAvailable
     previewScope="fixture" viewingMatch={viewingMatch} notices={notices} busyNoticeId={otherActive ? "fixture-busy-notice" : undefined}
-    active={isCodeAgentRunActive(run) || otherActive} streaming={false} stopping={run.phase === "stopping"} run={run}
+    active={isCodeAgentRunActive(run) || otherActive} streaming={false} stopping={run.phase === "stopping"} run={ownerSnapshot ?? fixtureRunSnapshot(run)}
     onChoice={choice => choices.push(choice)} onStarted={() => {}} onStreaming={() => {}} onSettled={() => { settled += 1; }}
     onStop={async () => false} onSettings={() => {}} /></MemoryRouter></QueryClientProvider>;
   const view = await mount(element());
@@ -218,8 +235,33 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
     },
     async update(patch) {
       run = { ...run, ...patch };
+      ownerSnapshot = null;
       await act(async () => { view.root.render(element()); });
       await settle();
+    },
+    async ownerPoll(patch) {
+      run = { ...run, ...patch };
+      repliedRun = run;
+      const queryKey = ["action", "vivary-code-state", { projectId: undefined }];
+      await act(async () => {
+        client.setQueryData(queryKey, { projectId: null, run: fixtureRunSnapshot(run) });
+        ownerSnapshot = client.getQueryData(queryKey).run;
+        view.root.render(element());
+      });
+      await settle();
+    },
+    holdOwnerRead() {
+      const queryKey = ["action", "vivary-code-state", { projectId: undefined }];
+      const stale = { projectId: null, run: fixtureRunSnapshot(run) };
+      let release;
+      const result = client.fetchQuery({ queryKey, queryFn: () => new Promise(resolve => { release = resolve; }) })
+        .then(() => "resolved", error => { if (!isCancelledError(error)) throw error; return "cancelled"; });
+      return async () => {
+        release(stale);
+        const outcome = await result;
+        await settle();
+        return { outcome, model: client.getQueryData(queryKey)?.run?.model ?? null };
+      };
     },
     async unmount() {
       try { await view.unmount(); } finally {
@@ -272,6 +314,72 @@ export async function renderSessionDetails() {
     },
     async unmount() { await view.unmount(); client.clear(); globalThis.fetch = originalFetch; },
   };
+}
+
+// Mount the real query owner, not just CodeSessionDetails. Only its normal code-state cache entry is updated.
+export async function renderWorkspaceSessionDetails(events) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const queryKey = ["action", "vivary-code-state", { projectId: undefined }];
+  const version = "2.1.300";
+  const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
+    runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
+    models: claudeCodeModelChoices(version).map(model => model.id), claudeModels: claudeCodeModelChoices(version) };
+  const codex = { engine: "codex-cli", label: "Codex", configured: true, runtime: { status: "ready", message: "Signed in" },
+    models: ["gpt-fixture"], claudeModels: null,
+    modelCatalog: { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture",
+      connections: [], message: "" } };
+  let run = { id: "retained-run", title: "Retained conversation", projectId: null, engine: "claude-cli",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", status: "completed", phase: "complete", pendingSwitch: null,
+    createdAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:01:00.000Z", events };
+  const snapshot = () => ({ projectId: null, engines: [engine, codex], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5",
+    runtime: engine.runtime, activeRun: null, busy: false, cleanup: null, pendingApproval: null,
+    run: fixtureRunSnapshot(run), runs: [run] });
+  let details = { runId: run.id, engineLabel: "Claude Code", continuity: "native-resume", sessionId: "obsolete-claude-session",
+    nextTurn: "native-resume", log: { reference: "native:retained-run", status: "available", excerpt: "", truncated: false },
+    providerLog: { reference: null, status: "unavailable", excerpt: "", truncated: false } };
+  const reads = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    if (!url.pathname.endsWith("/vivary-code-state")) return originalFetch(input, init);
+    if (url.searchParams.get("details") === "true") {
+      reads.push({ sessionId: details.sessionId, nextTurn: details.nextTurn });
+      return Response.json(details);
+    }
+    return Response.json(snapshot());
+  };
+  client.setQueryData(queryKey, snapshot());
+  function Owner() {
+    const [selection, setSelection] = useState({ key: "retained-run", runId: "retained-run" });
+    return <ProjectCodeWorkspace projectId={null} draftScopeKey="fixture" ownerKey="fixture-owner"
+      workspaceAvailable selection={selection} setSelection={setSelection} onOpenActive={async () => false} previewScope="fixture" />;
+  }
+  const settle = () => act(async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 5)); });
+  let view;
+  const dispose = async () => {
+    try { await view?.unmount(); } finally { client.clear(); globalThis.fetch = originalFetch; }
+  };
+  try {
+    view = await mount(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/?run=retained-run"]}>
+      <Owner /></MemoryRouter></QueryClientProvider>);
+    await settle();
+    const trigger = [...view.host.querySelectorAll("button")].find(button => button.textContent.trim() === "Session details");
+    if (!trigger) throw new Error("the real ProjectCodeWorkspace owner did not render Session details");
+    await act(async () => { trigger.dispatchEvent(new window.Event("click", { bubbles: true })); });
+    await settle();
+    return {
+      reads,
+      panel: () => view.host.querySelector('[aria-label="Session details"]')?.textContent ?? null,
+      async poll(patch, detailsPatch = {}) {
+        run = { ...run, ...patch };
+        details = { ...details, ...detailsPatch };
+        // No details invalidation, child props override, or manual refetch. This is the owner's real polling input.
+        await act(async () => { client.setQueryData(queryKey, snapshot()); });
+        await settle();
+      },
+      unmount: dispose,
+    };
+  } catch (error) { await dispose(); throw error; }
 }
 
 export async function renderRowMenu() {
@@ -660,7 +768,7 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
           return undefined;
         });
         build.onLoad({ filter: /.*/, namespace: "workbench-code" }, args => ({
-          contents: readFileSync(args.path, "utf8") + "\nexport { CodeSessionDetails, LocalCodeConversation };",
+          contents: readFileSync(args.path, "utf8") + "\nexport { CodeSessionDetails, LocalCodeConversation, ProjectCodeWorkspace };",
           loader: "tsx", resolveDir: dirname(args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "stub" }, args => (
@@ -814,6 +922,13 @@ function installSelectionServer(rows) {
   return { close() { restore(); }, get modelSubmits() { return modelSubmits; } };
 }
 
+// Canonical fixtures use durable event IDs. fixtureRunSnapshot transports their server-derived identities.
+// Full-history cap and anchor behavior is exercised by code-state-snapshot.test.mjs, not by the UI fixture.
+function codeTranscriptEvent(id, kind, message, seq, metadata = {}) {
+  return { id, runId: "retained-run", kind, message, createdAt: new Date(Date.UTC(2026, 9, 20, 0, seq)).toISOString(),
+    metadata: { seq, ...metadata } };
+}
+
 test("Native chat controls", async t => {
   // Tiptap reads the DOM when its module loads, so the DOM goes in first.
   const closeChannels = installDom();
@@ -933,6 +1048,44 @@ test("Native chat controls", async t => {
     } finally { await view.unmount(); }
   });
 
+  await t.test("PR258 4330509923: the real workspace owner refreshes open details after an away-and-back switch", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const user = codeTranscriptEvent("details-user", "user", "Keep this conversation.", 0);
+    const answer = codeTranscriptEvent("details-answer", "assistant", "Earlier answer.", 1);
+    let view;
+    try {
+      view = await proof.renderWorkspaceSessionDetails([user, answer]);
+      assert.deepEqual(view.reads, [{ sessionId: "obsolete-claude-session", nextTurn: "native-resume" }]);
+      assert.match(view.panel() ?? "", /Provider session: obsolete-claude-session/);
+      assert.match(view.panel() ?? "", /The next message will request resume of this provider session\./);
+      await view.poll({ status: "paused", phase: "paused", updatedAt: "2026-10-20T00:01:30.000Z" });
+      assert.equal(view.reads.length, 1, "same switch generation status and timestamp changes do not refetch details");
+      const claude = { engine: "claude-cli", model: "claude-sonnet-5-5" };
+      const codex = { engine: "codex-cli", model: "gpt-fixture" };
+      const away = codeTranscriptEvent("details-switch-away", "note", "Switched from Claude Code to Codex.", 2,
+        { source: "vivary-runtime-switch", switchedAt: "2026-10-20T00:02:00.000Z", from: claude, to: codex });
+      const back = codeTranscriptEvent("details-switch-back", "note", "Switched from Codex to Claude Code.", 3,
+        { source: "vivary-runtime-switch", switchedAt: "2026-10-20T00:03:00.000Z", from: codex, to: claude });
+      // One observed snapshot has the same engine/model and two new canonical switch notes. Only the parent's
+      // actual code-state query is updated. No child props are supplied and no details query is invalidated.
+      await view.poll({ events: [user, answer, away, back], updatedAt: "2026-10-20T00:03:00.000Z" },
+        { continuity: "not-recorded", sessionId: null, nextTurn: "reconstructed-context" });
+      assert.equal(view.reads.length, 2, "a new switch generation must reach the child through ProjectCodeWorkspace");
+      assert.deepEqual(view.reads.at(-1), { sessionId: null, nextTurn: "reconstructed-context" });
+      assert.match(view.panel() ?? "", /Provider session: Not reported/);
+      assert.match(view.panel() ?? "", /The next message will reconstruct context from the saved conversation\./);
+      assert.doesNotMatch(view.panel() ?? "", /obsolete-claude-session|will request resume|confirmed native resume/);
+      await view.poll({ status: "completed", phase: "complete", updatedAt: "2026-10-20T00:03:30.000Z" });
+      assert.equal(view.reads.length, 2, "another status-only poll in the same generation does not refetch");
+      await view.poll({ switchGeneration: "committed-before-note", updatedAt: "2026-10-20T00:04:00.000Z" });
+      assert.equal(view.reads.length, 3, "a durable route commit refreshes details even before its note exists");
+      const committedNote = codeTranscriptEvent("committed-note", "note", "The committed switch note.", 4,
+        { source: "vivary-runtime-switch", switchGeneration: "committed-before-note", from: claude, to: claude });
+      await view.poll({ events: [user, answer, away, back, committedNote], updatedAt: "2026-10-20T00:04:30.000Z" });
+      assert.equal(view.reads.length, 3, "appending the committed generation's note does not refetch again");
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
   await t.test("Cancel, or choosing the current route again, sends nothing", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch();
@@ -1019,6 +1172,79 @@ test("Native chat controls", async t => {
     });
   }
 
+  for (const replyModel of ["gpt-fixture", "gpt-other"]) {
+    await t.test(`PR258 4330509916: the returned ${replyModel} route governs selectors, saved choice and real Send`, { timeout: 10_000 }, async () => {
+      const server = installChatServer();
+      const authoritative = { engine: "codex-cli", model: replyModel };
+      let view;
+      try {
+        view = await proof.renderCodeSwitch({ recordSend: true,
+          switchReply: { ...authoritative, engineLabel: "Codex" } });
+        await view.prefill();
+        const draft = view.draft();
+        assert.match(draft ?? "", /Read README\.md/);
+        await view.choose("Conversation runtime", "codex-cli");
+        assert.deepEqual(view.route(), { engine: "codex-cli", model: "gpt-fixture" });
+        assert.match(view.panelMessage() ?? "", /^Switch this conversation from Claude Code Sonnet 5\.5 to Codex GPT Fixture\?/);
+        assert.deepEqual([view.calls, view.choices], [[], []], "a displayed target authorizes no submission");
+        await view.click("Switch");
+        assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
+          params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture" } }]);
+        // An older polling request may arrive after the action reply. An opaque different ID alone proves no freshness.
+        await view.update({ engine: "claude-cli", model: "claude-sonnet-5-5", switchGeneration: "fixture-older-switch",
+          updatedAt: "2026-10-20T00:00:00.000Z" });
+        assert.equal(typeof view.sendDisabled(), "boolean", "the installed composer still owns Send");
+        if (view.sendDisabled()) {
+          // Gating until parent polling catches up is also safe. Never send an unconfirmed or stale route.
+          assert.equal(view.draft(), draft);
+          await view.update({ ...authoritative, engineLabel: "Codex", switchGeneration: "fixture-accepted-switch" });
+          assert.equal(view.sendDisabled(), false, "authoritative parent state restores Send");
+        }
+        const visibleAtSend = view.route();
+        assert.equal(view.draft(), draft, "the confirmed switch preserves the composed text");
+        // Send through the installed composer and real adapter even on old source, before route assertions fail.
+        await view.send();
+        assert.equal(view.calls.length, 2, "one confirmed switch and one real adapter submission");
+        assert.equal(view.calls[1].name, "vivary-code-send");
+        const submitted = view.calls[1].params;
+        assert.deepEqual({ engine: submitted.engine, model: submitted.model }, authoritative,
+          "the returned route governs enabled Send before parent polling catches up");
+        assert.deepEqual(visibleAtSend, authoritative, "selectors agree with the authoritative route at submission");
+        for (const choice of view.choices) assert.deepEqual(choice, authoritative, "remembered choices use the returned route");
+        assert.equal(submitted.runId, "retained-run");
+        assert.equal(submitted.message, draft);
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
+
+  await t.test("an accepted switch yields to a later owner query even if its generation never rendered in parent props", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ recordSend: true,
+        switchReply: { engine: "codex-cli", engineLabel: "Codex", model: "gpt-other" } });
+      await view.prefill();
+      const draft = view.draft();
+      const releaseOlderRead = view.holdOwnerRead();
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Switch");
+      assert.deepEqual(view.route(), { engine: "codex-cli", model: "gpt-other" });
+      assert.deepEqual(await releaseOlderRead(), { outcome: "cancelled", model: "gpt-other" },
+        "a pre-action owner request cannot replace the accepted cache when its old reply arrives");
+      // The normal owner cache supplies a newer snapshot after the action cancels earlier queries. The parent
+      // never renders fixture-accepted-switch, so waiting for that exact generation would freeze the old route.
+      await view.ownerPoll({ engine: "codex-cli", engineLabel: "Codex", model: "gpt-fixture",
+        switchGeneration: "another-window-switch", updatedAt: "2026-10-20T00:05:00.000Z" });
+      assert.deepEqual(view.route(), { engine: "codex-cli", model: "gpt-fixture" });
+      assert.equal(view.draft(), draft);
+      assert.equal(view.sendDisabled(), false);
+      await view.send();
+      assert.deepEqual(view.calls.map(call => call.name), ["vivary-code-switch", "vivary-code-send"]);
+      assert.deepEqual({ engine: view.calls[1].params.engine, model: view.calls[1].params.model },
+        { engine: "codex-cli", model: "gpt-fixture" });
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
   await t.test("while this conversation works, Wait does nothing and Stop and switch confirms, then hands the switch to the host", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
@@ -1089,6 +1315,43 @@ test("Native chat controls", async t => {
       assert.equal(view.panel(), null);
       assert.deepEqual([view.calls, view.choices], [[], []], "Wait leaves the current route alone");
     } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("PR258 4330509930: a new canonical turn demotes an earlier Stop confirmation without an idle poll", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const turnA = codeTranscriptEvent("turn-a-user", "user", "Work on turn A.", 0);
+    const answerA = codeTranscriptEvent("turn-a-answer", "assistant", "Starting turn A.", 1);
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true, events: [turnA, answerA] });
+      await view.choose("Conversation model", "claude-opus-5-5");
+      await view.click("Stop and switch");
+      const confirmation = view.panelMessage();
+      assert.equal(confirmation, "Stop and switch to Claude Code Opus 5.5? The current request will be cancelled. "
+        + "Completed work stays in this conversation and the workspace. " + transfer);
+      assert.deepEqual(view.buttons(), ["Stop and switch", "Keep working"]);
+      const tokenA = codeTranscriptEvent("turn-a-token", "assistant", "More output from turn A.", 2);
+      const statusA = codeTranscriptEvent("turn-a-status", "status", "Still working on turn A.", 3);
+      await view.update({ status: "running", phase: "running", updatedAt: "2026-10-20T00:03:30.000Z",
+        events: [turnA, answerA, tokenA, statusA] });
+      assert.equal(view.panelMessage(), confirmation, "same-turn output and status do not revoke the Stop choice");
+      assert.deepEqual(view.buttons(), ["Stop and switch", "Keep working"]);
+      assert.deepEqual([view.calls, view.choices], [[], []]);
+      const turnB = codeTranscriptEvent("turn-b-user", "user", "Work on turn B.", 4);
+      // A single poll crosses the turn boundary. Status and phase remain working throughout the observed frames.
+      await view.update({ status: "running", phase: "running", updatedAt: "2026-10-20T00:04:00.000Z",
+        events: [turnA, answerA, tokenA, statusA, turnB] });
+      assert.equal(view.panelMessage(), "This conversation is working. Wait for the current request to finish, or stop it and switch to "
+        + "Claude Code Opus 5.5.");
+      assert.deepEqual(view.buttons(), ["Wait", "Stop and switch"], "turn B requires a fresh Stop choice");
+      assert.deepEqual([view.calls, view.choices], [[], []], "the stale confirmation cannot stop turn B");
+      await view.click("Stop and switch");
+      assert.equal(view.panelMessage(), confirmation);
+      assert.deepEqual(view.calls, [], "the new turn still needs its own confirmation");
+      await view.click("Stop and switch");
+      assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
+        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true } }]);
+    } finally { try { await view?.unmount(); } finally { server(); } }
   });
 
   await t.test("a turn that starts during an idle choice changes the legal confirmation actions", { timeout: 10_000 }, async () => {

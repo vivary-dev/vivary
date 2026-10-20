@@ -193,7 +193,9 @@ application consumes the target and appends a note saying the switch did not
 happen, under the same per-run refusal lookup. A run that already ended when
 the request arrives switches at once. When the run already has the target route,
 because another window switched it and started a turn, Stop and switch still stops
-the run and records no switch, since the owner confirmed that Stop.
+the run and records no switch, since the owner confirmed that Stop. This matching
+route path performs the same final project grant, reconnection, and run checks
+immediately before requesting Stop.
 
 Every switch, including a model change inside one runtime, starts a new provider
 session. Codex refuses to resume a thread under another model, Claude Code's
@@ -202,8 +204,13 @@ reads `claudeSessionId` without checking the runtime. The switch therefore sets
 the new `engine` and `model`, removes both `claudeSessionId` and `codexSessionId`
 and the last `providerSessionMode`, and keeps the earlier session ID in
 `previousProviderSessions` (at most 20) so its provider log can still be found.
+One existing atomic record update commits that route and session reset, clears
+`pendingSwitch`, and saves a new opaque `switchGeneration`. An interruption cannot
+leave the old route with its confirmed target already consumed.
 It appends a visible `note` event with `metadata.source: "vivary-runtime-switch"`,
-the from and to runtime and model, and the time. Core's transcript event kinds are
+the same generation, the from and to runtime and model, and the time. The durable
+generation remains observable if the host ends between the route commit and note
+append. Core's transcript event kinds are
 a closed set, so the switch reuses `note` the way the project context load does.
 `codeMatchRepository` in
 [`code-match-repository.ts`](../packages/workbench/app/lib/code-match-repository.ts)
@@ -230,13 +237,34 @@ neither the saved route nor the adapter's route. Cancel leaves the current route
 and draft intact, and the composer resumes subject to the existing run and
 readiness gates. The selectors remain available to change or cancel the choice.
 
+The switch action's returned run owns the accepted route, including a newer
+route another window selected while the action awaited its state response. The
+composer uses that returned route for its selectors, remembered choice, and Send.
+Before putting the returned state in the two exact workspace and selected-run
+queries, the view cancels their older polling requests. It retains the accepted
+run until its parent observes the same generation and route, or a later snapshot
+from those queries after cancellation. That allows a newer switch to arrive
+before the accepted generation renders. Opaque generation values carry identity,
+not ordering, so an arbitrary different value cannot prove that a late response
+is newer.
+
 The panel derives its legal actions from the latest observed phase of this
 conversation's run on every render. A turn that starts while an idle choice is
 open replaces Switch and Cancel with Wait and Stop and switch. Wait changes
 nothing. Stop and switch asks again and says the current request will be
 cancelled and completed work stays. If the turn finishes while either working
 panel is open, the plain confirm replaces it. A Stop confirmation belongs only to
-that turn, so a later turn needs a new Stop choice. Confirming Stop and switch
+that turn, so a later turn needs a new Stop choice even when both polls show
+working. The selected run exposes `turnId`, the latest canonical user event ID
+from full history before the 400-event cap or search window. Its
+`switchGeneration` comes from the durable record, falling back to the latest
+canonical runtime-switch note ID for legacy records. These fields are added only
+to the selected run, without new identity scans for sidebar summaries. Output,
+status, and `updatedAt` changes advance neither identity. The workspace owner
+passes the switch generation to Session details, so an open panel refreshes after
+switches away and back to the same route, including a route commit whose note has
+not yet appended. An unrelated update does not trigger that refresh.
+Confirming Stop and switch
 sends one `vivary-code-switch` request with `stop`, and the composer then shows
 the recorded target until the host applies it. Leaving or reloading the view
 does not cancel the recorded switch. A refused switch keeps the route and shows
@@ -823,6 +851,32 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Second Codex review repairs for PR #258 at `ad935f28`. The coordinator
+ran the prepared cases against unchanged product source. Route selection
+completed 24 tests with 20 passes and four assertion failures. Components
+completed 49 tests with 45 passes and three failing leaf assertions plus their
+parent. The matching authoritative-response control passed. The failures cover
+matching-route Stop without final grant checks, consuming a pending target before
+its route commit, sending the requested model instead of the returned model,
+stale Session details after switches away and back, and retaining Stop consent
+when a new user turn starts between working snapshots.
+
+The route owner now shares final admission across matching and changed routes.
+Pending consumption, route, session reset, and an opaque generation share one
+atomic record update. Selected snapshots derive the user turn from full history
+and expose the committed generation with a legacy switch-note fallback. The
+composer accepts the returned run, cancels older requests for the two affected
+owner queries, and binds Stop confirmation to the canonical user ID. The real
+workspace owner passes the switch generation to Session details. Existing
+assertions remain, with added snapshot cap and anchor cases, an interrupted
+record-write boundary, real-store generation assertions, and delayed-note
+coverage. The injected write fault is source-slice evidence, not a killed-host
+durability test. Focused green tests and typecheck for these repairs remain
+unrun. Integrated final-head CI, final reviews, real provider switching,
+screenshots, installed Windows acceptance with preserved profiles, dev
+integration approval, merge approval, and production release remain separate
+pending gates.
 
 2026-10-20 Target cleanup refusal lookup and confirmation behavior for PR #258.
 An old-code run against

@@ -609,11 +609,16 @@ process.send({type:"vivary:code-worker:ready"});
       const stored = JSON.parse(await readFile(path.join(codeAgentRunsDir(), `${runId}.json`), "utf8")).metadata;
       assert.equal("claudeSessionId" in stored || "codexSessionId" in stored || "providerSessionMode" in stored, false);
       assert.equal(stored.previousProviderSessions.length, 1);
+      assert.equal(typeof stored.switchGeneration, "string", "the real Native store persists the route generation");
+      assert.equal(switched.run?.switchGeneration, stored.switchGeneration);
       const details = await getVivaryCodeSessionDetails(owner.ownerEmail, runId, workspace, owner.orgId);
       assert.deepEqual([details.sessionId, details.continuity, details.nextTurn], [null, "not-recorded", "reconstructed-context"]);
       assert.match(details.log.excerpt, /note: Switched from Claude Code Sonnet 5\.5 to Claude Code Opus 5\.5\./);
       const transcript = listCodeAgentTranscriptEvents(runId);
       assert.deepEqual(transcript.filter(event => event.kind === "user").map(event => event.message), ["Keep working"]);
+      assert.equal(switched.run?.turnId, transcript.findLast(event => event.kind === "user")?.id);
+      assert.equal(transcript.findLast(event => event.metadata?.source === "vivary-runtime-switch")?.metadata?.switchGeneration,
+        stored.switchGeneration, "the later note carries the committed generation");
       assert.equal(transcript.at(-1)?.metadata?.source, "vivary-runtime-switch");
 
       // A send that names the earlier model, without a switch, still refuses before any write.
