@@ -373,7 +373,9 @@ A host start or shutdown never starts queued work. Every queued record becomes `
 the agents working in its folder now. Both send the stored message again from
 the owner's request with fresh closures. Cancel removes a turn, starts nothing,
 and restores the run's earlier status. A conversation that never started is
-marked `discarded` and leaves history. [`code-queue-draft.ts`](../packages/workbench/server/code-queue-draft.ts)
+marked `discarded` and leaves history. A later send into it clears the mark, so
+it is listed again while queued or running, and Cancel before it ever started
+discards it again. [`code-queue-draft.ts`](../packages/workbench/server/code-queue-draft.ts)
 turns its pending draft back into a draft, fills an empty one, and leaves a draft
 the owner typed since. The turn leaves the queue only after its draft is
 restored. If the draft write fails, the turn stays queued and listed, and it does

@@ -605,6 +605,35 @@ test("a runtime switch, with or without Stop, is refused while the conversation 
   } finally { await endAll(runs); }
 });
 
+test("a send into a conversation whose only queued message was cancelled lists it again", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-discarded");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "discard_b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const listed = (runId: string) => agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId).some(run => run.id === runId);
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "discard_a"), "Work in a")).run!.id);
+    const queued = (await send(workspace, "First words")).run!.id;
+    runs.push(queued);
+    await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "discard_b" });
+    assert.equal(listed(queued), false, "a conversation that never started is not listed");
+    // The view stays on the conversation, so the next send names it. While the host is full, it queues and is listed.
+    await send(workspace, "Second words", { runId: queued });
+    assert.deepEqual((await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns.map(run => run.id), [queued]);
+    assert.equal(listed(queued), true);
+    // It still never started, so Cancel discards it again.
+    await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "discard_b" });
+    assert.equal(listed(queued), false);
+    await settle(runs[0]);
+    await send(workspace, "Third words", { runId: queued });
+    await waitFor(() => capacityHost().activeRuns.has(queued), "the conversation to start");
+    assert.equal(listed(queued), true, "a started conversation is listed in history");
+    assert.deepEqual(userMessages(queued), ["Third words"]);
+  } finally { await endAll(runs); }
+});
+
 test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { folder } = await ipcFixture("capacity-mixed");

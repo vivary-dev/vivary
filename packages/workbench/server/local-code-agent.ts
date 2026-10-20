@@ -1245,7 +1245,7 @@ export async function sendVivaryCodeMessage(input: {
   }
   if (input.queued) takeQueuedSlot(input.queued);
   updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
-    metadata: { pendingLaunch: undefined, queuedTurn: undefined, codexPermissionMode: permissionMode,
+    metadata: { pendingLaunch: undefined, queuedTurn: undefined, discarded: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
@@ -1990,7 +1990,8 @@ async function queueVivaryCodeTurn(input: VivaryCodeSendInput, record: () => Cod
     // An acknowledgement covers the turns working in the folder now. A turn that starts while this one waits asks again.
     acknowledgedTurns: input.acknowledgeSharedFolder
       ? runsInFolder(canonicalRoot, input.ownerEmail, input.orgId).map(other => other.turnId) : [],
-    restore: existing ? { status: existing.status, phase: existing.phase ?? null } : null,
+    // A conversation whose queued messages were all cancelled never started, so Cancel discards it again.
+    restore: existing && !existing.metadata?.discarded ? { status: existing.status, phase: existing.phase ?? null } : null,
     input: { ...input, runId: run.id },
   };
   hostState.queue.push(item);
@@ -2005,7 +2006,7 @@ function persistQueuedTurn(item: QueuedTurn): void {
   const stored: StoredQueuedTurn = { message, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns,
     state: waiting ? "queued" : item.state as VivaryCodeQueueState, reason, restore };
   updateCodeAgentRunRecord(item.runId, { status: waiting ? "queued" : "paused", phase: waiting ? "queued" : item.state,
-    needsApproval: false, metadata: { queuedTurn: stored } });
+    needsApproval: false, metadata: { queuedTurn: stored, discarded: undefined } });
 }
 
 /** A queued turn passed its fresh checks and starts now, in the slot it reserved. */
