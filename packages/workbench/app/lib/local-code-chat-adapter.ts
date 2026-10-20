@@ -16,7 +16,7 @@ const PRE_APPEND_CODE_REJECTIONS = new Set([
   "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_conversation_active",
   "vivary_code_shared_folder_active",
   "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
-  "vivary_code_cleanup_required",
+  "vivary_code_cleanup_required", "vivary_code_capacity_full", "vivary_code_conversation_queued",
   "vivary_linked_history_unavailable",
 ]);
 

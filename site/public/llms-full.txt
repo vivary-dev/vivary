@@ -6708,7 +6708,13 @@ folder where another conversation's agent is working, Vivary shows a warning.
 Choose **Proceed** to work there anyway, **Use another folder** to open a
 separate folder or a Git worktree you made, or **Cancel** to close the warning
 and keep your draft. The warning shows a
-`git worktree add` command you can copy. This prerelease artifact predates the
+`git worktree add` command you can copy. Settings, Runtime limits how many Code
+conversations work at once on the host, 3 by default and up to 16. The default
+is a starting value, not a tested safe limit. Beyond it, a message queues and
+starts when a slot frees, or Vivary refuses it if you choose Refuse. The strip
+shows how many run and wait, and each waiting message has Cancel, which puts it
+back in your draft. After a restart, waiting messages are held until you choose
+Start. This prerelease artifact predates the
 switch and concurrent conversations. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
 follow-ups, progress, and Stop. Earlier Windows candidates exercised real Codex
@@ -7804,6 +7810,66 @@ two sends, and a switch beside a running conversation.
 check. No live provider turn and no packaged Windows run has exercised
 concurrent conversations.
 
+### Concurrent Code run limit
+
+The owner decided on 2026-10-19, on the Codex review of PR #261, that the host
+limits how many Code turns work at once, with a configurable limit and values
+above six allowed. Six is not a permanent ceiling or a measured safety
+guarantee. [`code-run-capacity.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-run-capacity.ts)
+stores one host-wide Core setting, `vivary-code-run-capacity-v1`: a limit from 1
+to 16, default 3, and When full, Queue (the default) or Refuse. The default has
+not been validated as safe for any computer. Runtime settings show both, with the
+running, queued, and held counts. API chat has no coding worker and does not
+count. Same-project, shared-folder, and mixed-runtime concurrency are unchanged
+below the limit.
+
+`sendVivaryCodeMessage` checks the limit in the same turn as its claim. A new
+send starts only when a slot is free and no queued turn waits for one, so the
+queue stays first in, first out. With Refuse, a send beyond the limit fails with
+`vivary_code_capacity_full` (409), names the limit, and writes nothing. With
+Queue, the run record reads `queued` and keeps the message, runtime, model, draft
+IDs, the folder turns the sender acknowledged, and `queuedAt` in
+`metadata.queuedTurn`. A queued turn writes no transcript entry, so a pending
+draft stays pending. A second send into a running or queued conversation still
+refuses (`vivary_code_conversation_queued` for a queued one).
+
+When a run leaves, the host reserves the freed slot for the oldest queued turn
+before any await, then runs that turn's original send again with its closures,
+so ownership, the project grant and reconnection, the folder, the runtime and
+model, and the shared folder are checked fresh. The project context is the one
+loaded with the original request. A shared-folder overlap that the turn's
+acknowledgement does not cover moves it to `needs-confirmation`, with the
+owner's warning. Any other refusal moves it to `held` with its reason, so the
+message is never lost. Approvals and Stop stay per run.
+
+A host start never starts queued work. Every queued record becomes `held`
+(status `paused`, phase `held`), shown as Held after restart. The
+`vivary-code-queue` owner action starts a held turn, or with `proceed` accepts
+the agents working in its folder now. Both send the stored message again from
+the owner's request with fresh closures. Cancel removes a turn, starts nothing,
+and restores the run's earlier status. A conversation that never started is
+marked `discarded` and leaves history. [`code-queue-draft.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-queue-draft.ts)
+turns its pending draft back into a draft, fills an empty one, and leaves a draft
+the owner typed since. Stop on a queued conversation cancels it the same way.
+
+Host state carries `capacity` (`limit`, `whenFull`, `running`, `queued`, `held`)
+and `queuedRuns`, each with its `state`, host-wide `position`, `reason`, and
+`queuedAt`. A run summary carries `queue`. The agent work strip in
+[`CodeRunControl.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/CodeRunControl.tsx)
+shows the counts and each queued conversation with Cancel, Start for a held one,
+and Proceed or Use another folder for one that needs confirmation. Use another
+folder cancels the message back into its draft and opens the folder picker.
+`tests/code-concurrency.test.ts` covers the queue with the IPC worker: first in,
+first out, Cancel and its draft, Refuse, a queued conversation's refusal and
+Stop, held after restart, a fresh shared-folder check, and mixed runtimes under
+the limit.
+
+Memory evidence for the default, measured on the build server on 2026-10-20 with
+fake runtimes: the IPC test worker held about 48 MiB per run (143 MiB for three,
+287 MiB for six). The real worker, loaded through tsx as the tests load it, held
+290 to 370 MiB per run, about 1 GiB for three and 2 GiB for six. The packaged
+worker and real provider CLIs were not measured, so the default stays unvalidated.
+
 ### Linked runtime conversations
 
 The saved Code and Native conversation surfaces can open a linked inactive target
@@ -8375,6 +8441,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-19 Concurrent Code run limit, a PR stacked on #261. The owner decided the
+Codex P1 review thread on #261: a configurable host-wide limit, default 3 and not
+validated, with Queue or Refuse when full, a held queue after restart, counts,
+and queued Cancel. The new section "Concurrent Code run limit" describes the
+setting, the claim, the queue record, the fresh checks before a queued turn
+starts, the owner actions, and the strip. `vivary-code-send` and the new
+`vivary-code-queue` build their send input in `code-send-input.ts`. The
+Concurrent Code conversations chart gains the queued states.
 
 2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
 conversation, so a later turn of an acknowledged conversation did not ask again.

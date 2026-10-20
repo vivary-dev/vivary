@@ -71,6 +71,8 @@ function fixture() {
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
     // A stored refusal on the record, as cleanupRefusalFromRun reads it.
     cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
+    // A host with free slots. The capacity tests in code-concurrency cover queueing.
+    codeRunSlotFree: () => true, queueVivaryCodeTurn: () => { throw new Error("No queue expected"); }, takeQueuedSlot() {},
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));

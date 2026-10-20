@@ -34,6 +34,8 @@ after(async () => {
 });
 
 const agent = await import("../server/local-code-agent.ts");
+// The tests below that run several conversations at once are not about the limit, so it is above them all.
+await agent.setVivaryCodeRunCapacity({ limit: 16, whenFull: "queue" });
 const { getVivaryRuntimeStatus } = await import("../server/local-runtime-setup.ts");
 const { SHARED_FOLDER_WARNING } = await import("../shared/code-concurrency.ts");
 const { getCodeAgentRunRecord, listCodeAgentRunRecords, listCodeAgentTranscriptEvents, updateCodeAgentRunRecord } =
@@ -341,6 +343,200 @@ test("Stop leaves alone a run whose own cleanup refusal is in force while an old
     await settle(older);
     await settle(newer);
   }
+});
+
+
+// Capacity. A host-wide limit on running turns, with a first in, first out queue or a refusal beyond it.
+const capacityHost = () => Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")) as {
+  activeRuns: Map<string, unknown>; queue: unknown[]; reserved: number; initialization: Promise<void> | null };
+
+async function folders(fixture: string, ...names: string[]) {
+  const made: string[] = [];
+  for (const name of names) {
+    const folder = path.join(fixture, name);
+    await mkdir(folder, { recursive: true });
+    made.push(folder);
+  }
+  return made;
+}
+
+/** Cancels whatever still waits, so nothing starts behind the test, then stops whatever runs. */
+async function endAll(runIds: string[]) {
+  for (const runId of runIds) {
+    const projectId = getCodeAgentRunRecord(runId)?.metadata?.projectId as string | undefined;
+    await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId, projectId }).catch(() => undefined);
+  }
+  await waitFor(() => capacityHost().reserved === 0, "queued starts to settle");
+  for (const runId of runIds) await settle(runId);
+  await agent.setVivaryCodeRunCapacity({ limit: 16, whenFull: "queue" });
+}
+
+const userMessages = (runId: string) => listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user")
+  .map(event => event.message);
+const startedRuns = async (fixture: string) => (await readFile(path.join(fixture, "starts.jsonl"), "utf8").catch(() => ""))
+  .trim().split("\n").filter(Boolean).map(line => JSON.parse(line).runId as string);
+
+test("a full host queues sends and starts them first in, first out as slots free", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-fifo");
+  const [a, b, c, d] = await folders(fixture, "a", "b", "c", "d");
+  await agent.setVivaryCodeRunCapacity({ limit: 2, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "cap_a"), "Work in a")).run!.id);
+    runs.push((await send(project(b, "cap_b"), "Work in b", codex)).run!.id);
+    const queued = await send(project(c, "cap_c"), "Work in c");
+    runs.push(queued.run!.id);
+    assert.deepEqual([queued.run!.status, queued.run!.queue], ["queued", { state: "queued", position: 1, reason: null }]);
+    runs.push((await send(project(d, "cap_d"), "Work in d", codex)).run!.id);
+    const [runA, runB, runC, runD] = runs;
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual(state.capacity, { limit: 2, whenFull: "queue", running: 2, queued: 2, held: 0 });
+    assert.deepEqual(state.queuedRuns.map(run => [run.id, run.state, run.position]), [[runC, "queued", 1], [runD, "queued", 2]]);
+    assert.deepEqual(userMessages(runC), [], "a queued turn writes no transcript entry before it starts");
+
+    await settle(runA);
+    await waitFor(() => capacityHost().activeRuns.has(runC), "the first queued turn to start");
+    assert.equal(capacityHost().activeRuns.has(runD), false, "the second still waits");
+    assert.equal((await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns[0].position, 1);
+    await settle(runB);
+    await waitFor(() => capacityHost().activeRuns.has(runD), "the second queued turn to start");
+    await waitFor(async () => (await startedRuns(fixture)).length === 4, "four workers");
+    assert.deepEqual(await startedRuns(fixture), [runA, runB, runC, runD], "workers start in send order");
+    assert.deepEqual(userMessages(runC), ["Work in c"]);
+  } finally { await endAll(runs); }
+});
+
+test("Cancel removes a queued message, starts nothing, and puts the message back in its draft", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-cancel");
+  const [a, b] = await folders(fixture, "a", "b");
+  const { runWithRequestContext } = await import("@agent-native/core/server");
+  const { changeIndexedChatDraft, createCodeDraftIdentity, readChatDraft } = await import("../server/chat-draft.ts");
+  const { restoreQueuedCodeDraft } = await import("../server/code-queue-draft.ts");
+  const asOwner = <T>(work: () => Promise<T>) => runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, work);
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const identity = createCodeDraftIdentity(owner.ownerEmail, owner.orgId, "cap_draft");
+  const threadId = "vivary-code:project:cap_draft:queued-draft";
+  const submitId = "5c0d6d1e-6a8e-4f62-9a53-2f8f6f1b4a10";
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "cap_running"), "Work in a")).run!.id);
+    await asOwner(() => changeIndexedChatDraft(identity, threadId, null, { text: "Queued words", status: "pending", submitId }));
+    const queued = (await send(project(b, "cap_draft"), "Queued words", { draftSubmitId: submitId, draftThreadId: threadId })).run!.id;
+    runs.push(queued);
+    const cancelled = await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "cap_draft" });
+    assert.equal(await asOwner(() => restoreQueuedCodeDraft(owner.ownerEmail, owner.orgId, cancelled)), true);
+    const draft = await asOwner(() => readChatDraft(identity, threadId));
+    assert.deepEqual([draft?.status, draft?.text, draft?.submitId], ["draft", "Queued words", null]);
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual([state.queuedRuns, state.capacity.queued], [[], 0]);
+    assert.equal(agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId).some(run => run.id === queued), false,
+      "a conversation that never started is not listed");
+    await settle(runs[0]);
+    await delay(250);
+    assert.deepEqual(await startedRuns(fixture), [runs[0]], "the cancelled message never started");
+    assert.deepEqual(userMessages(queued), []);
+  } finally { await endAll(runs); }
+});
+
+test("Refuse names the limit and writes nothing, and a queued conversation refuses another send and stops by cancelling",
+  { timeout: 60_000, skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-refuse");
+  const [a, b] = await folders(fixture, "a", "b");
+  const runs: string[] = [];
+  try {
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "refuse" });
+    runs.push((await send(project(a, "refuse_a"), "Work in a")).run!.id);
+    const records = listCodeAgentRunRecords("vivary-local-code").length;
+    await assert.rejects(send(project(b, "refuse_b"), "Beyond the limit"), (error: Error & { errorCode?: string; statusCode?: number }) => {
+      assert.equal(error.errorCode, "vivary_code_capacity_full");
+      assert.equal(error.statusCode, 409);
+      assert.match(error.message, /limit of 1 coding conversation at once/);
+      return true;
+    });
+    assert.equal(listCodeAgentRunRecords("vivary-local-code").length, records, "a refused send writes no run");
+
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    const queued = (await send(project(b, "refuse_b"), "Queued in b")).run!.id;
+    runs.push(queued);
+    await assert.rejects(send(project(b, "refuse_b"), "A second message", { runId: queued }),
+      { errorCode: "vivary_code_conversation_queued", statusCode: 409 });
+    await agent.stopVivaryCodeRun({ ...owner, runId: queued, projectId: "refuse_b" });
+    assert.equal((await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns.length, 0, "Stop cancelled it");
+  } finally { await endAll(runs); }
+});
+
+test("a restart holds the queue until the owner starts it", { timeout: 60_000, skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-restart");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "restart_b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "restart_a"), "Work in a")).run!.id);
+    const queued = (await send(workspace, "Queued before the restart")).run!.id;
+    runs.push(queued);
+    // A new host process: the in-memory queue is gone and the host initializes again from the records.
+    const state = capacityHost();
+    state.queue.length = 0;
+    state.initialization = null;
+    const restarted = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual(restarted.queuedRuns.map(run => [run.id, run.state, run.position, run.reason]),
+      [[queued, "held", null, null]]);
+    assert.deepEqual([getCodeAgentRunRecord(queued)?.status, getCodeAgentRunRecord(queued)?.phase], ["paused", "held"]);
+    await settle(runs[0]);
+    await delay(250);
+    assert.equal(capacityHost().activeRuns.has(queued), false, "a restart starts nothing on its own");
+
+    await agent.resumeQueuedVivaryCodeTurn({ ...owner, workspace, revalidateWorkspace: async () => workspace,
+      message: "Queued before the restart", engine: "claude-cli", model: "claude-sonnet-5-5", runId: queued, proceed: false });
+    await waitFor(() => capacityHost().activeRuns.has(queued), "the owner's Start");
+    assert.deepEqual(userMessages(queued), ["Queued before the restart"]);
+  } finally { await endAll(runs); }
+});
+
+test("a queued turn whose folder gained an agent since it queued waits for confirmation, then Proceed starts it",
+  { timeout: 60_000, skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-confirm");
+  const [x, w, shared] = await folders(fixture, "x", "w", "shared");
+  const later = project(shared, "confirm_later");
+  await agent.setVivaryCodeRunCapacity({ limit: 2, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(x, "confirm_x"), "Work in x")).run!.id);
+    runs.push((await send(project(w, "confirm_w"), "Work in w")).run!.id);
+    // Neither queued turn overlaps a running one when it queues, so neither needs an acknowledgement then.
+    runs.push((await send(project(shared, "confirm_first"), "First in the shared folder")).run!.id);
+    const waiting = (await send(later, "Second in the shared folder", codex)).run!.id;
+    runs.push(waiting);
+    await settle(runs[0]);
+    await waitFor(() => capacityHost().activeRuns.has(runs[2]), "the first shared-folder turn to start");
+    await settle(runs[1]);
+    const confirm = await waitFor(async () => (await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns
+      .find(run => run.id === waiting && run.state === "needs-confirmation"), "the fresh check to ask");
+    assert.equal(confirm.reason, SHARED_FOLDER_WARNING);
+    assert.equal(getCodeAgentRunRecord(waiting)?.phase, "needs-confirmation");
+    assert.equal(capacityHost().activeRuns.has(waiting), false, "it did not start beside the new agent");
+    await agent.resumeQueuedVivaryCodeTurn({ ...owner, workspace: later, revalidateWorkspace: async () => later,
+      message: "Second in the shared folder", ...codex, runId: waiting, proceed: true });
+    await waitFor(() => capacityHost().activeRuns.has(waiting), "Proceed to start it");
+  } finally { await endAll(runs); }
+});
+
+test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { folder } = await ipcFixture("capacity-mixed");
+  const workspace = project(folder, "mixed_project");
+  await agent.setVivaryCodeRunCapacity({ limit: 3, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(workspace, "Claude here")).run!.id);
+    runs.push((await send(workspace, "Codex here", { ...codex, acknowledgeSharedFolder: true })).run!.id);
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual([state.capacity.running, state.capacity.queued], [2, 0]);
+    assert.deepEqual(state.activeRuns.map(run => run.engineLabel), ["Claude Code", "Codex CLI"]);
+  } finally { await endAll(runs); }
 });
 
 test("folders that overlap warn, while separate projects and Git worktrees run without a warning", { timeout: 60_000,

@@ -31,6 +31,7 @@ import { codexSessionLogLifecycle } from "./codex-session-process";
 import { canonicalFolder, foldersOverlap } from "./folder-overlap";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 import { SHARED_FOLDER_WARNING } from "../shared/code-concurrency";
+import { DEFAULT_CODE_RUN_CAPACITY, readCodeRunCapacity, writeCodeRunCapacity, type CodeRunCapacity } from "./code-run-capacity";
 
 import {
   WINDOWS_SCAN_FAILURES, type WindowsScanFailure,
@@ -96,7 +97,24 @@ export type VivaryCodeRunSummary = Pick<
   draftThreadId: string | null;
   /** A Stop and switch target the host applies when this run leaves it. */
   pendingSwitch: { engine: VivaryCodeEngine; model: string } | null;
+  /** This conversation's message waiting for a slot or for the owner, or null. */
+  queue: VivaryCodeQueuePlace | null;
 };
+
+/**
+ * Where a queued message waits. `queued` waits for a free slot. `held` waits for the owner's Start, after a restart or
+ * when a fresh check before its start failed. `needs-confirmation` waits for the owner to accept agents that started
+ * in its folder since it queued.
+ */
+export type VivaryCodeQueueState = "queued" | "held" | "needs-confirmation";
+/** `position` counts from 1 among the turns waiting for a slot, host-wide. Held turns have none. */
+export type VivaryCodeQueuePlace = { state: VivaryCodeQueueState; position: number | null; reason: string | null };
+export type VivaryCodeQueuedRun = VivaryCodeQueuePlace & {
+  id: string; title: string; projectId: string | null; workspaceLabel: string; engineLabel: string; model: string;
+  queuedAt: string;
+};
+/** The host-wide limit and the turns using it now. `queued` waits for a slot, and `held` waits for the owner. */
+export type VivaryCodeCapacityView = CodeRunCapacity & { running: number; queued: number; held: number };
 
 export type VivaryCodeRunState = VivaryCodeRunSummary & {
   events: CodeAgentTranscriptEvent[];
@@ -184,6 +202,9 @@ export type VivaryCodeHostState = {
   /** Whether any of the caller's conversations is running. `VivaryCodeState` narrows it to the selected one. */
   busy: boolean;
   cleanup: VivaryCodeCleanupView | null;
+  capacity: VivaryCodeCapacityView;
+  /** The caller's queued messages, in queue order. */
+  queuedRuns: VivaryCodeQueuedRun[];
 };
 
 export type VivaryCodeState = VivaryCodeHostState & {
@@ -302,6 +323,28 @@ type CodeHostState = {
   cleanupCheck: Promise<void> | null;
   /** Refusals whose last write failed, by run. They stay in force from memory until a write succeeds or they lift. */
   unsaved: Map<string, CleanupRefusal>;
+  /** The saved host-wide limit, read at host start and on every change. */
+  capacity: CodeRunCapacity;
+  /** Turns waiting for a slot or for the owner, oldest first. */
+  queue: QueuedTurn[];
+  /** Slots held by queued turns that are running their fresh checks before they start. */
+  reserved: number;
+};
+
+/** What a queued turn keeps on its run record, so a restart holds it instead of losing the message. */
+type StoredQueuedTurn = {
+  message: string; engine: VivaryCodeEngine; model: string; draftSubmitId?: string; draftThreadId?: string;
+  queuedAt: string; acknowledgedTurns: string[]; state: VivaryCodeQueueState; reason: string | null;
+  /** The record's status before it queued, restored by Cancel. Null for a conversation that never started. */
+  restore: { status: CodeAgentRunRecord["status"]; phase: string | null } | null;
+};
+
+type QueuedTurn = Omit<StoredQueuedTurn, "state"> & {
+  runId: string; ownerEmail: string; orgId?: string; workspaceLabel: string;
+  /** `starting` holds a reserved slot while the send's fresh checks run. */
+  state: VivaryCodeQueueState | "starting";
+  /** The original send, with the closures that check the project again. Null after a restart, until the owner starts it. */
+  input: VivaryCodeSendInput | null;
 };
 
 // Nitro bundles plugins while Native loads action source modules. Both must own
@@ -318,6 +361,9 @@ const hostState = hostProcess[codeHostKey] ??= {
   cleanup: null,
   cleanupCheck: null,
   unsaved: new Map<string, CleanupRefusal>(),
+  capacity: DEFAULT_CODE_RUN_CAPACITY,
+  queue: [],
+  reserved: 0,
 };
 const activeRuns = hostState.activeRuns;
 export async function initializeVivaryCodeAgent(): Promise<void> {
@@ -333,7 +379,12 @@ export function shutdownVivaryCodeAgent(): Promise<void> {
 async function ensureVivaryCodeHostInitialized(): Promise<void> {
   // Production uses one supervised Node process, so persisted active records here
   // can only be leftovers from a prior host process.
-  hostState.initialization ??= Promise.resolve().then(() => {
+  hostState.initialization ??= Promise.resolve().then(async () => {
+    try { hostState.capacity = await readCodeRunCapacity(); }
+    catch (error) {
+      console.error(`[vivary-code-host] capacity-read-failed ${error instanceof Error ? error.name : "unknown"}`);
+    }
+    restoreHeldQueue();
     for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
       if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER) continue;
       if (!isActiveCodeAgentRun(run)) continue;
@@ -865,6 +916,13 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
     busy: active.length > 0,
     // Every user of the host sees the refusal, because it refuses them all.
     cleanup: hostState.cleanup ? cleanupView(hostState.cleanup, runs, ownerEmail, orgId) : null,
+    capacity: capacityView(),
+    queuedRuns: hostState.queue.flatMap(item => {
+      const run = ownedById.get(item.runId);
+      return run ? [{ id: run.id, title: run.title, projectId: metadataString(run, "projectId"),
+        workspaceLabel: item.workspaceLabel, engineLabel: engineLabelFromRun(run), model: modelFromRun(run),
+        queuedAt: item.queuedAt, ...queuePlace(item.runId)! }] : [];
+    }),
   };
 }
 
@@ -1041,6 +1099,8 @@ export async function sendVivaryCodeMessage(input: {
   loadLinkedContext?: () => Promise<PreparedLinkedContext | null>;
   /** The sender saw SHARED_FOLDER_WARNING and chose to work beside the other agents in this folder. */
   acknowledgeSharedFolder?: boolean;
+  /** Set by the host only: this send is a queued turn starting in the slot it reserved. */
+  queued?: QueuedTurn;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
@@ -1130,7 +1190,7 @@ export async function sendVivaryCodeMessage(input: {
       errorCode: "vivary_code_engine_changed", statusCode: 409,
     });
   }
-  const run = latest ?? createCodeAgentRunRecord({
+  const newRun = () => createCodeAgentRunRecord({
     goalId: VIVARY_CODE_GOAL_ID,
     title: titleFromMessage(input.message),
     status: "queued",
@@ -1155,6 +1215,9 @@ export async function sendVivaryCodeMessage(input: {
       ...(input.draftThreadId ? { draftThreadId: input.draftThreadId } : {}),
     },
   });
+  // The host-wide limit, checked in the same turn as the claim. A full host queues this turn, or refuses it.
+  if (!input.queued && !codeRunSlotFree()) return queueVivaryCodeTurn(input, () => latest ?? newRun(), workspace, canonicalRoot);
+  const run = latest ?? newRun();
 
   const executionMessage = buildVivaryCodeExecutionPrompt(latest, selectedEngine,
     linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
@@ -1170,8 +1233,9 @@ export async function sendVivaryCodeMessage(input: {
     recordProjectContextLoad(run, input.projectContext);
     input.recordProjectContext?.(input.projectContext);
   }
+  if (input.queued) takeQueuedSlot(input.queued);
   updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
-    metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
+    metadata: { pendingLaunch: undefined, queuedTurn: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
@@ -1440,6 +1504,7 @@ async function executeVivaryCodeRun(input: {
     catch (error) {
       console.error(`[vivary-code-host] pending-switch-failed run=${input.runId} ${error instanceof Error ? error.name : "unknown"}`);
     }
+    drainCodeRunQueue();
   }
 }
 
@@ -1448,6 +1513,8 @@ export async function stopVivaryCodeRun(input: {
   orgId?: string;
   runId: string;
   projectId?: string;
+  /** Stop on a queued message cancels it. The action restores the message to the conversation's draft here. */
+  onQueuedCancelled?: (cancelled: CancelledQueuedTurn) => Promise<unknown>;
 }): Promise<VivaryCodeState> {
   await ensureVivaryCodeHostInitialized();
   const record = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).find(run =>
@@ -1466,6 +1533,11 @@ export async function stopVivaryCodeRun(input: {
   };
 
   const activeRun = activeRuns.get(input.runId);
+  if (!activeRun && queuedTurnFor(input.runId)) {
+    const cancelled = await cancelQueuedVivaryCodeTurn(input);
+    await input.onQueuedCancelled?.(cancelled);
+    return getVivaryCodeState(input.ownerEmail, input.runId, workspace, input.orgId);
+  }
   if (!activeRun || activeRun.ownerEmail !== input.ownerEmail) {
     fail("That local Vivary code run is not active.", {
       errorCode: "vivary_code_run_not_active",
@@ -1697,7 +1769,8 @@ export async function getVivaryCodeFiles(
  * owner listing (history, the host's recent run, draft runs and submit lookups) uses this one predicate.
  */
 function isListedRun(run: CodeAgentRunRecord): boolean {
-  return !run.metadata?.linkedCreationPending;
+  // A conversation whose only message was a queued one that the owner cancelled was never started, so it is not listed.
+  return !run.metadata?.linkedCreationPending && !run.metadata?.discarded;
 }
 
 /**
@@ -1820,7 +1893,7 @@ function assertCodeHostAvailable(): void {
  * skip the warning.
  */
 function assertConversationCanStart(input: { runId?: string; ownerEmail: string; orgId?: string;
-  acknowledgeSharedFolder?: boolean }, canonicalRoot: string): void {
+  acknowledgeSharedFolder?: boolean; queued?: QueuedTurn }, canonicalRoot: string): void {
   const own = input.runId ? activeRuns.get(input.runId) : undefined;
   if (own) {
     fail(own.stopReason ? "This conversation is still stopping. Send again after it stops."
@@ -1828,13 +1901,230 @@ function assertConversationCanStart(input: { runId?: string; ownerEmail: string;
       errorCode: "vivary_code_conversation_active", statusCode: 409,
     });
   }
-  if (input.acknowledgeSharedFolder) return;
-  const others = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId);
+  const waiting = input.runId ? queuedTurnFor(input.runId) : undefined;
+  if (waiting && waiting !== input.queued) {
+    fail("This conversation already has a queued message. Cancel it, or start it from the agent work strip, before "
+      + "sending another.", { errorCode: "vivary_code_conversation_queued", statusCode: 409 });
+  }
+  // A queued turn's acknowledgement covers the turns that were working in the folder when it queued, not later ones.
+  if (input.acknowledgeSharedFolder && !input.queued) return;
+  const others = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId)
+    .filter(run => !input.queued?.acknowledgedTurns.includes(run.turnId));
   if (others.length) {
     fail(`${SHARED_FOLDER_WARNING} ${folderRunsSentence(others)}`, {
       errorCode: "vivary_code_shared_folder_active", statusCode: 409,
     });
   }
+}
+
+export type VivaryCodeSendInput = Parameters<typeof sendVivaryCodeMessage>[0];
+
+function capacityView(): VivaryCodeCapacityView {
+  const waiting = hostState.queue.filter(item => item.state === "queued" || item.state === "starting").length;
+  return { ...hostState.capacity, running: activeRuns.size, queued: waiting, held: hostState.queue.length - waiting };
+}
+
+/** The limit minus the running turns and the queued turns already starting. */
+function freeCodeRunSlots(): number {
+  return hostState.capacity.limit - activeRuns.size - hostState.reserved;
+}
+
+/** A new send starts only when a slot is free and no queued turn waits for one, so the queue stays first in, first out. */
+function codeRunSlotFree(): boolean {
+  return freeCodeRunSlots() > 0 && !hostState.queue.some(item => item.state === "queued" || item.state === "starting");
+}
+
+function queuedTurnFor(runId: string): QueuedTurn | undefined {
+  return hostState.queue.find(item => item.runId === runId);
+}
+
+function queuePlace(runId: string): VivaryCodeQueuePlace | null {
+  const item = queuedTurnFor(runId);
+  if (!item) return null;
+  const waiting = hostState.queue.filter(other => other.state === "queued" || other.state === "starting");
+  return item.state === "queued" || item.state === "starting"
+    ? { state: "queued", position: waiting.indexOf(item) + 1, reason: null }
+    : { state: item.state, position: null, reason: item.reason };
+}
+
+/**
+ * Queues a send that found every slot taken, or refuses it when the owner chose Refuse. A queued turn writes no
+ * transcript entry, so a pending draft stays pending until the turn starts or the owner cancels it.
+ */
+async function queueVivaryCodeTurn(input: VivaryCodeSendInput, record: () => CodeAgentRunRecord,
+  workspace: VivaryCodeWorkspace, canonicalRoot: string): Promise<VivaryCodeState> {
+  const { limit, whenFull } = hostState.capacity;
+  if (whenFull === "refuse") {
+    fail(`Vivary is running its limit of ${limit} coding ${limit === 1 ? "conversation" : "conversations"} at once. `
+      + "Wait for one to finish, or stop one, and send again. You can change the limit in Settings, Runtime.", {
+      errorCode: "vivary_code_capacity_full", statusCode: 409,
+    });
+  }
+  const existing = input.runId ? getCodeAgentRunRecord(input.runId) : null;
+  const run = record();
+  const item: QueuedTurn = {
+    runId: run.id, ownerEmail: input.ownerEmail, orgId: input.orgId, workspaceLabel: workspace.label,
+    message: input.message, engine: engineFromRun(run), model: modelFromRun(run),
+    ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId, draftThreadId: input.draftThreadId } : {}),
+    queuedAt: new Date().toISOString(), state: "queued", reason: null,
+    // An acknowledgement covers the turns working in the folder now. A turn that starts while this one waits asks again.
+    acknowledgedTurns: input.acknowledgeSharedFolder
+      ? runsInFolder(canonicalRoot, input.ownerEmail, input.orgId).map(other => other.turnId) : [],
+    restore: existing ? { status: existing.status, phase: existing.phase ?? null } : null,
+    input: { ...input, runId: run.id },
+  };
+  hostState.queue.push(item);
+  persistQueuedTurn(item);
+  return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+}
+
+/** Writes a queued turn to its run. A turn waiting for a slot reads as queued, and one waiting for the owner as paused. */
+function persistQueuedTurn(item: QueuedTurn): void {
+  const waiting = item.state === "queued" || item.state === "starting";
+  const { message, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns, reason, restore } = item;
+  const stored: StoredQueuedTurn = { message, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns,
+    state: waiting ? "queued" : item.state as VivaryCodeQueueState, reason, restore };
+  updateCodeAgentRunRecord(item.runId, { status: waiting ? "queued" : "paused", phase: waiting ? "queued" : item.state,
+    needsApproval: false, metadata: { queuedTurn: stored } });
+}
+
+/** A queued turn passed its fresh checks and starts now, in the slot it reserved. */
+function takeQueuedSlot(item: QueuedTurn): void {
+  const index = hostState.queue.indexOf(item);
+  if (index >= 0) hostState.queue.splice(index, 1);
+  if (item.state === "starting") hostState.reserved -= 1;
+}
+
+/**
+ * Starts queued turns, oldest first, while slots are free. A slot is reserved before the first await of the turn's
+ * fresh checks, so a new send cannot take it meanwhile. Called when a run leaves, a turn is cancelled or started by the
+ * owner, a start fails, or the limit changes. Never at host start, so a restart starts nothing on its own.
+ */
+function drainCodeRunQueue(): void {
+  while (freeCodeRunSlots() > 0) {
+    const next = hostState.queue.find(item => item.state === "queued" && item.input);
+    if (!next?.input) return;
+    next.state = "starting";
+    hostState.reserved += 1;
+    void startQueuedTurn(next, next.input);
+  }
+}
+
+/**
+ * Runs the original send again, so ownership, the project grant, reconnection, the folder, the runtime and model, and
+ * the shared folder are all checked fresh. A shared-folder refusal asks the owner to confirm. Any other refusal holds
+ * the turn with its reason, so the message is never lost.
+ */
+async function startQueuedTurn(item: QueuedTurn, input: VivaryCodeSendInput): Promise<void> {
+  try { await sendVivaryCodeMessage({ ...input, queued: item }); }
+  catch (error) {
+    if (hostState.queue.includes(item)) {
+      if (item.state === "starting") hostState.reserved -= 1;
+      const shared = error !== null && typeof error === "object" && "errorCode" in error
+        && error.errorCode === "vivary_code_shared_folder_active";
+      item.state = shared ? "needs-confirmation" : "held";
+      item.reason = shared ? SHARED_FOLDER_WARNING
+        : error instanceof Error ? error.message : "The queued message could not start.";
+      try { persistQueuedTurn(item); }
+      catch (failure) { console.error(`[vivary-code-host] queue-write-failed run=${item.runId} ${failure instanceof Error ? failure.name : "unknown"}`); }
+    }
+  }
+  drainCodeRunQueue();
+}
+
+/** At host start, every queued turn on record is held for the owner. Its closures ended with the previous host. */
+function restoreHeldQueue(): void {
+  const held: QueuedTurn[] = [];
+  for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
+    if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER || hostState.queue.some(item => item.runId === run.id)) continue;
+    const stored = run.metadata?.queuedTurn as StoredQueuedTurn | undefined;
+    if (!stored || typeof stored.message !== "string") continue;
+    held.push({ ...stored, acknowledgedTurns: Array.isArray(stored.acknowledgedTurns) ? stored.acknowledgedTurns : [],
+      runId: run.id, ownerEmail: metadataString(run, "ownerEmail") ?? "", orgId: metadataString(run, "orgId") ?? undefined,
+      workspaceLabel: path.basename(run.cwd), state: "held", reason: null, input: null });
+  }
+  held.sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
+  for (const item of held) {
+    hostState.queue.push(item);
+    persistQueuedTurn(item);
+  }
+}
+
+/** What Cancel removed, so the action can put the message back in the conversation's draft. */
+export type CancelledQueuedTurn = { runId: string; projectId: string | null; message: string; draftThreadId?: string;
+  draftSubmitId?: string };
+
+function requireOwnedQueuedTurn(input: { ownerEmail: string; orgId?: string; runId: string; projectId?: string }) {
+  const item = queuedTurnFor(input.runId);
+  const run = item ? getCodeAgentRunRecord(item.runId) : null;
+  if (!item || !run || !isOwnedIdentity(run, input.ownerEmail, input.orgId)
+    || metadataString(run, "projectId") !== (input.projectId ?? null)) {
+    fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
+  }
+  return { item, run };
+}
+
+/** Removes a queued message. Nothing starts. A conversation that never started is no longer listed. */
+export async function cancelQueuedVivaryCodeTurn(input: {
+  ownerEmail: string; orgId?: string; runId: string; projectId?: string;
+}): Promise<CancelledQueuedTurn> {
+  await ensureVivaryCodeHostInitialized();
+  const { item, run } = requireOwnedQueuedTurn(input);
+  if (item.state === "starting") {
+    fail("That message is starting now. Stop it instead.", { errorCode: "vivary_code_queue_starting", statusCode: 409 });
+  }
+  hostState.queue.splice(hostState.queue.indexOf(item), 1);
+  updateCodeAgentRunRecord(item.runId, { status: item.restore?.status ?? "paused", phase: item.restore?.phase ?? "paused",
+    needsApproval: false, metadata: { queuedTurn: undefined, ...(item.restore ? {} : { discarded: true }) } });
+  drainCodeRunQueue();
+  return { runId: item.runId, projectId: metadataString(run, "projectId"), message: item.message,
+    draftThreadId: item.draftThreadId, draftSubmitId: item.draftSubmitId };
+}
+
+/** The stored message of a queued turn, which the action sends again with fresh project checks. */
+export async function readQueuedVivaryCodeTurn(input: {
+  ownerEmail: string; orgId?: string; runId: string; projectId?: string;
+}): Promise<Pick<StoredQueuedTurn, "message" | "engine" | "model" | "draftSubmitId" | "draftThreadId">> {
+  await ensureVivaryCodeHostInitialized();
+  const { item } = requireOwnedQueuedTurn(input);
+  const { message, engine, model, draftSubmitId, draftThreadId } = item;
+  return { message, engine, model, draftSubmitId, draftThreadId };
+}
+
+/**
+ * Puts a held or needs-confirmation turn back in the queue with a fresh send from the owner's request. With `proceed`,
+ * the owner accepts the agents working in its folder now. It starts as soon as a slot is free.
+ */
+export async function resumeQueuedVivaryCodeTurn(input: VivaryCodeSendInput & { runId: string; proceed: boolean }):
+  Promise<VivaryCodeState> {
+  const workspace = input.workspace ?? await resolveWorkspace();
+  await ensureVivaryCodeHostInitialized();
+  const canonicalRoot = await canonicalFolder(workspace.root);
+  const { item } = requireOwnedQueuedTurn({ ...input, projectId: workspace.projectId });
+  if (item.state === "queued" || item.state === "starting") {
+    fail("That message is already waiting for a slot.", { errorCode: "vivary_code_queue_waiting", statusCode: 409 });
+  }
+  const { proceed, ...send } = input;
+  if (proceed) item.acknowledgedTurns = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId).map(run => run.turnId);
+  item.input = { ...send, workspace, runId: item.runId };
+  item.state = "queued";
+  item.reason = null;
+  persistQueuedTurn(item);
+  drainCodeRunQueue();
+  return getVivaryCodeState(input.ownerEmail, item.runId, workspace, input.orgId);
+}
+
+export async function getVivaryCodeRunCapacity(): Promise<VivaryCodeCapacityView> {
+  await ensureVivaryCodeHostInitialized();
+  return capacityView();
+}
+
+/** Saves the host-wide limit. A higher limit starts queued turns at once, and a lower one stops nothing. */
+export async function setVivaryCodeRunCapacity(next: CodeRunCapacity): Promise<VivaryCodeCapacityView> {
+  await ensureVivaryCodeHostInitialized();
+  hostState.capacity = await writeCodeRunCapacity(next);
+  drainCodeRunQueue();
+  return capacityView();
 }
 
 /** Names the caller's conversations working in the folder and counts any other owner's. */
@@ -1894,6 +2184,7 @@ function toRunSummary(run: CodeAgentRunRecord): VivaryCodeRunSummary {
     model: modelFromRun(run),
     draftThreadId: runDraftThreadId(run),
     pendingSwitch: pendingSwitchFromRun(run),
+    queue: queuePlace(run.id),
   };
 }
 

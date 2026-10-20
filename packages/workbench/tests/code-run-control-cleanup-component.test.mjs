@@ -41,6 +41,8 @@ const stubs = new Map([
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
   ["react-router", `export function useNavigate() { return () => {}; }
     export function useLocation() { return { pathname: "/", search: "" }; }`],
+  ["../projects/open-project-folder", `export function useOpenProjectFolder() {
+    return { available: false, choosing: false, error: undefined, async openFolder() {} }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
@@ -280,6 +282,35 @@ export async function eachRunningConversationHasItsOwnApprovalsAndStop() {
   } finally { await dispose(); }
 }
 
+export async function queuedConversationsShowCountsAndTheirOwnChoices() {
+  const queued = (id, title, state, extra = {}) => ({ id, title, projectId: null, workspaceLabel: "fixture",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z", state,
+    position: null, reason: null, ...extra });
+  const queuedRuns = [queued("run-waiting", "Write the changelog", "queued", { position: 1 }),
+    queued("run-held", "Rename the module", "held"),
+    queued("run-check", "Fix the tests", "needs-confirmation", { reason: "Other agents are working in this folder." })];
+  const { host, dispose } = await mount(null, { activeRuns: [activeRun(CLAUDE_RUN)], busy: true, queuedRuns,
+    capacity: { limit: 1, whenFull: "queue", running: 1, queued: 1, held: 2 } });
+  try {
+    assert.equal(host.querySelector('[role="status"]')?.textContent,
+      "1 running, 1 queued, 2 waiting for you (limit 1)");
+    const rows = [...host.querySelectorAll('[aria-label="Queued conversations"] > li')];
+    assert.deepEqual(rows.map(row => row.querySelector('[role="status"]')?.textContent), [
+      "Queued, position 1 in Personal workspace (Claude Code): Write the changelog",
+      "Held after restart in Personal workspace (Claude Code): Rename the module",
+      "Needs confirmation in Personal workspace (Claude Code): Fix the tests"]);
+    assert.deepEqual(rows.map(row => [...row.querySelectorAll("button")].map(item => item.textContent)), [
+      ["Open conversation", "Cancel"], ["Open conversation", "Start", "Cancel"], ["Open conversation", "Cancel", "Proceed"]]);
+    const press = async (row, label) => click([...row.querySelectorAll("button")].find(item => item.textContent === label));
+    await press(rows[0], "Cancel");
+    await press(rows[1], "Start");
+    await press(rows[2], "Proceed");
+    assert.deepEqual(callProof.calls.map(call => [call.name, call.params.operation, call.params.runId]), [
+      ["vivary-code-queue", "cancel", "run-waiting"], ["vivary-code-queue", "start", "run-held"],
+      ["vivary-code-queue", "proceed", "run-check"]], "each choice acts on its own queued conversation");
+  } finally { await dispose(); }
+}
+
 export async function aStoppingRunHoldsItsStopOnly() {
   const runs = [activeRun(CLAUDE_RUN, { stopping: true }), activeRun(CODEX_RUN, { engineLabel: "Codex CLI" })];
   const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
@@ -361,6 +392,7 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["the run's owner sees its failed stop's check in place of Stop", proof.theOwnerSeesItsFailedStopsCheckInPlaceOfStop],
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
+    ["queued conversations show the counts and their own Cancel, Start, and Proceed", proof.queuedConversationsShowCountsAndTheirOwnChoices],
   ]) await t.test(name, () => run());
 });
 

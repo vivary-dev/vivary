@@ -30,6 +30,8 @@ const stubs = new Map([
   ["@agent-native/core/client/hooks", `
     export const actionErrorMessage = failure => failure?.message;
     export const useActionQuery = () => ({ data: ${fixture}.host, error: null, refetch: async () => ({}) });`],
+  ["../projects/open-project-folder", `export const useOpenProjectFolder = () => ({ available: false, choosing: false,
+    async openFolder() {} });`],
   ["@agent-native/toolkit/ui", `import { createElement } from "react";
     export const Button = ({ size, variant, ...props }) => createElement("button", { type: "button", ...props });`],
 ]);
