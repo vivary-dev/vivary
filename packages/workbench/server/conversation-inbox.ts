@@ -356,11 +356,14 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
     const active = host.activeRuns.find(run => run.id === input.runId);
     if (active?.pendingApprovals.length) refuseArchive(ARCHIVE_REFUSALS.approval);
     if (active) refuseArchive(ARCHIVE_REFUSALS.working);
-    // A follow-up whose send is still pending is queued work for this conversation.
-    const draftThreadId = owned.metadata?.draftThreadId;
-    if (typeof draftThreadId === "string" && input.orgId) {
-      const draft = await readChatDraft(createCodeDraftIdentity(input.ownerEmail, input.orgId, input.projectId), draftThreadId);
-      if (draft?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
+    // A follow-up whose send is still pending is queued work for this conversation. `linkedCodeDraftRuns` links drafts
+    // to runs the way the inbox marks a row Review send, including an older run whose draft ID is only in its transcript.
+    if (input.orgId) {
+      const pending = (await listChatDrafts(createCodeDraftIdentity(input.ownerEmail, input.orgId, input.projectId)))
+        .filter(draft => draft.status === "pending").map(draft => draft.threadId);
+      const linked = linkedCodeDraftRuns(input.ownerEmail, input.orgId, input.projectId === null ? undefined : input.scope,
+        pending);
+      if ([...linked.values()].some(run => run.id === input.runId)) refuseArchive(ARCHIVE_REFUSALS.sending);
     }
   }
   const now = new Date().toISOString();

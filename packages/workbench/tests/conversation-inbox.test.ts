@@ -252,8 +252,7 @@ test("archive refuses a working conversation and never stops it", async () => {
     await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
       change: { operation: "rename", title: "Renamed while working" } });
   } finally { host.activeRuns.clear(); }
-  await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
-    change: { operation: "archive" } });
+  await codeChange("beta-one", "beta", { operation: "archive" });
   assert.equal(typeof getCodeAgentRunRecord("beta-one")?.metadata?.archivedAt, "string");
 });
 
@@ -359,4 +358,16 @@ test("an API chat change needs the project in the owner's current catalog", () =
   assert.throws(() => inbox.requireCatalogProject({ code: "registry-unavailable" }, "beta"), denied);
   inbox.requireCatalogProject(catalog, "beta");
   assert.equal(typeof archiveAction.run, "function");
+});
+
+test("Code archive resolves a legacy draft ID from the transcript, so a row showing Review send is not archived", async () => {
+  const { appendCodeAgentTranscriptEvent } = await import("@agent-native/core/code-agents");
+  const draftThreadId = codeDraftThreadId("beta", "legacy-follow-up");
+  codeRun("legacy-draft", "beta");
+  appendCodeAgentTranscriptEvent({ runId: "legacy-draft", kind: "user", message: "First ask", metadata: { draftThreadId } });
+  await saveDraft(createCodeDraftIdentity(owner, orgId, "beta"), draftThreadId, "Next step", true);
+  assert.equal((await load()).rows.find(row => row.id === "code:legacy-draft")?.draft, "pending", "the row shows Review send");
+  await assert.rejects(codeChange("legacy-draft", "beta", { operation: "archive" }),
+    (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /still being sent/.test(error.message));
+  assert.equal(getCodeAgentRunRecord("legacy-draft")?.metadata?.archivedAt, undefined, "nothing was archived");
 });

@@ -443,7 +443,9 @@ Archive waits for unresolved work, for Code and API chat alike, and refuses with
 `vivary_conversation_archive_pending` (409) and a message naming what to resolve:
 a pending approval or a working or stopping run for Code, a running turn or queued
 messages in the thread for API chat, and for both a send from the draft that is
-still pending. Archive never stops, approves, sends or discards anything. The inbox
+still pending. A Code run's pending draft is found the way the inbox marks its row
+Review send, through `linkedCodeDraftRuns`, which also reads a draft ID kept only in
+an older run's transcript. Archive never stops, approves, sends or discards anything. The inbox
 archives, renames and pins an API chat only through the owner action
 [`vivary-conversation-archive`](../packages/workbench/actions/vivary-conversation-archive.ts),
 which runs the archive checks on the server before `setThreadArchived`. Its rename makes the
@@ -1051,6 +1053,10 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox Code archive and legacy drafts (W5b, review thread 4321225650). Code archive finds a pending
+send through `linkedCodeDraftRuns`, the same link that marks the row Review send, so an older run whose draft ID
+is only in its transcript is not archived. Evidence inspected: the new server test with a transcript-only draft ID.
 
 2026-10-20 Inbox changes follow current project access (W5b, review threads 4317586775 and 4319908290).
 Code rename, archive and pin check the run against the project's current history scope, and API chat changes
