@@ -482,6 +482,118 @@ test("footnote labels keep escaped brackets and backslashes and still match with
   assert.ok(!JSON.stringify(proof.readMarkdown("Bad[^a[b] here.\n\n[^a[b]: x", { footnotes: true }).json).includes("footnote"));
 });
 
+// PR #259 regressions. Run against the unchanged installed Toolkit from the repository root:
+// timeout 20s node --test --test-name-pattern="PR259 footnotes" packages/workbench/tests/markdown-reader.test.mjs
+test("PR259 footnotes leave labels with unsupported backslash escapes literal", async (t) => {
+  const proof = await loadProof();
+  // Bracket and backslash escapes are covered above. Neither letters nor other punctuation
+  // after a backslash may turn an invalid label into a footnote.
+  for (const [label, visible] of [[String.raw`bad\q`, String.raw`bad\q`], [String.raw`bad\!`, "bad!"]]) {
+    await t.test(label, () => {
+      const source = `Bad[^${label}] and valid[^ok].\n\n[^${label}]: Invalid note stays literal.\n\n[^ok]: Valid note.`;
+      const { json, html } = proof.readMarkdown(source, { footnotes: true });
+      const reader = document.createElement("div");
+      reader.innerHTML = html;
+      assert.deepEqual(json.content.find((block) => block.type === "footnotes").content
+        .map((item) => [item.attrs.label, item.attrs.number]), [["ok", 1]]);
+      assert.equal(reader.querySelector("p").textContent, `Bad[^${visible}] and valid1.`);
+      assert.ok(reader.textContent.includes(`[^${visible}]: Invalid note stays literal.`));
+      assert.deepEqual([...reader.querySelectorAll("sup.an-rich-md-footnote-ref > a")]
+        .map((a) => [a.getAttribute("href"), a.id]), [["#fn-1", "fnref-1"]]);
+    });
+  }
+});
+
+test("PR259 footnotes keep references inside Markdown link labels literal", async (t) => {
+  const proof = await loadProof();
+  for (const [kind, source] of [
+    ["inline link", "[Linked[^note]](https://example.test/docs) and outside[^note].\n\n[^note]: A visible note."],
+    ["reference link", "[Linked[^note]][docs] and outside[^note].\n\n[docs]: https://example.test/docs\n\n[^note]: A visible note."],
+  ]) {
+    await t.test(kind, () => {
+      const { html } = proof.readMarkdown(source, { footnotes: true });
+      const reader = document.createElement("div");
+      reader.innerHTML = html;
+      const links = [...reader.querySelectorAll('a[href="https://example.test/docs"]')];
+      assert.equal(links.length, 1);
+      assert.equal(links[0].textContent, "Linked[^note]");
+      assert.equal(links[0].querySelectorAll("a, sup").length, 0);
+      assert.deepEqual([...reader.querySelectorAll("sup.an-rich-md-footnote-ref > a")]
+        .map((a) => [a.getAttribute("href"), a.id]), [["#fn-1", "fnref-1"]]);
+      assert.deepEqual([...reader.querySelectorAll("a.an-rich-md-footnote-backref")]
+        .map((a) => a.getAttribute("href")), ["#fnref-1"]);
+    });
+  }
+});
+
+test("PR259 footnotes exclude calls in discarded duplicate definitions from return links", async () => {
+  const proof = await loadProof();
+  const source = [
+    "Body[^owner] and target[^target].", "",
+    "[^owner]: Kept note calls[^target].", "",
+    "[^OWNER]: Discarded duplicate calls[^target].", "",
+    "[^target]: Target note.",
+  ].join("\n");
+  const { json, html } = proof.readMarkdown(source, { footnotes: true });
+  const reader = document.createElement("div");
+  reader.innerHTML = html;
+  assert.deepEqual(json.content.find((block) => block.type === "footnotes").content
+    .map((item) => item.attrs.label), ["owner", "target"]);
+  assert.ok(reader.textContent.includes("Kept note calls"));
+  assert.ok(!reader.textContent.includes("Discarded duplicate"));
+  assert.deepEqual([...reader.querySelectorAll("sup.an-rich-md-footnote-ref > a")]
+    .map((a) => [a.getAttribute("href"), a.id]),
+  [["#fn-1", "fnref-1"], ["#fn-2", "fnref-2"], ["#fn-2", "fnref-2-2"]]);
+  assert.deepEqual([...reader.querySelectorAll('li[id="fn-2"] a.an-rich-md-footnote-backref')]
+    .map((a) => a.getAttribute("href")), ["#fnref-2", "#fnref-2-2"]);
+  for (const link of reader.querySelectorAll("a.an-rich-md-footnote-backref")) {
+    assert.ok(reader.querySelector(`[id="${link.getAttribute("href").slice(1)}"]`), link.getAttribute("href"));
+  }
+});
+
+test("PR259 footnotes number only definitions reachable from visible references", async (t) => {
+  const proof = await loadProof();
+  await t.test("an unused parent citing a child produces no notes", () => {
+    const source = [
+      "Body without citations.", "",
+      "[^unused]: Hidden parent calls[^ghost].", "",
+      "[^ghost]: Hidden child.",
+    ].join("\n");
+    const { html } = proof.readMarkdown(source, { footnotes: true });
+    const reader = document.createElement("div");
+    reader.innerHTML = html;
+    // Count matches so a failure reports a number rather than inspecting linkedom's
+    // linked DOM graph, which Node's assertion formatter traverses to depth 1000.
+    assert.equal(reader.querySelectorAll("section.an-rich-md-footnotes").length, 0);
+    assert.equal(reader.querySelectorAll("sup.an-rich-md-footnote-ref").length, 0);
+    assert.equal(reader.textContent, "Body without citations.");
+  });
+  await t.test("unused calls cannot steal numbers or return links from a visible note chain", () => {
+    const source = [
+      "[^unused]: Hidden call[^ghost] and hidden call[^leaf].", "",
+      "Body[^root] and second[^second].", "",
+      "[^root]: Root cites[^leaf].", "",
+      "[^second]: Second visible note.", "",
+      "[^leaf]: Leaf note.", "",
+      "[^ghost]: Hidden note.",
+    ].join("\n");
+    const { json, html } = proof.readMarkdown(source, { footnotes: true });
+    const reader = document.createElement("div");
+    reader.innerHTML = html;
+    assert.deepEqual(json.content.find((block) => block.type === "footnotes").content
+      .map((item) => [item.attrs.label, item.attrs.number]), [["root", 1], ["second", 2], ["leaf", 3]]);
+    assert.ok(!reader.textContent.includes("Hidden"));
+    assert.deepEqual([...reader.querySelectorAll("sup.an-rich-md-footnote-ref > a")]
+      .map((a) => [a.getAttribute("href"), a.id]),
+    [["#fn-1", "fnref-1"], ["#fn-2", "fnref-2"], ["#fn-3", "fnref-3"]]);
+    assert.deepEqual([...reader.querySelectorAll("a.an-rich-md-footnote-backref")]
+      .map((a) => a.getAttribute("href")), ["#fnref-1", "#fnref-2", "#fnref-3"]);
+    for (const link of reader.querySelectorAll("a.an-rich-md-footnote-backref")) {
+      assert.ok(reader.querySelector(`[id="${link.getAttribute("href").slice(1)}"]`), link.getAttribute("href"));
+    }
+  });
+});
+
 // GitHub's footnote help writes a note over several lines: two trailing spaces, then the next line.
 // The continuation stays in the note whether it is indented two spaces, as in that help, or not at all.
 test("a footnote continued on the next line keeps the continuation in its note", async () => {

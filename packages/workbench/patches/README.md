@@ -3410,12 +3410,23 @@ definitions and references through tiptap-markdown's parse setup hook.
 notes appear once in a list at the end in order of first reference, a reference
 with no definition stays text, and a definition that nothing references is not
 shown. Labels match ignoring case, through markdown-it's `normalizeReference`
-as for link references, and the first definition of a label wins. As in a link
-label, `\[`, `\]`, and `\` escapes stay in a label and do not end it. A definition
+as for link references, and the first definition of a label wins. Only `\[`,
+`\]`, and `\\` escapes are accepted in a label. Any other backslash escape
+leaves the citation and definition outside footnote syntax. Citations inside
+Markdown link labels stay literal, including during silent scans for link
+boundaries, so a link label never contains a footnote anchor. A definition
 nested inside another becomes its own note, and the outer note keeps the blocks
 after it. Each node has a serializer that writes the footnote syntax back with
 the label as written, so a read-only reconcile that reads Markdown never falls
 back to placeholder text.
+
+The inline rule records reference identities without assigning numbers. After
+definition blocks are removed from the body, the tail rule numbers body
+references first, then scans each reached definition once in note order.
+References in those retained notes can reach further notes. Discarded duplicate
+definitions and definitions unreachable from body references contribute neither
+numbers nor return links. This also keeps definition placement from changing the
+number of a body's first citation.
 
 As in GFM's HTML, each reference link has its own id, `fnref-<number>` for the
 first reference to a note and `fnref-<number>-<k>` for its k-th. A fourth node,

@@ -8172,6 +8172,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Footnote reference admission and reachability (PR #259 review). The
+maintained Toolkit patch rejects unsupported backslash escapes in labels and
+keeps citations literal inside Markdown link labels, including the silent scans
+that find their boundaries. Reference numbers and occurrences are assigned after
+definition blocks leave the body. Body citations establish the first numbers,
+then only the first retained definition of each reached note can contribute
+further citations. Discarded duplicates and unused definitions cannot create
+notes, consume numbers, or add return links. The read-only opt-in, editable save
+path, and serializer ownership described below remain accurate. Regression cases
+in `tests/markdown-reader.test.mjs` check both link forms, invalid escapes,
+discarded calls, unused definitions, and a retained note chain. The coordinator
+observed assertion failures in all four groups on unchanged installed code,
+then all 23 reader tests passed with the repaired patch installed. Element-count
+assertions keep failed DOM checks bounded. Frozen installation, the installed
+patch checks, dependency preflight and typecheck passed. Packaged Windows reader
+acceptance remains pending.
+
 2026-10-20 Footnote return links (PR #259 review). References had no id and notes
 had no link back, so a reader could not return to the citation, especially for a
 note cited twice. The maintained Toolkit patch now follows GFM's HTML. Each

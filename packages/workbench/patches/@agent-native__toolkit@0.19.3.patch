@@ -456,10 +456,10 @@ index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493
       * `false` so existing embedders are unchanged. When `true`, images
 diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa0b54cadb
+index 0000000000000000000000000000000000000000..3d14e71c328a4dd8c3494c29384a27339137d77b
 --- /dev/null
 +++ b/dist/editor/footnotes.js
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,392 @@
 +import { mergeAttributes, Node } from "@tiptap/core";
 +/**
 + * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
@@ -490,12 +490,14 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +        return null;
 +    for (let pos = start + 2; pos < max && pos - start <= LABEL_LIMIT; pos++) {
 +        const code = src.charCodeAt(pos);
-+        if (code === 0x5c && pos + 1 < max) {
++        if (code === 0x5c) {
++            if (pos + 1 >= max)
++                return null;
 +            const next = src.charCodeAt(pos + 1);
-+            if (next === 0x5b || next === 0x5d || next === 0x5c) {
-+                pos++;
-+                continue;
-+            }
++            if (next !== 0x5b && next !== 0x5d && next !== 0x5c)
++                return null;
++            pos++;
++            continue;
 +        }
 +        if (code === 0x5d)
 +            return pos === start + 2 ? null : { label: src.slice(start + 2, pos), end: pos + 1 };
@@ -517,9 +519,8 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +        return true;
 +    const env = state.env;
 +    const key = state.md.utils.normalizeReference(found.label);
-+    env.footnotes ??= { refs: new Map(), list: [], occurrences: [] };
-+    if (!env.footnotes.refs.has(key))
-+        env.footnotes.refs.set(key, -1);
++    env.footnotes ??= { refs: new Set() };
++    env.footnotes.refs.add(key);
 +    const open = new state.Token("footnote_definition_open", "", 1);
 +    open.meta = { label: found.label, key };
 +    open.level = state.level++;
@@ -563,6 +564,10 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +    return true;
 +}
 +function footnoteReference(state, silent) {
++    // Silent scans locate link-label boundaries. Treat the citation as ordinary
++    // bracketed text there, and keep it literal inside a confirmed link label.
++    if (silent || state.linkLevel > 0)
++        return false;
 +    const footnotes = state.env.footnotes;
 +    if (!footnotes)
 +        return false;
@@ -572,18 +577,9 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +    const key = state.md.utils.normalizeReference(found.label);
 +    if (!footnotes.refs.has(key))
 +        return false;
-+    if (!silent) {
-+        let index = footnotes.refs.get(key);
-+        if (index < 0) {
-+            index = footnotes.list.length;
-+            footnotes.list.push(key);
-+            footnotes.refs.set(key, index);
-+        }
-+        const occurrence = (footnotes.occurrences[index] ?? 0) + 1;
-+        footnotes.occurrences[index] = occurrence;
-+        const token = state.push("footnote_reference", "", 0);
-+        token.meta = { label: found.label, number: index + 1, occurrence };
-+    }
++    // Number only after discarded and unreferenced definition bodies are removed.
++    const token = state.push("footnote_reference", "", 0);
++    token.meta = { label: found.label, key };
 +    state.pos = found.end;
 +    return true;
 +}
@@ -616,10 +612,40 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +        }
 +        return true;
 +    });
-+    if (footnotes.list.length === 0)
++    const numbers = new Map();
++    const list = [];
++    const occurrences = [];
++    function numberReferences(tokens) {
++        for (const block of tokens) {
++            if (block.type !== "inline")
++                continue;
++            for (const token of block.children ?? []) {
++                if (token.type !== "footnote_reference")
++                    continue;
++                const key = token.meta.key;
++                let index = numbers.get(key);
++                if (index === undefined) {
++                    index = list.length;
++                    numbers.set(key, index);
++                    list.push(key);
++                }
++                const occurrence = (occurrences[index] ?? 0) + 1;
++                occurrences[index] = occurrence;
++                token.meta = { ...token.meta, number: index + 1, occurrence };
++            }
++        }
++    }
++    // The body renders before the appended notes. Visit its references first,
++    // then each reached definition once, including notes reached from notes.
++    // The growing list is a queue, so even a note referring to itself terminates.
++    numberReferences(state.tokens);
++    for (let index = 0; index < list.length; index++) {
++        numberReferences(definitions.get(list[index]).tokens);
++    }
++    if (list.length === 0)
 +        return;
 +    state.tokens.push(new state.Token("footnote_block_open", "", 1));
-+    footnotes.list.forEach((key, index) => {
++    list.forEach((key, index) => {
 +        const definition = definitions.get(key);
 +        const item = new state.Token("footnote_open", "", 1);
 +        item.meta = { label: definition?.label ?? key, number: index + 1 };
@@ -627,7 +653,7 @@ index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa
 +        // One return link per reference, at the end of the note's last paragraph, or in a
 +        // paragraph of their own when the note ends with another block.
 +        const backrefs = [];
-+        for (let occurrence = 1; occurrence <= (footnotes.occurrences[index] ?? 1); occurrence++) {
++        for (let occurrence = 1; occurrence <= occurrences[index]; occurrence++) {
 +            const backref = new state.Token("footnote_backref", "", 0);
 +            backref.meta = { number: index + 1, occurrence };
 +            backrefs.push(backref);
