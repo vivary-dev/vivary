@@ -225,3 +225,19 @@ button, a, input, summary { outline-offset: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .22); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .34); }
+
+/* Handoff request line and reply preview in chat (HandoffDisplay.tsx). */
+.vivary-handoff-preview {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+}
+.vivary-handoff-status {
+  font-weight: 500;
+}
+.vivary-handoff-preview details pre,
+.vivary-handoff-request details > div {
+  max-height: 20rem;
+  overflow: auto;
+}
