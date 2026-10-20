@@ -354,6 +354,9 @@ IDs, the folder turns the sender acknowledged, and `queuedAt` in
 `metadata.queuedTurn`. A queued turn writes no transcript entry, so a pending
 draft stays pending. A second send into a running or queued conversation still
 refuses (`vivary_code_conversation_queued` for a queued one).
+A runtime switch, with or without Stop, refuses with `vivary_code_switch_queued`
+while the conversation has a queued message, because the queued turn keeps the
+route it queued with.
 
 When a run leaves, the host reserves the freed slot for the oldest queued turn
 before any await, then runs that turn's original send again with its closures,

@@ -1659,6 +1659,12 @@ function hasOwnCleanupRefusal(runId: string): boolean {
 
 /** `stopFirst` admits an active or stopping run for Stop and switch. A cleanup refusal still holds every switch. */
 function assertRunCanSwitch(run: CodeAgentRunRecord, stopFirst = false): void {
+  // A queued turn keeps the runtime and model it queued with. A switch would leave it to start on the old route.
+  if (queuedTurnFor(run.id)) {
+    fail("This conversation has a queued message. Cancel it from the agent work strip before switching.", {
+      errorCode: "vivary_code_switch_queued", statusCode: 409,
+    });
+  }
   const active = stopFirst ? undefined : activeRuns.get(run.id);
   if (active?.stopReason) {
     fail("This conversation is still stopping. Switch after it stops.", {

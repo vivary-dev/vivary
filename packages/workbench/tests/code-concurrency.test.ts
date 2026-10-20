@@ -579,6 +579,32 @@ test("Cancel keeps a queued message queued when its draft cannot be restored", {
   } finally { await endAll(runs); }
 });
 
+test("a runtime switch, with or without Stop, is refused while the conversation has a queued message", {
+  timeout: 60_000, skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-switch-queued");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "switchq_b");
+  const runs: string[] = [];
+  try {
+    const idle = (await send(workspace, "Finish this one")).run!.id;
+    runs.push(idle);
+    await waitFor(() => !capacityHost().activeRuns.has(idle), "the first turn to finish");
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    runs.push((await send(project(a, "switchq_a"), "Work in a")).run!.id);
+    assert.equal((await send(workspace, "Queued follow-up", { runId: idle })).run?.queue?.state, "queued");
+    for (const stop of [false, true]) {
+      await assert.rejects(agent.switchVivaryCodeRuntime({ ...owner, runId: idle, engine: "codex-cli", model: "gpt-6-astra",
+        workspace, stop }), (error: Error & { errorCode?: string; statusCode?: number }) => {
+        assert.deepEqual([error.errorCode, error.statusCode], ["vivary_code_switch_queued", 409]);
+        assert.match(error.message, /queued message\. Cancel it/);
+        return true;
+      });
+    }
+    assert.deepEqual([getCodeAgentRunRecord(idle)?.metadata?.engine, getCodeAgentRunRecord(idle)?.metadata?.model],
+      ["claude-cli", "claude-sonnet-5-5"], "the queued turn keeps the route it queued with");
+  } finally { await endAll(runs); }
+});
+
 test("Claude Code and Codex in one folder run together under the limit", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { folder } = await ipcFixture("capacity-mixed");
