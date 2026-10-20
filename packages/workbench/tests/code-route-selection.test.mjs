@@ -73,6 +73,8 @@ function fixture() {
     cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
     // A host with free slots. The capacity tests in code-concurrency cover queueing.
     codeRunSlotFree: () => true, queueVivaryCodeTurn: () => { throw new Error("No queue expected"); }, takeQueuedSlot() {},
+    // No conversation here has a queued message, so the switch refusal for one does not apply.
+    queuedTurnFor: () => undefined,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));

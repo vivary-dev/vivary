@@ -977,6 +977,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Typecheck fix on PR #265. The agent work strip's row callbacks for Stop,
+approvals, Cancel, Start and Use another folder now accept any promise, because
+the strip's action wrapper returns whether the action succeeded. Use another folder
+reads that result to open the folder picker only after a confirmed cancel. The
+section "Concurrent Code run limit" still holds: the rows, their actions and the
+counts are unchanged. Inspected `CodeRunControl.tsx` and the strip component test.
+
 2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
 another project selected the project without a route hold, so Workspace's route
 reset and the new project's saved view could open another conversation or Native

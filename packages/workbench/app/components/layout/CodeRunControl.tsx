@@ -153,12 +153,12 @@ function QueuedRunItem({ item, projectLabel, ready, otherFolder, onOpen, onCance
   ready: boolean;
   otherFolder: boolean;
   onOpen: () => void;
-  onCancel: () => Promise<void>;
-  onStart: (proceed: boolean) => Promise<void>;
-  onOtherFolder: () => Promise<void>;
+  onCancel: () => Promise<unknown>;
+  onStart: (proceed: boolean) => Promise<unknown>;
+  onOtherFolder: () => Promise<unknown>;
 }) {
   const [working, setWorking] = useState(false);
-  const run = (action: () => Promise<void>) => {
+  const run = (action: () => Promise<unknown>) => {
     if (working) return;
     setWorking(true);
     void action().finally(() => setWorking(false));
@@ -194,8 +194,8 @@ function ActiveRunItem({ run, projectLabel, ready, onOpen, onStop, onDecide }: {
   projectLabel: string;
   ready: boolean;
   onOpen: () => void;
-  onStop: () => Promise<void>;
-  onDecide: (request: VivaryCodePendingApproval, decision: ApprovalDecision) => Promise<void>;
+  onStop: () => Promise<unknown>;
+  onDecide: (request: VivaryCodePendingApproval, decision: ApprovalDecision) => Promise<unknown>;
 }) {
   const [stopping, setStopping] = useState(false);
   return <li className="flex flex-col gap-2" aria-label={run.title}>
@@ -217,7 +217,7 @@ function ActiveRunItem({ run, projectLabel, ready, onOpen, onStop, onDecide }: {
 function ApprovalCard({ request, ready, onDecide }: {
   request: VivaryCodePendingApproval;
   ready: boolean;
-  onDecide: (decision: ApprovalDecision) => Promise<void>;
+  onDecide: (decision: ApprovalDecision) => Promise<unknown>;
 }) {
   const [working, setWorking] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
