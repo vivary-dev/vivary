@@ -388,10 +388,13 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     : search ? "No conversations match this search." : "No conversations yet. Start one with New conversation.";
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
   const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
+  const section = useRef<HTMLElement>(null);
   const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
+    // A section that loses its last row hands focus to New conversation, as the project history does.
+    fallbackFocus: () => section.current?.querySelector<HTMLElement>(".conversation-inbox__new-button") ?? null,
     onOpen: (row: InboxListRow) => void shared.openRow(row, scope),
     onChange: (row: InboxListRow, operation: RowOperation, title?: string) => void shared.change(row, operation, title) };
-  return <section className="conversation-inbox" aria-label="Conversations">
+  return <section ref={section} className="conversation-inbox" aria-label="Conversations">
     <div className="conversation-inbox__header">
       <div className="conversation-inbox__new">
         <Button size="sm" className="conversation-inbox__new-button" disabled={!canStart} onClick={startDefault}>
@@ -620,8 +623,9 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
  * The rows. One row takes Tab focus, the selected one or else the first. Arrow keys move between rows, Home and End
  * jump, Enter opens, and the Menu key, Shift+F10 or the row's menu button opens its actions.
  */
-export function InboxList({ label, rows, selectedId, showProject, emptyLabel, onOpen, onChange }: {
+export function InboxList({ label, rows, selectedId, showProject, emptyLabel, fallbackFocus, onOpen, onChange }: {
   label: string; rows: InboxListRow[]; selectedId: string | null; showProject: boolean; emptyLabel: string;
+  fallbackFocus?: () => HTMLElement | null;
   onOpen: (row: InboxListRow) => void; onChange: (row: InboxListRow, operation: RowOperation, title?: string) => void;
 }) {
   const list = useRef<HTMLUListElement>(null);
@@ -637,7 +641,7 @@ export function InboxList({ label, rows, selectedId, showProject, emptyLabel, on
     removed.current = null;
     const active = document.activeElement;
     if (active && active !== document.body && !list.current?.contains(active)) return;
-    focusAfterRemoval(rowButtons(), pending.index, null)?.focus();
+    focusAfterRemoval<HTMLElement>(rowButtons(), pending.index, fallbackFocus?.() ?? null)?.focus();
   }, [rows]);
   const tabStop = rows.some(row => row.id === focusId) ? focusId
     : rows.some(row => row.id === selectedId) ? selectedId : rows[0]?.id ?? null;

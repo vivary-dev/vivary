@@ -1064,6 +1064,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox focus fallback (W5b, review thread 4319908326). When Archive or Restore empties a section,
+focus moves to New conversation instead of the page body, as the project history does. Evidence inspected: the new
+component test that archives the only row.
+
 2026-10-20 Inbox empty message (W5b, review thread 4319908314). The empty message now waits while a draft or
 archived row matches, and never follows the load error. Evidence inspected: the new component test with only an
 archived match and with a failed inbox read.

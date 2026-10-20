@@ -422,6 +422,23 @@ test("after Archive the row moves to Archived and focus moves to the row that to
   assert.equal(document.activeElement?.dataset.rowId, "native:a2");
 });
 
+test("archiving the only row hands focus to New conversation instead of the page", async () => {
+  inboxFixture.rows = [row("code:a1", "alpha", "Fix table wrapping", 50)];
+  inboxFixture.call = async (name, input) => {
+    inboxFixture.calls.push({ name, input });
+    inboxFixture.rows = inboxFixture.rows.map(item => item.id === `code:${input.runId}` ? { ...item, archived: true } : item);
+    return { changed: true };
+  };
+  await render();
+  const only = rowButtons()[0];
+  only.focus();
+  await key(only, "ContextMenu");
+  await act(async () => button("Archive").click());
+  await settle();
+  assert.equal(host.querySelector('ul[aria-label="Conversations"]')?.textContent, undefined, "the active list is empty");
+  assert.equal(document.activeElement?.textContent, "New conversation");
+});
+
 test("an API chat is archived through the guarded action, and a refusal is shown without changing the row", async () => {
   inboxFixture.call = async (name, input) => {
     inboxFixture.calls.push({ name, input });
