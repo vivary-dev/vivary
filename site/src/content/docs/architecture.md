@@ -341,7 +341,10 @@ Inspection pages still start from the
 oldest entry. Actual retained tool results and labeled artifact references
 become text, never executable requests or new instruction authority. Runtime
 bookkeeping and private reasoning are excluded. For Code, only a completed tool
-result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. A Native attachment, or any other
+result is quoted: tool starts and Codex agent-operation statuses are bookkeeping. An assistant reply that exactly
+repeats the reply recorded just before it is one entry, the later copy. Claude Code conversations recorded before
+2026-10-19 hold every reply twice that way, and handoff, linked history and content search apply the same rule.
+A Native attachment, or any other
 content part such as an image or a source reference, becomes a named placeholder
 that says it is not included, so the excerpt never implies it is complete. The canonical empty Native
 repository represents no completed history, so an inactive Native target can
@@ -387,14 +390,19 @@ notice. **Prepare handoff** records the project facts in one pending row and
 submits a request message to that conversation. A Code conversation sends it
 through its own chat handle and adapter. Native sends it with Core's same-window
 submit, which only Native chats receive. Neither path changes the composer draft.
-The agent replies with one fenced `vivary-handoff` JSON block. **Save handoff**
+The agent replies with one fenced `vivary-handoff` JSON block. The conversation
+shows the request as one line and the reply as a readable preview that states its
+save status, with the raw text behind disclosures. **Save handoff**
 is a second owner click. `handoff.ts` reads the reply from the conversation's
 completed history, never from the client. It reads a conversation only through
 the linked conversation service: a linked target's own link is checked as every
 linked read checks it, and retained history the linked reader cannot parse is
 refused as unavailable, so a handoff accepts nothing linking refuses. It refuses a missing field, a second
 block, another request ID, an unknown key, or a passed or failed check without a
-completed evidence event. It fills every fact itself, redacts held credentials,
+completed evidence event. A check the agent runs while writing the reply cites
+`tool:` and its tool call ID, because that turn has no completed event ID yet. Save
+accepts it only when a completed tool call with that ID belongs to the reply turn,
+and records the completed event that holds it. It fills every fact itself, redacts held credentials,
 and writes one marked block at the end of the workspace's designated state
 document through `projectFileService.save` with the prepared version and
 binding. An update moves the block back to the end when text was added after
@@ -749,6 +757,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 PR #260 integration with dev at `2cac9444`. The combined design
+preserves Code controls that follow the project kind and acknowledged Native
+draft creation alongside PR #262's reply recording and handoff rendering and
+PR #259's table and footnote repairs. The coordinator completed the frozen offline
+Core and Toolkit patch transition with scripts disabled. The 1,112-package and
+1,112-snapshot graph and merged lockfile stayed unchanged. The full Core reverse
+patch check and exact Markdown-renderer and footnotes blob checks passed, followed
+by merged-state test preflight 10/10. On the uncommitted merged working tree,
+47/47 actual parent component tests, 23/23 Markdown reader tests, and the Workbench
+typecheck passed. Source and index identities stayed intact through these checks.
+Full final-head server CI and the required final Opus and Codex gates remain
+pending. Real UI screenshots, provider turns, and packaged Windows acceptance
+also remain pending.
+
 2026-10-20 Code view New conversation (PR #260 finding 4324767366). The header and
 retained runtime/model notice shared a callback that always created a Code draft,
 even in a Personal project. The callback now uses `newConversationSurface` and
@@ -817,6 +839,235 @@ project files. Evidence: the migration upgrade and storage cases in
 `tests/local-root-provider.test.mjs`, `tests/managed-projects.test.mjs`,
 `tests/conversation-surface.test.mjs`, and
 `tests/workspace-kind-dialog-component.test.mjs`.
+2026-10-20 Integration of reply recording and chat Markdown patches. The
+combined Core patch keeps table token marking alongside registered handoff
+renderers and Claude reply-once recording. Both shared-renderer application
+orders produce the same source. The remaining appended sections and common
+patch prefix stay unchanged. The combined patch passes all 224 sections against
+integrity-verified upstream source. Frozen installation, installed patch checks,
+dependency preflight, all 23 reader tests and typecheck pass. The component and
+serialization contracts below still hold. Full exact-head server CI and
+packaged Windows acceptance remain pending.
+
+2026-10-20 PR #259 integration with merged PR #262. The maintained Core patch
+combines long-token marking in table cells and links with registered fenced-code
+renderers in one Markdown renderer diff. Claude reply recording, reply metadata,
+the user-message display registry and its exports retain PR #262's patch sections.
+The read-only footnote patch is unchanged. These changes keep the component and
+serialization boundaries described here. Installed-patch verification and
+packaged Windows acceptance of the combined source remain pending.
+
+2026-10-20 Footnote reference admission and reachability (PR #259 review). The
+maintained Toolkit patch rejects unsupported backslash escapes in labels and
+keeps citations literal inside Markdown link labels, including the silent scans
+that find their boundaries. Reference numbers and occurrences are assigned after
+definition blocks leave the body. Body citations establish the first numbers,
+then only the first retained definition of each reached note can contribute
+further citations. Discarded duplicates and unused definitions cannot create
+notes, consume numbers, or add return links. The read-only opt-in, editable save
+path, and serializer ownership described below remain accurate. Regression cases
+in `tests/markdown-reader.test.mjs` check both link forms, invalid escapes,
+discarded calls, unused definitions, and a retained note chain. The coordinator
+observed assertion failures in all four groups on unchanged installed code,
+then all 23 reader tests passed with the repaired patch installed. Element-count
+assertions keep failed DOM checks bounded. Frozen installation, the installed
+patch checks, dependency preflight and typecheck passed. Packaged Windows reader
+acceptance remains pending.
+
+2026-10-20 Footnote return links (PR #259 review). References had no id and notes
+had no link back, so a reader could not return to the citation, especially for a
+note cited twice. The maintained Toolkit patch now follows GFM's HTML. Each
+reference link has its own id, `fnref-1` for the first reference to note 1 and
+`fnref-1-2` for the second, and a new display-only `footnoteBackref` node ends each
+note with one return link per reference. Return links add no text and serialize to
+nothing, so read-only Markdown and editable saves are unchanged. `focusFootnote`
+also handles a rendered return link and moves focus back to its reference without
+changing the route. The Toolkit patch hash moves from `5ecd0aca` to `0e1103d4`.
+The footnote design below still holds. Evidence: two new cases in
+`tests/markdown-reader.test.mjs` check the ids, the return links and their
+targets, a note that ends in a list, the read-only Markdown measured before the
+change, and focus from each return link. Both failed before the change. The
+editable pin passes unchanged.
+
+2026-10-20 Escaped brackets in footnote labels (PR #259 review). The footnote label
+scanner in the maintained Toolkit patch ended a label at an escaped `\]` and
+rejected an escaped `\[`, so `[^a\]b]` and its definition stayed text. It now
+skips `\[`, `\]`, and `\` the way a link label does. The label keeps its
+escapes, so matching ignores case as before and each side saves the label as
+written. The Toolkit patch hash moves from `d757b942` to `5ecd0aca`. The footnote
+design below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+reads escaped references and definitions in other case, checks the notes and the
+saved Markdown, and keeps an unescaped bracket rejected. It failed before the
+change.
+
+2026-10-20 Chat table long tokens inside bold or struck text (PR #259 review).
+`markLongTokens` in the maintained Core patch marked only a cell's direct string
+children, so a long hash in `**bold**` or `~~struck~~` text got no
+`agent-markdown-long-token` span and could still make a chat table scroll. It now
+descends into plain elements such as `strong`, `em`, and `del`. Inline `code`,
+`kbd`, `samp`, and `pre` stay whole, and an element rendered by a component, such
+as Core's link, is left to that component, so a link inside bold text is marked
+once. The Core patch hash moves from `b680f535` to `b54ac9e3`. The chat rendering
+described below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+renders bold, struck, nested, linked, and code cells and checks the spans, cell
+text, hrefs, and the HTML without the spans. It failed before the change.
+
+2026-10-20 Note links come only from rendered references (PR #259 review). The
+previous fix still let an ordinary heading link such as `#fn-1` be taken over when
+note 1 existed. `focusFootnote` now handles only the link inside
+`sup.an-rich-md-footnote-ref`, the element the reader renders for a reference, so
+every other `#fn-` link keeps its normal handling. The design below still holds.
+Evidence: `tests/markdown-reader.test.mjs` adds an ordinary `#fn-1` link beside a
+rendered note 1, and that assertion fails with the previous selector.
+
+2026-10-19 Footnote review fixes (PR #259 review). Four parser and link cases in
+the read-only footnote support were wrong, and the design described below still
+holds. Labels now match ignoring case, the way link reference labels do, and each
+reference and note keeps the label it was written with when it serializes. A
+definition nested inside another becomes its own note, and the blocks after it
+stay in the outer note, where before they leaked into the document body.
+`focusFootnote` now handles only a `#fn-<number>` link whose note is rendered in
+the reader's notes section, so a heading link such as `#fn-details` keeps its
+normal handling. A note continued on the next line after two trailing spaces
+already kept its continuation, with or without indentation, and a test now pins
+it. Editable documents still get no footnote nodes. Evidence: four new cases in
+`tests/markdown-reader.test.mjs` and the unchanged editable pin.
+
+2026-10-19 Footnotes in the read-only Markdown readers. The owner saw a
+document's footnote definitions run together as one paragraph in the Files
+reader. Toolkit's shared editor parses Markdown with plain markdown-it, which has
+no footnote syntax. The maintained Toolkit patch adds an opt-in
+`features.footnotes` to `createSharedEditorExtensions`. With it, references render
+as superscript links and definitions as one notes list at the end, in order of
+first reference. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#read-only-markdown-footnotes)
+own the details. `app/routes/files.tsx` and `app/routes/architecture.tsx` opt in,
+and [`footnote-links.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/footnote-links.ts) moves
+focus to a note without changing the route. Editable documents do not opt in, so
+their saved Markdown is unchanged. A test pins that output. Chat already rendered
+footnotes through remark-gfm, and Core keeps a reply with a definition in one block.
+A Playwright check in Chrome 154 rendered one corpus in the real reader and in chat
+at 360 and 1000 pixels. Both showed four superscript references, two notes, no raw
+`[^` text, task-list checkboxes, and strikethrough. A trusted click on a reference
+focused its note and left the URL unchanged. Bare URLs remain plain text in the
+reader, because the GFM dialect keeps `linkify` off for byte-stable saves, while
+chat links them.
+
+2026-10-19 Long links and unbroken strings in chat tables, a follow-up to the
+table wrapping entry below and related to issue #256. With `width: auto`, a column
+still could not be narrower than its longest unbroken string, so one long URL, a
+64-character hash, or a long identifier forced the table wider than the reply and
+it scrolled. The maintained Core patch now adds `th` and `td` components to
+`markdownComponents` in `dist/client/chat/markdown-renderer.js`, and the plain
+branch of its link component does the same to its children. Each run of 20 or more
+non-whitespace characters in a direct text child is wrapped in a
+`.agent-markdown-long-token` span. The span adds no characters, so the cell text,
+selection, and copied text are unchanged, and hrefs and inline code are not
+touched. `clipboardMarkdownComponents` is unchanged, and Copy still writes the
+message's Markdown as plain text. `app/global.css` lets only those spans break
+anywhere. Links are left out of that rule because a measurement with
+`overflow-wrap: anywhere` on whole links split the words "Authentication" and
+"Documentation" in ordinary link text at 300 and 480 pixels. Electron's
+`will-navigate` and `setWindowOpenHandler` in
+[`main.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) act on the URL, and the in-app link
+handlers use `closest("a[href]")`, so a click on a span still resolves to its link.
+A Playwright check in Chrome 154 rendered the installed, patched components in
+Core's stylesheet at 300, 480, 800, and 1200 pixel windows. A long link, a long
+hash, and a table holding prose, a link, and a hash now fit the reply at every
+width with no ordinary word split. Before, the hash table measured 465 pixels in a
+255 pixel reply. A five-column prose table still scrolls at 300 pixels, because its
+words need 339 pixels in 255. Tables of long inline code paths and a 14-column
+numeric table also scroll, and code stays on one line. A trusted click on the last
+line of each wrapped link requested the original URL, and selecting a cell and
+copying it with the keyboard gave the source text. `tests/markdown-reader.test.mjs`
+renders the installed components with react-markdown and remark-gfm and checks the
+spans, cell text, hrefs, code, cell attributes, and the copied HTML.
+
+2026-10-20 Older handoff replies are not called unsaved (PR #262 review). A reply
+preview whose request is neither pending, failed nor the covered one said "Not
+saved", which was wrong for an earlier reply that Vivary saved and a newer handoff
+later replaced. `handoffSaveStatus` in `handoff-status.ts` now says the reply is not
+the latest handoff request and that Save handoff applies only to the latest one,
+claiming nothing about its save. The design below still holds. Evidence:
+`tests/handoff-display-components.test.mjs` adds a replaced-reply case that fails
+with the previous wording.
+
+2026-10-19 Handoff checks from the reply turn. In an API chat, Save handoff refused
+a reply whose passed check came from a `vivary-project-read` call the agent made
+while writing it. The request listed only earlier completed events, and the reply's
+own tool call had a tool call ID but no completed event ID until the turn ended, so
+the agent cited none. The request now says to cite such a check as `tool:` plus its
+tool call ID. `nativeHistoryItems` and `codeHistoryItems` in `linked-history.ts`
+attach the IDs of completed tool calls to their items: a Native tool-call part's
+`toolCallId`, and the `toolCallId` that Claude Code and both Codex routes record
+on a Code `tool_done` event.
+History digests are taken over the stored entries and events, so existing links
+keep their bindings. `proposalFrom` in `server/handoff.ts` resolves a `tool:` citation
+only against tool calls in the reply turn, after the request and before any later
+user message, and records the completed event that holds it. The reply preview labels such a
+citation as a tool call. A completed event ID
+is still checked first and kept as cited. A made-up ID, or a
+call from an earlier turn, is refused with a problem that names it. Every other
+validation rule is unchanged. `tests/handoff.test.ts` covers Native and Code saves
+with a fresh tool check, refuses an earlier turn's call in both, and refuses a
+made-up ID in Native.
+
+2026-10-19 Readable handoff request and reply. After Prepare handoff, an API chat
+showed the whole request prompt and the agent's `vivary-handoff` JSON block as raw
+text. The maintained Core patch adds two display registries in
+`dist/client/chat/message-text-renderers.js`, exported from
+`@agent-native/core/client/chat`. `registerMarkdownFenceRenderer` lets an app render
+a fenced code language in chat Markdown, and `registerUserMessageTextRenderer` lets
+it render a matching user message. Core's `pre` component and `UserMessageText`
+consult them before their defaults. Vivary's
+[`HandoffDisplay.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/HandoffDisplay.tsx)
+registers both. A `vivary-handoff` block reads as goal, decisions, changes, checks,
+unfinished work, risks and next action, with the block itself under a closed Raw
+details disclosure. A block that is not valid JSON, such as one still streaming,
+says so and keeps its text there. The Prepare handoff request shows as one
+"Handoff requested" line with the full prompt under a closed disclosure. Each Code
+and Native conversation view creates one status hub from
+[`handoff-status.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/handoff-status.ts).
+`HandoffControl` publishes its freshness read and the last refused Save to it, and
+publishes no status while its freshness check has failed, so a preview never keeps
+an older status beside the control's failed check. Each preview states its own
+reply's status: not saved yet, refused with the
+parser's reasons, saved and Fresh, out of date, failed, or not the latest request.
+Only a Save that read the reply and refused it (`replyRefused` in the result, for a
+block that fails validation or a conversation that continued past it) marks the
+reply refused. A Save clicked before the reply finished shows its reason in the
+control, and the preview stays at not saved yet.
+A read-only history view has no control, so its previews state no status. The
+stored message text, the parser and schema in `server/handoff.ts`, its validation,
+and clipboard copies are unchanged. `tests/handoff-display-components.test.mjs`
+covers the preview, both disclosures, each status and the request matcher.
+
+2026-10-19 Claude Code replies recorded once. Every Claude Code reply was stored
+twice in a Code transcript, about 0.6 seconds apart with the same text. Core's
+`executeClaudeCliRun` records each streamed assistant message through
+`appendClaudeParticipantTranscriptEvents` (`source: "claude-cli"`), then recorded
+the result text again with the engine and model. The result repeats the last
+streamed message. Save handoff joins every assistant entry after the request, so it
+found two `vivary-handoff` blocks and refused. The maintained Core patch now puts
+the engine, model and effort on each streamed reply and records the result only
+when nothing streamed or the result differs from the last streamed message. Codex
+already recorded one event per message. Existing transcripts keep their pairs.
+`repeatsAssistantReply` in
+[`linked-history.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/linked-history.ts) is now the one
+rule for an exact repeat of the previous assistant event, with the same phase and
+item. `codeHistoryItems` keeps the later copy, so handoff, linked history and the
+quoted send block count each old reply once. The Code conversation view's existing
+dedupe in [`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts)
+uses the same rule and stays for old transcripts. Content search in
+[`chat-content-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/chat-content-search.ts)
+reports the first copy only. Its search cursor carries the digest of the last
+assistant reply it read (`assistantReplyKey`), so a result page that ends between
+the two copies does not report the second one on the next page. Core's own display
+dedupe is unchanged. The linked
+history paragraph above now states the rule. `tests/claude-session-continuity.test.mjs`
+drives the real executor with an offline Claude CLI that repeats its last message as
+the result, and checks one stored event per reply, each with engine and model.
+`tests/handoff.test.ts`, `tests/linked-history.test.ts` and
+`tests/chat-content-search.test.ts` cover old transcripts with the repeated pair.
 
 2026-10-19 Code selector lock reason and Markdown table wrapping, found during
 Windows acceptance and related to issue #256. In a Code conversation the runtime

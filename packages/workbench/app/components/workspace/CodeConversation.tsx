@@ -31,6 +31,8 @@ import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
 import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
 import { HandoffControl } from "./HandoffControl";
+import "./HandoffDisplay";
+import { HandoffStatusContext, createHandoffStatusHub } from "./handoff-status";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -591,6 +593,7 @@ type LocalCodeConversationProps = PreviewChatProps & {
 
 function LocalCodeConversation(props: LocalCodeConversationProps) {
   const chatRef = useRef<AssistantChatHandle>(null);
+  const [handoffStatus] = useState(createHandoffStatusHub);
   const { call } = useNativeActionCaller();
   const latest = useRef(props);
   latest.current = props;
@@ -698,7 +701,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     props.onChoice(next);
   }
 
-  return <AssistantChat key={viewKey.current} ref={chatRef}
+  return <HandoffStatusContext.Provider value={handoffStatus}><AssistantChat key={viewKey.current} ref={chatRef}
     tabId={draftThreadId}
     hostComposerDraft={draft.hostComposerDraft}
     contextNamespace={previewContextKey}
@@ -829,5 +832,5 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <IconSquare size={14} /> Stop
       </Button> : undefined}
     threadFooterSlot={<p className="local-agent-limits"><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.</p>}
-  />;
+  /></HandoffStatusContext.Provider>;
 }

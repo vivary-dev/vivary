@@ -36,6 +36,8 @@ const stubs = new Map([
     export const useActionQuery = () => ({ data: undefined });
     export const tryCallActionKeepalive = () => ({ accepted: false });`],
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
+  ["@agent-native/core/client/chat", `export const registerMarkdownFenceRenderer = () => () => {};
+    export const registerUserMessageTextRenderer = () => () => {};`],
   ["@agent-native/core/client/agent-chat", `import { createElement, useEffect } from "react";
     export const clearChatStorage = () => {};
     export const sendToAgentChatAndConfirm = async () => { throw new Error("No handoff submit expected"); };
