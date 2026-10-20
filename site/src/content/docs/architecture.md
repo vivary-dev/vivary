@@ -1068,6 +1068,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox failed search scopes across Search more (W5b, review thread 4325272339). Message search keeps
+the projects whose request failed, retries them on Search more, and keeps reporting them until they answer.
+Evidence inspected: the new component test with one failing and one paged project.
+
 2026-10-20 Inbox same-project open during a pending selection (W5b, review thread 4324883747). While a project
 selection the inbox started is still running, an open in the selected project also goes through the route hold and
 a selection, so it supersedes the pending open instead of losing to its later hold. Evidence inspected: the new

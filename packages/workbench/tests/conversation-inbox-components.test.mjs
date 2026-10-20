@@ -183,7 +183,9 @@ test.beforeEach(() => {
     searches: [],
     search: async (name, params) => {
       inboxFixture.searches.push({ name, params });
-      if (inboxFixture.searchFails) return new Response("{}", { status: 503 });
+      if (inboxFixture.searchFails || inboxFixture.failProjects?.includes(params.projectId ?? null)) {
+        return new Response("{}", { status: 503 });
+      }
       // pages, when set, answers by cursor and stops each request after one hit, as a long search would.
       const page = inboxFixture.pages?.[params.after ?? ""];
       const hits = (page?.results ?? inboxFixture.hits ?? []).filter(hit => hit.projectId === (params.projectId ?? null));
@@ -764,6 +766,23 @@ test("message search starts again when a searched project is rebound, so old bin
   await settle();
   assert.equal(inboxFixture.searches.length, 2, "the rebound project is searched again");
   assert.deepEqual(hitTitles(), [], "the old binding's hit is gone");
+});
+
+test("a project whose search failed stays reported, and retried, across Search more", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.failProjects = ["alpha"];
+  inboxFixture.pages = { "": { results: [hit("beta", "b1", "table one")], continueAfter: "c1" },
+    c1: { results: [hit("beta", "b2", "table two")], continueAfter: null } };
+  await render("/?run=a1");
+  await searchFor("table");
+  const messages = () => host.querySelector(".conversation-inbox__messages").textContent;
+  assert.match(messages(), /One project could not be searched\./);
+  await act(async () => button("Search more").click());
+  await settle();
+  assert.deepEqual(hitTitles().sort(), ["Session b1", "Session b2"]);
+  assert.match(messages(), /One project could not be searched\./, "the failed project is still missing");
+  assert.ok(inboxFixture.searches.filter(search => search.params.projectId === "alpha").length >= 2,
+    "Search more retries the project that failed");
 });
 
 test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {

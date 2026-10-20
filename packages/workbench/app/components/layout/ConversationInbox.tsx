@@ -522,21 +522,24 @@ function searchAccessKey(catalog: { scopeKey: string; policyRevision?: unknown;
 /** A scope whose search stopped with more to read, and the cursor to read from. */
 type MoreToSearch = { scope: SearchScope; after: string };
 type MessageSearchState = { key: string; status: "loading" | "ready" | "unavailable"; hits: ChatSearchHit[];
-  failed: number; more: MoreToSearch[] };
+  /** Scopes whose last request failed. Search more retries them, so a missing project stays reported until it answers. */
+  failed: SearchScope[]; more: MoreToSearch[] };
+type SearchTarget = { scope: SearchScope; after?: string };
 type ScopeResult = PromiseSettledResult<{ scope: SearchScope; hits: ChatSearchHit[]; after?: string }>;
 const hitKey = (hit: ChatSearchHit) => JSON.stringify([hit.runtime, hit.sessionId, hit.referenceId]);
 
-/** Adds one round of scope results to the hits found so far. */
-function mergeMessageSearch(key: string, previous: ChatSearchHit[], results: ScopeResult[]): MessageSearchState {
+/** Adds one round of scope results, in the order of its targets, to the hits found so far. */
+function mergeMessageSearch(key: string, previous: ChatSearchHit[], targets: SearchTarget[],
+  results: ScopeResult[]): MessageSearchState {
   const found = new Map(previous.map(hit => [hitKey(hit), hit]));
   const more: MoreToSearch[] = [];
-  for (const result of results) {
-    if (result.status !== "fulfilled") continue;
+  const failed: SearchScope[] = [];
+  results.forEach((result, index) => {
+    if (result.status !== "fulfilled") { failed.push(targets[index].scope); return; }
     for (const hit of result.value.hits) found.set(hitKey(hit), hit);
     if (result.value.after) more.push({ scope: result.value.scope, after: result.value.after });
-  }
-  const failed = results.filter(result => result.status === "rejected").length;
-  return { key, status: failed === results.length && !found.size ? "unavailable" : "ready", failed, more,
+  });
+  return { key, status: failed.length === results.length && !found.size ? "unavailable" : "ready", failed, more,
     hits: [...found.values()].sort((a, b) => (b.sessionUpdatedAt ?? 0) - (a.sessionUpdatedAt ?? 0)) };
 }
 
@@ -555,7 +558,7 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
   const [state, setState] = useState<MessageSearchState>();
   // The current search's abort, which a later term or scope change aborts, Search more included.
   const running = useRef<AbortController | null>(null);
-  function searchScopes(targets: { scope: SearchScope; after?: string }[], signal: AbortSignal): Promise<ScopeResult[]> {
+  function searchScopes(targets: SearchTarget[], signal: AbortSignal): Promise<ScopeResult[]> {
     return Promise.allSettled(targets.map(async ({ scope, after }) => {
       const hits: ChatSearchHit[] = [];
       let next = after;
@@ -580,10 +583,11 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
     if (term.length < 2) return;
     const abort = new AbortController();
     running.current = abort;
-    setState({ key, status: "loading", hits: [], failed: 0, more: [] });
+    setState({ key, status: "loading", hits: [], failed: [], more: [] });
     const timer = setTimeout(async () => {
-      const results = await searchScopes(scopes.map(scope => ({ scope })), abort.signal);
-      if (!abort.signal.aborted) setState(mergeMessageSearch(key, [], results));
+      const targets = scopes.map(scope => ({ scope }));
+      const results = await searchScopes(targets, abort.signal);
+      if (!abort.signal.aborted) setState(mergeMessageSearch(key, [], targets, results));
     }, 300);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [key, readAction]);
@@ -591,8 +595,10 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
     const abort = running.current;
     if (!abort || abort.signal.aborted) return;
     setState({ ...from, status: "loading" });
-    const results = await searchScopes(from.more, abort.signal);
-    if (!abort.signal.aborted) setState(mergeMessageSearch(key, from.hits, results));
+    // Continue the scopes that stopped early, and try the failed ones again from their start.
+    const targets: SearchTarget[] = [...from.more, ...from.failed.map(scope => ({ scope }))];
+    const results = await searchScopes(targets, abort.signal);
+    if (!abort.signal.aborted) setState(mergeMessageSearch(key, from.hits, targets, results));
   }
   if (term.length < 2) return null;
   const current = state?.key === key ? state : undefined;
@@ -607,13 +613,13 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
       {status === "loading" ? "Searching messages…"
         : status === "unavailable" ? "Message search is unavailable. Titles are still filtered."
           : `${hits.length ? `${hits.length} matching message${hits.length === 1 ? "" : "s"}` : "No messages match"}${
-            current?.more.length ? " so far" : ""}.`}
+            current?.more.length || current?.failed.length ? " so far" : ""}.`}
     </p>
-    {current?.status === "ready" && current.more.length > 0 && <Button size="sm" variant="ghost"
+    {current?.status === "ready" && current.more.length + current.failed.length > 0 && <Button size="sm" variant="ghost"
       onClick={() => void searchMore(current)}>Search more</Button>}
     {status === "unavailable" && <Button size="sm" variant="ghost" onClick={() => setRetry(value => value + 1)}>Retry search</Button>}
-    {current?.status === "ready" && current.failed > 0 && <p className="conversation-inbox__notice">
-      {current.failed === 1 ? "One project" : `${current.failed} projects`} could not be searched.</p>}
+    {current?.status === "ready" && current.failed.length > 0 && <p className="conversation-inbox__notice">
+      {current.failed.length === 1 ? "One project" : `${current.failed.length} projects`} could not be searched.</p>}
     {total > scopes.length && <p className="conversation-inbox__notice">
       Messages were searched in {scopes.length} of {total} projects. Choose a project in Show to search the rest.</p>}
     {hits.length > 0 && <ul className="conversation-inbox__list">{hits.map(hit =>
