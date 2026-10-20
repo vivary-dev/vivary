@@ -306,7 +306,13 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
   hostState.initialization ??= Promise.resolve().then(() => {
     for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
       if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER) continue;
-      if (!isActiveCodeAgentRun(run)) continue;
+      if (!isActiveCodeAgentRun(run)) {
+        // A host that ended after saving the stopped state, before the execution owner applied a Stop and switch,
+        // leaves the target on a settled record. No worker remains to apply it, so this start does, under the same
+        // cleanup refusal check.
+        applyPendingSwitch(run.id);
+        continue;
+      }
       appendCodeAgentTranscriptEvent({
         runId: run.id,
         kind: "status",

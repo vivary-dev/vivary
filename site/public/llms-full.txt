@@ -7645,7 +7645,10 @@ stopping run. After the same checks, the switch records the target as
 host, the execution owner applies the target in the same turn that frees the run,
 so no send can claim the run on the old route first. A host that ended while the
 run was stopping applies the target when the next host start marks the run
-interrupted. A run that ends under a cleanup refusal keeps its route, and a
+interrupted. A host that ended after it saved the stopped state, but before it
+applied the target, leaves a settled record with `pendingSwitch`. The next host
+start applies that target too, under the same cleanup refusal check, so the
+selectors and composer do not stay locked. A run that ends under a cleanup refusal keeps its route, and a
 transcript note says the switch did not happen. A run that already ended when
 the request arrives switches at once. When the run already has the target route,
 because another window switched it and started a turn, Stop and switch still stops
@@ -8276,6 +8279,12 @@ confirmed Stop left the current turn running. The no-op branch of
 `switchVivaryCodeRuntime` now requests Stop for an active run when `stop` is set.
 The Stop and switch paragraph in "Switching a Code conversation in place" says
 so. `code-route-selection.test.mjs` covers it and failed before the fix.
+Host start applied a recorded switch only on records it marked interrupted. A
+host that exited after `recordPausedRun` saved the stopped state, but before the
+execution `finally` applied the switch, left `pendingSwitch` on a paused record
+forever, which locked the selectors and composer. Host start now also runs
+`applyPendingSwitch` on settled records, which keeps its cleanup refusal check.
+A paused record case in `local-code-agent.test.ts` failed before the fix.
 
 2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
 its prompt from the record it reads before claiming the host, not the one read

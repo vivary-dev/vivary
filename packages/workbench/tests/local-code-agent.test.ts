@@ -659,6 +659,21 @@ process.send({type:"vivary:code-worker:ready"});
       assert.deepEqual([restarted?.status, restarted?.phase, restarted?.metadata?.model, restarted?.metadata?.pendingSwitch],
         ["paused", "interrupted", "claude-opus-5-5", undefined]);
       assert.equal(listCodeAgentTranscriptEvents(interrupted.id).at(-1)?.metadata?.source, "vivary-runtime-switch");
+
+      // A host that ended after it saved the stopped state, but before it applied the switch, leaves a paused record
+      // that still names the target. The next host start applies it, so the selectors and composer unlock.
+      const saved = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Stopped switch", status: "paused",
+        phase: "paused", needsApproval: false, permissionMode: "auto-edit", cwd: fixture,
+        metadata: { app: "vivary-workbench-local-code", engine: "claude-cli", model: "claude-sonnet-5-5", ...owner,
+          workspaceRoot: fixture, projectId: workspace.projectId, bindingId: workspace.bindingId, rootId: workspace.rootId,
+          bindingRevision: workspace.bindingRevision,
+          pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5", label: "Opus 5.5", requestedAt: "2026-10-20T00:00:00.000Z" } } });
+      Reflect.set(host(), "initialization", undefined);
+      await getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+      const resumed = getCodeAgentRunRecord(saved.id);
+      assert.deepEqual([resumed?.status, resumed?.phase, resumed?.metadata?.model, resumed?.metadata?.pendingSwitch],
+        ["paused", "paused", "claude-opus-5-5", undefined]);
+      assert.equal(listCodeAgentTranscriptEvents(saved.id).at(-1)?.metadata?.source, "vivary-runtime-switch");
     } finally {
       if (runId) {
         const execution = host().activeRuns.get(runId)?.execution;
