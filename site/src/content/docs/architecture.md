@@ -715,6 +715,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Escaped brackets in footnote labels (PR #259 review). The footnote label
+scanner in the maintained Toolkit patch ended a label at an escaped `\]` and
+rejected an escaped `\[`, so `[^a\]b]` and its definition stayed text. It now
+skips `\[`, `\]`, and `\` the way a link label does. The label keeps its
+escapes, so matching ignores case as before and each side saves the label as
+written. The Toolkit patch hash moves from `d757b942` to `5ecd0aca`. The footnote
+design below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+reads escaped references and definitions in other case, checks the notes and the
+saved Markdown, and keeps an unescaped bracket rejected. It failed before the
+change.
+
 2026-10-20 Chat table long tokens inside bold or struck text (PR #259 review).
 `markLongTokens` in the maintained Core patch marked only a cell's direct string
 children, so a long hash in `**bold**` or `~~struck~~` text got no

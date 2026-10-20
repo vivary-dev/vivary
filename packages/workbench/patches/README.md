@@ -3410,7 +3410,8 @@ definitions and references through tiptap-markdown's parse setup hook.
 notes appear once in a list at the end in order of first reference, a reference
 with no definition stays text, and a definition that nothing references is not
 shown. Labels match ignoring case, through markdown-it's `normalizeReference`
-as for link references, and the first definition of a label wins. A definition
+as for link references, and the first definition of a label wins. As in a link
+label, `\[`, `\]`, and `\` escapes stay in a label and do not end it. A definition
 nested inside another becomes its own note, and the outer note keeps the blocks
 after it. Each node has a serializer that writes the footnote syntax back with
 the label as written, so a read-only reconcile that reads Markdown never falls

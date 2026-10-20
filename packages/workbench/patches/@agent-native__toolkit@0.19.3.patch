@@ -456,10 +456,10 @@ index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493
       * `false` so existing embedders are unchanged. When `true`, images
 diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..d3b08c82a49356698ba6cd1c0aa4e7ef7ff814f6
+index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b1542b9b30ff
 --- /dev/null
 +++ b/dist/editor/footnotes.js
-@@ -0,0 +1,282 @@
+@@ -0,0 +1,290 @@
 +import { mergeAttributes, Node } from "@tiptap/core";
 +/**
 + * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
@@ -481,11 +481,19 @@ index 0000000000000000000000000000000000000000..d3b08c82a49356698ba6cd1c0aa4e7ef
 +const LABEL_LIMIT = 999;
 +const parsers = new WeakSet();
 +function readLabel(src, start, max) {
-+    // `[^` then a label with no whitespace, closed by `]`.
++    // `[^` then a label with no whitespace, closed by `]`. As in a link label, a backslash
++    // escapes a bracket or a backslash, so `\[`, `\]`, and `\\` stay in the label.
 +    if (src.charCodeAt(start) !== 0x5b || src.charCodeAt(start + 1) !== 0x5e)
 +        return null;
 +    for (let pos = start + 2; pos < max && pos - start <= LABEL_LIMIT; pos++) {
 +        const code = src.charCodeAt(pos);
++        if (code === 0x5c && pos + 1 < max) {
++            const next = src.charCodeAt(pos + 1);
++            if (next === 0x5b || next === 0x5d || next === 0x5c) {
++                pos++;
++                continue;
++            }
++        }
 +        if (code === 0x5d)
 +            return pos === start + 2 ? null : { label: src.slice(start + 2, pos), end: pos + 1 };
 +        if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x5b)

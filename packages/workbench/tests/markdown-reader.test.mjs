@@ -412,6 +412,32 @@ test("footnote labels match without case, and each side keeps the label it was w
   assert.match(markdown, /\n\[\^note\]: text$/);
 });
 
+// Review of #259: a footnote label, like a link label, may hold backslash-escaped brackets and
+// backslashes. An escape does not end the label, and labels still match without case.
+test("footnote labels keep escaped brackets and backslashes and still match without case", async () => {
+  const proof = await loadProof();
+  const source = String.raw`Notes[^a\]b] and[^c\[d] and[^E\\F] and[^x\\] here.
+
+[^A\]B]: First.
+[^C\[D]: Second.
+[^e\\f]: Third.
+[^X\\]: Fourth.`;
+  const { json, markdown } = proof.readMarkdown(source, { footnotes: true });
+  assert.deepEqual(json.content.map((block) => block.type), ["paragraph", "footnotes"]);
+  const references = json.content[0].content.filter((node) => node.type === "footnoteReference");
+  assert.deepEqual(references.map((node) => [node.attrs.label, node.attrs.number]),
+    [[String.raw`a\]b`, 1], [String.raw`c\[d`, 2], [String.raw`E\\F`, 3], [String.raw`x\\`, 4]]);
+  assert.deepEqual(json.content[1].content.map((item) => [item.attrs.label, item.content[0].content[0].text]),
+    [[String.raw`A\]B`, "First."], [String.raw`C\[D`, "Second."], [String.raw`e\\f`, "Third."], [String.raw`X\\`, "Fourth."]]);
+  // Each side saves the label it was written with.
+  assert.match(markdown, /^Notes\[\^a\\\]b\] and\[\^c\\\[d\] and\[\^E\\\\F\] and\[\^x\\\\\] here\./);
+  for (const definition of [String.raw`[^A\]B]: First.`, String.raw`[^C\[D]: Second.`, String.raw`[^e\\f]: Third.`, String.raw`[^X\\]: Fourth.`]) {
+    assert.ok(markdown.includes(`\n${definition}`), definition);
+  }
+  // An unescaped bracket still ends or rejects a label.
+  assert.ok(!JSON.stringify(proof.readMarkdown("Bad[^a[b] here.\n\n[^a[b]: x", { footnotes: true }).json).includes("footnote"));
+});
+
 // GitHub's footnote help writes a note over several lines: two trailing spaces, then the next line.
 // The continuation stays in the note whether it is indented two spaces, as in that help, or not at all.
 test("a footnote continued on the next line keeps the continuation in its note", async () => {
