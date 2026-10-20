@@ -268,7 +268,7 @@ test("local project grants register real folders and reopen without content snap
         project.projectId === betaResult.projectId).workspaceKind, "coding");
 
       await assert.rejects(setLocalProjectKind(actionContext, betaResult.projectId, "work"), TypeError);
-      await assert.rejects(setLocalProjectKind(actionContext, "project-unknown", "coding"), { statusCode: 409 });
+      await assert.rejects(setLocalProjectKind(actionContext, "project-unknown", "coding"), { statusCode: 404 });
       await assert.rejects(setLocalProjectKind({ ...actionContext, orgId: "foreign" }, betaResult.projectId, "coding"));
       await assert.rejects(setLocalProjectKind({ ...actionContext, caller: "tool" }, betaResult.projectId, "personal"),
         { statusCode: 403 });
@@ -276,6 +276,24 @@ test("local project grants register real folders and reopen without content snap
         { statusCode: 403 });
       const [row] = (await getDb().select().from(projects)).filter(value => value.projectId === betaResult.projectId);
       assert.equal(row.workspaceKind, "coding", "refused changes left the saved kind");
+
+      // Review of #260. The catalog lists a project with two same-scope bindings once, and its kind still saves.
+      const [betaBinding] = (await getDb().select().from(bindings)).filter(value => value.projectId === betaResult.projectId);
+      await getDb().insert(bindings).values({ ...betaBinding, bindingId: "binding-second-fixture", rootId: "root-second-fixture" });
+      try {
+        const listed = (await catalog.run({}, context)).projects.filter(project => project.projectId === betaResult.projectId);
+        assert.equal(listed.length, 1, "two bindings list as one project");
+        assert.deepEqual(await setLocalProjectKind(actionContext, betaResult.projectId, "personal"),
+          { projectId: betaResult.projectId, workspaceKind: "personal" });
+        assert.equal((await catalog.run({}, context)).projects.find(project =>
+          project.projectId === betaResult.projectId).workspaceKind, "personal");
+        await assert.rejects(setLocalProjectKind({ ...actionContext, caller: "tool" }, betaResult.projectId, "coding"),
+          { statusCode: 403 });
+      } finally {
+        const { eq } = await import("@agent-native/core/db/schema");
+        await getDb().delete(bindings).where(eq(bindings.bindingId, "binding-second-fixture"));
+        await setLocalProjectKind(actionContext, betaResult.projectId, "coding");
+      }
     });
     await suite.test("reopening preserves project and root identifiers with fresh metadata checks", async () => {
       const before = await catalog.run({}, context);

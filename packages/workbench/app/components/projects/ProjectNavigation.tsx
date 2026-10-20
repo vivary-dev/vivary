@@ -197,6 +197,8 @@ export function ProjectNavigation() {
         </li>)}</ul>}
       {!creating && <Button size="sm" className="register-project-button" onClick={() => {
         setRegistering(false);
+        // Each new project starts with no kind chosen. Change kind inside the form keeps the current choice.
+        setNewProjectKind(null);
         setKindPrompt({ purpose: "new" });
       }}>New project</Button>}
       {!desktop.data?.folderPicker && !registering

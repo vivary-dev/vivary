@@ -8201,6 +8201,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Project kind second review fixes (PR #260 review). `setLocalProjectKind`
+used the workspace resolver, which requires exactly one binding, so a project the
+catalog lists from two same-scope bindings refused every kind save with 409. It
+now checks the owner and the current scope and requires at least one binding in
+that scope, the rule the catalog lists projects by, and still rechecks the scope
+before the write. An unknown project now gets 404. New project also clears the
+previous new project's kind before its dialog opens, so nothing is preselected.
+The project kind description in System structure still holds. Evidence: the
+two-binding case in `tests/local-root-provider.test.mjs` and the New project case
+in `tests/workspace-kind-dialog-component.test.mjs`.
+
 2026-10-19 Project kind review fixes (PR #260 review). The kind action writes
 only through the local project service, so a configured installation refused it
 while Project details still offered the control. The catalog now carries

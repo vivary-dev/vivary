@@ -445,13 +445,19 @@ export async function connectLocalProjectFolder(context, folder, displayName) {
   return Object.freeze({ ...result, locationRef: selected.locationRef, displayName: name });
 }
 
-async function resolveLocalProjectBinding(context, projectId) {
+/** The owner's current project scope, for a project id that is well formed. */
+async function readLocalProjectScope(context, projectId) {
   const { service, owner } = localService(context, projectId);
   if (!identifier.safeParse(projectId).success) {
     throw Object.assign(new Error("Choose a registered project."), { statusCode: 400 });
   }
   const scope = await service.registry.readScope(owner);
   if (!scope) throw Object.assign(new Error("Project folder access changed."), { statusCode: 403 });
+  return { service, owner, scope };
+}
+
+async function resolveLocalProjectBinding(context, projectId) {
+  const { service, owner, scope } = await readLocalProjectScope(context, projectId);
   const [{ getDb }, { bindings, projects }, { and, eq, inArray }] = await Promise.all([
     import("./db/index.mjs"), import("./db/schema.mjs"), import("@agent-native/core/db/schema"),
   ]);
@@ -487,14 +493,24 @@ export async function resolveLocalProjectHistory(context, projectId) {
 /**
  * Saves the owner's Coding or Personal choice for one registered project in
  * the owner's scope. It writes only the registry row, never project files, and
- * does not need the folder to be available.
+ * does not need the folder to be available. The project needs at least one
+ * binding in the owner's current scope, the same rule the catalog lists it by,
+ * so a project with several same-scope bindings can be saved as well.
  */
 export async function setLocalProjectKind(context, projectId, kind) {
   // Only the owner chooses. An admitted chat tool may read its project but never change this preference.
   if (context?.caller === "tool") {
     throw Object.assign(new Error("Local project access is unavailable."), { statusCode: 403 });
   }
-  const { service, owner, scope } = await resolveLocalProjectBinding(context, projectId);
+  const { service, owner, scope } = await readLocalProjectScope(context, projectId);
+  const [{ getDb }, { bindings }, { and, eq, inArray }] = await Promise.all([
+    import("./db/index.mjs"), import("./db/schema.mjs"), import("@agent-native/core/db/schema"),
+  ]);
+  const listed = await getDb().select({ bindingId: bindings.bindingId }).from(bindings)
+    .where(and(eq(bindings.projectId, projectId), eq(bindings.actorId, scope.actorId),
+      eq(bindings.collectionId, scope.collectionId), eq(bindings.deviceId, scope.deviceId),
+      inArray(bindings.locationRef, scope.locationRefs))).limit(1);
+  if (listed.length === 0) throw Object.assign(new Error("Choose a registered project."), { statusCode: 404 });
   const { updateProjectWorkspaceKind } = await import("./registry-store.mjs");
   await requireCurrentProjectScope(service, owner, scope);
   if (!await updateProjectWorkspaceKind(projectId, kind)) {

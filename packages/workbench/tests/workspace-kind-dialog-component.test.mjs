@@ -65,6 +65,80 @@ const bundle = await build({ stdin: { contents: `
 const module = { exports: {} };
 compileFunction(bundle.outputFiles[0].text, ["require", "module", "exports"])(require, module, module.exports);
 
+// Every bundle is built before the first test is declared. A test declared after a build awaited between tests
+// was silently left out of the run here, so the builds stay above every test.
+const catalogFixture = (patch = {}) => ({ code: "catalog", scopeKey: "scope_a", policyRevision: 1, registryRevision: 4,
+  kindEditable: true, locations: [], projects: [
+    { projectId: "project_alpha", displayName: "Alpha", bindingRevision: 1, status: "available", reconnectEligible: false,
+      workspaceKind: "coding" },
+    { projectId: "project_beta", displayName: "Beta", bindingRevision: 1, status: "available", reconnectEligible: false,
+      workspaceKind: null }], ...patch });
+
+// The Code rail shows while chat identity loads, and it can start only a Code conversation.
+const codeRailStubs = new Map([
+  ["@agent-native/core/client/agent-chat", `export const isCodeAgentRunActive = () => false;`],
+  ["@agent-native/core/client/hooks", `export const useActionQuery = () => ({ data: undefined, isLoading: false,
+    error: null, refetch: async () => {} });`],
+  ["@agent-native/toolkit/chat-history", `import { createElement } from "react";
+    export const useChatHistoryRailController = ({ onNewChat, labels }) => ({ visibleItems: [], onNewChat,
+      newChatLabel: labels.newChat, canExpand: false });
+    export const ChatHistoryList = ({ footer }) => createElement("div", null, footer);`],
+  ["@agent-native/toolkit/design-system", `import { createElement } from "react";
+    export const ActionButton = ({ onPress, disabled, children, className }) =>
+      createElement("button", { type: "button", className, disabled, onClick: onPress }, children);
+    export const IconButton = () => null;`],
+  ["@tabler/icons-react", `export const IconDots = () => null; export const IconPlus = () => null;`],
+  ["react-router", `export const useLocation = () => ({ search: "" });
+    export const useNavigate = () => to => globalThis.kindFixture.events.push(["navigate", to]);`],
+  ["@/components/projects/ProjectContext", `export const useProjects = () => globalThis.kindFixture.projects;`],
+  ["@/components/ui/button", `import { createElement } from "react"; export const Button = props => createElement("button", props);`],
+]);
+const codeRailBundle = await build({ stdin: { contents: `
+  import { createElement } from "react";
+  import { CodeHistory } from "./app/components/layout/CodeHistory";
+  export function railView() { return createElement(CodeHistory); }`, loader: "tsx", resolveDir: workbench },
+  bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
+  plugins: [{ name: "code-rail-services", setup(build) {
+    build.onResolve({ filter: /.*/ }, args => codeRailStubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
+    build.onLoad({ filter: /.*/, namespace: "host" }, args => ({ contents: codeRailStubs.get(args.path), loader: "tsx", resolveDir: workbench }));
+  } }] });
+const codeRail = { exports: {} };
+compileFunction(codeRailBundle.outputFiles[0].text, ["require", "module", "exports"])(require, codeRail, codeRail.exports);
+
+// Project navigation with its own host stubs. The dialog is the real component on the stubbed toolkit dialog.
+const navigationStubs = new Map([
+  ["react-router", `export const useLocation = () => ({ pathname: "/" }); export const useNavigate = () => () => {};`],
+  ["@agent-native/core/client/hooks", `export const useActionQuery = () => ({ data: { folderPicker: false } });`],
+  ["@agent-native/toolkit/ui", stubs.get("@agent-native/toolkit/ui") + `
+    export const Skeleton = () => null;`],
+  ["@tabler/icons-react", `export const IconCode = () => null; export const IconNotes = () => null;
+    export const IconFolderPlus = () => null;`],
+  ["@/components/ui/button", `import { createElement } from "react";
+    export const Button = ({ size, variant, ...props }) => createElement("button", props);`],
+  ["@/components/ui/input", `import { createElement } from "react"; export const Input = props => createElement("input", props);`],
+  ["@/lib/native-actions", `export const useNativeActionCaller = () => ({ ready: true, call: globalThis.kindFixture.call });
+    export const folderConnectionErrorMessage = () => "Folder failed.";`],
+  ["./ProjectContext", `export const useProjects = () => globalThis.kindFixture.projects;`],
+  ["./ReconnectProjectForm", `export const ReconnectProjectForm = () => null;`],
+  ["./CreateProjectForm", `import { createElement } from "react";
+    export const CreateProjectForm = ({ workspaceKind, onClose }) => createElement("div", { "data-create-kind": workspaceKind },
+      createElement("button", { type: "button", "data-create-close": "", onClick: onClose }, "Close form"));`],
+]);
+const navigationBundle = await build({ stdin: { contents: `
+  import { createElement } from "react";
+  import { QueryClientProvider } from "@tanstack/react-query";
+  import { ProjectNavigation } from "./app/components/projects/ProjectNavigation";
+  export function navigationView() {
+    return createElement(QueryClientProvider, { client: globalThis.kindFixture.queryClient }, createElement(ProjectNavigation));
+  }`, loader: "tsx", resolveDir: workbench },
+  bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
+  plugins: [{ name: "navigation-services", setup(build) {
+    build.onResolve({ filter: /.*/ }, args => navigationStubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
+    build.onLoad({ filter: /.*/, namespace: "host" }, args => ({ contents: navigationStubs.get(args.path), loader: "tsx", resolveDir: workbench }));
+  } }] });
+const navigation = { exports: {} };
+compileFunction(navigationBundle.outputFiles[0].text, ["require", "module", "exports"])(require, navigation, navigation.exports);
+
 let host, root;
 test.beforeEach(() => {
   focused = null;
@@ -165,13 +239,6 @@ test("saving calls only the owner action with the project and kind, then refresh
     ["call", "vivary-set-project-kind", { projectId: "project_beta", workspaceKind: "personal" }], ["refresh"]]);
 });
 
-const catalogFixture = (patch = {}) => ({ code: "catalog", scopeKey: "scope_a", policyRevision: 1, registryRevision: 4,
-  kindEditable: true, locations: [], projects: [
-    { projectId: "project_alpha", displayName: "Alpha", bindingRevision: 1, status: "available", reconnectEligible: false,
-      workspaceKind: "coding" },
-    { projectId: "project_beta", displayName: "Beta", bindingRevision: 1, status: "available", reconnectEligible: false,
-      workspaceKind: null }], ...patch });
-
 // Review of #260. The project list refetch does not reject when it fails, and it keeps the cached list.
 test("a saved kind is written into the cached project list, so a failed refetch cannot leave Not set", async () => {
   const { CATALOG_QUERY_KEY } = module.exports;
@@ -221,37 +288,6 @@ test("Open folder asks for the kind of a new or repeated registration only while
   assert.equal(openedFolderNeedsKind("already-registered", "project_beta", { code: "denied" }), false);
 });
 
-// The Code rail shows while chat identity loads, and it can start only a Code conversation.
-const codeRailStubs = new Map([
-  ["@agent-native/core/client/agent-chat", `export const isCodeAgentRunActive = () => false;`],
-  ["@agent-native/core/client/hooks", `export const useActionQuery = () => ({ data: undefined, isLoading: false,
-    error: null, refetch: async () => {} });`],
-  ["@agent-native/toolkit/chat-history", `import { createElement } from "react";
-    export const useChatHistoryRailController = ({ onNewChat, labels }) => ({ visibleItems: [], onNewChat,
-      newChatLabel: labels.newChat, canExpand: false });
-    export const ChatHistoryList = ({ footer }) => createElement("div", null, footer);`],
-  ["@agent-native/toolkit/design-system", `import { createElement } from "react";
-    export const ActionButton = ({ onPress, disabled, children, className }) =>
-      createElement("button", { type: "button", className, disabled, onClick: onPress }, children);
-    export const IconButton = () => null;`],
-  ["@tabler/icons-react", `export const IconDots = () => null; export const IconPlus = () => null;`],
-  ["react-router", `export const useLocation = () => ({ search: "" });
-    export const useNavigate = () => to => globalThis.kindFixture.events.push(["navigate", to]);`],
-  ["@/components/projects/ProjectContext", `export const useProjects = () => globalThis.kindFixture.projects;`],
-  ["@/components/ui/button", `import { createElement } from "react"; export const Button = props => createElement("button", props);`],
-]);
-const codeRailBundle = await build({ stdin: { contents: `
-  import { createElement } from "react";
-  import { CodeHistory } from "./app/components/layout/CodeHistory";
-  export function railView() { return createElement(CodeHistory); }`, loader: "tsx", resolveDir: workbench },
-  bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
-  plugins: [{ name: "code-rail-services", setup(build) {
-    build.onResolve({ filter: /.*/ }, args => codeRailStubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
-    build.onLoad({ filter: /.*/, namespace: "host" }, args => ({ contents: codeRailStubs.get(args.path), loader: "tsx", resolveDir: workbench }));
-  } }] });
-const codeRail = { exports: {} };
-compileFunction(codeRailBundle.outputFiles[0].text, ["require", "module", "exports"])(require, codeRail, codeRail.exports);
-
 test("while chat identity loads, the Code rail cannot start a conversation in a Personal project", async () => {
   const newConversation = () => host.querySelector(".an-chat-history-rail__new-chat");
   for (const [kind, disabled] of [["personal", true], ["coding", false], [null, false]]) {
@@ -262,4 +298,22 @@ test("while chat identity loads, the Code rail cannot start a conversation in a 
   }
   await act(async () => newConversation().click());
   assert.match(kindFixture.events.at(-1)[1], /^\/\?run=new&draft=/, "Not set keeps opening a Code draft");
+});
+
+// Review of #260. The kind chosen for one new project must not carry into the next New project.
+test("New project starts with no kind chosen after an earlier project chose Personal", async () => {
+  kindFixture.projects = { catalog: catalogFixture(), activeProject: null, checking: false, workspaceAvailable: true,
+    selecting: false, error: null, refresh: async () => {}, selectProject: async () => true, retrySelection: null };
+  await act(async () => root.render(navigation.exports.navigationView()));
+  const newProject = () => [...host.querySelectorAll("button")].find(button => button.textContent === "New project");
+  await act(async () => newProject().click());
+  assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"]);
+  await act(async () => cards()[1].click());
+  await settle();
+  assert.equal(host.querySelector("[data-create-kind]").getAttribute("data-create-kind"), "personal");
+  assert.equal(newProject(), undefined, "New project is hidden while its form is open");
+  await act(async () => host.querySelector("[data-create-close]").click());
+  await act(async () => newProject().click());
+  assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"], "nothing is preselected");
+  assert.equal(document.activeElement, cards()[0], "the first card takes focus, not the earlier choice");
 });
