@@ -39,7 +39,8 @@ const stubs = new Map([
     }`],
   ["../projects/ProjectContext", `
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
-  ["react-router", `export function useNavigate() { return () => {}; }`],
+  ["react-router", `export function useNavigate() { return () => {}; }
+    export function useLocation() { return { pathname: "/", search: "" }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
@@ -55,7 +56,7 @@ import { CodeRunControl } from "@proof/CodeRunControl";
 import { hostProof } from "@agent-native/core/client/hooks";
 import { callProof } from "../../lib/native-actions";
 
-const HOST = { activeRun: null, pendingApproval: null, recentRun: null, busy: false };
+const HOST = { activeRuns: [], recentRun: null, busy: false };
 const NAMED = {
   version: "4a1b2c3d4e5f6a7b",
   heading: "Coding processes from an earlier run are still running",
@@ -227,11 +228,66 @@ export async function theOwnerSeesItsFailedStopsCheckInPlaceOfStop() {
   const run = { id: "run-crashed", title: "Refactor the parser", projectId: null };
   const checking = { ...UNSCANNED, heading: "Vivary is checking what a failed stop left running",
     instruction: "The choices appear here when the check ends.", canContinue: false, checking: true, run };
-  const { host, dispose } = await mount(checking, { activeRun: run, busy: true });
+  const { host, dispose } = await mount(checking, { activeRuns: [activeRun(run)], busy: true });
   try {
     assert.equal(host.querySelector("h2")?.textContent, checking.heading, "the strip shows the check, not the run working");
     assert.equal(region(host).querySelector("p")?.textContent, checking.instruction);
     assert.deepEqual(buttons(host), ["Open conversation"], "no Stop and no choice until the check ends");
+  } finally { await dispose(); }
+}
+
+function activeRun(run, extra = {}) {
+  return { status: "running", phase: "running", workspaceLabel: "Parser", engineLabel: "Claude Code", model: "sonnet",
+    stopping: false, pendingApprovals: [], ...run, ...extra };
+}
+
+// Codex numbers its requests per session, so two runs can each wait on request 17.
+function approval(run, requestId = "17") {
+  return { requestId, method: "item/commandExecution/requestApproval", params: { command: "read " + run.id },
+    runId: run.id, title: run.title, projectId: run.projectId, workspaceLabel: "Parser" };
+}
+
+const CLAUDE_RUN = { id: "run-claude", title: "Write the parser tests", projectId: null };
+const CODEX_RUN = { id: "run-codex", title: "Refactor the parser", projectId: null };
+const OTHER_CODEX_RUN = { id: "run-codex-2", title: "Update the docs", projectId: null };
+
+export async function eachRunningConversationHasItsOwnApprovalsAndStop() {
+  const runs = [activeRun(CLAUDE_RUN), activeRun(CODEX_RUN, { engineLabel: "Codex CLI", pendingApprovals: [approval(CODEX_RUN)] }),
+    activeRun(OTHER_CODEX_RUN, { engineLabel: "Codex CLI", pendingApprovals: [approval(OTHER_CODEX_RUN)] })];
+  const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
+  try {
+    const rows = [...host.querySelectorAll('[aria-label="Running conversations"] > li')];
+    assert.deepEqual(rows.map(row => row.getAttribute("aria-label")), runs.map(run => run.title));
+    assert.deepEqual(rows.map(row => row.querySelector('[role="status"]')?.textContent), [
+      "Agent working in Personal workspace (Claude Code): Write the parser tests",
+      "Agent working in Personal workspace (Codex CLI): Refactor the parser",
+      "Agent working in Personal workspace (Codex CLI): Update the docs"]);
+    assert.deepEqual(rows.map(row => [...row.querySelectorAll('[role="region"]')].map(card => card.getAttribute("aria-label"))),
+      [[], ["Codex request: Refactor the parser"], ["Codex request: Update the docs"]], "each request sits in its run's row");
+    const allow = row => [...row.querySelectorAll("button")].find(item => item.textContent === "Allow once");
+    await click(allow(rows[2]));
+    assert.deepEqual(callProof.calls, [{ name: "vivary-code-approve", params: { runId: OTHER_CODEX_RUN.id, requestId: "17",
+      projectId: undefined, answers: {}, content: {} } }], "Allow once answers only its own run's request");
+    callProof.calls = [];
+    await click(rows[1].querySelector('[aria-label="Stop Refactor the parser"]'));
+    assert.deepEqual(callProof.calls, [{ name: "vivary-code-stop", params: { runId: CODEX_RUN.id, projectId: undefined } }],
+      "Stop stops only its own run");
+    callProof.calls = [];
+    const decline = [...rows[1].querySelectorAll("button")].find(item => item.textContent === "Decline");
+    await click(decline);
+    assert.deepEqual(callProof.calls, [{ name: "vivary-code-deny", params: { runId: CODEX_RUN.id, requestId: "17",
+      projectId: undefined } }]);
+  } finally { await dispose(); }
+}
+
+export async function aStoppingRunHoldsItsStopOnly() {
+  const runs = [activeRun(CLAUDE_RUN, { stopping: true }), activeRun(CODEX_RUN, { engineLabel: "Codex CLI" })];
+  const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
+  try {
+    const stops = runs.map(run => host.querySelector('[aria-label="Stop ' + run.title + '"]'));
+    assert.deepEqual(stops.map(stop => [stop.textContent, stop.disabled]), [["Stopping…", true], ["Stop", false]]);
+    assert.equal(host.querySelector('[aria-label="Running conversations"] > li')?.querySelector('[role="status"]')?.textContent,
+      "Stopping in Personal workspace (Claude Code): Write the parser tests");
   } finally { await dispose(); }
 }
 `;
@@ -303,6 +359,8 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["a check already running holds End them", proof.aRunningCheckHoldsEndThem],
     ["a failed stop's own check offers no choice and says why", proof.aFailedStopsOwnCheckOffersNoChoice],
     ["the run's owner sees its failed stop's check in place of Stop", proof.theOwnerSeesItsFailedStopsCheckInPlaceOfStop],
+    ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
+    ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
   ]) await t.test(name, () => run());
 });
 

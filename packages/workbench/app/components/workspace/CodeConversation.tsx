@@ -21,6 +21,10 @@ import { codeDraftSelectionKey, codeDraftThreadId } from "../../../shared/code-d
 import { createLocalCodeChatAdapter } from "../../lib/local-code-chat-adapter";
 import { codeConversationModelChoices } from "../../lib/code-conversation-model-choices";
 import { useProjects } from "../projects/ProjectContext";
+import { useOpenProjectFolder } from "../projects/open-project-folder";
+import { folderRunTargets, type FolderRun } from "../../lib/code-folder-runs";
+import { holdConversationRoute } from "../../lib/conversation-route-hold";
+import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
@@ -36,6 +40,9 @@ import { previewInspectionContext, type PreviewChatTarget } from "@/lib/workbenc
 type PreviewChatProps = { previewScope: string; onPreviewChatTarget?: (target: PreviewChatTarget | null) => void };
 
 type ModelChoice = { engine: VivaryCodeState["defaultEngine"]; model: string };
+/** A conversation to open, possibly in another project. */
+type RunTarget = { id: string; projectId: string | null };
+/** Another conversation working in this conversation's folder. Another owner's has no title and cannot be opened. */
 const conversationSelectionSchema = z.object({
   key: z.string().min(1).max(128),
   runId: z.string().min(1).max(128).nullable(),
@@ -117,8 +124,16 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
     void queueCodeSelection(selectionKey, next).catch(() => {});
   }, [queryClient, selectionKey, queueCodeSelection, stateWriterReady]);
 
-  async function openActiveConversation(active: NonNullable<VivaryCodeState["activeRun"]>) {
-    if (active.projectId !== projectId && !await selectProject(active.projectId)) return false;
+  async function openActiveConversation(active: RunTarget) {
+    // A run in another project: the project change unmounts this view, then Workspace clears the route and the new
+    // project restores its saved view. The page's route hold lives outside this view and keeps the clicked run's route.
+    if (active.projectId !== projectId) {
+      const release = holdConversationRoute(active.projectId, "/?run=" + encodeURIComponent(active.id));
+      if (!await selectProject(active.projectId)) {
+        release();
+        return false;
+      }
+    }
     const key = SELECTION_PREFIX + [catalog?.scopeKey, active.projectId ?? "personal"].join(":");
     const next = { key: active.id, runId: active.id };
     await queryClient.cancelQueries({ queryKey: [key], exact: true });
@@ -173,7 +188,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   workspaceAvailable: boolean;
   selection: ConversationSelection | null;
   setSelection: Dispatch<SetStateAction<ConversationSelection | null>>;
-  onOpenActive: (active: NonNullable<VivaryCodeState["activeRun"]>) => Promise<boolean>;
+  onOpenActive: (active: RunTarget) => Promise<boolean>;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -225,9 +240,12 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   // that fallback ID. A newly started run keeps its original draft UUID
   // mounted while the accepted send settles.
   const openingSavedRun = !!selection?.runId && selection.key === selection.runId && !run;
-  const activeRun = codeState?.activeRun;
-  const otherActiveRun = activeRun && activeRun.id !== selection?.runId ? activeRun : null;
-  const busyNoticeId = useId();
+  // Conversations run concurrently. Only this conversation's own run locks its composer and owns its Stop.
+  const activeRuns = codeState?.activeRuns ?? [];
+  const ownActiveRun = activeRuns.find(item => item.id === selection?.runId) ?? null;
+  const otherWorking = activeRuns.filter(item => item.id !== selection?.runId).length;
+  const folderRuns = folderRunTargets(codeState?.folderRuns ?? [], activeRuns, selection?.runId, projectId);
+  const folderIsolation = useOpenProjectFolder();
   const error = notice ?? codeState?.error
     ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
     ?? (state.data && !codeState ? "The project changed. Refresh this workspace before continuing." : undefined)
@@ -302,11 +320,12 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     if (currentSelection.current?.key === key) showInUrl({ key, runId });
   }, [setSelection, showInUrl]);
 
+  // Stops the selected conversation's run, never another conversation's.
   async function stopRun() {
-    if (!activeRun) return false;
+    if (!ownActiveRun) return false;
     setNotice(undefined);
     try {
-      const result = await stop.mutateAsync({ projectId: activeRun.projectId ?? undefined, runId: activeRun.id });
+      const result = await stop.mutateAsync({ projectId: ownActiveRun.projectId ?? undefined, runId: ownActiveRun.id });
       if (result.error) throw new Error(result.error);
       await state.refetch();
       return true;
@@ -342,18 +361,15 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     }
   }
 
+  const openRun = (target: RunTarget) => {
+    if (target.projectId === projectId) selectConversation(target.id);
+    else void onOpenActive(target).then(opened => {
+      if (!opened) setNotice("That conversation's project could not be opened. You can still stop its agent from the top of Vivary.");
+    });
+  };
   const conversationNotices = <>
     {error && <div className="local-agent-notice" role="alert">
       <span>{error}</span><Button variant="ghost" size="sm" onClick={() => { void state.refetch(); if (selection?.runId) void selectedState.refetch(); }}>Retry</Button>
-    </div>}
-    {otherActiveRun && <div className="local-agent-notice" role="status">
-      <span id={busyNoticeId}>An agent is working in another conversation.</span>
-      <Button variant="ghost" size="sm" onClick={() => {
-        if (otherActiveRun.projectId === projectId) selectConversation(otherActiveRun.id);
-        else void onOpenActive(otherActiveRun).then(opened => {
-          if (!opened) setNotice("The active conversation's project could not be opened. You can still stop the agent here.");
-        });
-      }}>Open conversation</Button>
     </div>}
   </>;
 
@@ -366,7 +382,9 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
       </div>
       <div className="local-agent-header-actions">
         {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
-        {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
+        {ownActiveRun ? <Badge variant="secondary" role="status">Working</Badge>
+          : otherWorking > 0 && <Badge variant="secondary" role="status">
+            {otherWorking === 1 ? "1 other conversation working" : `${otherWorking} other conversations working`}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Conversation history"><IconHistory size={18} /></Button>
@@ -391,14 +409,15 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     <div className="local-agent-layout">
       <div className="local-agent-chat">
         {selection && codeState && !openingSavedRun ? <LocalCodeConversation key={selection.key}
-          notices={conversationNotices} busyNoticeId={otherActiveRun ? busyNoticeId : undefined}
+          notices={conversationNotices} folderRuns={folderRuns} folderIsolation={folderIsolation} onOpenRun={openRun}
+          pendingApprovals={ownActiveRun?.pendingApprovals.length ?? 0}
           projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
           viewingMatch={!!requestedEvent || unassigned}
           matchedEventId={requestedEvent}
-          active={codeState.busy} streaming={streaming} onStreaming={setStreaming}
+          active={!!ownActiveRun} streaming={streaming} onStreaming={setStreaming}
           onStarted={runId => onStarted(selection.key, runId)}
           onChoice={choice => setSelection(current => current ? { ...current, choice } : current)}
           onSettled={() => { void state.refetch(); }}
@@ -494,6 +513,64 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
   </Popover>;
 }
 
+/** A worktree folder name beside the project folder, from its label, safe to paste into a shell. */
+function worktreeCommand(folderLabel: string): string {
+  const name = folderLabel.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "") || "project";
+  return `git worktree add ../${name}-worktree`;
+}
+
+/**
+ * The owner's warning before sending in a folder where other conversations' agents work. Proceed sends here anyway.
+ * Use another folder opens a separate folder or a Git worktree the owner made. Vivary does not manage worktrees.
+ */
+function SharedFolderNotice({ runs, acknowledged, folderLabel, isolation, onProceed, onCancel, onOpen }: {
+  runs: FolderRun[];
+  acknowledged: boolean;
+  folderLabel: string;
+  isolation: ReturnType<typeof useOpenProjectFolder>;
+  onProceed: () => void;
+  /** Closes the warning without sending. The draft stays and focus returns to the composer. */
+  onCancel: () => void;
+  onOpen: (target: RunTarget) => void;
+}) {
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
+  const command = worktreeCommand(folderLabel);
+  return <div className="local-agent-notice local-agent-shared-folder" role="group" aria-label="Shared folder"
+    onKeyDown={event => {
+      if (event.key !== "Escape" || acknowledged) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    }}>
+    <p role={acknowledged ? undefined : "alert"}>{SHARED_FOLDER_WARNING}</p>
+    <ul>
+      {runs.map(item => <li key={item.id}>
+        {item.title ?? "A conversation of another user"}
+        {item.title !== null && <Button variant="ghost" size="sm" onClick={() => onOpen(item)}>Open</Button>}
+      </li>)}
+    </ul>
+    <div className="local-agent-shared-folder-actions">
+      {acknowledged ? <span role="status">You chose to work in this folder beside them.</span>
+        : <Button size="sm" onClick={onProceed}>Proceed</Button>}
+      {isolation.available && <Button size="sm" variant="outline" disabled={isolation.choosing}
+        onClick={() => void isolation.openFolder()}>{isolation.choosing ? "Choosing folder…" : "Use another folder"}</Button>}
+      {!acknowledged && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
+    </div>
+    <p className="local-agent-shared-folder-hint">To work in a Git worktree, run this in the project folder, then {isolation.available
+      ? "choose Use another folder and pick the new folder" : "connect the new folder as a project"}:</p>
+    <div className="local-agent-shared-folder-actions">
+      <code>{command}</code>
+      <Button variant="ghost" size="sm" onClick={() => {
+        // A Remote access page served over plain HTTP has no clipboard API, so a missing one reads as a failed copy.
+        void Promise.resolve().then(() => navigator.clipboard.writeText(command))
+          .then(() => setCopied("copied"), () => setCopied("failed"));
+      }}>Copy</Button>
+      {copied && <span role="status">{copied === "copied" ? "Copied." : "Copy failed. Select the command to copy it."}</span>}
+    </div>
+    {isolation.error && <p role="alert">{isolation.error}</p>}
+  </div>;
+}
+
 function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, model: string) {
   return engine?.modelCatalog?.status === "ready"
     ? engine.modelCatalog.models.find(item => item.id === model)?.label ?? model
@@ -517,14 +594,20 @@ type LocalCodeConversationProps = PreviewChatProps & {
   viewingMatch?: boolean;
   matchedEventId?: string | null;
   notices: ReactNode;
-  /** The rendered notice that another conversation's agent is working, which locks a new conversation's selectors. */
-  busyNoticeId?: string;
+  /** Other conversations working in this folder. Sending beside them needs the shared-folder warning's Proceed. */
+  folderRuns: FolderRun[];
+  /** Open folder, offered by the warning for a separate folder or a Git worktree. */
+  folderIsolation: ReturnType<typeof useOpenProjectFolder>;
+  onOpenRun: (target: RunTarget) => void;
+  /** This conversation's pending Codex requests, answered from the host strip. */
+  pendingApprovals: number;
   ownerKey: string;
   projectId: string | null;
   workspaceAvailable: boolean;
   selection: ConversationSelection;
   run: VivaryCodeRunState | null;
   state: VivaryCodeState;
+  /** This conversation's own run is working. Another conversation's run never sets it. */
   active: boolean;
   streaming: boolean;
   stopping: boolean;
@@ -580,12 +663,26 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const shown = pendingSwitch ?? choice;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
   const runWorking = props.streaming || (!!props.run && isCodeAgentRunActive(props.run));
+  // Proceed acknowledges the turns working in this folder now, keyed by turn. One that starts later asks again, including
+  // a later turn of a conversation that was acknowledged before.
+  const [acknowledgedRuns, setAcknowledgedRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const unacknowledged = props.folderRuns.filter(item => !acknowledgedRuns.has(item.turnId));
+  // Cancel and Escape close the warning for these conversations without acknowledging it. Nothing is sent and the draft
+  // stays. A later send meets the server's shared-folder refusal, which opens the warning again.
+  const [cancelledRuns, setCancelledRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const undecided = unacknowledged.filter(item => !cancelledRuns.has(item.turnId));
+  const sharedFolderHeld = undecided.length > 0 && !runWorking;
+  const focusComposerAfterCancel = useRef(false);
+  const sharedFolderAcknowledged = useRef(false);
+  sharedFolderAcknowledged.current = props.folderRuns.length > 0 && unacknowledged.length === 0;
 
   const createAdapter = useCallback<NonNullable<AssistantChatProps["createAdapter"]>>(context =>
     createLocalCodeChatAdapter({
       context, call, runIdRef, projectId: props.projectId, draftThreadId,
       onKnownRejected: submitId => draft.rejectKnownSubmission(draftThreadId, submitId),
       engines: () => latest.current.state.engines,
+      acknowledgeSharedFolder: () => sharedFolderAcknowledged.current,
+      onSharedFolderRefused: () => setCancelledRuns(new Set()),
       onStarted: runId => latest.current.onStarted(runId),
       onStreaming: value => {
         if (value) adapterOwnsMessages.current = true;
@@ -623,10 +720,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
   const shownModelChoices = !pendingSwitch ? modelChoices
     : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
-  // A retained conversation switches in place (vivary-code-switch), so another conversation's run never locks it.
-  // A new conversation's selectors still wait for the host, and point at the busy notice that says why.
+  // A retained conversation switches in place (vivary-code-switch). Another conversation's run never locks either kind.
   const retained = !!props.selection.runId;
-  const selectorReasonIds = retained ? undefined : props.busyNoticeId;
   // A Stop and switch the host recorded on the run. It survives a reload and applies when the run stops.
   const serverPending = props.run?.pendingSwitch ?? null;
   const selectorsDisabled = retained
@@ -657,7 +752,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
     || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable
-    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || !!props.run?.pendingSwitch;
+    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || !!serverPending || sharedFolderHeld;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
@@ -724,6 +819,17 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     }
   }
 
+  function cancelSharedFolder() {
+    setCancelledRuns(new Set(unacknowledged.map(item => item.turnId)));
+    focusComposerAfterCancel.current = true;
+  }
+  // The composer is disabled while the warning asks, so focus moves once Cancel has enabled it.
+  useEffect(() => {
+    if (!focusComposerAfterCancel.current || sharedFolderHeld) return;
+    focusComposerAfterCancel.current = false;
+    chatRef.current?.focusComposer();
+  }, [sharedFolderHeld]);
+
   const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
   useEffect(() => {
     // A turn that finished while the owner was choosing needs only the plain confirm now.
@@ -746,7 +852,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.pendingApprovals > 0 ? "Review the pending request above. Approve or deny before sending another message." : sharedFolderHeld ? "Other agents are working in this folder. Choose Proceed or use another folder before sending." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
@@ -771,6 +877,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     </div>}
     composerSlot={<div className="min-h-0 overflow-auto">
       {props.notices}
+      {props.folderRuns.length > 0 && !runWorking && !props.viewingMatch && (undecided.length > 0 || !unacknowledged.length)
+        && <SharedFolderNotice runs={props.folderRuns} onCancel={cancelSharedFolder}
+        acknowledged={!sharedFolderHeld} folderLabel={props.state.workspaceLabel} isolation={props.folderIsolation}
+        onProceed={() => setAcknowledgedRuns(new Set(props.folderRuns.map(item => item.turnId)))} onOpen={props.onOpenRun} />}
       {!props.viewingMatch && props.run && <>
         <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
         <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
@@ -856,7 +966,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <label className="local-agent-composer-runtime">
           Runtime
           <select aria-label="Conversation runtime" value={shown.engine}
-            aria-describedby={pendingSwitch || serverPending ? switchPanelId : selectorReasonIds}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
             className="local-agent-composer-select"
             disabled={selectorsDisabled}
             onChange={event => chooseRuntime(event.target.value)}>
@@ -869,7 +979,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <label className="local-agent-composer-model">
           Model
           <select aria-label="Conversation model" value={shown.model}
-            aria-describedby={pendingSwitch || serverPending ? switchPanelId : selectorReasonIds}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
             className="local-agent-composer-select"
             disabled={selectorsDisabled || !shownModelChoices.length}
             onChange={event => {

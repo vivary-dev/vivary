@@ -74,9 +74,8 @@ test("a legacy pending launch is interrupted without replay when a fresh host in
     assert.equal(retained?.needsApproval, false);
     assert.equal(retained?.metadata?.pendingLaunch, undefined);
     const host = await getVivaryCodeHostState("owner@example.com");
-    assert.equal(host.activeRun, null);
+    assert.deepEqual(host.activeRuns, []);
     assert.equal(host.busy, false);
-    assert.equal(host.pendingApproval, null);
     assert.equal(getCodeAgentRunRecord(native.id)?.status, "paused");
     assert.equal(getCodeAgentRunRecord(native.id)?.phase, "interrupted");
     assert.equal(getCodeAgentRunRecord(native.id)?.needsApproval, false);

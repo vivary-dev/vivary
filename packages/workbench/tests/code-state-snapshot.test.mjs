@@ -29,8 +29,8 @@ for (const scenario of ["terminal", "engine", "model"]) test(scenario === "model
     requireOwnedRun: () => record,
     getCodexModels: async () => { discovered(); await held;
       return { status: "ready", models: [{ id: "fixture-model" }] }; },
-    getVivaryCodeHostState: async () => ({ activeRun: null, busy: false, cleanup: { scan: "unavailable" } }),
-    readVivaryCodeHostState: () => ({ activeRun: null, busy: false, cleanup: { scan: "unavailable" } }),
+    getVivaryCodeHostState: async () => ({ activeRuns: [], busy: false, cleanup: { scan: "unavailable" } }),
+    readVivaryCodeHostState: () => ({ activeRuns: [], busy: false, cleanup: { scan: "unavailable" } }),
     listCodeAgentTranscriptEvents: () => [{ kind: "status", metadata: { status: "errored", phase: "cleanup-unverified" } }],
   });
   const response = getState("owner@example.test", changedSelection ? undefined : "run-one");
@@ -42,7 +42,7 @@ for (const scenario of ["terminal", "engine", "model"]) test(scenario === "model
   assert.equal(state.run.status, "errored", "selected status must agree with the terminal transcript");
   assert.equal(state.run.phase, "cleanup-unverified");
   assert.equal(state.runs[0].status, "errored", "history must use the same fresh store snapshot");
-  assert.equal(state.activeRun, null);
+  assert.deepEqual(state.activeRuns, []);
   assert.equal(state.runtime.message, state.run.engine, "runtime belongs to the selected run's engine");
   assert.equal(state.engineLabel, state.run.engine);
   assert.ok(state.engines.find(engine => engine.engine === state.run.engine).models.includes(state.run.model),
@@ -67,8 +67,11 @@ function stateFixture(overrides = {}) {
     engineFromRun: run => run.engine,
     modelFromRun: run => run.model,
     engineLabelFromRun: run => run.engine,
-    getVivaryCodeHostState: async () => ({ activeRun: null, busy: false, cleanup: null }),
-    readVivaryCodeHostState: () => ({ activeRun: null, busy: false, cleanup: null }),
+    getVivaryCodeHostState: async () => ({ activeRuns: [], busy: false, cleanup: null }),
+    readVivaryCodeHostState: () => ({ activeRuns: [], busy: false, cleanup: null }),
+    activeRuns: new Map(),
+    canonicalFolder: async folder => folder,
+    runsInFolder: () => [],
     getCodePermissionMode: async () => "auto-edit",
     toRunSummary: value => ({ ...value }),
     listCodeAgentTranscriptEvents: () => [],
@@ -112,10 +115,12 @@ test("host activity matches a run that finishes during awaited state work", asyn
   const finishRun = () => { record = { ...record, status: "errored", phase: "cleanup-unverified" }; };
   const readHost = () => {
     const busy = record.status === "running";
-    return { busy, activeRun: busy ? { id: record.id, title: record.title, projectId: null } : null,
-      pendingApproval: busy ? { runId: record.id } : null,
+    return { busy, activeRuns: busy ? [{ id: record.id, title: record.title, projectId: null,
+      pendingApprovals: [{ runId: record.id }] }] : [],
       recentRun: busy ? null : { ...record }, cleanup: { scan: "unavailable" } };
   };
+  // The host's run map, which reads the same record, so a finished run leaves it in the same turn.
+  const activeRuns = { has: id => id === record.id && record.status === "running" };
   // A dependency can capture activity, yield, then return after execution has ended.
   // Exercise that window for the host read and for a post-discovery runtime probe.
   const getState = stateFixture({
@@ -134,15 +139,15 @@ test("host activity matches a run that finishes during awaited state work", asyn
       return snapshot;
     },
     readVivaryCodeHostState: readHost,
+    activeRuns,
     listCodeAgentTranscriptEvents: () => [{ kind: "status", metadata: { status: record.status, phase: record.phase } }],
   });
   const state = await getState("owner@example.test", "run-one");
   assert.equal(state.run.status, "errored");
   assert.equal(state.runs[0].status, "errored");
   assert.equal(state.run.events[0].metadata.status, "errored");
-  assert.equal(state.busy, false, "a finished host must not remain busy in the terminal snapshot");
-  assert.equal(state.activeRun, null, "the terminal run must not remain the host's active run");
-  assert.equal(state.pendingApproval, null);
+  assert.equal(state.busy, false, "a finished run must not remain busy in the terminal snapshot");
+  assert.deepEqual(state.activeRuns, [], "the terminal run must not remain among the host's active runs");
   assert.equal(state.recentRun.status, "errored");
   assert.equal(state.cleanup.scan, "unavailable", "cleanup refusals remain visible");
 });

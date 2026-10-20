@@ -296,7 +296,7 @@ Each implementation unit gets focused checks and affected real hosted verificati
 | Open an existing project | One workspace appears; metadata is compact and no file opens automatically. |
 | Open a previous conversation | Existing history, harness identity and unsent draft remain intact. No duplicate session. |
 | Start another conversation in the same project | The new chat has separate history, bounded context and draft state. The earlier conversation remains available. |
-| Inspect potentially concurrent work | Deferred to issue #228. This release accepts the interim row: the interface states that only one run can be active and offers Open. |
+| Inspect potentially concurrent work | Each running Code conversation appears at the top with its own requests, Open and Stop. A send beside another agent in an overlapping folder shows the owner's warning with Proceed, Use another folder and a Git worktree command (issue #228). |
 | Open a file, edit, close and reopen | Formatted read view first; explicit edits and recoverable draft survive. Composer and run are unchanged. |
 | Resize and close panels | Pointer and keyboard work; focus returns; minimum chat space and remembered widths remain usable. |
 | Use a 390 px viewport and 200% zoom | Navigation, composer, context, approval and Stop remain reachable without crushed columns. |

@@ -134,7 +134,9 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
         assert.equal(calls.filter(call => call.message?.method === "turn/start").length, 1);
         for (const pid of new Set<number>(calls.map(call => call.pid))) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
       } finally {
-        if ((await getVivaryCodeHostState(ownerEmail)).activeRun?.id === run.id) await stopVivaryCodeRun({ ownerEmail, runId: run.id });
+        if ((await getVivaryCodeHostState(ownerEmail)).activeRuns.some(active => active.id === run.id)) {
+          await stopVivaryCodeRun({ ownerEmail, runId: run.id });
+        }
         process.chdir(previousCwd);
         if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Restores the saved search path.
       }

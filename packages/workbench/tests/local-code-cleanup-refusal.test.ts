@@ -509,7 +509,8 @@ test("a Stop during a failed stop's own check leaves the run failed, not stopped
       const id = (await send("exit after its run")).run!.id;
       await waitFor(() => metadataOf(id).cleanupRefusal, AbortSignal.any([t.signal, AbortSignal.timeout(5_000)]));
       const owners = await agent.getVivaryCodeHostState(OWNER);
-      assert.deepEqual({ active: owners.activeRun?.id, checking: owners.cleanup?.checking, run: owners.cleanup?.run?.id },
+      assert.deepEqual({ active: owners.activeRuns.map(run => run.id).join(), checking: owners.cleanup?.checking,
+        run: owners.cleanup?.run?.id },
         { active: id, checking: true, run: id }, "the owner's strip can tell that the check belongs to its run");
       await agent.stopVivaryCodeRun({ ownerEmail: OWNER, runId: id });
       await rm(scanHold);

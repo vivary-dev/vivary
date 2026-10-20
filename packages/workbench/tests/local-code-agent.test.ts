@@ -405,20 +405,26 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
     const runId = "host-state-test";
     try {
       assert.deepEqual(await getVivaryCodeHostState("owner@example.com"), {
-        activeRun: null, pendingApproval: null, recentRun: null, busy: false, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null,
       });
       createCodeAgentRunRecord({
         id: runId, goalId: "vivary-local-code", title: "Disconnected project", status: "running",
         cwd: path.join(store, "missing-project"),
         metadata: { app: "vivary-workbench-local-code", ownerEmail: "owner@example.com", projectId: "project_alpha" },
       });
-      host.activeRuns.set(runId, { controller, ownerEmail: "owner@example.com", execution: null, stopReason: null, requests: new Map() });
-      assert.deepEqual(await codeStateAction.run({ scope: "host" }, { caller: "frontend", userEmail: "owner@example.com" }), {
-        activeRun: { id: runId, title: "Disconnected project", projectId: "project_alpha" },
-        pendingApproval: null, recentRun: null, busy: true, cleanup: null,
-      });
+      const missingProject = path.join(store, "missing-project");
+      host.activeRuns.set(runId, { controller, ownerEmail: "owner@example.com", execution: null, stopReason: null,
+        workspace: { root: missingProject, label: "Disconnected project" }, canonicalRoot: missingProject, requests: new Map() });
+      const shown = await codeStateAction.run({ scope: "host" }, { caller: "frontend", userEmail: "owner@example.com" });
+      assert.deepEqual(shown.activeRuns.map(({ id, title, projectId, status, workspaceLabel, stopping, pendingApprovals }) =>
+        ({ id, title, projectId, status, workspaceLabel, stopping, pendingApprovals })), [{ id: runId,
+        title: "Disconnected project", projectId: "project_alpha", status: "running", workspaceLabel: "Disconnected project",
+        stopping: false, pendingApprovals: [] }]);
+      assert.deepEqual({ recentRun: shown.recentRun, busy: shown.busy, cleanup: shown.cleanup },
+        { recentRun: null, busy: true, cleanup: null });
+      // Busy and the run list are the caller's own. Another user's run never locks this user's conversations.
       assert.deepEqual(await getVivaryCodeHostState("other@example.com"), {
-        activeRun: null, pendingApproval: null, recentRun: null, busy: true, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null,
       });
     } finally {
       host.activeRuns.delete(runId);
@@ -429,7 +435,7 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
     }
   });
 
-  it("Send starts immediately, keeps one host slot, snapshots settings, and Stop remains available", async () => {
+  it("Send starts immediately, refuses a second turn in the same conversation, snapshots settings, and Stop remains available", async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-send-"));
     temporaryRoots.push(fixture);
     const server = path.join(fixture, ".output", "server");
@@ -476,9 +482,10 @@ process.send({type:"vivary:code-worker:ready"});
         "vivary-code:project:immediate:draft-1");
       assert.equal((await getVivaryCodeState("immediate@example.com", runId, workspace, "immediate-org"))
         .run?.draftThreadId, "vivary-code:project:immediate:draft-1");
-      assert.equal(state.pendingApproval, null);
-      assert.equal(state.activeRun?.id, runId);
+      assert.deepEqual(state.activeRuns.map(run => [run.id, run.pendingApprovals.length]), [[runId, 0]]);
       assert.equal(state.busy, true);
+      assert.deepEqual(state.folderRuns.map(({ id, title }) => ({ id, title })), [{ id: runId, title: "Inspect this fixture" }]);
+      assert.match(state.folderRuns[0].turnId, /^[0-9a-f-]{36}$/, "a random turn identity, not the run ID");
       assert.equal(getCodeAgentRunRecord(runId)?.metadata?.pendingLaunch, undefined);
       assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
       assert.equal(hasOwnedVivaryCodeSubmit("immediate@example.com", "immediate-org", workspace,
@@ -507,8 +514,12 @@ process.send({type:"vivary:code-worker:ready"});
       assert.equal(invocation?.permissionMode, "read-only");
       assert.equal(await getCodePermissionMode("immediate@example.com", "immediate-org"), "yolo");
       assert.equal(await getCodePermissionMode("different@example.com", "immediate-org"), "normal");
-      await assert.rejects(sendVivaryCodeMessage({ ownerEmail: "immediate@example.com", message: "Second", workspace }),
-        { errorCode: "vivary_code_run_active" });
+      await assert.rejects(sendVivaryCodeMessage({ ownerEmail: "immediate@example.com", orgId: "immediate-org", runId,
+        message: "Second", workspace }), { errorCode: "vivary_code_conversation_active", statusCode: 409 });
+      // Another owner in the same folder sees the warning, and no title of this owner's conversation.
+      await assert.rejects(sendVivaryCodeMessage({ ownerEmail: "immediate@example.com", message: "Elsewhere", workspace }),
+        { errorCode: "vivary_code_shared_folder_active", statusCode: 409,
+          message: /^Other agents are working in this folder\. .* Working in this folder: 1 conversation of another user\.$/ });
       await assert.rejects(stopVivaryCodeRun({ ownerEmail: "different@example.com", runId, projectId: workspace.projectId }),
         { statusCode: 404 });
       await stopVivaryCodeRun({ ownerEmail: "immediate@example.com", orgId: "immediate-org", runId, projectId: workspace.projectId });
@@ -627,7 +638,8 @@ process.send({type:"vivary:code-worker:ready"});
         workspace, revalidateWorkspace: async () => workspace });
       let pending;
       for (let attempt = 0; attempt < 200 && !pending; attempt++) {
-        pending = (await getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).pendingApproval;
+        pending = (await getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).activeRuns
+          .find(run => run.id === runId)?.pendingApprovals[0];
         if (!pending) await delay(20);
       }
       assert.equal(pending?.runId, runId, "the approval belongs to the switched conversation");

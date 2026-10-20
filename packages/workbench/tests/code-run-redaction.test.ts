@@ -128,9 +128,11 @@ test("a Codex approval card shows placeholders, and the answer keeps the request
   const request = { requestId: "17", method: "item/commandExecution/requestApproval",
     params: { command: `curl -H "Authorization: Bearer ${held}" https://api.example.test/v1`, reason: `Uses the key ${held}`, cwd: caseRoot } };
   host.activeRuns.set(runId, { controller: new AbortController(), ownerEmail, execution: null, stopReason: null,
-    workspace: { root: caseRoot, label: "Approval probe" }, requests: new Map([["17", { request, resolve: () => undefined }]]) } as never);
+    workspace: { root: caseRoot, label: "Approval probe" }, canonicalRoot: caseRoot,
+    requests: new Map([["17", { request, resolve: () => undefined }]]) } as never);
   try {
-    const shown = JSON.stringify((await getVivaryCodeHostState(ownerEmail)).pendingApproval);
+    const shown = JSON.stringify((await getVivaryCodeHostState(ownerEmail)).activeRuns.find(run => run.id === runId)
+      ?.pendingApprovals);
     assertHidden(shown, [held], "approval card");
     assertMatch(shown, /Authorization: Bearer \[redacted VIVARY_PROBE_TOKEN\]/);
     assertMatch(shown, /"requestId":"17"/);

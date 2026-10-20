@@ -240,8 +240,17 @@ after a confirm. The new session gets the visible conversation text, up to the
 last 24 messages. Tool output and the previous runtime's private session do not
 transfer. While a request runs, the switch waits, or Stop and switch cancels the
 request first and keeps completed work. Vivary keeps a Stop and switch request
-if you leave or reload the conversation before the request stops. This prerelease artifact predates the
-switch. Codex integration
+if you leave or reload the conversation before the request stops.
+
+Several Code conversations can work at once, in one project or in different
+projects, with Claude Code and Codex side by side. The strip at the top lists
+each running conversation with its own requests and Stop. Before you send in a
+folder where another conversation's agent is working, Vivary shows a warning.
+Choose **Proceed** to work there anyway, **Use another folder** to open a
+separate folder or a Git worktree you made, or **Cancel** to close the warning
+and keep your draft. The warning shows a
+`git worktree add` command you can copy. This prerelease artifact predates the
+switch and concurrent conversations. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
 follow-ups, progress, and Stop. Earlier Windows candidates exercised real Codex
 journeys. This exact artifact's visual review did not repeat paid model calls.

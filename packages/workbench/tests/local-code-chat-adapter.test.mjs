@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalCodeChatAdapter } from "../app/lib/local-code-chat-adapter.ts";
 
-function adapterForTest(rejections, actions, engine = "codex-cli", actionError = new Error("No owner action expected")) {
+function adapterForTest(rejections, actions, engine = "codex-cli", actionError = new Error("No owner action expected"),
+  acknowledged = false) {
   return createLocalCodeChatAdapter({
     context: { engineRef: { current: engine }, modelRef: { current: "fixture-model" } },
     call: async (...args) => { actions.push(args); throw actionError; },
@@ -12,11 +13,37 @@ function adapterForTest(rejections, actions, engine = "codex-cli", actionError =
     engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
       modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
     onKnownRejected: async submitId => { rejections.push(submitId); },
+    acknowledgeSharedFolder: () => acknowledged,
     onStarted: () => {},
     onStreaming: () => {},
     onSettled: () => {},
   });
 }
+
+test("a shared-folder refusal restores the draft and asks the warning again", async () => {
+  const rejections = [], actions = [];
+  let refused = 0;
+  const refusal = Object.assign(new Error("Other agents are working in this folder."),
+    { errorCode: "vivary_code_shared_folder_active", statusCode: 409 });
+  const adapter = createLocalCodeChatAdapter({
+    context: { engineRef: { current: "codex-cli" }, modelRef: { current: "fixture-model" } },
+    call: async (...args) => { actions.push(args); throw refusal; },
+    projectId: "project-one", draftThreadId: "original-draft-id", runIdRef: { current: null },
+    engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
+      modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
+    onKnownRejected: async submitId => { rejections.push(submitId); },
+    acknowledgeSharedFolder: () => false, onSharedFolderRefused: () => { refused += 1; },
+    onStarted: () => {}, onStreaming: () => {}, onSettled: () => {},
+  });
+  await assert.rejects(async () => {
+    for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Edit the parser" }] }],
+      runConfig: { custom: { agentNativeQueuedMessageId: "submit-shared" } }, abortSignal: new AbortController().signal })) {}
+  }, /Other agents are working in this folder/);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0][1].acknowledgeSharedFolder, false);
+  assert.deepEqual(rejections, ["submit-shared"], "the draft is restored");
+  assert.equal(refused, 1, "the warning asks again");
+});
 
 test("Code local validation restores a known rejected draft before any owner action", async () => {
   const rejections = [], actions = [];
@@ -59,13 +86,26 @@ test("an uncertain Code owner failure keeps its pending submission for reconcili
   }, /No owner action expected/);
   assert.equal(actions.length, 1);
   assert.equal(actions[0][0], "vivary-code-send");
+  assert.equal(actions[0][1].acknowledgeSharedFolder, false);
   assert.deepEqual(rejections, []);
+});
+
+test("a send carries the owner's Proceed on the shared-folder warning", async () => {
+  const actions = [];
+  const adapter = adapterForTest([], actions, "codex-cli", new Error("No owner action expected"), true);
+  await assert.rejects(async () => {
+    for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "work here" }] }],
+      abortSignal: new AbortController().signal })) {}
+  }, /No owner action expected/);
+  assert.equal(actions[0][1].acknowledgeSharedFolder, true);
 });
 
 
 test("an explicit pre-append owner rejection restores the same Code draft", async () => {
   // Issue #121. Leftover coding processes refuse a send before it is appended, so the draft comes back too.
-  for (const [status, errorCode] of [[503, "vivary_code_runtime_unavailable"], [409, "vivary_code_cleanup_required"]]) {
+  // A busy conversation and an unacknowledged shared folder refuse before the append as well.
+  for (const [status, errorCode] of [[503, "vivary_code_runtime_unavailable"], [409, "vivary_code_cleanup_required"],
+    [409, "vivary_code_conversation_active"], [409, "vivary_code_shared_folder_active"]]) {
     const rejections = [], actions = [];
     const error = Object.assign(new Error(`Refused with ${errorCode}`), { status, errorCode });
     const adapter = adapterForTest(rejections, actions, "codex-cli", error);
@@ -96,7 +136,8 @@ test("accepted owner sends refresh linked history while refused sends emit no ac
     projectId: "project-one", draftThreadId: "retained-draft", runIdRef,
     engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
       modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
-    onKnownRejected: async () => {}, onStarted: () => controller.abort(), onStreaming: () => {}, onSettled: () => {},
+    onKnownRejected: async () => {}, acknowledgeSharedFolder: () => false,
+    onStarted: () => controller.abort(), onStreaming: () => {}, onSettled: () => {},
   });
   for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Explicit send" }] }],
     abortSignal: controller.signal })) {}

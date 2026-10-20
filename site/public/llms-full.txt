@@ -6699,8 +6699,17 @@ after a confirm. The new session gets the visible conversation text, up to the
 last 24 messages. Tool output and the previous runtime's private session do not
 transfer. While a request runs, the switch waits, or Stop and switch cancels the
 request first and keeps completed work. Vivary keeps a Stop and switch request
-if you leave or reload the conversation before the request stops. This prerelease artifact predates the
-switch. Codex integration
+if you leave or reload the conversation before the request stops.
+
+Several Code conversations can work at once, in one project or in different
+projects, with Claude Code and Codex side by side. The strip at the top lists
+each running conversation with its own requests and Stop. Before you send in a
+folder where another conversation's agent is working, Vivary shows a warning.
+Choose **Proceed** to work there anyway, **Use another folder** to open a
+separate folder or a Git worktree you made, or **Cancel** to close the warning
+and keep your draft. The warning shows a
+`git worktree add` command you can copy. This prerelease artifact predates the
+switch and concurrent conversations. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
 follow-ups, progress, and Stop. Earlier Windows candidates exercised real Codex
 journeys. This exact artifact's visual review did not repeat paid model calls.
@@ -7520,10 +7529,10 @@ Unavailable selections keep the composer disabled with a reason to choose anothe
 model, update Claude Code, or verify its installed version. A retained
 conversation changes its runtime or model in place through a confirmed switch,
 described below. The send boundary still refuses a send that names a runtime or
-model the run does not record, so only that switch changes a retained route. When
-another conversation's agent is working, a new conversation's selectors stay
-locked and name that notice. A retained conversation's selectors stay open,
-because a switch waits only for its own run.
+model the run does not record, so only that switch changes a retained route.
+Another conversation's agent never locks this conversation's selectors or
+composer, as described in Concurrent Code conversations below. A retained
+conversation's switch waits only for its own run.
 A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
@@ -7632,7 +7641,8 @@ and refuses a changed or missing project (`vivary_code_project_changed`). Then,
 with no await before the write, it refuses while a project reconnection is
 pending (`vivary_code_project_reconnecting`) and reads the run again, refusing if
 it started, stopped, or changed route meanwhile. A send that awaited its own
-checks while a switch landed reads the record again before it claims the host. It
+checks while a switch landed reads the record again before it claims this
+conversation's slot. It
 refuses with `vivary_code_engine_changed` when the route changed, so it never
 launches the old route. It builds the prompt from that fresh record, so a switch
 away and back during the send, which keeps the route but clears the sessions,
@@ -7643,7 +7653,8 @@ stopping run. After the same checks, the switch records the target as
 `metadata.pendingSwitch` and requests Stop for the run. Run summaries carry it as
 `pendingSwitch`, so a reloaded or reopened view shows it. When the run leaves the
 host, the execution owner applies the target in the same turn that frees the run,
-so no send can claim the run on the old route first. A host that ended while the
+so no send can claim the run on the old route first. Runs in other conversations
+keep working and neither delay nor apply it. A host that ended while the
 run was stopping applies the target when the next host start marks the run
 interrupted. A run that ends under a cleanup refusal keeps its route, and a
 transcript note says the switch did not happen. A run that already ended when
@@ -7695,6 +7706,107 @@ with stub Claude Code and Codex executables from Claude to Codex and back,
 real Native store, `tests/chat-search-code-replay.test.mjs` checks the divider
 rows, and `tests/native-chat-components.test.mjs` drives the composer. No live
 provider turn and no packaged Windows run has exercised the switch.
+
+### Concurrent Code conversations
+
+The owner required on 2026-10-19 that several conversations can run at once
+within one project, including different runtimes, and accepted the risk that
+agents edit the same files. Issue #228 tracked this. Each Code conversation is
+one Native Code run, and most run state was already kept per run: the
+`activeRuns` map, its AbortController, its pending Codex requests, a forked
+worker process, the record and transcript files, Stop by run ID, and approve or
+deny by run ID plus request ID. Codex numbers requests per session, so two runs
+can both wait on request 17. The host keys each request by its run.
+
+`sendVivaryCodeMessage` in
+[`local-code-agent.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-code-agent.ts) no
+longer refuses because another run is active. `assertConversationCanStart`
+refuses a send into a conversation whose run is working or stopping
+(`vivary_code_conversation_active`, 409), because a second turn would drive the
+same provider session. It runs before the runtime checks and again at the final
+claim. No await separates the final claim from `activeRuns.set`, so of two
+simultaneous sends into one conversation exactly one starts.
+
+The same check refuses with `vivary_code_shared_folder_active` (409) when
+another active run's folder overlaps this workspace, unless the send carries
+`acknowledgeSharedFolder`. [`folder-overlap.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/folder-overlap.ts)
+compares real paths. Two folders overlap when they are the same folder or one
+contains the other. A Git worktree in a sibling folder therefore does not overlap
+its main checkout, while a symbolic link to the folder or a nested project does.
+The refusal starts with the owner's warning from
+[`code-concurrency.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/code-concurrency.ts), names
+the caller's conversations working there by title, and counts another user's
+without a title. The server enforces the acknowledgement, so a Remote access
+client cannot skip the warning. The acknowledgement accepts the folder's risk,
+not a list of runs. A run that starts after the composer's last poll and before
+the send is therefore covered by an earlier Proceed, and the composer asks again
+on its next poll.
+
+`getVivaryCodeHostState` returns `activeRuns`: the caller's running
+conversations in start order, each with its run ID, title, project, workspace
+label, runtime label, model, status, whether it is stopping, and its own redacted
+pending requests. This replaces the single `activeRun` and `pendingApproval`
+fields, and every caller moved in the same change. `busy` counts only the
+caller's runs. In `getVivaryCodeState`, `busy` means the selected conversation is
+running, and `folderRuns` lists active runs, any owner's, whose folder overlaps
+the workspace. Each entry carries a `turnId` that is new for every turn, so a
+Proceed or Cancel covers one turn and a later turn of the same conversation asks
+again. Only the caller's runs carry their run ID and title. Another
+owner's run carries a random placeholder ID, kept for the life of the run so an
+earlier Proceed still covers it, and no title. A send that names a run checks
+ownership before the per-conversation refusal, so another owner's run ID gets the
+same `vivary_code_run_not_found` (404) as any unknown ID.
+
+[`CodeRunControl.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/CodeRunControl.tsx)
+lists each running conversation with Open conversation, its own Stop, and its
+own request cards, so an answer or a Stop acts on that run only. Open
+conversation in another project, from the strip or from the shared-folder
+warning, goes through the page's route hold in
+[`conversation-route-hold.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-route-hold.ts).
+The hold lives outside any component, because the Code conversation that asks
+for the open unmounts while the project changes. `CodeRunControl`, which stays
+mounted in the layout, runs `useConversationRouteHold` to apply it.
+Workspace clears the conversation route when the project changes, and the new
+project then restores its saved Code conversation or Native chat onto the bare
+route, so a plain navigation could open the restored view instead of the clicked
+run. The hook applies the target once the project is selected and the old route
+is gone, applies it again with replace if a restore replaces it, and releases it
+after 750 ms or when the owner presses a key or the pointer. In
+[`CodeConversation.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/CodeConversation.tsx)
+the composer locks only while this conversation's run works, New conversation
+and history stay available, and Stop targets the selected conversation's run.
+When other conversations work in this folder, the composer slot shows the
+warning, those conversations with Open, Proceed, Use another folder, Cancel, and a
+copyable `git worktree add ../<folder>-worktree` command. Use another folder is
+the existing Open folder flow, now in
+[`open-project-folder.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/open-project-folder.ts),
+and it appears where the desktop folder picker exists. Vivary does not create or
+manage worktrees.
+
+Folder reconnection now refuses only while a run of that project, or a run whose
+folder overlaps the reconnected folder, is active
+([`managed-project-reconnection.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/managed-project-reconnection.mjs)).
+A pending reconnection still pauses every Code send on the host while it lasts.
+
+The cleanup refusal of issue #121 stays host-wide. Its target is a process group
+or a set of PIDs, not a folder, so Vivary cannot tell which folders leftover
+processes can reach, and a run in `yolo` mode is not confined to its workspace. A
+refusal whose scan could not run lists no processes at all. The strip and
+`resolveVivaryCodeCleanup` also act on one refusal at a time, the oldest. Runs
+that are already working keep their requests and Stop.
+
+Vivary does not control conflicting writes to shared files or concurrent Git
+operations, which the owner accepted. Native chat is unchanged. Offline evidence:
+`tests/code-concurrency.test.ts` runs Claude Code and Codex conversations in one
+project with the IPC worker and with the real worker and fake Claude Code and
+Codex executables, and covers routing, approvals, Stop, the shared-folder
+refusal, nested and linked folders, a separate project, a Git worktree, a race of
+two sends, and a switch beside a running conversation.
+`tests/code-run-control-cleanup-component.test.mjs` and
+`tests/native-chat-components.test.mjs` render the run list and the warning.
+`tests/managed-project-reconnection.test.mjs` covers the narrowed reconnection
+check. No live provider turn and no packaged Windows run has exercised
+concurrent conversations.
 
 ### Linked runtime conversations
 
@@ -7895,9 +8007,9 @@ work after the boundary cannot break an existing link. An entry that does not fi
 the rest of a page starts the next page, so paging never skips text. Only an
 entry longer than a whole page is shortened, and its text ends with an omission
 notice that points to the original. The original remains the complete history owner. This is the
-first linked-history slice of issue #38. Controlled concurrent execution remains
-separate work under issue #228. Independent review and built UI acceptance of
-this slice remain required.
+first linked-history slice of issue #38. Concurrent execution (issue #228) is
+described in Concurrent Code conversations. Independent review and built UI
+acceptance of this slice remain required.
 
 ### Prepare handoff
 
@@ -8267,6 +8379,84 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
+another project selected the project without a route hold, so Workspace's route
+reset and the new project's saved view could open another conversation or Native
+chat. The route hold moves out of component state into one hold for the page,
+set with `holdConversationRoute` and applied by `useConversationRouteHold` in
+`CodeRunControl`, and the warning's Open uses it.
+`tests/conversation-route-hold.test.mjs` covers a view that unmounts during the
+project change.
+
+2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
+conversation, so a later turn of an acknowledged conversation did not ask again.
+`folderRuns` entries now carry a per-turn `turnId`, and the composer keys Proceed
+and Cancel by it. A personal-workspace run in the folder opened in the selected
+project, because a null project fell back to it. `folderRunTargets` in
+`app/lib/code-folder-runs.ts` keeps a matched run's null project. The route hold's
+`hold` now returns a release for that hold only, so a slow, failed open no longer
+releases a newer click's hold or shows its error. Stop, switch, and a pending
+switch now check the run's own cleanup refusal, not only the host's oldest one.
+The inbox's two owner actions, `vivary-code-conversation-meta` and
+`vivary-conversation-archive`, move from this PR's allowlist to the inbox PR #263.
+
+2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
+three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape
+close the warning without acknowledging it, send nothing, keep the draft, and
+return focus to the composer. A later send meets the server's
+`vivary_code_shared_folder_active` refusal, which restores the draft and opens
+the warning again through the adapter's `onSharedFolderRefused`. Isolation stays
+optional. Tests: the warning case in `native-chat-components.test.mjs`,
+the refusal case in `local-code-chat-adapter.test.mjs`, and a second send into a
+working conversation in `code-concurrency.test.ts`.
+
+2026-10-19 Shared route hold for opening a conversation in another project, on PR
+#261. `CodeRunControl.openConversation` selected the project and then navigated,
+so Workspace's route reset and the new project's saved-view restore opened the
+restored conversation instead of the clicked run. The hold that the conversation
+inbox introduced moves to `app/lib/conversation-route-hold.ts`, and the strip uses
+it. `tests/conversation-route-hold.test.mjs` covers the hook and the strip over no
+saved view, a saved Code conversation, and a saved Native chat, and runs in
+`test:native-chat`.
+
+2026-10-19 Exports for the Code conversation inbox, on PR #261.
+`local-code-agent.ts` exports `listOwnedVivaryCodeRuns`, which returns every
+listed Code run the caller owns in any project, most recently updated first, from
+one directory scan, plus the existing `engineLabelFromRun` and `modelFromRun`.
+No behavior changes.
+`tests/code-concurrency.test.ts` covers the list.
+
+2026-10-19 Review fix for concurrent Code conversations (PR #261). `folderRuns`
+returned other owners' run IDs to every caller, and a send checked the
+conversation's active run before ownership, so another owner's working run ID
+got `vivary_code_conversation_active` (409) instead of the unowned-run 404.
+`runsInFolder` now gives another owner's run a random placeholder ID, and the
+send resolves ownership first. `tests/code-concurrency.test.ts` covers both.
+
+2026-10-19 Merge of PR #258's review fixes into the concurrency branch. Both
+behaviors hold together. A switch refuses only for the switched conversation's
+own active or stopping run, and Stop and switch records `pendingSwitch` on that
+run. The host applies it when that run leaves `activeRuns`, in the same turn, so
+no send into that conversation starts on the old route first. Runs in other
+conversations neither block the switch nor apply it. A send checks its own
+conversation, then the shared folder, then builds its prompt from the record it
+reads at that point.
+
+2026-10-19 Concurrent Code conversations, stacked on PR #258 (issue #228). The
+owner required several conversations at once in one project, including Claude
+Code and Codex together, with a warning before a send beside another agent and
+no mandatory isolation. The new section "Concurrent Code conversations"
+describes the per-conversation refusal, the shared-folder refusal and its
+acknowledgement, folder overlap by real path, the host state's `activeRuns` list
+that replaces `activeRun` and `pendingApproval`, the run list and warning in the
+interface, the narrowed reconnection check, and why the cleanup refusal stays
+host-wide. The Coding model selection section no longer says another
+conversation locks a new conversation's selectors. The linked history section
+points to the new section. The 2026-10-16 entry below records the earlier
+release-scope choice, and its host-wide single run guard no longer exists.
+Evidence: the tests named in the new section, the workbench type check, and the
+targeted test files listed in the pull request.
 
 2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
 its prompt from the record it reads before claiming the host, not the one read

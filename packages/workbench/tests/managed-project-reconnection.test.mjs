@@ -155,6 +155,18 @@ test("an owner explicitly reconnects one recorded local folder", async suite => 
       assert.deepEqual(await state(registered.projectId), originalState);
       updateCodeAgentRunRecord(pendingRun.id, { status: "paused", phase: "approval-denied",
         needsApproval: false, metadata: { pendingLaunch: undefined } });
+      // Runs of other projects matter only when their folder overlaps this one. One nested inside it refuses.
+      const codeRun = (id, cwd, projectId) => createCodeAgentRunRecord({ id, goalId: "vivary-local-code",
+        title: id, status: "running", phase: "running", cwd, metadata: { app: "vivary-workbench-local-code",
+          ownerEmail: email, orgId, projectId, workspaceRoot: cwd, engine: "claude-cli", model: "sonnet" } });
+      const nestedRun = codeRun("reconnect-nested-run", path.join(alpha, "packages", "app"), "nested_project");
+      await assert.rejects(confirmManagedProjectReconnection(actionContext, {
+        projectId: registered.projectId, operationId: firstPlan.operationId,
+        acceptedPlanSha256: firstPlan.planSha256,
+      }), /Stop or deny the active coding request in this folder/);
+      updateCodeAgentRunRecord(nestedRun.id, { status: "paused", phase: "paused" });
+      // A run in a separate folder keeps working while this folder reconnects.
+      const elsewhereRun = codeRun("reconnect-elsewhere-run", path.join(fixture, "Elsewhere"), "elsewhere_project");
       let releaseBarrier;
       let enteredBarrier;
       const barrier = new Promise(resolve => { releaseBarrier = resolve; });
@@ -180,7 +192,8 @@ test("an owner explicitly reconnects one recorded local folder", async suite => 
       }
       firstResult = await inFlight;
       assert.equal(projectReconnectionPending(), false);
-      assert.equal(firstResult.code, "reconnected");
+      assert.equal(firstResult.code, "reconnected", "a run in a separate folder does not block the reconnection");
+      updateCodeAgentRunRecord(elsewhereRun.id, { status: "paused", phase: "paused" });
       assert.equal(firstResult.projectId, registered.projectId);
       assert.equal(firstResult.bindingId, originalState.binding.bindingId);
       assert.notEqual(firstResult.rootId, originalState.binding.rootId);

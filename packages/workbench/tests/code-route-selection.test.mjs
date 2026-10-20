@@ -28,7 +28,7 @@ const fail = (message, options) => { throw Object.assign(new Error(message), opt
 // vivary-code-switch, its refusals, its model check, and the record change, as written.
 const switchCode = await slice("export async function switchVivaryCodeRuntime(", "\nexport async function getVivaryCodeFiles(");
 const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
-const pendingCode = await slice("function pendingSwitchFromRun(", "\nfunction engineLabelFromRun(");
+const pendingCode = await slice("function pendingSwitchFromRun(", "\nexport function engineLabelFromRun(");
 const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
   ["VIVARY_CODE_DEFAULT_MODEL", "VIVARY_CODE_MODELS", "CLAUDE_CODE_LEGACY_ALIASES", "fail"])(
   CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_MODELS.map(model => model.id), CLAUDE_CODE_LEGACY_ALIASES, fail);
@@ -38,11 +38,11 @@ function fixture() {
   let codex = { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" };
   let statusGate = null, reconnecting = false;
   const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [];
-  const activeRuns = new Map(), hostState = { cleanup: null };
+  const activeRuns = new Map(), hostState = { cleanup: null, unsaved: new Map() };
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace, ensureVivaryCodeHostInitialized: async () => {},
-    hostState, assertCodeHostAvailable() {},
+    hostState, assertCodeHostAvailable() {}, assertConversationCanStart() {}, canonicalFolder: async folder => folder,
     requireOwnedRun: id => records.get(id) ?? fail("Local Vivary code run not found.", { statusCode: 404 }),
     getCodeAgentRunRecord: id => records.get(id) ?? null,
     engineFromRun: run => run.metadata.engine,
@@ -69,6 +69,8 @@ function fixture() {
     recordProjectContextLoad() { writes.push("context"); },
     activeRuns, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
+    // A stored refusal on the record, as cleanupRefusalFromRun reads it.
+    cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));
