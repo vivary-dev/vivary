@@ -723,6 +723,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Older handoff replies are not called unsaved (PR #262 review). A reply
+preview whose request is neither pending, failed nor the covered one said "Not
+saved", which was wrong for an earlier reply that Vivary saved and a newer handoff
+later replaced. `handoffSaveStatus` in `handoff-status.ts` now says the reply is not
+the latest handoff request and that Save handoff applies only to the latest one,
+claiming nothing about its save. The design below still holds. Evidence:
+`tests/handoff-display-components.test.mjs` adds a replaced-reply case that fails
+with the previous wording.
+
 2026-10-19 Handoff checks from the reply turn. In an API chat, Save handoff refused
 a reply whose passed check came from a `vivary-project-read` call the agent made
 while writing it. The request listed only earlier completed events, and the reply's

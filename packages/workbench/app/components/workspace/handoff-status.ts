@@ -50,5 +50,6 @@ export function handoffSaveStatus(state: HandoffDisplayState | null, requestId: 
     if (status.status === "unverifiable") return { text: `Saved to ${file}. Freshness could not be verified.` };
     return { text: `Saved to ${file}. A newer handoff request is pending.` };
   }
-  return { text: "Not saved. This reply does not answer the latest handoff request." };
+  // An older reply may have been saved and later replaced, so this fallback claims nothing about its save.
+  return { text: "Not the latest handoff request. Save handoff applies only to the latest one." };
 }

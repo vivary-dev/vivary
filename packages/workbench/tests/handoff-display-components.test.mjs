@@ -144,8 +144,10 @@ test("out of date, failed, superseded and unreported states each say so", async 
     [{ status: "out-of-date", covered, reasons: ["head-moved"] }, "Saved to STATE.md. Out of date."],
     [{ ...pending, status: "failed", message: "The write failed.", retryable: true }, "Not saved. The write failed."],
     [{ ...pending, requestId: "req-2", covered }, "Saved to STATE.md. A newer handoff request is pending."],
-    [{ ...pending, requestId: "req-2" }, "Not saved. This reply does not answer the latest handoff request."],
-    [{ status: "none", path: "STATE.md" }, "Not saved. This reply does not answer the latest handoff request."],
+    [{ ...pending, requestId: "req-2" }, "Not the latest handoff request. Save handoff applies only to the latest one."],
+    [{ status: "none", path: "STATE.md" }, "Not the latest handoff request. Save handoff applies only to the latest one."],
+    // An earlier reply that was saved, then replaced by a newer saved handoff, is not called unsaved.
+    [{ status: "fresh", covered: { ...covered, requestId: "req-2" }, reasons: [] }, "Not the latest handoff request. Save handoff applies only to the latest one."],
   ];
   for (const [freshness, expected] of cases) {
     handoffFixture.status = freshness;
