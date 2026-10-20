@@ -465,7 +465,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       <InboxList label="Archived conversations" rows={visible.archived} {...listProps} emptyLabel="" />
     </details>}
     <InboxMessageSearch term={search.trim()} {...messageSearchScopes(filter, catalog?.projects ?? [], inbox.data?.rows ?? [])}
-      rows={inbox.data?.rows ?? []} onOpen={hit => void shared.openHref(hit.projectId, chatSearchHref(hit, false, ""))} />
+      rows={inbox.data?.rows ?? []} access={searchAccessKey(catalog)} onOpen={hit => void shared.openHref(hit.projectId, chatSearchHref(hit, false, ""))} />
   </section>;
 }
 
@@ -490,6 +490,16 @@ export function messageSearchScopes(filter: InboxFilter, projects: readonly { pr
   const ordered = [...all].sort((left, right) => (newest.get(right) ?? -1) - (newest.get(left) ?? -1));
   return { scopes: ordered.slice(0, MAX_MESSAGE_SEARCH_SCOPES).map(projectId => ({ projectId, label: label(projectId) })),
     total: all.length };
+}
+
+/**
+ * What a search result depends on besides its term: the owner's catalog scope, its policy, and each project's binding.
+ * A change restarts message search, so hits from a revoked grant or an old binding are not kept on screen.
+ */
+function searchAccessKey(catalog: { scopeKey: string; policyRevision?: unknown;
+  projects: readonly { projectId: string; bindingRevision?: unknown }[] } | null | undefined): string {
+  return JSON.stringify([catalog?.scopeKey ?? null, catalog?.policyRevision ?? null,
+    catalog?.projects.map(project => [project.projectId, project.bindingRevision ?? null]) ?? []]);
 }
 
 /** A scope whose search stopped with more to read, and the cursor to read from. */
@@ -519,12 +529,12 @@ function mergeMessageSearch(key: string, previous: ChatSearchHit[], results: Sco
  * scope that stopped early. The title filter above stays instant. Selection and the list stay as they are while
  * results load.
  */
-function InboxMessageSearch({ term, scopes, total, rows, onOpen }: { term: string; scopes: SearchScope[]; total: number;
-  rows: readonly Pick<InboxRow, "id" | "archived">[]; onOpen: (hit: ChatSearchHit) => void }) {
+function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { term: string; scopes: SearchScope[];
+  total: number; rows: readonly Pick<InboxRow, "id" | "archived">[]; access: string; onOpen: (hit: ChatSearchHit) => void }) {
   const readAction = useNativeActionReader();
   const headingId = useId();
   const [retry, setRetry] = useState(0);
-  const key = JSON.stringify([term, scopes.map(scope => scope.projectId), retry]);
+  const key = JSON.stringify([term, scopes.map(scope => scope.projectId), access, retry]);
   const [state, setState] = useState<MessageSearchState>();
   // The current search's abort, which a later term or scope change aborts, Search more included.
   const running = useRef<AbortController | null>(null);

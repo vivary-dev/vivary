@@ -1060,6 +1060,10 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox message search follows project access (W5b, review thread 4319908334). The search key now
+holds the catalog scope, its policy revision and each project's binding revision, so a rebinding or grant change
+starts message search again and drops hits from the old binding. Evidence inspected: the new component test.
+
 2026-10-20 Inbox message search pages (W5b, review thread 4318949371). Message search reads each scope through
 `continueChatSearch`, as the project history search does, and offers Search more while a scope stopped with a
 cursor. The count says so far until nothing remains. Evidence inspected: the new component test with three

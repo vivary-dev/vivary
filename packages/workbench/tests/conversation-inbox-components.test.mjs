@@ -161,7 +161,7 @@ test.beforeEach(() => {
     identity: () => inboxFixture.identityBlocked === inboxFixture.active ? null : ({ kind: "project",
       projectId: inboxFixture.active, storageKey: `key-${inboxFixture.active}`,
       scope: { type: "workspace-app", id: `scope-${inboxFixture.active}` } }),
-    projects: () => ({ catalog, checking: false, workspaceAvailable: true, historyAvailable: true, selecting: false,
+    projects: () => ({ catalog: inboxFixture.catalog ?? catalog, checking: false, workspaceAvailable: true, historyAvailable: true, selecting: false,
       activeProject: catalog.projects.find(project => project.projectId === inboxFixture.active) ?? null,
       refresh: async () => {},
       selectProject: async projectId => {
@@ -667,6 +667,21 @@ test("message search reads past the first page and offers Search more while matc
   assert.match(messages(), /3 matching messages\./);
   assert.equal(button("Search more"), undefined, "nothing remains to search");
   assert.deepEqual(inboxFixture.searches.map(search => search.params.after ?? null), [null, "c1", "c2"]);
+});
+
+test("message search starts again when a searched project is rebound, so old binding hits do not stay", async () => {
+  inboxFixture.hits = [hit("alpha", "a1", "the table wraps")];
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.equal(inboxFixture.searches.length, 1);
+  inboxFixture.hits = [];
+  inboxFixture.catalog = { ...catalog, projects: catalog.projects.map(project => project.projectId === "alpha"
+    ? { ...project, bindingRevision: 2 } : project) };
+  await act(async () => inboxFixture.notify());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 400)));
+  await settle();
+  assert.equal(inboxFixture.searches.length, 2, "the rebound project is searched again");
+  assert.deepEqual(hitTitles(), [], "the old binding's hit is gone");
 });
 
 test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {
