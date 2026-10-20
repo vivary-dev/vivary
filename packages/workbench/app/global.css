@@ -4,12 +4,19 @@
 @import "@agent-native/toolkit/styles.css";
 @source "./**/*.{ts,tsx}";
 
-/* Chat replies: Core sizes a Markdown table to max-content, so every cell stays on one line and the
-   table scrolls. Auto width wraps cell text at spaces and keeps the table within the reply. The
-   longest word or code span still sets a column's minimum, so a table that cannot fit scrolls in
-   Core's wrapper. break-word replaces any inherited overflow-wrap:anywhere, which would let a column
-   shrink below its longest word. Code stays on one line, so a wide path or command scrolls whole. */
+/* Chat replies. Core sizes a Markdown table to max-content inside a wrapper that scrolls sideways.
+   - The table rule sets auto width, so cell text wraps at spaces and the table fits the reply.
+     break-word replaces any inherited overflow-wrap:anywhere, so an ordinary word still sets its
+     column's minimum and is never split.
+   - The long-token rule lets a run of 20 or more characters without a space break anywhere. The
+     maintained Core patch wraps each such run in a table cell or link in
+     .agent-markdown-long-token, so a long URL or hash no longer forces the table wider than the
+     reply. Only the display wraps: the href and the text are unchanged. Links are not in the
+     selector, so short link text such as "Authentication guide" still breaks only at spaces.
+   - The code rule keeps inline code on one line, so a table of wide paths or commands still
+     scrolls in Core's wrapper instead of breaking the code. */
 .agent-markdown-table-wrap > table { width: auto; overflow-wrap: break-word; }
+.agent-markdown-table-wrap .agent-markdown-long-token { overflow-wrap: anywhere; }
 .agent-markdown-table-wrap code { white-space: nowrap; }
 
 /* Unmount closing menus before a sibling overlay takes focus. */

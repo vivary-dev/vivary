@@ -8180,6 +8180,149 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Integration of reply recording and chat Markdown patches. The
+combined Core patch keeps table token marking alongside registered handoff
+renderers and Claude reply-once recording. Both shared-renderer application
+orders produce the same source. The remaining appended sections and common
+patch prefix stay unchanged. The combined patch passes all 224 sections against
+integrity-verified upstream source. Frozen installation, installed patch checks,
+dependency preflight, all 23 reader tests and typecheck pass. The component and
+serialization contracts below still hold. Full exact-head server CI and
+packaged Windows acceptance remain pending.
+
+2026-10-20 PR #259 integration with merged PR #262. The maintained Core patch
+combines long-token marking in table cells and links with registered fenced-code
+renderers in one Markdown renderer diff. Claude reply recording, reply metadata,
+the user-message display registry and its exports retain PR #262's patch sections.
+The read-only footnote patch is unchanged. These changes keep the component and
+serialization boundaries described here. Installed-patch verification and
+packaged Windows acceptance of the combined source remain pending.
+
+2026-10-20 Footnote reference admission and reachability (PR #259 review). The
+maintained Toolkit patch rejects unsupported backslash escapes in labels and
+keeps citations literal inside Markdown link labels, including the silent scans
+that find their boundaries. Reference numbers and occurrences are assigned after
+definition blocks leave the body. Body citations establish the first numbers,
+then only the first retained definition of each reached note can contribute
+further citations. Discarded duplicates and unused definitions cannot create
+notes, consume numbers, or add return links. The read-only opt-in, editable save
+path, and serializer ownership described below remain accurate. Regression cases
+in `tests/markdown-reader.test.mjs` check both link forms, invalid escapes,
+discarded calls, unused definitions, and a retained note chain. The coordinator
+observed assertion failures in all four groups on unchanged installed code,
+then all 23 reader tests passed with the repaired patch installed. Element-count
+assertions keep failed DOM checks bounded. Frozen installation, the installed
+patch checks, dependency preflight and typecheck passed. Packaged Windows reader
+acceptance remains pending.
+
+2026-10-20 Footnote return links (PR #259 review). References had no id and notes
+had no link back, so a reader could not return to the citation, especially for a
+note cited twice. The maintained Toolkit patch now follows GFM's HTML. Each
+reference link has its own id, `fnref-1` for the first reference to note 1 and
+`fnref-1-2` for the second, and a new display-only `footnoteBackref` node ends each
+note with one return link per reference. Return links add no text and serialize to
+nothing, so read-only Markdown and editable saves are unchanged. `focusFootnote`
+also handles a rendered return link and moves focus back to its reference without
+changing the route. The Toolkit patch hash moves from `5ecd0aca` to `0e1103d4`.
+The footnote design below still holds. Evidence: two new cases in
+`tests/markdown-reader.test.mjs` check the ids, the return links and their
+targets, a note that ends in a list, the read-only Markdown measured before the
+change, and focus from each return link. Both failed before the change. The
+editable pin passes unchanged.
+
+2026-10-20 Escaped brackets in footnote labels (PR #259 review). The footnote label
+scanner in the maintained Toolkit patch ended a label at an escaped `\]` and
+rejected an escaped `\[`, so `[^a\]b]` and its definition stayed text. It now
+skips `\[`, `\]`, and `\` the way a link label does. The label keeps its
+escapes, so matching ignores case as before and each side saves the label as
+written. The Toolkit patch hash moves from `d757b942` to `5ecd0aca`. The footnote
+design below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+reads escaped references and definitions in other case, checks the notes and the
+saved Markdown, and keeps an unescaped bracket rejected. It failed before the
+change.
+
+2026-10-20 Chat table long tokens inside bold or struck text (PR #259 review).
+`markLongTokens` in the maintained Core patch marked only a cell's direct string
+children, so a long hash in `**bold**` or `~~struck~~` text got no
+`agent-markdown-long-token` span and could still make a chat table scroll. It now
+descends into plain elements such as `strong`, `em`, and `del`. Inline `code`,
+`kbd`, `samp`, and `pre` stay whole, and an element rendered by a component, such
+as Core's link, is left to that component, so a link inside bold text is marked
+once. The Core patch hash moves from `b680f535` to `b54ac9e3`. The chat rendering
+described below still holds. Evidence: a new case in `tests/markdown-reader.test.mjs`
+renders bold, struck, nested, linked, and code cells and checks the spans, cell
+text, hrefs, and the HTML without the spans. It failed before the change.
+
+2026-10-20 Note links come only from rendered references (PR #259 review). The
+previous fix still let an ordinary heading link such as `#fn-1` be taken over when
+note 1 existed. `focusFootnote` now handles only the link inside
+`sup.an-rich-md-footnote-ref`, the element the reader renders for a reference, so
+every other `#fn-` link keeps its normal handling. The design below still holds.
+Evidence: `tests/markdown-reader.test.mjs` adds an ordinary `#fn-1` link beside a
+rendered note 1, and that assertion fails with the previous selector.
+
+2026-10-19 Footnote review fixes (PR #259 review). Four parser and link cases in
+the read-only footnote support were wrong, and the design described below still
+holds. Labels now match ignoring case, the way link reference labels do, and each
+reference and note keeps the label it was written with when it serializes. A
+definition nested inside another becomes its own note, and the blocks after it
+stay in the outer note, where before they leaked into the document body.
+`focusFootnote` now handles only a `#fn-<number>` link whose note is rendered in
+the reader's notes section, so a heading link such as `#fn-details` keeps its
+normal handling. A note continued on the next line after two trailing spaces
+already kept its continuation, with or without indentation, and a test now pins
+it. Editable documents still get no footnote nodes. Evidence: four new cases in
+`tests/markdown-reader.test.mjs` and the unchanged editable pin.
+
+2026-10-19 Footnotes in the read-only Markdown readers. The owner saw a
+document's footnote definitions run together as one paragraph in the Files
+reader. Toolkit's shared editor parses Markdown with plain markdown-it, which has
+no footnote syntax. The maintained Toolkit patch adds an opt-in
+`features.footnotes` to `createSharedEditorExtensions`. With it, references render
+as superscript links and definitions as one notes list at the end, in order of
+first reference. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#read-only-markdown-footnotes)
+own the details. `app/routes/files.tsx` and `app/routes/architecture.tsx` opt in,
+and [`footnote-links.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/footnote-links.ts) moves
+focus to a note without changing the route. Editable documents do not opt in, so
+their saved Markdown is unchanged. A test pins that output. Chat already rendered
+footnotes through remark-gfm, and Core keeps a reply with a definition in one block.
+A Playwright check in Chrome 154 rendered one corpus in the real reader and in chat
+at 360 and 1000 pixels. Both showed four superscript references, two notes, no raw
+`[^` text, task-list checkboxes, and strikethrough. A trusted click on a reference
+focused its note and left the URL unchanged. Bare URLs remain plain text in the
+reader, because the GFM dialect keeps `linkify` off for byte-stable saves, while
+chat links them.
+
+2026-10-19 Long links and unbroken strings in chat tables, a follow-up to the
+table wrapping entry below and related to issue #256. With `width: auto`, a column
+still could not be narrower than its longest unbroken string, so one long URL, a
+64-character hash, or a long identifier forced the table wider than the reply and
+it scrolled. The maintained Core patch now adds `th` and `td` components to
+`markdownComponents` in `dist/client/chat/markdown-renderer.js`, and the plain
+branch of its link component does the same to its children. Each run of 20 or more
+non-whitespace characters in a direct text child is wrapped in a
+`.agent-markdown-long-token` span. The span adds no characters, so the cell text,
+selection, and copied text are unchanged, and hrefs and inline code are not
+touched. `clipboardMarkdownComponents` is unchanged, and Copy still writes the
+message's Markdown as plain text. `app/global.css` lets only those spans break
+anywhere. Links are left out of that rule because a measurement with
+`overflow-wrap: anywhere` on whole links split the words "Authentication" and
+"Documentation" in ordinary link text at 300 and 480 pixels. Electron's
+`will-navigate` and `setWindowOpenHandler` in
+[`main.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) act on the URL, and the in-app link
+handlers use `closest("a[href]")`, so a click on a span still resolves to its link.
+A Playwright check in Chrome 154 rendered the installed, patched components in
+Core's stylesheet at 300, 480, 800, and 1200 pixel windows. A long link, a long
+hash, and a table holding prose, a link, and a hash now fit the reply at every
+width with no ordinary word split. Before, the hash table measured 465 pixels in a
+255 pixel reply. A five-column prose table still scrolls at 300 pixels, because its
+words need 339 pixels in 255. Tables of long inline code paths and a 14-column
+numeric table also scroll, and code stays on one line. A trusted click on the last
+line of each wrapped link requested the original URL, and selecting a cell and
+copying it with the keyboard gave the source text. `tests/markdown-reader.test.mjs`
+renders the installed components with react-markdown and remark-gfm and checks the
+spans, cell text, hrefs, code, cell attributes, and the copied HTML.
+
 2026-10-20 Older handoff replies are not called unsaved (PR #262 review). A reply
 preview whose request is neither pending, failed nor the covered one said "Not
 saved", which was wrong for an earlier reply that Vivary saved and a newer handoff
