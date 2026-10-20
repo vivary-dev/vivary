@@ -105,10 +105,18 @@ const codeRailBundle = await build({ stdin: { contents: `
 const codeRail = { exports: {} };
 compileFunction(codeRailBundle.outputFiles[0].text, ["require", "module", "exports"])(require, codeRail, codeRail.exports);
 
-// Project navigation with its own host stubs. The dialog is the real component on the stubbed toolkit dialog.
+// Project navigation and its selection owner are real, including React Query's refetch/error semantics.
+// The dialog uses the same inert toolkit shell as the isolated cases above. Host actions and saved state are mocked.
 const navigationStubs = new Map([
   ["react-router", `export const useLocation = () => ({ pathname: "/" }); export const useNavigate = () => () => {};`],
-  ["@agent-native/core/client/hooks", `export const useActionQuery = () => ({ data: { folderPicker: false } });`],
+  ["@agent-native/core/client/hooks", `import { useQuery } from "@tanstack/react-query";
+    export function useActionQuery(name, input, options = {}) {
+      return useQuery({ ...options, queryKey: ["action", name, input],
+        queryFn: () => globalThis.kindFixture.readAction(name, input) });
+    }
+    export const readClientAppState = async () => globalThis.kindFixture.selection;`],
+  ["@/lib/native-state", `export const useAppStateWriter = () => ({ ready: true, sessionStatus: "authenticated",
+    retrySession() {}, writeAppState: globalThis.kindFixture.writeAppState });`],
   ["@agent-native/toolkit/ui", stubs.get("@agent-native/toolkit/ui") + `
     export const Skeleton = () => null;`],
   ["@tabler/icons-react", `export const IconCode = () => null; export const IconNotes = () => null;
@@ -118,18 +126,30 @@ const navigationStubs = new Map([
   ["@/components/ui/input", `import { createElement } from "react"; export const Input = props => createElement("input", props);`],
   ["@/lib/native-actions", `export const useNativeActionCaller = () => ({ ready: true, call: globalThis.kindFixture.call });
     export const folderConnectionErrorMessage = () => "Folder failed.";`],
-  ["./ProjectContext", `export const useProjects = () => globalThis.kindFixture.projects;`],
   ["./ReconnectProjectForm", `export const ReconnectProjectForm = () => null;`],
   ["./CreateProjectForm", `import { createElement } from "react";
     export const CreateProjectForm = ({ workspaceKind, onClose }) => createElement("div", { "data-create-kind": workspaceKind },
       createElement("button", { type: "button", "data-create-close": "", onClick: onClose }, "Close form"));`],
 ]);
 const navigationBundle = await build({ stdin: { contents: `
-  import { createElement } from "react";
+  import { createElement, useEffect } from "react";
   import { QueryClientProvider } from "@tanstack/react-query";
   import { ProjectNavigation } from "./app/components/projects/ProjectNavigation";
+  import { ProjectProvider, useProjects } from "./app/components/projects/ProjectContext";
+  function Navigation() {
+    const projects = useProjects();
+    globalThis.kindFixture.observedProjects = projects;
+    useEffect(() => {
+      if (projects.workspaceAvailable && projects.activeProject) {
+        globalThis.kindFixture.entries.push({ projectId: projects.activeProject.projectId,
+          kind: projects.activeProject.workspaceKind });
+      }
+    }, [projects.workspaceAvailable, projects.activeProject]);
+    return createElement(ProjectNavigation);
+  }
   export function navigationView() {
-    return createElement(QueryClientProvider, { client: globalThis.kindFixture.queryClient }, createElement(ProjectNavigation));
+    return createElement(QueryClientProvider, { client: globalThis.kindFixture.queryClient },
+      createElement(ProjectProvider, null, createElement(Navigation)));
   }`, loader: "tsx", resolveDir: workbench },
   bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
   plugins: [{ name: "navigation-services", setup(build) {
@@ -145,13 +165,32 @@ test.beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   globalThis.kindFixture = { events: [],
     call: async (name, input) => { kindFixture.events.push(["call", name, input]); return { ok: true }; },
-    refresh: async () => { kindFixture.events.push(["refresh"]); } };
+    refresh: async () => { kindFixture.events.push(["refresh"]); },
+    catalog: catalogFixture(), selection: null, entries: [], folderPicker: false,
+    readCatalog: async () => kindFixture.catalog,
+    readAction: async name => {
+      if (name === "vivary-project-catalog") return kindFixture.readCatalog();
+      if (name === "vivary-desktop-status") return { folderPicker: kindFixture.folderPicker };
+      throw new Error("Unexpected navigation query: " + name);
+    },
+    writeAppState: async (name, value) => {
+      kindFixture.events.push(["state-write", name, value]);
+      kindFixture.selection = value;
+      return value;
+    } };
   kindFixture.queryClient = new module.exports.QueryClient();
 });
 // Clearing the client removes its queries and their five-minute garbage collection timers, which
 // otherwise keep the test process running after the last test.
 test.afterEach(async () => { await act(async () => root.unmount()); host.remove(); kindFixture.queryClient.clear(); });
 const settle = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+async function waitForNavigation(check, message) {
+  const expires = Date.now() + 2000;
+  while (!check()) {
+    assert.ok(Date.now() < expires, "Navigation did not settle: " + message);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  }
+}
 const cards = () => [...host.querySelectorAll(".workspace-kind-card")];
 const props = (patch = {}) => ({ open: true, description: "Fixture description.",
   onChoose: kind => { kindFixture.events.push(["choose", kind]); }, onCancel: () => { kindFixture.events.push(["cancel"]); },
@@ -276,7 +315,7 @@ test("Project details shows the kind everywhere and its button only where the ho
   assert.deepEqual(changes, ["change"]);
 });
 
-test("Open folder asks for the kind of a new or repeated registration only while it is Not set and savable", () => {
+test("Open folder asks for an unset or unknown kind where the catalog permits saving", () => {
   const { openedFolderNeedsKind } = module.exports;
   const catalog = catalogFixture();
   assert.equal(openedFolderNeedsKind("registered", "project_beta", catalog), true);
@@ -284,7 +323,8 @@ test("Open folder asks for the kind of a new or repeated registration only while
     "a retry that finds the folder registered still asks while the kind is Not set");
   assert.equal(openedFolderNeedsKind("already-registered", "project_alpha", catalog), false);
   assert.equal(openedFolderNeedsKind("registered", "project_new", catalog), true);
-  assert.equal(openedFolderNeedsKind("already-registered", "project_new", catalog), false);
+  assert.equal(openedFolderNeedsKind("already-registered", "project_new", catalog), true,
+    "a missing retry entry leaves the kind uncertain in the retained editable catalog");
   assert.equal(openedFolderNeedsKind("registered", "project_beta", catalogFixture({ kindEditable: false })), false);
   assert.equal(openedFolderNeedsKind("registered", "project_beta", undefined), true);
   assert.equal(openedFolderNeedsKind("already-registered", "project_beta", { code: "denied" }), false);
@@ -304,10 +344,9 @@ test("while chat identity loads, the Code rail cannot start a conversation in a 
 
 // Review of #260. The kind chosen for one new project must not carry into the next New project.
 test("New project starts with no kind chosen after an earlier project chose Personal", async () => {
-  kindFixture.projects = { catalog: catalogFixture(), activeProject: null, checking: false, workspaceAvailable: true,
-    selecting: false, error: null, refresh: async () => {}, selectProject: async () => true, retrySelection: null };
   await act(async () => root.render(navigation.exports.navigationView()));
   const newProject = () => [...host.querySelectorAll("button")].find(button => button.textContent === "New project");
+  await waitForNavigation(() => !!newProject(), "initial project catalog");
   await act(async () => newProject().click());
   assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"]);
   await act(async () => cards()[1].click());
@@ -318,4 +357,147 @@ test("New project starts with no kind chosen after an earlier project chose Pers
   await act(async () => newProject().click());
   assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"], "nothing is preselected");
   assert.equal(document.activeElement, cards()[0], "the first card takes focus, not the earlier choice");
+});
+
+// Claim 4330742974. Registration is in-memory fixture state. The lost-response trace is a mocked
+// host reply, not a real remote registration, filesystem operation, or network failure experiment.
+function openFolderHost({ alreadyRegistered = false, kind = null, loseFirstReply = false } = {}) {
+  const projectId = "project_gamma";
+  let registered = alreadyRegistered, workspaceKind = kind, connects = 0, catalogReads = 0;
+  let failNextCatalog = false;
+  const trace = [], failedCatalogs = [];
+  const selectionWrites = () => kindFixture.events.filter(event => event[0] === "state-write"
+    && event[1] === "vivary-project-selection-v1" && event[2].projectId === projectId);
+  const unsubscribe = kindFixture.queryClient.getQueryCache().subscribe(event => {
+    if (event.type === "updated" && event.action.type === "error"
+      && event.query.queryKey[1] === "vivary-project-catalog") {
+      const data = event.query.state.data;
+      failedCatalogs.push({ code: data?.code ?? null,
+        projectIds: data?.projects?.map(project => project.projectId) ?? [] });
+    }
+  });
+  kindFixture.folderPicker = true;
+  kindFixture.readCatalog = async () => {
+    catalogReads++;
+    if (failNextCatalog) {
+      failNextCatalog = false;
+      trace.push("mocked catalog refresh rejected");
+      throw new Error("Mocked catalog read unavailable");
+    }
+    const current = catalogFixture();
+    if (registered) current.projects.push({ projectId, displayName: "Gamma", bindingRevision: 1,
+      status: "available", reconnectEligible: false, workspaceKind });
+    trace.push("mocked catalog reply: " + (registered ? "Gamma present" : "Gamma absent"));
+    return current;
+  };
+  kindFixture.call = async (name, input) => {
+    kindFixture.events.push(["call", name, input]);
+    if (name === "vivary-connect-project-folder") {
+      connects++;
+      const code = registered ? "already-registered" : "registered";
+      registered = true;
+      if (loseFirstReply && connects === 1) {
+        trace.push("mocked host reply lost after Gamma registration state changed");
+        throw new Error("Mocked host reply lost");
+      }
+      if (loseFirstReply && connects === 2) failNextCatalog = true;
+      trace.push("mocked host reply: " + code);
+      return { code, projectId, displayName: "Gamma", bindingId: "binding_gamma", bindingRevision: 1, replayed: connects > 1 };
+    }
+    if (name === "vivary-set-project-kind") {
+      assert.equal(input.projectId, projectId);
+      workspaceKind = input.workspaceKind;
+      return { projectId, workspaceKind };
+    }
+    throw new Error("Unexpected mocked host action: " + name);
+  };
+  return { projectId, trace, failedCatalogs, selectionWrites, close: unsubscribe,
+    get registered() { return registered; }, get connects() { return connects; }, get catalogReads() { return catalogReads; } };
+}
+
+const openFolderButton = () => [...host.querySelectorAll("button")].find(button => button.textContent === "Open folder");
+async function mountOpenFolder() {
+  await act(async () => root.render(navigation.exports.navigationView()));
+  await waitForNavigation(() => !!openFolderButton() && !openFolderButton().disabled, "Open folder available");
+}
+async function clickOpenFolder() {
+  assert.equal(openFolderButton()?.disabled, false, "the actual Open folder control is enabled");
+  await act(async () => openFolderButton().click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  await waitForNavigation(() => !!openFolderButton() && !openFolderButton().disabled
+    && !kindFixture.observedProjects.selecting, "Open folder completion");
+}
+
+test("Open folder retry after a mocked lost host reply cannot enter an unseen Not-set project", async () => {
+  const fixture = openFolderHost({ loseFirstReply: true });
+  try {
+    await mountOpenFolder();
+    await clickOpenFolder();
+    assert.equal(fixture.registered, true, "the mocked host changed registration state before losing its reply");
+    assert.equal(fixture.trace.includes("mocked host reply lost after Gamma registration state changed"), true);
+    assert.equal(fixture.connects, 1);
+    assert.equal(fixture.catalogReads, 1, "the lost mocked reply leaves the pre-registration catalog cached");
+    assert.equal(fixture.selectionWrites().length, 0);
+    await clickOpenFolder();
+    assert.equal(fixture.connects, 2);
+    assert.equal(fixture.trace.includes("mocked host reply: already-registered"), true);
+    assert.equal(fixture.failedCatalogs.length, 1, "React Query observed the rejected refresh");
+    assert.equal(fixture.failedCatalogs[0].code, "catalog", "the refresh failure retained the cached catalog");
+    assert.equal(fixture.failedCatalogs[0].projectIds.includes("project_alpha"), true);
+    assert.equal(fixture.failedCatalogs[0].projectIds.includes(fixture.projectId), false, "the retained catalog lacks Gamma");
+    assert.equal(fixture.selectionWrites().length, 0, "retry must not persist entry into an unseen Not-set project before a kind choice");
+    assert.equal(kindFixture.entries.some(entry => entry.projectId === fixture.projectId), false,
+      "the real selection owner must not make Gamma's Code workspace available before the kind choice");
+    const dialog = host.querySelectorAll('[role="dialog"]').length;
+    const safeRetry = [...host.querySelectorAll('[role="status"], [role="alert"]')]
+      .some(element => /refresh|retry|try again/i.test(element.textContent));
+    assert.equal(dialog > 0 || safeRetry, true, "a kind dialog or explicit safe retry must gate project entry");
+    if (dialog === 0) await clickOpenFolder();
+    assert.equal(host.querySelectorAll('[role="dialog"]').length, 1, "a later successful refresh still requires the kind choice");
+    assert.equal(fixture.selectionWrites().length, 0);
+    await act(async () => cards()[1].click());
+    await waitForNavigation(() => kindFixture.observedProjects.activeProject?.projectId === fixture.projectId
+      && !kindFixture.observedProjects.selecting, "retried project selection after choosing Personal");
+    assert.equal(fixture.selectionWrites().length, 1);
+    assert.equal(kindFixture.observedProjects.activeProject.workspaceKind, "personal");
+    const save = kindFixture.events.findIndex(event => event[0] === "call" && event[1] === "vivary-set-project-kind"
+      && event[2].projectId === fixture.projectId && event[2].workspaceKind === "personal");
+    assert.equal(save >= 0 && save < kindFixture.events.indexOf(fixture.selectionWrites()[0]), true,
+      "the Personal save precedes persisted project selection");
+    assert.equal(host.querySelectorAll('[role="dialog"]').length, 0, "the kind dialog closes after choosing Personal");
+    assert.equal(kindFixture.entries.some(entry => entry.projectId === fixture.projectId && entry.kind === null), false,
+      "Gamma is never made available with the default Code kind before the choice");
+  } finally { fixture.close(); }
+});
+
+for (const [kind, label] of [["coding", "Coding"], ["personal", "Personal"]]) {
+  test("Open folder reuses a present " + label + " project without another kind choice", async () => {
+    const fixture = openFolderHost({ alreadyRegistered: true, kind });
+    try {
+      await mountOpenFolder();
+      await clickOpenFolder();
+      assert.equal(fixture.trace.includes("mocked host reply: already-registered"), true);
+      assert.equal(host.querySelectorAll('[role="dialog"]').length, 0);
+      assert.equal(fixture.selectionWrites().length, 1);
+      assert.equal(kindFixture.observedProjects.activeProject?.projectId ?? null, fixture.projectId);
+      assert.equal(kindFixture.observedProjects.activeProject?.workspaceKind ?? null, kind);
+    } finally { fixture.close(); }
+  });
+}
+
+test("Open folder asks before selecting an ordinarily registered Not-set project", async () => {
+  const fixture = openFolderHost();
+  try {
+    await mountOpenFolder();
+    await clickOpenFolder();
+    assert.equal(fixture.trace.includes("mocked host reply: registered"), true);
+    assert.equal(host.querySelectorAll('[role="dialog"]').length, 1);
+    assert.equal(fixture.selectionWrites().length, 0);
+    assert.equal(kindFixture.entries.some(entry => entry.projectId === fixture.projectId), false);
+    await act(async () => cards()[1].click());
+    await waitForNavigation(() => kindFixture.observedProjects.activeProject?.projectId === fixture.projectId
+      && !kindFixture.observedProjects.selecting, "chosen Personal project selection");
+    assert.equal(fixture.selectionWrites().length, 1);
+    assert.equal(kindFixture.observedProjects.activeProject.workspaceKind, "personal");
+  } finally { fixture.close(); }
 });

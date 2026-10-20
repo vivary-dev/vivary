@@ -38,15 +38,15 @@ export function withProjectKind(current: CatalogResult | undefined, projectId: s
 
 /**
  * Whether Open folder asks Coding or Personal for the folder it just registered or found registered. It asks only
- * where the host can save a kind and only while the project's kind is Not set. Without a fresh list, a new
- * registration still asks and a repeated one does not.
+ * where the host can save a kind and the retained catalog lists Not set or cannot confirm the project's kind.
+ * Without a valid catalog, a new registration still asks and a repeated one does not.
  */
 export function openedFolderNeedsKind(code: "registered" | "already-registered", projectId: string,
   catalog: CatalogResult | undefined) {
   if (catalog?.code !== "catalog") return code === "registered";
   if (!catalog.kindEditable) return false;
   const project = catalog.projects.find(item => item.projectId === projectId);
-  return project ? project.workspaceKind === null : code === "registered";
+  return !project || project.workspaceKind === null;
 }
 
 export const selectionSchema = z.strictObject({ scopeKey: identifier, projectId: identifier.nullable() });

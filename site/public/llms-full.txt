@@ -7523,7 +7523,10 @@ and Project details offers the kind control only when it is true. New project as
 before the form, which fills the matching preset, and saves it after
 registration. Open folder registers the folder unchanged, asks, then selects the
 project. A repeated Open folder that finds the folder registered asks again while
-its kind is Not set. A saved kind is written into the cached project list before
+its kind is Not set. If the retained editable catalog omits the registered
+project, its kind is uncertain and Open folder asks before selection. This also
+applies when a failed refresh retains the list from before registration.
+A saved kind is written into the cached project list before
 the list is refreshed, so a failed refresh cannot show the stale Not set. While
 chat identity loads, the fallback Code history cannot start a conversation in a
 Personal project. The [conversation surface owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-surface.ts)
@@ -8217,6 +8220,21 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Open folder retry (PR #260 finding 4330742974). The shared kind decision
+now asks before selection when a valid editable catalog omits the registered
+project, including an already-registered retry. Known Coding and Personal kinds
+and the editability gate keep their existing behavior. The actual ProjectProvider
+and navigation regression in `tests/workspace-kind-dialog-component.test.mjs`
+failed against the prior source with one selection persisted before the choice.
+That coordinator run passed test preflight 10/10 and the other 14 component cases.
+Registration and lost host replies are mocked boundaries. The regression retains
+the stale catalog and checks Personal saving before selection and dialog closure.
+The coordinator's post-fix working-tree run passed all 15 component tests with no
+failures, skips, or cancellations, and the Workbench typecheck exited 0. Test
+preflight passed 10/10, input checks passed, and neither guarded receipt reported
+a reserve stop. The site audit, final-head CI and reviews, actual UI and provider
+turns, and packaged Windows acceptance remain pending.
 
 2026-10-20 PR #260 integration with dev at `2cac9444`. The combined design
 preserves Code controls that follow the project kind and acknowledged Native
