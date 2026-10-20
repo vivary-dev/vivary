@@ -8540,6 +8540,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox same-project open during a pending selection (W5b, review thread 4324883747). While a project
+selection the inbox started is still running, an open in the selected project also goes through the route hold and
+a selection, so it supersedes the pending open instead of losing to its later hold. Evidence inspected: the new
+component test that clicks a Beta row and then an Alpha row before Beta opens.
+
 2026-10-20 Inbox Code creation needs a folder (W5b, review thread 4324883739). With Personal workspace as the
 destination from another project, Code conversation is offered only when Personal's folder resolves. Otherwise New
 conversation starts an API chat, matching the server, which lists only Personal API chats without a folder.

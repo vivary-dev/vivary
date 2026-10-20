@@ -230,16 +230,24 @@ export function ConversationInbox() {
     await openHref(row.projectId, inboxRowHref(row));
   }
 
+  // Project selections this inbox started that have not finished. While one runs, an open in the selected project also
+  // goes through a hold and a selection, so it supersedes the pending one instead of losing to its later hold.
+  const selectionsPending = useRef(0);
+  async function select(projectId: string | null): Promise<boolean> {
+    selectionsPending.current++;
+    try { return await selectProject(projectId); } finally { selectionsPending.current--; }
+  }
+
   async function openHref(projectId: string | null, href: string) {
     // Opening a conversation replaces a deferred API chat request.
     setPendingNative(undefined);
-    if (projectId === activeProjectId) {
+    if (projectId === activeProjectId && selectionsPending.current === 0) {
       navigate(href);
       return;
     }
     const release = holdConversationRoute(projectId, href);
     // A newer open owns the route by now, so a slow failure here neither releases it nor reports over it.
-    if (!await selectProject(projectId) && release()) {
+    if (!await select(projectId) && release()) {
       setNotice("That project is unavailable. Its conversations are retained.");
     }
   }
@@ -289,7 +297,7 @@ export function ConversationInbox() {
       startedFrom.current = location.pathname + location.search;
       setPendingNative(projectId);
     }
-    if (!await selectProject(projectId)) {
+    if (!await select(projectId)) {
       if (release && !release()) return;
       setPendingNative(current => current === projectId ? undefined : current);
       setNotice("That project is unavailable. Choose another destination.");

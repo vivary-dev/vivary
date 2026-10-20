@@ -614,6 +614,20 @@ for (const restores of [false, true]) test(`a row in another project opens exact
   assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=p1");
 });
 
+test("a row in the open project clicked while another project is still opening wins", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  await render("/?run=a1");
+  await act(async () => {
+    rowButtons().find(item => item.dataset.rowId === "code:b1").click();
+    rowButtons().find(item => item.dataset.rowId === "code:a3").click();
+  });
+  await settle();
+  assert.equal(inboxFixture.active, "alpha", "the slower open of Beta does not take over");
+  assert.equal(host.querySelector("#route").textContent, "?run=a3");
+  // The page-wide hold releases once its route has held, so the next test starts without it.
+  await act(async () => new Promise(resolve => setTimeout(resolve, 900)));
+});
+
 test("a row in the selected project opens directly and Native rows select their thread", async () => {
   await render("/?run=a1");
   await act(async () => rowButtons().find(item => item.dataset.rowId === "native:a2").click());
