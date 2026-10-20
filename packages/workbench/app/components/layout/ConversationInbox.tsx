@@ -143,6 +143,8 @@ type Shared = {
   pendingNative: string | null | undefined;
   clearPendingNative: () => void;
   refetchInbox: () => unknown;
+  /** The route as it is now. A step that finishes after an await compares it with the route it started from. */
+  currentRoute: () => string;
 };
 
 /**
@@ -178,12 +180,26 @@ export function ConversationInbox() {
   // An API chat is created after an await, so it reads the route as it is then, not as it was when creation began.
   const latestRoute = useRef(location);
   latestRoute.current = location;
+  const currentRoute = () => latestRoute.current.pathname + latestRoute.current.search;
   const startedFrom = useRef<string | null>(null);
+  // New conversation in another project is the explicit action that selects it. The API chat waits for that project's
+  // Native scope.
+  const [pendingNative, setPendingNative] = useState<string | null>();
+  // Once the requested project was selected, any later project change drops the request, so returning to that project
+  // later never creates an API chat the owner stopped waiting for.
+  const pendingReached = useRef(false);
+  useEffect(() => {
+    if (pendingNative === undefined) { pendingReached.current = false; return; }
+    if (checking) return;
+    if (activeProjectId === pendingNative) pendingReached.current = true;
+    else if (pendingReached.current) setPendingNative(undefined);
+  }, [pendingNative, activeProjectId, checking]);
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
     setNotice(undefined);
     if (row.kind === "native" && row.archived) {
       // Native cannot open an archived conversation, so opening one restores it first, as the archive list did.
+      const from = currentRoute();
       try {
         await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
           threadId: row.id.slice("native:".length) });
@@ -192,12 +208,17 @@ export function ConversationInbox() {
         setNotice(actionErrorMessage(failure) ?? "The conversation could not be restored. Try again.");
         return;
       }
+      void refetchInbox();
+      // A conversation the owner opened while the restore ran keeps the route.
+      if (currentRoute() !== from) return;
     }
     if (row.projectId === activeProjectId && row.id.startsWith("native:")) scope?.switchThread(row.id.slice("native:".length));
     await openHref(row.projectId, inboxRowHref(row));
   }
 
   async function openHref(projectId: string | null, href: string) {
+    // Opening a conversation replaces a deferred API chat request.
+    setPendingNative(undefined);
     if (projectId === activeProjectId) {
       navigate(href);
       return;
@@ -224,8 +245,9 @@ export function ConversationInbox() {
           // queued or a send is pending.
           await call("vivary-conversation-archive", { operation, projectId: row.projectId,
             threadId: row.id.slice("native:".length), ...(operation === "rename" ? { title } : {}) });
-          // Native cannot show an archived conversation, so its open route closes, as in the project history.
-          if (operation === "archive" && selectedInboxRowId(location.search) === row.id) navigate("/");
+          // Native cannot show an archived conversation, so its open route closes, as in the project history. The
+          // route is read after the await, so a conversation opened meanwhile stays open.
+          if (operation === "archive" && selectedInboxRowId(latestRoute.current.search) === row.id) navigate("/");
         }
         window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
       }
@@ -246,8 +268,6 @@ export function ConversationInbox() {
     else holdConversationRoute(activeProjectId, href);
     startedFrom.current = null;
   }
-  // New conversation in another project is the explicit action that selects it.
-  const [pendingNative, setPendingNative] = useState<string | null>();
   async function startIn(projectId: string | null, kind: "code" | "native") {
     setNotice(undefined);
     const release = kind === "code" ? holdConversationRoute(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
@@ -263,7 +283,7 @@ export function ConversationInbox() {
   }
 
   const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, hold, openHref, startIn,
-    pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox };
+    pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox, currentRoute };
   return <ScopedInbox shared={shared} />;
 }
 
@@ -324,6 +344,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     if (creatingNative.current || !scope) return;
     creatingNative.current = true;
     setNotice(undefined);
+    const from = shared.currentRoute();
     try {
       const threadId = await scope.createThread();
       if (!threadId) throw new Error("No conversation ID was created.");
@@ -334,7 +355,8 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
       const href = `/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`;
       if (afterProjectChange) shared.hold(href);
-      else navigate(href);
+      // A conversation the owner opened while the chat was created keeps the route.
+      else if (shared.currentRoute() === from) navigate(href);
     } catch {
       setNotice("The conversation could not be saved. Try again.");
     } finally {

@@ -13,6 +13,7 @@ const require = createRequire(new URL("../package.json", import.meta.url));
 const coreRequire = createRequire(require.resolve("@agent-native/core/client/agent-chat"));
 const { window } = coreRequire("linkedom").parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window, document: window.document, HTMLElement: window.HTMLElement, Event: window.Event,
+  CustomEvent: window.CustomEvent,
   requestAnimationFrame: callback => setTimeout(callback, 0), IS_REACT_ACT_ENVIRONMENT: true });
 // linkedom tracks no focus. The proof records focus() calls, serves them as activeElement, and emits focusin for React.
 let focused = null;
@@ -154,7 +155,9 @@ test.beforeEach(() => {
     version: 0, active: "alpha", calls: [], switched: [], state: new Map(), drafts: {}, rows: rows(),
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     notify() { inboxFixture.version++; for (const listener of listeners) listener(); },
-    identity: () => ({ kind: "project", projectId: inboxFixture.active, storageKey: `key-${inboxFixture.active}`,
+    // A project named in identityBlocked has not loaded its Native identity yet.
+    identity: () => inboxFixture.identityBlocked === inboxFixture.active ? null : ({ kind: "project",
+      projectId: inboxFixture.active, storageKey: `key-${inboxFixture.active}`,
       scope: { type: "workspace-app", id: `scope-${inboxFixture.active}` } }),
     projects: () => ({ catalog, checking: false, workspaceAvailable: true, historyAvailable: true, selecting: false,
       activeProject: catalog.projects.find(project => project.projectId === inboxFixture.active) ?? null,
@@ -256,6 +259,26 @@ for (const restores of [false, true]) test(`an API chat for another project is c
   const draft = inboxFixture.calls.find(call => call.name === "vivary-chat-draft");
   assert.equal(draft.input.projectId, null, "the draft is recorded in the destination's scope");
   assert.equal(host.querySelector("#route").textContent, "?runtime=native&history=project&thread=new-native");
+});
+
+test("a deferred API chat is dropped when the owner selects another project before it could be created", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  inboxFixture.identityBlocked = "beta";
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  await act(async () => button("API chat (separate billing)").click());
+  await settle();
+  assert.equal(inboxFixture.active, "beta");
+  // While Beta's Native identity loads, the owner selects Alpha elsewhere in the app, then comes back to Beta.
+  await act(async () => { inboxFixture.active = "alpha"; inboxFixture.notify(); });
+  await settle();
+  inboxFixture.identityBlocked = undefined;
+  await act(async () => { inboxFixture.active = "beta"; inboxFixture.notify(); });
+  await settle();
+  assert.equal(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"), false, "the old request created nothing");
+  assert.doesNotMatch(host.querySelector("#route").textContent, /thread=new-native/);
 });
 
 test("a saved project filter is restored after a restart, and a project that left the catalog lists everything", async () => {
@@ -389,6 +412,55 @@ test("API chat rename and pin go through the owner action a private-proxy browse
       input: { operation: "pin", projectId: "alpha", threadId: "a2" } });
     assert.equal(posts.length, 0, "no change reaches Native's thread routes");
   } finally { globalThis.fetch = realFetch; }
+});
+
+// A deferred answer the test releases after the owner has moved on.
+function gate() {
+  let release;
+  const wait = new Promise(resolve => { release = resolve; });
+  return { wait, release: () => release() };
+}
+const route = () => host.querySelector("#route").textContent;
+const openRow = id => act(async () => host.querySelector(`[data-row-id="${id}"]`).click());
+
+test("a slow API chat archive closes its route only while that conversation is still open", async () => {
+  const slow = gate();
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    if (input.operation === "archive") await slow.wait; return { changed: true }; };
+  await render("/?runtime=native&history=project&thread=a2");
+  await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
+  await act(async () => button("Archive").click());
+  await openRow("code:a1");
+  await act(async () => slow.release());
+  await settle();
+  assert.equal(route(), "?run=a1", "the conversation opened meanwhile stays open");
+});
+
+test("a slow API chat creation does not replace a conversation opened meanwhile", async () => {
+  const slow = gate();
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    if (name === "vivary-chat-draft") await slow.wait; return { changed: true, record: { status: "cleared" } }; };
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  await act(async () => button("API chat (separate billing)").click());
+  await settle();
+  await openRow("code:a3");
+  await act(async () => slow.release());
+  await settle();
+  assert.equal(route(), "?run=a3");
+});
+
+test("a slow restore of an archived API chat does not replace a conversation opened meanwhile", async () => {
+  inboxFixture.rows = [...rows(), row("native:a5", "alpha", "Old API chat", 5, { archived: true })];
+  const slow = gate();
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    if (name === "vivary-native-archive") await slow.wait; return { restored: true }; };
+  await render("/?run=a1");
+  await openRow("native:a5");
+  await openRow("code:a3");
+  await act(async () => slow.release());
+  await settle();
+  assert.equal(route(), "?run=a3");
 });
 
 test("rename edits the title in place and returns focus to the row", async () => {

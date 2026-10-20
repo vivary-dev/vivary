@@ -7901,6 +7901,9 @@ API chat created after the project change is held on a bare route and replaces a
 route the new project already restored. Native rename, pin and archive go through the owner
 action `vivary-conversation-archive`, never Native's thread routes, because a private-proxy
 browser can authenticate a POST only to an owner action. Restore uses `vivary-native-archive`.
+A step that finishes after an await (archive, a restore before opening, API chat creation)
+changes the route only while the route is still the one it started from. A deferred API chat
+for another project is dropped once the owner selects a different project.
 
 Code rename, archive and pin go through the owner action
 [`vivary-code-conversation-meta`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-code-conversation-meta.ts).
@@ -8529,6 +8532,11 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox stale continuations (W5b, review threads 4318543030, 4318949381, 4319908304 and 4317586821).
+Archive, restore before opening and API chat creation no longer replace a conversation the owner opened while
+they ran, and a deferred API chat is dropped after a later project change. The Conversation inbox section says so.
+Evidence inspected: four component tests that hold the server answer until the owner has moved on.
 
 2026-10-20 Inbox timestamps from numeric strings (W5b, review thread 4317666066). The inbox reads a numeric
 string time, as a Postgres driver returns a `BIGINT`, as epoch milliseconds instead of a date string. No section
