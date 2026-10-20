@@ -180,7 +180,9 @@ so no send can claim the run on the old route first. A host that ended while the
 run was stopping applies the target when the next host start marks the run
 interrupted. A run that ends under a cleanup refusal keeps its route, and a
 transcript note says the switch did not happen. A run that already ended when
-the request arrives switches at once.
+the request arrives switches at once. When the run already has the target route,
+because another window switched it and started a turn, Stop and switch still stops
+the run and records no switch, since the owner confirmed that Stop.
 
 Every switch, including a model change inside one runtime, starts a new provider
 session. Codex refuses to resume a thread under another model, Claude Code's
@@ -800,6 +802,13 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Codex review fixes for PR #258 at `8d359579`. Stop and switch to the
+route a run already has returned before requesting Stop, so a stale window's
+confirmed Stop left the current turn running. The no-op branch of
+`switchVivaryCodeRuntime` now requests Stop for an active run when `stop` is set.
+The Stop and switch paragraph in "Switching a Code conversation in place" says
+so. `code-route-selection.test.mjs` covers it and failed before the fix.
 
 2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
 its prompt from the record it reads before claiming the host, not the one read

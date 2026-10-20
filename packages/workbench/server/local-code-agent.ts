@@ -1442,6 +1442,10 @@ export async function switchVivaryCodeRuntime(input: {
   const fromEngine = metadataString(run, "engine");
   const fromModel = modelFromRun(run);
   if (fromEngine === input.engine && fromModel === input.model) {
+    // Another window may already have switched to this route and started a turn. The owner confirmed that Stop and
+    // switch cancels the current request, so the Stop still applies when no switch is needed.
+    const active = input.stop ? activeRuns.get(run.id) : undefined;
+    if (active) requestUserStop(run.id, active);
     return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
   }
   const runtime = await getVivaryRuntimeStatus(input.engine);

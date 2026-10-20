@@ -370,6 +370,24 @@ test("Stop and switch records the target on the run, stops it, and the host appl
   assert.deepEqual(value.stops, [runId, runId]);
 });
 
+test("Stop and switch to the route a run already has still stops it", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  // Another window switched this conversation and started a turn. A stale window confirms Stop and switch to that route.
+  value.activeRuns.set(runId, { stopReason: null });
+  const before = value.records.get(runId);
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace, stop: true });
+  assert.deepEqual(value.stops, [runId], "the confirmed Stop cancels the current request");
+  assert.equal(value.activeRuns.get(runId).stopReason, "user");
+  assert.equal(value.records.get(runId), before, "no switch is recorded for the current route");
+  // Without Stop, choosing the current route still writes nothing and stops nothing.
+  value.activeRuns.set(runId, { stopReason: null });
+  await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace }),
+    { errorCode: "vivary_code_switch_run_active" });
+  assert.deepEqual(value.stops, [runId]);
+});
+
 test("a recorded switch is dropped with a visible note when the run ends under a cleanup refusal", async () => {
   const value = fixture();
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
