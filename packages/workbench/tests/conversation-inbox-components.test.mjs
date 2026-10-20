@@ -363,9 +363,32 @@ test("an API chat is archived through the guarded action, and a refusal is shown
   await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
   await act(async () => button("Archive").click());
   await settle();
-  assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive", input: { projectId: "alpha", threadId: "a2" } });
+  assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive",
+    input: { operation: "archive", projectId: "alpha", threadId: "a2" } });
   assert.match(host.querySelector('[role="alert"]').textContent, /is working\. Stop it or let it finish/);
   assert.deepEqual(titles(), ["Old pinned plan", "Fix table wrapping", "Write launch notes"], "the row stays in place");
+});
+
+test("API chat rename and pin go through the owner action a private-proxy browser can reach, never a raw Native POST", async () => {
+  const posts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (...args) => { posts.push(args); return new Response("{}"); };
+  try {
+    await render();
+    await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
+    await act(async () => button("Rename").click());
+    await type(host.querySelector(".conversation-inbox__rename"), "Launch notes");
+    await key(host.querySelector(".conversation-inbox__rename"), "Enter");
+    await settle();
+    assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive",
+      input: { operation: "rename", projectId: "alpha", threadId: "a2", title: "Launch notes" } });
+    await act(async () => host.querySelector('[aria-label="Actions for Write launch notes"]').click());
+    await act(async () => button("Pin").click());
+    await settle();
+    assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-conversation-archive",
+      input: { operation: "pin", projectId: "alpha", threadId: "a2" } });
+    assert.equal(posts.length, 0, "no change reaches Native's thread routes");
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test("rename edits the title in place and returns focus to the row", async () => {

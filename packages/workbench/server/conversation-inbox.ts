@@ -1,7 +1,9 @@
 import { fail } from "@agent-native/core/action";
 import { updateCodeAgentRunRecord, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { getDbExec, isPostgres } from "@agent-native/core/db";
-import { getThread, listThreads, setThreadArchived } from "@agent-native/core/server";
+import {
+  getThread, listThreads, setThreadArchived, setThreadPinned, updateThreadData, type ChatThread,
+} from "@agent-native/core/server";
 import { codeDraftSelectionKey } from "../shared/code-draft";
 import { LINKED_TARGET_SOURCE_URL } from "../shared/linked-conversation";
 import { createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts, readChatDraft } from "./chat-draft";
@@ -266,33 +268,55 @@ function refuseArchive(message: string): never {
   fail(message, { errorCode: "vivary_conversation_archive_pending", statusCode: 409 });
 }
 
+export type NativeConversationChange = { operation: "rename"; title: string } | { operation: "archive" | "pin" | "unpin" };
+
 /**
- * Archives the owner's API chat in one project, the inbox's only archive path for Native. It refuses while a turn
- * runs, while queued messages wait in the thread, or while a send from its draft is pending. Restore stays with
- * `vivary-native-archive`.
+ * Renames, pins or archives the owner's API chat in one project. The inbox sends these through an owner action rather
+ * than Native's thread routes, because a private-proxy browser can authenticate a POST only to an owner action. Restore
+ * stays with `vivary-native-archive`.
  */
-export async function archiveNativeConversation(input: { ownerEmail: string; orgId: string; projectId: string | null;
-  threadId: string }): Promise<{ archived: true }> {
+export async function changeNativeConversation(input: { ownerEmail: string; orgId: string; projectId: string | null;
+  threadId: string; change: NativeConversationChange }): Promise<{ changed: true }> {
   const identity = createVivaryChatIdentity(input.ownerEmail, input.orgId,
     { kind: "project", projectId: input.projectId, label: "" });
   const thread = await getThread(input.threadId);
   if (!thread || !threadBelongsToChatIdentity(identity, thread, input.ownerEmail, input.orgId)) {
     fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   }
+  const change = input.change;
+  let changed: boolean;
+  if (change.operation === "archive") changed = await archiveNativeThread(identity, thread);
+  else if (change.operation === "rename") changed = await renameNativeThread(thread, change.title);
+  // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
+  else changed = await setThreadPinned(input.threadId, change.operation === "pin", { ownerEmail: thread.ownerEmail });
+  if (!changed) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+  return { changed: true };
+}
+
+/**
+ * The same write as Native's rename route. `_titleOverride` keeps a later generated title from replacing the owner's.
+ * The saved thread's messages travel with the title, and Core merges them with any newer ones under its revision check.
+ */
+async function renameNativeThread(thread: ChatThread, requested: string): Promise<boolean> {
+  const title = requested.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_LENGTH);
+  let saved: Record<string, unknown> = {};
+  try { saved = JSON.parse(thread.threadData || "{}") as Record<string, unknown>; } catch { saved = {}; }
+  const next = { ...saved, messages: Array.isArray(saved.messages) ? saved.messages : [], _titleOverride: title };
+  return await updateThreadData(thread.id, JSON.stringify(next), title, thread.preview, thread.messageCount) !== undefined;
+}
+
+/** Archive refuses while a turn runs, while queued messages wait in the thread, or while a send from its draft is pending. */
+async function archiveNativeThread(identity: ReturnType<typeof createVivaryChatIdentity>, thread: ChatThread): Promise<boolean> {
   const latest = await agentRunsTableExists() ? await getDbExec().execute({
-    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [input.threadId] })
+    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [thread.id] })
     : { rows: [] };
   if (latest.rows[0]?.status === "running") refuseArchive(ARCHIVE_REFUSALS.working);
   let queued: unknown;
   try { queued = (JSON.parse(thread.threadData || "{}") as { queuedMessages?: unknown }).queuedMessages; }
   catch { queued = undefined; }
   if (Array.isArray(queued) && queued.length) refuseArchive(ARCHIVE_REFUSALS.queued);
-  if ((await readChatDraft(identity, input.threadId))?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
-  // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
-  if (!await setThreadArchived(input.threadId, true, { ownerEmail: thread.ownerEmail })) {
-    fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
-  }
-  return { archived: true };
+  if ((await readChatDraft(identity, thread.id))?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
+  return setThreadArchived(thread.id, true, { ownerEmail: thread.ownerEmail });
 }
 
 export const MAX_TITLE_LENGTH = 160;

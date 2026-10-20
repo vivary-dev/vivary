@@ -268,7 +268,7 @@ test("changes refuse another owner's run, another project's run and invalid titl
 
 test("API chat archive waits for a running turn, queued messages and a pending send, and restore keeps identity and order", async () => {
   const archive = (threadId: string, projectId: string | null = "beta", user = owner) => asUser(user, orgId,
-    () => inbox.archiveNativeConversation({ ownerEmail: user, orgId, projectId, threadId }));
+    () => inbox.changeNativeConversation({ ownerEmail: user, orgId, projectId, threadId, change: { operation: "archive" } }));
   const refused = (pattern: RegExp) => (error: { statusCode?: number; errorCode?: string; message: string }) =>
     error.statusCode === 409 && error.errorCode === "vivary_conversation_archive_pending" && pattern.test(error.message);
   const before = (await load()).rows.filter(row => !row.archived).map(row => row.id);
@@ -292,7 +292,7 @@ test("API chat archive waits for a running turn, queued messages and a pending s
     "another owner cannot archive it");
   await assert.rejects(archive("native-beta", "alpha"), (error: { statusCode?: number }) => error.statusCode === 404,
     "the wrong project cannot archive it");
-  assert.deepEqual(await archive("native-beta"), { archived: true });
+  assert.deepEqual(await archive("native-beta"), { changed: true });
   assert.equal((await load()).rows.find(row => row.id === "native:native-beta")?.archived, true);
   const { restoreArchivedNativeChat } = await import("../server/native-archive.ts");
   await restoreArchivedNativeChat(betaChat, "native-beta", owner, orgId);
@@ -314,4 +314,24 @@ test("Code archive also waits for an approval and a pending send", async () => {
   await assert.rejects(change(), (error: { statusCode?: number; message: string }) =>
     error.statusCode === 409 && /still being sent/.test(error.message));
   assert.equal(getCodeAgentRunRecord("alpha-failed")?.metadata?.archivedAt, undefined, "nothing was archived");
+});
+
+test("API chat rename and pin keep its messages, survive a generated title and refuse another project", async () => {
+  const change = (change: Parameters<typeof inbox.changeNativeConversation>[0]["change"], projectId: string | null = null) =>
+    asUser(owner, orgId, () => inbox.changeNativeConversation({ ownerEmail: owner, orgId, projectId,
+      threadId: "native-personal", change }));
+  assert.deepEqual(await change({ operation: "rename", title: "  Personal   plan " }), { changed: true });
+  const saved = await getDbExec().execute({ sql: "SELECT title, thread_data FROM chat_threads WHERE id = ?",
+    args: ["native-personal"] });
+  const data = JSON.parse(String(saved.rows[0].thread_data));
+  assert.equal(saved.rows[0].title, "Personal plan");
+  assert.equal(data._titleOverride, "Personal plan", "a later generated title keeps the owner's");
+  assert.equal(data.messages.length, 1, "the messages stay");
+  await change({ operation: "pin" });
+  let row = (await load()).rows.find(item => item.id === "native:native-personal")!;
+  assert.deepEqual([row.title, row.pinned], ["Personal plan", true]);
+  await change({ operation: "unpin" });
+  row = (await load()).rows.find(item => item.id === "native:native-personal")!;
+  assert.equal(row.pinned, false);
+  await assert.rejects(change({ operation: "pin" }, "alpha"), (error: { statusCode?: number }) => error.statusCode === 404);
 });

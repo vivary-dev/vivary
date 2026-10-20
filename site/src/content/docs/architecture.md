@@ -426,8 +426,9 @@ pointer. This hold is `holdConversationRoute` in
 work strip also uses. `CodeRunControl` in the layout applies the page's one hold, so the inbox
 only calls it. New conversation in another project uses the same hold. An
 API chat created after the project change is held on a bare route and replaces a
-route the new project already restored. Native rename, pin and archive use Native's own thread
-routes with the row's scope. Restore uses `vivary-native-archive`.
+route the new project already restored. Native rename, pin and archive go through the owner
+action `vivary-conversation-archive`, never Native's thread routes, because a private-proxy
+browser can authenticate a POST only to an owner action. Restore uses `vivary-native-archive`.
 
 Code rename, archive and pin go through the owner action
 [`vivary-code-conversation-meta`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-code-conversation-meta.ts).
@@ -442,9 +443,11 @@ Archive waits for unresolved work, for Code and API chat alike, and refuses with
 a pending approval or a working or stopping run for Code, a running turn or queued
 messages in the thread for API chat, and for both a send from the draft that is
 still pending. Archive never stops, approves, sends or discards anything. The inbox
-archives an API chat only through the owner action
+archives, renames and pins an API chat only through the owner action
 [`vivary-conversation-archive`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-conversation-archive.ts),
-which runs these checks on the server before `setThreadArchived`. `VIVARY_OWNER_ACTIONS` in
+which runs the archive checks on the server before `setThreadArchived`. Its rename makes the
+same write as Core's rename route: the title and `_titleOverride`, with the saved messages, under
+Core's revision check. `VIVARY_OWNER_ACTIONS` in
 [`owner-actions.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/owner-actions.ts) names this action and
 `vivary-code-conversation-meta`, so both accept the private proxy session on a POST. Restore uses
 `vivary-native-archive` and returns the row to its place, since rows sort by
@@ -1047,6 +1050,12 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox API chat changes through the owner action (W5b, review thread 4317586764). Rename and pin
+of an API chat no longer post to Native's thread routes, which a private-proxy browser cannot authenticate.
+`vivary-conversation-archive` now carries archive, rename, pin and unpin, and the Conversation inbox section
+says so. Evidence inspected: the component test that fails on any raw POST, the server rename and pin test, and
+Core's rename route and `updateThreadData` merge.
 
 2026-10-19 Inbox on the page-wide route hold (W5). The inbox calls
 `holdConversationRoute` and no longer mounts the hook, which `CodeRunControl` applies

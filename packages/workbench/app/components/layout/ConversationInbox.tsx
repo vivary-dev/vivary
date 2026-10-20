@@ -1,5 +1,4 @@
 import { useChatThreads } from "@agent-native/core/client/agent-chat";
-import { agentNativePath } from "@agent-native/core/client/api-path";
 import { actionErrorMessage, readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { ChatHistoryMenuItem } from "@agent-native/toolkit/chat-history";
 import {
@@ -119,14 +118,6 @@ function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) 
   return { filter, setFilter };
 }
 
-async function changeNativeThread(row: InboxListRow, operation: "rename" | "pin", body: unknown) {
-  const threadId = row.id.slice("native:".length);
-  const params = new URLSearchParams({ scopeType: "workspace-app", scopeId: row.nativeScopeId ?? "" });
-  const response = await fetch(`${agentNativePath(`/_agent-native/agent-chat/threads/${encodeURIComponent(threadId)}/${operation}`)}?${params}`,
-    { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error("Native refused the change.");
-}
-
 type NativeScope = {
   identity: VivaryChatIdentity;
   createThread: () => Promise<string | null>;
@@ -228,13 +219,14 @@ export function ConversationInbox() {
         if (operation === "restore") {
           await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
             threadId: row.id.slice("native:".length) });
-        } else if (operation === "rename") await changeNativeThread(row, "rename", { title });
-        else if (operation === "archive") {
-          // The server refuses while a turn runs, messages are queued or a send is pending.
-          await call("vivary-conversation-archive", { projectId: row.projectId, threadId: row.id.slice("native:".length) });
+        } else {
+          // One owner action, which a private-proxy browser can reach. Archive refuses while a turn runs, messages are
+          // queued or a send is pending.
+          await call("vivary-conversation-archive", { operation, projectId: row.projectId,
+            threadId: row.id.slice("native:".length), ...(operation === "rename" ? { title } : {}) });
           // Native cannot show an archived conversation, so its open route closes, as in the project history.
-          if (selectedInboxRowId(location.search) === row.id) navigate("/");
-        } else await changeNativeThread(row, "pin", { pinned: operation === "pin" });
+          if (operation === "archive" && selectedInboxRowId(location.search) === row.id) navigate("/");
+        }
         window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
       }
     } catch (failure) {
