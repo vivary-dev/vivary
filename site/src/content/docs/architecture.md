@@ -67,8 +67,17 @@ the list is refreshed, so a failed refresh cannot show the stale Not set. While
 chat identity loads, the fallback Code history cannot start a conversation in a
 Personal project. The [conversation surface owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-surface.ts)
 maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
-when no surface is requested or saved. New conversation follows a chosen kind.
-Both conversation kinds remain available in every project. The
+when no surface is requested or saved. New conversation follows a chosen kind
+in the sidebar and in both the Code header and the retained conversation's
+runtime/model notice. In a Personal project's Code view, both controls wait for
+the project chat identity, create a fresh optimistic Native thread ID, and require
+the existing `vivary-chat-draft` action to acknowledge its cleared record before
+opening API chat. They leave the saved Code selection intact. Repeated clicks
+share one pending creation. A failed acknowledgement leaves Code open with an
+error, and a project or route change or unmount cancels late navigation and
+failure notices. Coding, Not set, and Personal workspace keep Code creation from
+a Code view. Explicit Code history stays open in a Personal project. Both
+conversation kinds remain available in every project. The
 [J06 state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#project-kind-coding-or-personal)
 owns the journey.
 
@@ -739,6 +748,21 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Code view New conversation (PR #260 finding 4324767366). The header and
+retained runtime/model notice shared a callback that always created a Code draft,
+even in a Personal project. The callback now uses `newConversationSurface` and
+Native's existing identity and optimistic thread hook, then follows
+ProjectHistory's cleared-draft acknowledgement contract before navigation. A
+single-flight guard and navigation generation protect pending creation without
+changing the retained Code selection. System structure describes this flow.
+The two actual-parent regression cases in `tests/native-chat-components.test.mjs`
+failed with missing draft initialization against the previous production source
+in a terminal coordinator run. The file also covers failed acknowledgements and
+retry, duplicate controls, identity loading, and completion after route changes,
+project changes, and unmount. A terminal coordinator run passed all 47 component
+tests and the Workbench typecheck with test preflight 10/10. Full CI on the
+integrated head, real UI testing, and packaged Windows acceptance remain pending.
 
 2026-10-20 Project kind second review fixes (PR #260 review). `setLocalProjectKind`
 used the workspace resolver, which requires exactly one binding, so a project the
