@@ -380,3 +380,25 @@ test("database timestamps read as epoch milliseconds whether the driver returns 
   assert.equal(inbox.epochMilliseconds(null), 0);
   assert.equal(inbox.epochMilliseconds("not a time"), 0);
 });
+
+test("message search keeps a project's API chats searchable when its Code history is unavailable", async () => {
+  const { chatSearchScope } = await import("../actions/vivary-chat-search.ts");
+  const unavailable = Object.assign(new Error("This project's conversation history is unavailable."),
+    { statusCode: 409, errorCode: "vivary_code_project_history_unavailable" });
+  const catalog = { code: "catalog", projects: [{ projectId: "alpha", displayName: "Alpha" }] };
+  const deps = (history: () => Promise<unknown>) => ({ projectHistory: history, workspace: async () => personal,
+    catalog: async () => catalog });
+  const refused = await chatSearchScope({ projectId: "alpha", unassigned: false }, deps(() => Promise.reject(unavailable)));
+  assert.deepEqual(refused, { codeScope: undefined, label: "Alpha" }, "Native search runs and Code reads as unavailable");
+  await assert.rejects(chatSearchScope({ projectId: "gone", unassigned: false }, deps(() => Promise.reject(unavailable))),
+    (error: { statusCode?: number }) => error.statusCode === 403, "a project outside the catalog stays unsearchable");
+  const denied = Object.assign(new Error("Denied"), { statusCode: 403 });
+  await assert.rejects(chatSearchScope({ projectId: "alpha", unassigned: false }, deps(() => Promise.reject(denied))),
+    (error: { statusCode?: number }) => error.statusCode === 403);
+  const found = await chatSearchScope({ projectId: "alpha", unassigned: false }, deps(async () => history("alpha")));
+  assert.deepEqual(found, { codeScope: history("alpha"), label: "Alpha" });
+  assert.deepEqual(await chatSearchScope({ projectId: null, unassigned: false }, deps(async () => undefined)),
+    { codeScope: personal, label: "personal" });
+  assert.deepEqual(await chatSearchScope({ projectId: null, unassigned: true }, deps(async () => undefined)),
+    { codeScope: undefined, label: "Unassigned" });
+});
