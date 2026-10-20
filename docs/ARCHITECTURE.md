@@ -284,8 +284,12 @@ same `vivary_code_run_not_found` (404) as any unknown ID.
 [`CodeRunControl.tsx`](../packages/workbench/app/components/layout/CodeRunControl.tsx)
 lists each running conversation with Open conversation, its own Stop, and its
 own request cards, so an answer or a Stop acts on that run only. Open
-conversation in another project goes through `useConversationRouteHold` in
+conversation in another project, from the strip or from the shared-folder
+warning, goes through the page's route hold in
 [`conversation-route-hold.ts`](../packages/workbench/app/lib/conversation-route-hold.ts).
+The hold lives outside any component, because the Code conversation that asks
+for the open unmounts while the project changes. `CodeRunControl`, which stays
+mounted in the layout, runs `useConversationRouteHold` to apply it.
 Workspace clears the conversation route when the project changes, and the new
 project then restores its saved Code conversation or Native chat onto the bare
 route, so a plain navigation could open the restored view instead of the clicked
@@ -899,6 +903,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
+another project selected the project without a route hold, so Workspace's route
+reset and the new project's saved view could open another conversation or Native
+chat. The route hold moves out of component state into one hold for the page,
+set with `holdConversationRoute` and applied by `useConversationRouteHold` in
+`CodeRunControl`, and the warning's Open uses it.
+`tests/conversation-route-hold.test.mjs` covers a view that unmounts during the
+project change.
 
 2026-10-19 Review fixes on PR #261. Shared-folder acknowledgements were keyed by
 conversation, so a later turn of an acknowledged conversation did not ask again.

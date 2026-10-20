@@ -23,6 +23,7 @@ import { codeConversationModelChoices } from "../../lib/code-conversation-model-
 import { useProjects } from "../projects/ProjectContext";
 import { useOpenProjectFolder } from "../projects/open-project-folder";
 import { folderRunTargets, type FolderRun } from "../../lib/code-folder-runs";
+import { holdConversationRoute } from "../../lib/conversation-route-hold";
 import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
@@ -124,7 +125,15 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
   }, [queryClient, selectionKey, queueCodeSelection, stateWriterReady]);
 
   async function openActiveConversation(active: RunTarget) {
-    if (active.projectId !== projectId && !await selectProject(active.projectId)) return false;
+    // A run in another project: the project change unmounts this view, then Workspace clears the route and the new
+    // project restores its saved view. The page's route hold lives outside this view and keeps the clicked run's route.
+    if (active.projectId !== projectId) {
+      const release = holdConversationRoute(active.projectId, "/?run=" + encodeURIComponent(active.id));
+      if (!await selectProject(active.projectId)) {
+        release();
+        return false;
+      }
+    }
     const key = SELECTION_PREFIX + [catalog?.scopeKey, active.projectId ?? "personal"].join(":");
     const next = { key: active.id, runId: active.id };
     await queryClient.cancelQueries({ queryKey: [key], exact: true });
