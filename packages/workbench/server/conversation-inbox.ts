@@ -324,18 +324,36 @@ async function renameNativeThread(thread: ChatThread, requested: string): Promis
   return await updateThreadData(thread.id, JSON.stringify(next), title, thread.preview, thread.messageCount) !== undefined;
 }
 
-/** Archive refuses while a turn runs, while queued messages wait in the thread, or while a send from its draft is pending. */
-async function archiveNativeThread(identity: ReturnType<typeof createVivaryChatIdentity>, thread: ChatThread): Promise<boolean> {
+/** Why an API chat cannot be archived now: a running turn, queued messages, or a pending send from its draft. */
+async function nativeArchiveRefusal(identity: ReturnType<typeof createVivaryChatIdentity>,
+  threadId: string): Promise<string | null> {
   const latest = await agentRunsTableExists() ? await getDbExec().execute({
-    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [thread.id] })
+    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [threadId] })
     : { rows: [] };
-  if (latest.rows[0]?.status === "running") refuseArchive(ARCHIVE_REFUSALS.working);
+  if (latest.rows[0]?.status === "running") return ARCHIVE_REFUSALS.working;
   let queued: unknown;
-  try { queued = (JSON.parse(thread.threadData || "{}") as { queuedMessages?: unknown }).queuedMessages; }
+  try { queued = (JSON.parse((await getThread(threadId))?.threadData || "{}") as { queuedMessages?: unknown }).queuedMessages; }
   catch { queued = undefined; }
-  if (Array.isArray(queued) && queued.length) refuseArchive(ARCHIVE_REFUSALS.queued);
-  if ((await readChatDraft(identity, thread.id))?.status === "pending") refuseArchive(ARCHIVE_REFUSALS.sending);
-  return setThreadArchived(thread.id, true, { ownerEmail: thread.ownerEmail });
+  if (Array.isArray(queued) && queued.length) return ARCHIVE_REFUSALS.queued;
+  if ((await readChatDraft(identity, threadId))?.status === "pending") return ARCHIVE_REFUSALS.sending;
+  return null;
+}
+
+/**
+ * Native's send path shares no lock with archive, so the checks run again after the write. Work admitted between the
+ * first checks and the write undoes the archive and refuses it. A send that starts after archive finishes still runs,
+ * because Native's send path does not read archive.
+ */
+async function archiveNativeThread(identity: ReturnType<typeof createVivaryChatIdentity>, thread: ChatThread): Promise<boolean> {
+  const before = await nativeArchiveRefusal(identity, thread.id);
+  if (before) refuseArchive(before);
+  if (!await setThreadArchived(thread.id, true, { ownerEmail: thread.ownerEmail })) return false;
+  const after = await nativeArchiveRefusal(identity, thread.id);
+  if (after) {
+    await setThreadArchived(thread.id, false, { ownerEmail: thread.ownerEmail });
+    refuseArchive(after);
+  }
+  return true;
 }
 
 export const MAX_TITLE_LENGTH = 160;
@@ -359,19 +377,8 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
     && isOwnedRun(run, input.ownerEmail, input.orgId, input.scope));
   if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   if (input.change.operation === "archive") {
-    const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
-    const active = host.activeRuns.find(run => run.id === input.runId);
-    if (active?.pendingApprovals.length) refuseArchive(ARCHIVE_REFUSALS.approval);
-    if (active) refuseArchive(ARCHIVE_REFUSALS.working);
-    // A follow-up whose send is still pending is queued work for this conversation. `linkedCodeDraftRuns` links drafts
-    // to runs the way the inbox marks a row Review send, including an older run whose draft ID is only in its transcript.
-    if (input.orgId) {
-      const pending = (await listChatDrafts(createCodeDraftIdentity(input.ownerEmail, input.orgId, input.projectId)))
-        .filter(draft => draft.status === "pending").map(draft => draft.threadId);
-      const linked = linkedCodeDraftRuns(input.ownerEmail, input.orgId, input.projectId === null ? undefined : input.scope,
-        pending);
-      if ([...linked.values()].some(run => run.id === input.runId)) refuseArchive(ARCHIVE_REFUSALS.sending);
-    }
+    const before = await codeArchiveRefusal(input);
+    if (before) refuseArchive(before);
   }
   const now = new Date().toISOString();
   const change = input.change;
@@ -382,5 +389,34 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
     : { updatedAt: record.updatedAt, metadata: change.operation === "archive" ? { archivedAt: now }
       : change.operation === "restore" ? { archivedAt: null } : { pinnedAt: change.operation === "pin" ? now : null } });
   if (!updated) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+  if (change.operation === "archive") {
+    // Code send admission shares no lock with archive, so the checks run again after the write. A send admitted in
+    // between undoes the archive and refuses it. A send after archive finishes still runs, because sends do not read
+    // `metadata.archivedAt` (local-code-agent.ts).
+    const after = await codeArchiveRefusal(input);
+    if (after) {
+      updateCodeAgentRunRecord(input.runId, record => ({ updatedAt: record.updatedAt, metadata: { archivedAt: null } }));
+      refuseArchive(after);
+    }
+  }
   return { changed: true };
+}
+
+/** Why a Code conversation cannot be archived now: an approval, a working or stopping run, or a pending send. */
+async function codeArchiveRefusal(input: { ownerEmail: string; orgId?: string; runId: string; projectId: string | null;
+  scope: VivaryCodeReadScope }): Promise<string | null> {
+  const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
+  const active = host.activeRuns.find(run => run.id === input.runId);
+  if (active?.pendingApprovals.length) return ARCHIVE_REFUSALS.approval;
+  if (active) return ARCHIVE_REFUSALS.working;
+  // A follow-up whose send is still pending is queued work for this conversation. `linkedCodeDraftRuns` links drafts
+  // to runs the way the inbox marks a row Review send, including an older run whose draft ID is only in its transcript.
+  if (input.orgId) {
+    const pending = (await listChatDrafts(createCodeDraftIdentity(input.ownerEmail, input.orgId, input.projectId)))
+      .filter(draft => draft.status === "pending").map(draft => draft.threadId);
+    const linked = linkedCodeDraftRuns(input.ownerEmail, input.orgId, input.projectId === null ? undefined : input.scope,
+      pending);
+    if ([...linked.values()].some(run => run.id === input.runId)) return ARCHIVE_REFUSALS.sending;
+  }
+  return null;
 }

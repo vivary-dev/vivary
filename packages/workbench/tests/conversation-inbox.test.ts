@@ -406,3 +406,40 @@ test("message search keeps a project's API chats searchable when its Code histor
   assert.deepEqual(await chatSearchScope({ projectId: null, unassigned: true }, deps(async () => undefined)),
     { codeScope: undefined, label: "Unassigned" });
 });
+
+test("Code archive that meets a send admitted during its checks is undone and refused", async () => {
+  codeRun("race-code", "alpha");
+  // The run turns active only once its record says archived: a send admitted after the checks, before the write.
+  const runs = host.activeRuns as Map<string, HostRun> & { [Symbol.iterator]: () => IterableIterator<[string, HostRun]> };
+  const late = { ownerEmail: owner, orgId, stopReason: null, workspace: { label: "alpha" }, requests: new Map() } as HostRun;
+  runs[Symbol.iterator] = function* () {
+    yield* Map.prototype.entries.call(runs);
+    if (getCodeAgentRunRecord("race-code")?.metadata?.archivedAt) yield ["race-code", late];
+  };
+  try {
+    await assert.rejects(codeChange("race-code", "alpha", { operation: "archive" }),
+      (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /is working/.test(error.message));
+  } finally { delete (runs as Partial<typeof runs>)[Symbol.iterator]; }
+  assert.equal(getCodeAgentRunRecord("race-code")?.metadata?.archivedAt ?? null, null, "the archive was undone");
+});
+
+test("API chat archive that meets a turn started during its checks is undone and refused", async () => {
+  await nativeThread("race-native", nativeScope(null), 7_000);
+  const db = getDbExec() as { execute: (query: { sql: string; args: unknown[] }) => Promise<unknown> };
+  const execute = db.execute;
+  db.execute = async query => {
+    const result = await execute.call(db, query);
+    // A turn starts right after the archive write lands.
+    if (/^\s*UPDATE chat_threads SET archived_at/i.test(query.sql) && query.args[0] != null) {
+      await execute.call(db, { sql: "INSERT INTO agent_runs (id, thread_id, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?)",
+        args: ["race-run", "race-native", "running", Date.now(), null] });
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(asUser(owner, orgId, () => inbox.changeNativeConversation({ ownerEmail: owner, orgId,
+      projectId: null, threadId: "race-native", change: { operation: "archive" } })),
+    (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /is working/.test(error.message));
+  } finally { db.execute = execute; }
+  assert.equal((await load()).rows.find(row => row.id === "native:race-native")?.archived, false, "the archive was undone");
+});

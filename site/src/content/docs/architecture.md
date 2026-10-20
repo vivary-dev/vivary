@@ -455,7 +455,9 @@ Archive waits for unresolved work, for Code and API chat alike, and refuses with
 `vivary_conversation_archive_pending` (409) and a message naming what to resolve:
 a pending approval or a working or stopping run for Code, a running turn or queued
 messages in the thread for API chat, and for both a send from the draft that is
-still pending. A Code run's pending draft is found the way the inbox marks its row
+still pending. Archive shares no lock with send admission, so the checks run again after
+the archive write, and work admitted in between undoes the archive and refuses it. A send
+that starts after archive finishes still runs, because neither send path reads archive. A Code run's pending draft is found the way the inbox marks its row
 Review send, through `linkedCodeDraftRuns`, which also reads a draft ID kept only in
 an older run's transcript. Archive never stops, approves, sends or discards anything. The inbox
 archives, renames and pins an API chat only through the owner action
@@ -1065,6 +1067,11 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox archive rechecks after its write (W5b, review threads 4324883731 and 4325071865). Code and API
+chat archive run their refusal checks again after the write and undo the archive when work was admitted in
+between. The Conversation inbox section says so and names the remaining gap: sends do not read archive. Evidence
+inspected: two server tests that admit work right after the archive write.
 
 2026-10-20 Inbox API chat restore without Code history (W5b, review thread 4324883723). The inbox restores an
 archived API chat through `vivary-conversation-archive`, gated by the current catalog, instead of
