@@ -462,7 +462,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       <InboxList label="Archived conversations" rows={visible.archived} {...listProps} emptyLabel="" />
     </details>}
     <InboxMessageSearch term={search.trim()} {...messageSearchScopes(filter, catalog?.projects ?? [], inbox.data?.rows ?? [])}
-      onOpen={hit => void shared.openHref(hit.projectId, chatSearchHref(hit, false, ""))} />
+      rows={inbox.data?.rows ?? []} onOpen={hit => void shared.openHref(hit.projectId, chatSearchHref(hit, false, ""))} />
   </section>;
 }
 
@@ -496,8 +496,8 @@ type MessageSearchState = { key: string; status: "loading" | "ready" | "unavaila
  * Searches user messages and agent replies through the existing `vivary-chat-search` owner action, one first page per
  * scope. The title filter above stays instant. Selection and the list stay as they are while results load.
  */
-function InboxMessageSearch({ term, scopes, total, onOpen }: { term: string; scopes: SearchScope[]; total: number;
-  onOpen: (hit: ChatSearchHit) => void }) {
+function InboxMessageSearch({ term, scopes, total, rows, onOpen }: { term: string; scopes: SearchScope[]; total: number;
+  rows: readonly Pick<InboxRow, "id" | "archived">[]; onOpen: (hit: ChatSearchHit) => void }) {
   const readAction = useNativeActionReader();
   const headingId = useId();
   const [retry, setRetry] = useState(0);
@@ -533,7 +533,10 @@ function InboxMessageSearch({ term, scopes, total, onOpen }: { term: string; sco
   if (term.length < 2) return null;
   const current = state?.key === key ? state : undefined;
   const status = current?.status ?? "loading";
-  const hits = current?.hits ?? [];
+  // The search action does not know Code archive, so a Code conversation the list holds as archived is left out here,
+  // as the search leaves out archived API chats.
+  const archived = new Set(rows.filter(row => row.archived).map(row => row.id));
+  const hits = (current?.hits ?? []).filter(hit => !archived.has(`${hit.runtime}:${hit.sessionId}`));
   return <section className="conversation-inbox__messages" aria-labelledby={headingId}>
     <h3 id={headingId}>Messages</h3>
     <p role="status" className="conversation-inbox__notice">

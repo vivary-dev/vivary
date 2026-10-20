@@ -627,6 +627,14 @@ test("a title match is not repeated as a message, since the title filter already
   assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
 });
 
+test("message search leaves out a Code conversation the inbox lists as archived", async () => {
+  inboxFixture.hits = [hit("alpha", "a4", "a table in the cleanup"), hit("alpha", "a3", "a table in the plan")];
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.deepEqual(hitTitles(), ["Session a3"]);
+  assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
+});
+
 test("message search says when nothing matches and when search is unavailable, and keeps the selection", async () => {
   inboxFixture.hits = [];
   await render("/?run=a1");

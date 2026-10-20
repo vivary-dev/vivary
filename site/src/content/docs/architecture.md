@@ -1064,6 +1064,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Inbox message search and Code archive (W5b, review thread 4321225646). `chat-content-search.ts`
+ignores `metadata.archivedAt`, which this PR adds, so the inbox leaves out a hit whose Code row it lists as archived.
+The search server itself still returns archived Code hits to other callers, and the root fix there needs an owner.
+Evidence inspected: the new component test and the Code branch of `searchChatContent`.
+
 2026-10-20 Inbox Messages holds message matches only (W5b, review thread 4318543019). A title match from the
 search action is already a row in the title-filtered list, so Messages no longer repeats it as a matching message.
 Evidence inspected: the new component test with one title and one content hit.
