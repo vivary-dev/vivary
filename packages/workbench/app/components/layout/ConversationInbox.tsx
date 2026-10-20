@@ -197,13 +197,19 @@ export function ConversationInbox() {
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
     setNotice(undefined);
-    if (row.kind === "native" && row.archived) {
-      // Native cannot open an archived conversation, so opening one restores it first, as the archive list did.
+    if (row.archived) {
+      // An archived conversation is restored before it opens. Native cannot open one, and a Code send never checks
+      // archive, so a run could otherwise start hidden in the Archived section.
       const from = currentRoute();
       try {
-        await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
-          threadId: row.id.slice("native:".length) });
-        window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
+        if (row.kind === "native") {
+          await call("vivary-native-archive", { operation: "restore", projectId: row.projectId,
+            threadId: row.id.slice("native:".length) });
+          window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
+        } else {
+          await call("vivary-code-conversation-meta", { operation: "restore", runId: row.id.slice("code:".length),
+            projectId: row.projectId });
+        }
       } catch (failure) {
         setNotice(actionErrorMessage(failure) ?? "The conversation could not be restored. Try again.");
         return;
@@ -245,12 +251,12 @@ export function ConversationInbox() {
           // queued or a send is pending.
           await call("vivary-conversation-archive", { operation, projectId: row.projectId,
             threadId: row.id.slice("native:".length), ...(operation === "rename" ? { title } : {}) });
-          // Native cannot show an archived conversation, so its open route closes, as in the project history. The
-          // route is read after the await, so a conversation opened meanwhile stays open.
-          if (operation === "archive" && selectedInboxRowId(latestRoute.current.search) === row.id) navigate("/");
         }
         window.dispatchEvent(new CustomEvent("agent-chat:threads-updated"));
       }
+      // An archived conversation's route closes: Native cannot show one, and an open Code composer could start a run
+      // hidden in the Archived section. The route is read after the await, so a conversation opened meanwhile stays.
+      if (operation === "archive" && selectedInboxRowId(latestRoute.current.search) === row.id) navigate("/");
     } catch (failure) {
       setNotice(actionErrorMessage(failure) ?? "The conversation could not be changed. Try again.");
     } finally {

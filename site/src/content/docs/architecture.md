@@ -429,7 +429,10 @@ API chat created after the project change is held on a bare route and replaces a
 route the new project already restored. Native rename, pin and archive go through the owner
 action `vivary-conversation-archive`, never Native's thread routes, because a private-proxy
 browser can authenticate a POST only to an owner action. Restore uses `vivary-native-archive`.
-A step that finishes after an await (archive, a restore before opening, API chat creation)
+Archiving the open conversation closes its route for Code too, and opening an archived
+Code row restores it first, because a Code send never checks archive and a run could start
+hidden in the Archived section. A step that finishes after an await (archive, a restore
+before opening, API chat creation)
 changes the route only while the route is still the one it started from. A deferred API chat
 for another project is dropped once the owner selects a different project.
 
@@ -1060,6 +1063,10 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-20 Inbox Code archive closes the open conversation (W5b, review thread 4317586797). Archiving the open
+Code conversation closes its route, and opening an archived Code row restores it before it opens. The Conversation
+inbox section says so. Evidence inspected: the new component test.
 
 2026-10-20 Inbox stale continuations (W5b, review threads 4318543030, 4318949381, 4319908304 and 4317586821).
 Archive, restore before opening and API chat creation no longer replace a conversation the owner opened while

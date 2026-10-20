@@ -463,6 +463,19 @@ test("a slow restore of an archived API chat does not replace a conversation ope
   assert.equal(route(), "?run=a3");
 });
 
+test("archiving the open Code conversation closes it, and opening an archived one restores it first", async () => {
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Actions for Fix table wrapping"]').click());
+  await act(async () => button("Archive").click());
+  await settle();
+  assert.equal(route(), "", "an archived conversation keeps no open composer");
+  await openRow("code:a4");
+  await settle();
+  assert.deepEqual(inboxFixture.calls.at(-1), { name: "vivary-code-conversation-meta",
+    input: { operation: "restore", runId: "a4", projectId: "alpha" } });
+  assert.equal(route(), "?run=a4");
+});
+
 test("rename edits the title in place and returns focus to the row", async () => {
   await render();
   await act(async () => host.querySelector('[aria-label="Actions for Fix table wrapping"]').click());
