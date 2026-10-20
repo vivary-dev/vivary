@@ -711,6 +711,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-20 Footnote return links (PR #259 review). References had no id and notes
+had no link back, so a reader could not return to the citation, especially for a
+note cited twice. The maintained Toolkit patch now follows GFM's HTML. Each
+reference link has its own id, `fnref-1` for the first reference to note 1 and
+`fnref-1-2` for the second, and a new display-only `footnoteBackref` node ends each
+note with one return link per reference. Return links add no text and serialize to
+nothing, so read-only Markdown and editable saves are unchanged. `focusFootnote`
+also handles a rendered return link and moves focus back to its reference without
+changing the route. The Toolkit patch hash moves from `5ecd0aca` to `0e1103d4`.
+The footnote design below still holds. Evidence: two new cases in
+`tests/markdown-reader.test.mjs` check the ids, the return links and their
+targets, a note that ends in a list, the read-only Markdown measured before the
+change, and focus from each return link. Both failed before the change. The
+editable pin passes unchanged.
+
 2026-10-20 Escaped brackets in footnote labels (PR #259 review). The footnote label
 scanner in the maintained Toolkit patch ended a label at an escaped `\]` and
 rejected an escaped `\[`, so `[^a\]b]` and its definition stayed text. It now

@@ -355,6 +355,18 @@ const footnoteMarkdown = [
   "    An indented line continues the note.",
   "[^unused]: A definition that nothing references.",
 ].join("\n");
+// What a read-only reader saved for footnoteMarkdown and for a note that ends in a list, measured
+// before the return links existed.
+const READ_ONLY_FOOTNOTE_MARKDOWN = [
+  "TypeScript checks ran at three versions[^diagnostics-matrix] with the same options[^options-matrix].",
+  "",
+  "A second mention of the versions[^diagnostics-matrix] and a reference with no note\\[^missing\\].",
+  "",
+  "[^diagnostics-matrix]: TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2.",
+  "",
+  "[^options-matrix]: TypeScript compiler options from `tsconfig.json`. An indented line continues the note.",
+].join("\n");
+const READ_ONLY_LIST_NOTE_MARKDOWN = "See[^list].\n\n[^list]: Items:\n\n    - one\n    - two";
 
 test("the reader renders GFM footnotes as superscript links and one notes list at the end", async () => {
   const proof = await loadProof();
@@ -370,13 +382,14 @@ test("the reader renders GFM footnotes as superscript links and one notes list a
   const notes = json.content[2].content;
   assert.deepEqual(notes.map((item) => item.attrs.label), ["diagnostics-matrix", "options-matrix"]);
   assert.equal(notes[0].content[0].content[0].text, "TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2.");
-  assert.deepEqual(notes[1].content[0].content.map((node) => node.text),
+  assert.deepEqual(notes[1].content[0].content.filter((node) => node.type === "text").map((node) => node.text),
     ["TypeScript compiler options from ", "tsconfig.json", ". An indented line continues the note."]);
   // Each reference is a superscript link to its note. Repeated references share the note's number.
   assert.equal(html.match(/<sup class="an-rich-md-footnote-ref"><a [^>]*href="#fn-1"[^>]*>1<\/a><\/sup>/g)?.length, 2);
   assert.equal(html.match(/<sup class="an-rich-md-footnote-ref"><a [^>]*href="#fn-2"[^>]*>2<\/a><\/sup>/g)?.length, 1);
-  assert.match(html, /<section [^>]*class="an-rich-md-footnotes"[^>]*><ol><li id="fn-1"><p>TypeScript diagnostics[^<]*<\/p><\/li><li id="fn-2">/);
-  assert.equal(html.match(/ id="/g)?.length, 2, "only the two notes carry ids, so no id repeats");
+  assert.match(html, /<section [^>]*class="an-rich-md-footnotes"[^>]*><ol><li id="fn-1"><p>TypeScript diagnostics at 5\.9\.3, 6\.0\.3, and 7\.0\.2\.<span /);
+  // The notes and the references carry ids, and no id repeats.
+  assert.deepEqual(html.match(/ id="[^"]*"/g), [' id="fnref-1"', ' id="fnref-2"', ' id="fnref-1-2"', ' id="fn-1"', ' id="fn-2"']);
   assert.ok(!html.includes("[^diagnostics-matrix]") && !html.includes("[^options-matrix]") && !html.includes("[^unused]"));
   // Files and Settings > Documentation are the read-only readers that opt in. Both follow a note link in place.
   for (const route of ["files.tsx", "architecture.tsx"]) {
@@ -398,6 +411,37 @@ test("editable documents keep footnote Markdown and their saved bytes unchanged"
   const readOnly = proof.readMarkdown(footnoteMarkdown, { footnotes: true }).markdown;
   assert.match(readOnly, /versions\[\^diagnostics-matrix\] with the same options\[\^options-matrix\]\./);
   assert.match(readOnly, /\n\[\^diagnostics-matrix\]: TypeScript diagnostics at 5\.9\.3, 6\.0\.3, and 7\.0\.2\.\n/);
+});
+
+// Review of #259: as in GFM's HTML, each reference has its own id, fnref-<number> for the first reference
+// to a note and fnref-<number>-<k> for its k-th, and each note ends with one return link per reference.
+// The return links are display only, so the Markdown a read-only reconcile reads is unchanged.
+test("each footnote reference has its own id and each note links back to every reference", async () => {
+  const proof = await loadProof();
+  const { json, html, markdown } = proof.readMarkdown(footnoteMarkdown, { footnotes: true });
+  const listed = proof.readMarkdown("See[^list].\n\n[^list]: Items:\n\n    - one\n    - two", { footnotes: true });
+  const linkedom = createRequire(join(CORE, "package.json"))("linkedom");
+  const doc = linkedom.parseHTML(`<!doctype html><html><body>${html}</body></html>`).document;
+  const references = [...doc.querySelectorAll("sup.an-rich-md-footnote-ref > a")];
+  assert.deepEqual(references.map((a) => [a.getAttribute("href"), a.id]),
+    [["#fn-1", "fnref-1"], ["#fn-2", "fnref-2"], ["#fn-1", "fnref-1-2"]]);
+  const returns = (number) => [...doc.querySelectorAll(`section.an-rich-md-footnotes li[id="fn-${number}"] a.an-rich-md-footnote-backref`)]
+    .map((a) => [a.getAttribute("href"), a.getAttribute("aria-label"), a.textContent]);
+  assert.deepEqual(returns(1), [["#fnref-1", "Back to reference 1", "↩"], ["#fnref-1-2", "Back to reference 1-2", "↩2"]]);
+  assert.deepEqual(returns(2), [["#fnref-2", "Back to reference 2", "↩"]]);
+  // Every return link names a reference that is rendered.
+  for (const link of doc.querySelectorAll("a.an-rich-md-footnote-backref")) {
+    assert.ok(doc.getElementById(link.getAttribute("href").slice(1)), link.getAttribute("href"));
+  }
+  // The return links sit at the end of the note's last paragraph and add no text to the document.
+  assert.equal(doc.querySelector('li[id="fn-1"] p').textContent, "TypeScript diagnostics at 5.9.3, 6.0.3, and 7.0.2. ↩ ↩2");
+  assert.equal(JSON.stringify(json).includes("↩"), false);
+  assert.equal(markdown, READ_ONLY_FOOTNOTE_MARKDOWN);
+  // A note that ends in a list gets its return link in a paragraph after the list.
+  const listDoc = linkedom.parseHTML(`<!doctype html><html><body>${listed.html}</body></html>`).document;
+  assert.deepEqual([...listDoc.querySelectorAll('li[id="fn-1"] > *')].map((element) => element.tagName), ["P", "UL", "P"]);
+  assert.equal(listDoc.querySelector('li[id="fn-1"] > p:last-child a').getAttribute("href"), "#fnref-1");
+  assert.equal(listed.markdown, READ_ONLY_LIST_NOTE_MARKDOWN);
 });
 
 // Review of #259: GFM matches footnote labels like link reference labels, ignoring case.
@@ -448,7 +492,8 @@ test("a footnote continued on the next line keeps the continuation in its note",
     assert.deepEqual(json.content.map((block) => block.type), ["paragraph", "paragraph", "footnotes"], continuation);
     assert.equal(json.content[1].content[0].text, "After.");
     const note = json.content[2].content[0].content[0].content;
-    assert.deepEqual(note.map((node) => node.type), ["text", "hardBreak", "text"], continuation);
+    // The note's return link follows its text.
+    assert.deepEqual(note.map((node) => node.type), ["text", "hardBreak", "text", "footnoteBackref"], continuation);
     assert.equal(note[2].text.trim(), "This allows you to have a footnote with multiple lines.");
   }
 });
@@ -467,13 +512,21 @@ test("a nested footnote definition becomes its own note and the outer note keeps
 
 // Only a rendered reference's link to a rendered note moves focus. Heading links such as #fn-details or #fn-1
 // keep their normal handling, even when a note with that number exists.
+let footnoteLinksReady;
+function loadFootnoteLinks() {
+  footnoteLinksReady ??= (async () => {
+    await loadProof();
+    const built = await esbuild.build({ entryPoints: [join(WORKBENCH, "app", "lib", "footnote-links.ts")], bundle: true,
+      write: false, format: "esm", platform: "node", logLevel: "silent" });
+    const helper = join(folder, "footnote-links.mjs");
+    writeFileSync(helper, built.outputFiles[0].text);
+    return import(pathToFileURL(helper).href);
+  })();
+  return footnoteLinksReady;
+}
+
 test("note links move focus only to a rendered note and leave other #fn- links alone", async () => {
-  await loadProof();
-  const built = await esbuild.build({ entryPoints: [join(WORKBENCH, "app", "lib", "footnote-links.ts")], bundle: true,
-    write: false, format: "esm", platform: "node", logLevel: "silent" });
-  const helper = join(folder, "footnote-links.mjs");
-  writeFileSync(helper, built.outputFiles[0].text);
-  const { focusFootnote } = await import(pathToFileURL(helper).href);
+  const { focusFootnote } = await loadFootnoteLinks();
   const reader = document.createElement("div");
   reader.innerHTML = '<p><sup class="an-rich-md-footnote-ref"><a href="#fn-1">1</a></sup> <a href="#fn-details">details</a>'
     + ' <a href="#fn-2">2</a> <a class="heading-link" href="#fn-1">section</a></p><h2 id="fn-details">Fn details</h2>'
@@ -492,6 +545,36 @@ test("note links move focus only to a rendered note and leave other #fn- links a
   assert.equal(focused, null);
   assert.deepEqual(click("#fn-1"), [true, true]);
   assert.equal(focused, note);
+});
+
+// Review of #259: a rendered note's return link moves focus back to the reference it names, in place,
+// so the route and its URL stay unchanged. Any other #fnref- link keeps its normal handling.
+test("return links move focus back to their rendered reference and leave other #fnref- links alone", async () => {
+  const { focusFootnote } = await loadFootnoteLinks();
+  const proof = await loadProof();
+  const reader = document.createElement("div");
+  reader.innerHTML = proof.readMarkdown(footnoteMarkdown, { footnotes: true }).html
+    + '<p><a class="plain" href="#fnref-1">plain</a></p>'
+    + '<section class="an-rich-md-footnotes"><ol><li><p><a class="an-rich-md-footnote-backref" href="#fnref-9">↩</a></p></li></ol></section>';
+  const focused = [];
+  for (const reference of reader.querySelectorAll("sup.an-rich-md-footnote-ref > a")) {
+    reference.focus = () => { focused.push(reference.id); };
+  }
+  const click = (selector) => {
+    const event = { target: reader.querySelector(selector), currentTarget: reader, prevented: false,
+      preventDefault() { this.prevented = true; } };
+    return [focusFootnote(event), event.prevented];
+  };
+  assert.deepEqual(click("a.plain"), [false, false], "an ordinary #fnref- link is not a return link");
+  assert.deepEqual(click('a.an-rich-md-footnote-backref[href="#fnref-9"]'), [false, false],
+    "a return link whose reference is not rendered is not taken over");
+  assert.deepEqual(focused, []);
+  assert.deepEqual(click('a.an-rich-md-footnote-backref[href="#fnref-1-2"]'), [true, true]);
+  assert.deepEqual(click('a.an-rich-md-footnote-backref[href="#fnref-2"]'), [true, true]);
+  assert.deepEqual(click('a.an-rich-md-footnote-backref[href="#fnref-1"]'), [true, true]);
+  assert.deepEqual(focused, ["fnref-1-2", "fnref-2", "fnref-1"]);
+  // A reference link stays in the tab order after focus returns to it.
+  assert.equal(reader.querySelector('a[id="fnref-1"]').getAttribute("tabindex"), null);
 });
 
 test.after(() => {

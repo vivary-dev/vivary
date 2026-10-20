@@ -456,10 +456,10 @@ index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493
       * `false` so existing embedders are unchanged. When `true`, images
 diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b1542b9b30ff
+index 0000000000000000000000000000000000000000..f0e61f549f67b1949f803b61469211fa0b54cadb
 --- /dev/null
 +++ b/dist/editor/footnotes.js
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,366 @@
 +import { mergeAttributes, Node } from "@tiptap/core";
 +/**
 + * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
@@ -471,7 +471,10 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 + * This follows GFM: a reference without a definition stays text, and a
 + * definition that nothing references is not shown. Labels match the way link
 + * reference labels do, ignoring case, and each reference and note keeps the
-+ * label it was written with for serialization.
++ * label it was written with for serialization. As in GFM's HTML, each reference
++ * has its own id, `fnref-<number>` for the first reference to a note and
++ * `fnref-<number>-<k>` for its k-th, and each note ends with one return link per
++ * reference. Return links are display only and serialize to nothing.
 + *
 + * Opt in with `features.footnotes`. It is off by default so editable documents
 + * keep their existing schema and saved Markdown. The serializers write the
@@ -514,7 +517,7 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +        return true;
 +    const env = state.env;
 +    const key = state.md.utils.normalizeReference(found.label);
-+    env.footnotes ??= { refs: new Map(), list: [] };
++    env.footnotes ??= { refs: new Map(), list: [], occurrences: [] };
 +    if (!env.footnotes.refs.has(key))
 +        env.footnotes.refs.set(key, -1);
 +    const open = new state.Token("footnote_definition_open", "", 1);
@@ -576,8 +579,10 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +            footnotes.list.push(key);
 +            footnotes.refs.set(key, index);
 +        }
++        const occurrence = (footnotes.occurrences[index] ?? 0) + 1;
++        footnotes.occurrences[index] = occurrence;
 +        const token = state.push("footnote_reference", "", 0);
-+        token.meta = { label: found.label, number: index + 1 };
++        token.meta = { label: found.label, number: index + 1, occurrence };
 +    }
 +    state.pos = found.end;
 +    return true;
@@ -618,7 +623,26 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +        const definition = definitions.get(key);
 +        const item = new state.Token("footnote_open", "", 1);
 +        item.meta = { label: definition?.label ?? key, number: index + 1 };
-+        state.tokens.push(item, ...(definition?.tokens ?? []), new state.Token("footnote_close", "", -1));
++        const tokens = definition?.tokens ?? [];
++        // One return link per reference, at the end of the note's last paragraph, or in a
++        // paragraph of their own when the note ends with another block.
++        const backrefs = [];
++        for (let occurrence = 1; occurrence <= (footnotes.occurrences[index] ?? 1); occurrence++) {
++            const backref = new state.Token("footnote_backref", "", 0);
++            backref.meta = { number: index + 1, occurrence };
++            backrefs.push(backref);
++        }
++        const last = tokens.length;
++        if (last >= 3 && tokens[last - 1].type === "paragraph_close" && tokens[last - 2].type === "inline") {
++            tokens[last - 2].children = [...(tokens[last - 2].children ?? []), ...backrefs];
++        }
++        else {
++            const inline = new state.Token("inline", "", 0);
++            inline.content = "";
++            inline.children = backrefs;
++            tokens.push(new state.Token("paragraph_open", "p", 1), inline, new state.Token("paragraph_close", "p", -1));
++        }
++        state.tokens.push(item, ...tokens, new state.Token("footnote_close", "", -1));
 +    });
 +    state.tokens.push(new state.Token("footnote_block_close", "", -1));
 +}
@@ -633,8 +657,12 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +    md.inline.ruler.after("image", "footnote_reference", footnoteReference);
 +    md.core.ruler.after("inline", "footnote_tail", footnoteTail);
 +    md.renderer.rules.footnote_reference = (tokens, index) => {
-+        const { label, number } = tokens[index].meta;
-+        return `<sup data-footnote-ref="${escape(label)}" data-footnote-number="${number}">${number}</sup>`;
++        const { label, number, occurrence } = tokens[index].meta;
++        return `<sup data-footnote-ref="${escape(label)}" data-footnote-number="${number}" data-footnote-occurrence="${occurrence}">${number}</sup>`;
++    };
++    md.renderer.rules.footnote_backref = (tokens, index) => {
++        const { number, occurrence } = tokens[index].meta;
++        return `<span data-footnote-backref="" data-footnote-number="${number}" data-footnote-occurrence="${occurrence}"></span>`;
 +    };
 +    md.renderer.rules.footnote_block_open = () => '<section data-footnotes=""><ol>';
 +    md.renderer.rules.footnote_block_close = () => "</ol></section>";
@@ -649,6 +677,15 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +    parseHTML: (element) => Number(element.getAttribute("data-footnote-number")) || 1,
 +    renderHTML: () => ({}),
 +};
++const occurrenceAttribute = {
++    default: 1,
++    parseHTML: (element) => Number(element.getAttribute("data-footnote-occurrence")) || 1,
++    renderHTML: () => ({}),
++};
++/** The id of a note's k-th reference, as in GFM: `fnref-1`, then `fnref-1-2`. */
++function referenceId(number, occurrence) {
++    return occurrence > 1 ? `fnref-${number}-${occurrence}` : `fnref-${number}`;
++}
 +/** A footnote reference, shown as a superscript link to its note. */
 +export const FootnoteReference = Node.create({
 +    name: "footnoteReference",
@@ -664,6 +701,7 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +                renderHTML: () => ({}),
 +            },
 +            number: numberAttribute,
++            occurrence: occurrenceAttribute,
 +        };
 +    },
 +    parseHTML() {
@@ -672,7 +710,7 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +    renderHTML({ node, HTMLAttributes }) {
 +        const number = String(node.attrs.number);
 +        return ["sup", mergeAttributes(HTMLAttributes, { class: "an-rich-md-footnote-ref" }),
-+            ["a", { href: `#fn-${number}`, "aria-label": `Note ${number}` }, number]];
++            ["a", { href: `#fn-${number}`, id: referenceId(number, node.attrs.occurrence), "aria-label": `Note ${number}` }, number]];
 +    },
 +    renderText({ node }) {
 +        return String(node.attrs.number);
@@ -683,6 +721,44 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +                serialize(state, node) {
 +                    state.write(`[^${node.attrs.label}]`);
 +                },
++                parse: {},
++            },
++        };
++    },
++});
++/**
++ * A return link at the end of a note to one of its references. It is display only:
++ * it adds no text and writes no Markdown.
++ */
++export const FootnoteBackref = Node.create({
++    name: "footnoteBackref",
++    group: "inline",
++    inline: true,
++    atom: true,
++    selectable: false,
++    addAttributes() {
++        return { number: numberAttribute, occurrence: occurrenceAttribute };
++    },
++    parseHTML() {
++        return [{ tag: "span[data-footnote-backref]" }];
++    },
++    renderHTML({ node }) {
++        const { number, occurrence } = node.attrs;
++        const id = referenceId(number, occurrence);
++        const label = occurrence > 1 ? `${number}-${occurrence}` : String(number);
++        const link = ["a", { href: `#${id}`, class: "an-rich-md-footnote-backref", "data-footnote-backref": "",
++                "aria-label": `Back to reference ${label}` }, "↩"];
++        if (occurrence > 1)
++            link.push(["sup", {}, String(occurrence)]);
++        return ["span", { class: "an-rich-md-footnote-return" }, " ", link];
++    },
++    renderText() {
++        return "";
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize() { },
 +                parse: {},
 +            },
 +        };
@@ -748,17 +824,19 @@ index 0000000000000000000000000000000000000000..68d60866fc9427db08c1b52cef08b154
 +    },
 +});
 +export function createFootnoteExtensions() {
-+    return [FootnoteReference, FootnoteItem, Footnotes];
++    return [FootnoteReference, FootnoteBackref, FootnoteItem, Footnotes];
 +}
 diff --git a/dist/editor/footnotes.d.ts b/dist/editor/footnotes.d.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..69e0786c21fc706a970dfdd08185b9d2466536ef
+index 0000000000000000000000000000000000000000..d711d78c19fda17a2cc21a3551fa070cbcd37977
 --- /dev/null
 +++ b/dist/editor/footnotes.d.ts
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,11 @@
 +import { Node } from "@tiptap/core";
 +/** A footnote reference, shown as a superscript link to its note. */
 +export declare const FootnoteReference: Node<any, any>;
++/** A return link at the end of a note to one of its references. Display only. */
++export declare const FootnoteBackref: Node<any, any>;
 +/** One note in the list, holding the definition's blocks. */
 +export declare const FootnoteItem: Node<any, any>;
 +/** The notes list at the end of the document. It registers the markdown-it rules. */

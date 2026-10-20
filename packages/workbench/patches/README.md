@@ -3417,9 +3417,19 @@ after it. Each node has a serializer that writes the footnote syntax back with
 the label as written, so a read-only reconcile that reads Markdown never falls
 back to placeholder text.
 
+As in GFM's HTML, each reference link has its own id, `fnref-<number>` for the
+first reference to a note and `fnref-<number>-<k>` for its k-th. A fourth node,
+`footnoteBackref`, puts one return link per reference at the end of the note's
+last paragraph, or in a paragraph of its own when the note ends with another
+block. A return link points at its reference's id, reads "Back to reference 1"
+or "Back to reference 1-2", and shows `↩`, with the occurrence number after it
+from the second reference on. It adds no text and serializes to nothing, so the
+Markdown a read-only reconcile reads is unchanged.
+
 Only Workbench's two read-only routes pass `footnotes: true`, and their
-`focusFootnote` helper moves focus to a rendered note without changing the
-route. Any other `#fn-` link keeps its normal handling. An
+`focusFootnote` helper moves focus to a rendered note, and from a rendered return
+link back to its reference, without changing the route. Any other `#fn-` or
+`#fnref-` link keeps its normal handling. An
 editable document gets no footnote nodes, so its parse and save path is
 unchanged. That path already escapes `[^id]` as `\[^id\]` and joins
 consecutive definitions when it saves. `tests/markdown-reader.test.mjs` pins
