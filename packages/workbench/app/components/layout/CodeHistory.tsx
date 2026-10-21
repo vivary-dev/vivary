@@ -17,7 +17,9 @@ export function CodeHistory() {
   const location = useLocation();
   const navigate = useNavigate();
   const projectId = activeProject?.projectId ?? null;
-  const routeRun = new URLSearchParams(location.search).get("run");
+  const params = new URLSearchParams(location.search);
+  const currentSurface = params.get("runtime") === "native" && params.get("history") !== "unassigned" ? "native" : "code";
+  const routeRun = params.get("run");
   const requestedRun = routeRun && routeRun !== "new" ? routeRun : undefined;
   const state = useActionQuery<VivaryCodeState>(
     "vivary-code-state",
@@ -33,7 +35,7 @@ export function CodeHistory() {
   const selectedRun = routeRun === "new" ? null : requestedRun
     ?? codeState?.runs.find(isCodeAgentRunActive)?.id
     ?? codeState?.run?.id;
-  const activeId = !new URLSearchParams(location.search).has("runtime") && codeState?.runs.some(run => run.id === selectedRun)
+  const activeId = !params.has("runtime") && codeState?.runs.some(run => run.id === selectedRun)
     ? selectedRun
     : null;
   const history = useChatHistoryRailController({
@@ -88,7 +90,7 @@ export function CodeHistory() {
               // This rail shows while chat identity loads and can start only a Code conversation. Where New
               // conversation opens API chat, it stays disabled until the full history replaces this rail.
               disabled={!workspaceAvailable
-                || newConversationSurface(activeProject?.workspaceKind, "code") === "native"}
+                || newConversationSurface(activeProject?.workspaceKind, currentSurface) === "native"}
             >
               <span>{history.newChatLabel}</span>
             </ActionButton>

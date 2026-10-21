@@ -16,6 +16,7 @@ import { useNativeActionCaller } from "@/lib/native-actions";
 import { useAppStateWriter } from "@/lib/native-state";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { newConversationSurface } from "@/lib/conversation-surface";
+import { claimNativeConversationCreation } from "@/lib/native-conversation-creation";
 import { registerSelectionCloseFlush, trackSelectionWrite, useChatDraftList, useNativeChatDraft } from "@/lib/chat-draft";
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger, Skeleton } from "@agent-native/toolkit/ui";
 import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-react";
@@ -327,6 +328,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     if (newSurface === "native") {
       const creator = nativeCreator.current;
       if (creatingNative.current || !identity || !creator || !workspaceAvailable) return;
+      const releaseCreation = claimNativeConversationCreation(identity.storageKey);
+      if (!releaseCreation) return;
       creatingNative.current = true;
       const generation = ++creationGeneration.current;
       const locationKey = location.key;
@@ -349,6 +352,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         if (stillCurrent()) setNotice("The conversation could not be saved. Try again.");
       } finally {
         creatingNative.current = false;
+        releaseCreation();
       }
       return;
     }

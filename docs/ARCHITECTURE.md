@@ -63,16 +63,22 @@ project, its kind is uncertain and Open folder asks before selection. This also
 applies when a failed refresh retains the list from before registration.
 A saved kind is written into the cached project list before
 the list is refreshed, so a failed refresh cannot show the stale Not set. While
-chat identity loads, the fallback Code history cannot start a conversation in a
-Personal project. The [conversation surface owner](../packages/workbench/app/lib/conversation-surface.ts)
+chat identity loads, the fallback Code history disables New conversation whenever
+it intends Native chat. It reads the current surface as Native only when the
+route has `runtime=native` and `history` is not `unassigned`, otherwise Code.
+The [conversation surface owner](../packages/workbench/app/lib/conversation-surface.ts)
 maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
 when no surface is requested or saved. New conversation follows a chosen kind
 in the sidebar and in both the Code header and the retained conversation's
 runtime/model notice. In a Personal project's Code view, both controls wait for
 the project chat identity, create a fresh optimistic Native thread ID, and require
 the existing `vivary-chat-draft` action to acknowledge its cleared record before
-opening API chat. They leave the saved Code selection intact. Repeated clicks
-share one pending creation. A failed acknowledgement leaves Code open with an
+opening API chat. They leave the saved Code selection intact. Code and sidebar
+controls share a synchronous admission claim keyed by the server-derived chat
+identity's `storageKey`, including the Personal workspace with no project ID.
+An occupied claim returns immediately. Its owning token releases it only after
+creation and draft initialization settle, including after navigation or unmount.
+This coordination is local to the renderer. A failed acknowledgement leaves Code open with an
 error, and a project or route change or unmount cancels late navigation and
 failure notices. Coding, Not set, and Personal workspace keep Code creation from
 a Code view. Explicit Code history stays open in a Personal project. Both
@@ -755,6 +761,33 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-21 Shared Native creation and loading fallback (PR #260 findings
+4331832605 and 4331832608). Code and sidebar owners now claim the same chat
+identity before allocating an optimistic Native ID. Only the owning token
+releases the claim in `finally`, after the pending creation and draft write settle.
+Each owner's existing stale-navigation and acknowledgement checks remain intact.
+The Code-only loading fallback now derives the current surface from the route,
+matching SessionHistory, and disables creation when it intends Native. A terminal
+coordinator run on the prior product source passed preflight 10/10 with 48 of 53
+tests passing. Both control orders observed two IDs instead of one, and both
+Not set and Personal workspace Native routes opened Code drafts before identity
+resolved. The four behavioral cases and their parent accounted for all five
+failures. Existing Code-intent
+controls passed. These real-owner component cases use mocked host boundaries.
+Earlier fixture-only request failures did not reach these product assertions.
+The focused coordinator batch ended on 2026-10-21 at 16:44:04 UTC with raw wrapper
+exit 0. On the uncommitted repair candidate, all 53 component tests passed with
+zero failures, cancellations, skips or todos. Workbench typecheck returned raw
+exit 0 while emitting existing production-configuration diagnostics that
+`BETTER_AUTH_SECRET` is unset. Scope, helper and result guards passed. Production
+and deployment readiness remain unverified.
+
+The earlier source turn recorded native exit 0 and wrapper exit 11 because its
+raw index-byte check failed. A separate immutable reconciliation verified logical
+index entries, ordinary flags, an empty cached diff and the remaining source
+guards. Final exact-head CI and required reviews, actual UI and provider journeys,
+and packaged Windows acceptance remain pending.
 
 2026-10-20 Open folder retry (PR #260 finding 4330742974). The shared kind decision
 now asks before selection when a valid editable catalog omits the registered
