@@ -510,6 +510,7 @@ function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, mode
 /** A runtime or model the owner chose for a retained conversation, waiting on a confirm or on its run to stop. */
 type PendingSwitch = ModelChoice & {
   step: "confirm" | "confirm-stop" | "stopping" | "switching";
+  expectedSwitchGeneration: string | null;
   turnId?: string | null;
 };
 
@@ -558,8 +559,7 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
   const observedFromCache = stateQueryKeys.some(queryKey =>
     queryClient.getQueryData<VivaryCodeState>(queryKey)?.run === observed.run);
   const caughtUp = !!acceptedRun && observed.run?.id === acceptedRun.id
-    && (observedFromCache || (observed.run.switchGeneration === acceptedRun.switchGeneration
-      && observed.run.engine === acceptedRun.engine && observed.run.model === acceptedRun.model));
+    && observedFromCache;
   // Keep the action's full run while parent polling still presents a previous route generation.
   // Its old query requests are cancelled before the accepted state enters either owner cache below.
   const props = acceptedRun && observed.selection.runId === acceptedRun.id && !caughtUp
@@ -607,11 +607,16 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
   }, [props.run?.id, props.run?.engine, props.run?.model]);
   const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
   const [switchError, setSwitchError] = useState<string>();
-  const shown = pendingSwitch ?? choice;
+  // A recorded target is a display choice, never an accepted Send route or a remembered choice.
+  const serverPending = props.run?.pendingSwitch ?? null;
+  const shown = pendingSwitch ?? serverPending ?? choice;
+  const observationChanged = !!pendingSwitch
+    && pendingSwitch.expectedSwitchGeneration !== props.run?.switchGeneration;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
   const runWorking = props.streaming || (!!props.run && (isCodeAgentRunActive(props.run) || props.run.phase === "stopping"));
   // Polling can start or settle a turn while a choice is open. Derive its legal actions on every render.
-  const switchStep = pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
+  const switchStep = observationChanged ? undefined
+    : pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
     : pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)
       ? (runWorking ? "working" : "confirm") : pendingSwitch?.step;
 
@@ -655,14 +660,12 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
   const runtime = selectedEngine?.runtime;
   // The selectors show a pending switch's target. A switch target lists only what that runtime supports now.
   const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
-  const shownModelChoices = !pendingSwitch ? modelChoices
+  const shownModelChoices = !pendingSwitch && !serverPending ? modelChoices
     : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
   // A retained conversation switches in place (vivary-code-switch), so another conversation's run never locks it.
   // A new conversation's selectors still wait for the host, and point at the busy notice that says why.
   const retained = !!props.selection.runId;
   const selectorReasonIds = retained ? undefined : props.busyNoticeId;
-  // A Stop and switch the host recorded on the run. It survives a reload and applies when the run stops.
-  const serverPending = props.run?.pendingSwitch ?? null;
   const selectorsDisabled = retained
     ? props.viewingMatch || !props.workspaceAvailable || !props.run || !!serverPending
       || (!!pendingSwitch && ["stopping", "switching"].includes(pendingSwitch.step))
@@ -712,39 +715,46 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
 
   // Choosing a retained conversation's current route cancels a pending switch. Anything else asks first.
   function requestSwitch(target: ModelChoice) {
+    const run = props.run;
     setSwitchError(undefined);
-    if (!props.run || (target.engine === props.run.engine && target.model === props.run.model)) {
+    if (!run || (target.engine === run.engine && target.model === run.model)) {
       setPendingSwitch(null);
       return;
     }
     setPendingSwitch(current => ({ ...target,
-      step: current?.step === "confirm-stop" && runWorking && current.turnId === props.run?.turnId ? "confirm-stop" : "confirm",
-      turnId: props.run?.turnId }));
+      expectedSwitchGeneration: run.switchGeneration,
+      step: current?.step === "confirm-stop" && !observationChanged && runWorking
+        && current.turnId === run.turnId ? "confirm-stop" : "confirm",
+      turnId: run.turnId }));
   }
 
-  async function completeSwitch({ engine, model }: ModelChoice) {
+  async function acceptSwitchReply(state: VivaryCodeState, runId: string) {
+    if (state.error) throw new Error(state.error);
+    if (!state.run || state.run.id !== runId || state.projectId !== props.projectId) {
+      throw new Error("The switched conversation could not be loaded. Refresh before continuing.");
+    }
+    // Cancel pre-action polling before seeding these exact owner queries. Opaque generations have no order.
+    // Only a subsequent owner-cache snapshot may supersede the reply while parent props lag behind it.
+    await Promise.all(stateQueryKeys.map(queryKey => queryClient.cancelQueries({ queryKey, exact: true })));
+    setAcceptedRun(state.run);
+    for (const queryKey of stateQueryKeys) queryClient.setQueryData(queryKey, state);
+    const accepted = { engine: state.run.engine, model: state.run.model };
+    setChoice(accepted);
+    if (!state.run.pendingSwitch) props.onChoice(accepted);
+    setPendingSwitch(null);
+    props.onSettled();
+  }
+
+  async function completeSwitch(target: PendingSwitch) {
     const runId = props.run?.id;
-    if (!runId) return;
+    if (!runId || observationChanged || switchStep !== "confirm") return;
     // The pending step stays out of the saved conversation choice.
-    const target = { engine, model };
     setPendingSwitch({ ...target, step: "switching" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
-        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model });
-      if (state.error) throw new Error(state.error);
-      if (!state.run || state.run.id !== runId || state.projectId !== props.projectId) {
-        throw new Error("The switched conversation could not be loaded. Refresh before continuing.");
-      }
-      // Cancel pre-action polling before seeding these exact owner queries. Opaque generations have no order,
-      // so a late response must not be treated as newer just because it arrives after this action.
-      await Promise.all(stateQueryKeys.map(queryKey => queryClient.cancelQueries({ queryKey, exact: true })));
-      setAcceptedRun(state.run);
-      for (const queryKey of stateQueryKeys) queryClient.setQueryData(queryKey, state);
-      const accepted = { engine: state.run.engine, model: state.run.model };
-      setChoice(accepted);
-      props.onChoice(accepted);
-      setPendingSwitch(null);
-      props.onSettled();
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model,
+        expectedSwitchGeneration: target.expectedSwitchGeneration });
+      await acceptSwitchReply(state, runId);
     } catch (failure) {
       setPendingSwitch(null);
       setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
@@ -753,21 +763,28 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
 
   // Stop and switch. The host records the target on the run, stops it, and applies the switch when the run leaves the
   // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
-  async function stopThenSwitch({ engine, model }: ModelChoice) {
+  async function stopThenSwitch(target: PendingSwitch) {
     const runId = props.run?.id;
-    if (!runId || switchStep !== "confirm-stop" || pendingSwitch?.turnId !== props.run?.turnId) return;
-    setPendingSwitch({ engine, model, step: "stopping" });
+    if (!runId || observationChanged || switchStep !== "confirm-stop"
+      || target.turnId === undefined || target.turnId !== props.run?.turnId) return;
+    setPendingSwitch({ ...target, step: "stopping" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
-        projectId: props.projectId ?? undefined, runId, engine, model, stop: true });
-      if (state.error) throw new Error(state.error);
-      setPendingSwitch(null);
-      props.onSettled();
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model, stop: true,
+        expectedSwitchGeneration: target.expectedSwitchGeneration, expectedTurnId: target.turnId });
+      await acceptSwitchReply(state, runId);
     } catch (failure) {
       setPendingSwitch(null);
       setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
     }
   }
+
+  useEffect(() => {
+    if (observationChanged && (pendingSwitch?.step === "confirm" || pendingSwitch?.step === "confirm-stop")) {
+      setPendingSwitch(null);
+      setSwitchError("This conversation changed. Choose its runtime and confirm again.");
+    }
+  }, [observationChanged, pendingSwitch?.step]);
 
   useEffect(() => {
     // A Stop confirmation belongs to the current turn. A later turn needs the owner's Stop choice again.
@@ -929,7 +946,7 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
               setChoice(next);
               props.onChoice(next);
             }}>
-            {!shownModelChoices.includes(shown.model) && <option value={shown.model}>{shown.model} (saved, unavailable)</option>}
+            {!shownModelChoices.includes(shown.model) && <option value={shown.model} disabled>{shown.model} (saved, unavailable)</option>}
             {shownModelChoices.map(model => <option key={model} value={model}
               disabled={modelOptionDisabled(model)}>
               {modelLabel(shownEngine, model)}

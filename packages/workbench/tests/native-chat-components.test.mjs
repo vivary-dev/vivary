@@ -132,7 +132,7 @@ function fixtureRunSnapshot(run) {
 
 // A retained Code conversation with both runtimes ready, driven through its selectors and switch panel.
 export async function renderCodeSwitch({ running = false, otherActive = false, viewingMatch = false, events = [], refuse,
-  pendingSwitch = null, recordSend = false, switchReply = null } = {}) {
+  pendingSwitch = null, recordSend = false, switchReply = null, switchGeneration = null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const version = "2.1.300";
   const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
@@ -146,7 +146,7 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
   const calls = [], choices = [];
   let settled = 0;
   let run = { id: "retained-run", engine: "claude-cli", engineLabel: "Claude Code", model: "claude-sonnet-5-5", events,
-    status: running ? "running" : "completed", phase: running ? "running" : "complete", pendingSwitch };
+    status: running ? "running" : "completed", phase: running ? "running" : "complete", pendingSwitch, switchGeneration };
   let repliedRun = null;
   let ownerSnapshot = null;
   const originalFetch = globalThis.fetch;
@@ -199,9 +199,12 @@ export async function renderCodeSwitch({ running = false, otherActive = false, v
     disabled: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.disabled),
     describedBy: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.getAttribute("aria-describedby") ?? null),
     options: label => [...control(label).querySelectorAll("option")].map(option => option.getAttribute("value")),
+    optionDisabled: (label, value) => [...control(label).querySelectorAll("option")]
+      .find(option => option.getAttribute("value") === value)?.hasAttribute("disabled") ?? null,
     route: () => ({ engine: control("Conversation runtime")?.value, model: control("Conversation model")?.value }),
     draft: () => view.host.querySelector(".ProseMirror")?.textContent ?? null,
     sendDisabled: () => sendButton()?.disabled ?? null,
+    canPrefill: () => [...view.host.querySelectorAll("button")].some(button => button.textContent === "Try a file change" && !button.disabled),
     async prefill() {
       const example = [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change");
       if (!example || example.disabled) throw new Error("native runtime did not enable the composer");
@@ -1024,7 +1027,7 @@ test("Native chat controls", async t => {
       assert.deepEqual(view.calls, [], "nothing is sent before the confirm");
       await view.click("Switch");
       assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
-        params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-other" } }]);
+        params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-other", expectedSwitchGeneration: null } }]);
       assert.deepEqual(view.choices, [{ engine: "codex-cli", model: "gpt-other" }]);
       assert.equal(view.panel(), null);
       assert.equal(view.settled, 1, "the parent reloads the conversation");
@@ -1189,7 +1192,7 @@ test("Native chat controls", async t => {
         assert.deepEqual([view.calls, view.choices], [[], []], "a displayed target authorizes no submission");
         await view.click("Switch");
         assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
-          params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture" } }]);
+          params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture", expectedSwitchGeneration: null } }]);
         // An older polling request may arrive after the action reply. An opaque different ID alone proves no freshness.
         await view.update({ engine: "claude-cli", model: "claude-sonnet-5-5", switchGeneration: "fixture-older-switch",
           updatedAt: "2026-10-20T00:00:00.000Z" });
@@ -1245,6 +1248,142 @@ test("Native chat controls", async t => {
     } finally { try { await view?.unmount(); } finally { server(); } }
   });
 
+  await t.test("PR258 4331141807: an applied Stop-and-switch reply governs real Send before selected-run polling catches up", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const target = { engine: "codex-cli", model: "gpt-fixture" };
+    const reply = { ...target, engineLabel: "Codex", status: "paused", phase: "paused", pendingSwitch: null };
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true, recordSend: true, switchReply: reply });
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Stop and switch");
+      assert.deepEqual(view.calls, [], "the working turn needs the owner's second confirmation");
+      await view.click("Stop and switch");
+      assert.equal(view.calls.length, 1);
+      assert.equal(view.calls[0].params.stop, true, "exercise stopThenSwitch, not plain Switch");
+      // The workspace is idle now, but its selected-run snapshot is late and still carries the previous route.
+      // Do not retain the fixture's running flag and mistake its disabled composer for response adoption.
+      await view.update({ status: "completed", phase: "complete", pendingSwitch: null });
+      // An empty draft also disables Send. Fill it first when editing is enabled so that cannot masquerade as a gate.
+      if (view.canPrefill()) await view.prefill();
+      const gatedUntilSelectedState = view.sendDisabled() !== false;
+      if (gatedUntilSelectedState) {
+        await view.ownerPoll({ ...reply, switchGeneration: "fixture-accepted-switch" });
+        await view.prefill();
+      }
+      assert.equal(view.sendDisabled(), false, "a real draft can send once the authoritative selected-run gate is resolved");
+      const visibleAtSend = view.route();
+      const draft = view.draft();
+      await view.send();
+      assert.deepEqual(view.calls.map(call => call.name), ["vivary-code-switch", "vivary-code-send"]);
+      const submitted = view.calls[1].params;
+      assert.deepEqual({ engine: submitted.engine, model: submitted.model }, target,
+        "an enabled real Send must use the applied Stop-and-switch reply, not the stale selected-run route");
+      assert.deepEqual(visibleAtSend, target);
+      if (!gatedUntilSelectedState) assert.deepEqual(view.choices.at(-1), target, "the accepted reply updates the remembered choice");
+      for (const choice of view.choices) assert.deepEqual(choice, target);
+      assert.equal(submitted.message, draft);
+      assert.equal(submitted.runId, "retained-run");
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
+  await t.test("PR258 4331141807 control: a genuinely pending Stop reply remains gated with its recorded target", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const pendingSwitch = { engine: "codex-cli", model: "gpt-fixture" };
+    const reply = { status: "running", phase: "stopping", pendingSwitch, switchGeneration: null };
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true, recordSend: true, switchReply: reply });
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Stop and switch");
+      await view.click("Stop and switch");
+      assert.notEqual(view.sendDisabled(), false, "a genuinely active Stop reply cannot enable Send");
+      await view.ownerPoll(reply);
+      assert.equal(view.panelMessage(), "Stopping the current request. This conversation then switches to Codex GPT Fixture.");
+      assert.deepEqual(view.disabled(), [true, true]);
+      assert.notEqual(view.sendDisabled(), false);
+      assert.deepEqual(view.calls.map(call => call.name), ["vivary-code-switch"]);
+      assert.deepEqual(view.choices, [], "recording a pending target does not yet accept a route");
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
+  await t.test("PR258 4331141807 control: a later owner query supersedes an applied Stop reply without freezing real Send", { timeout: 10_000 }, async () => {
+    const server = installChatServer();
+    const reply = { engine: "codex-cli", engineLabel: "Codex", model: "gpt-fixture", status: "paused", phase: "paused", pendingSwitch: null };
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true, recordSend: true, switchReply: reply });
+      await view.choose("Conversation runtime", "codex-cli");
+      await view.click("Stop and switch");
+      await view.click("Stop and switch");
+      // The next owner query can already be newer. Do not require an intermediate render of the accepted generation.
+      const later = { engine: "claude-cli", engineLabel: "Claude Code", model: "claude-opus-5-5", status: "completed", phase: "complete",
+        pendingSwitch: null, switchGeneration: "another-window-after-stop" };
+      await view.ownerPoll(later);
+      await view.prefill();
+      assert.deepEqual(view.route(), { engine: later.engine, model: later.model });
+      await view.send();
+      assert.deepEqual(view.calls.map(call => call.name), ["vivary-code-switch", "vivary-code-send"]);
+      assert.deepEqual({ engine: view.calls[1].params.engine, model: view.calls[1].params.model },
+        { engine: later.engine, model: later.model });
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
+  for (const stop of [false, true]) for (const observation of [null, "displayed-durable-generation"]) {
+    await t.test(`PR258 4331141822 UI contract: ${stop ? "Stop-and-switch" : "plain Switch"} submits ${observation === null ? "explicit null" : "the displayed generation"}`,
+    { timeout: 10_000 }, async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        const turn = codeTranscriptEvent("confirmed-switch-turn", "user", "The turn whose Stop is confirmed.", 0);
+        view = await proof.renderCodeSwitch({ running: stop, switchGeneration: observation, events: stop ? [turn] : [] });
+        await view.choose("Conversation runtime", "codex-cli");
+        if (stop) { await view.click("Stop and switch"); await view.click("Stop and switch"); }
+        else await view.click("Switch");
+        assert.equal(view.calls.length, 1);
+        assert.equal(view.calls[0].name, "vivary-code-switch");
+        assert.equal(Object.hasOwn(view.calls[0].params, "expectedSwitchGeneration"), true,
+          "the action must carry an observation even for a legacy null generation");
+        assert.equal(view.calls[0].params.expectedSwitchGeneration, observation);
+        if (stop) assert.equal(view.calls[0].params.expectedTurnId, turn.id, "Stop carries the canonical confirmed turn");
+        else assert.equal(Object.hasOwn(view.calls[0].params, "expectedTurnId"), false);
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
+
+  for (const running of [false, true]) {
+    await t.test(`a same-route ABA invalidates an open ${running ? "Stop" : "idle"} confirmation until a fresh choice`, { timeout: 10_000 }, async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        const turn = codeTranscriptEvent("aba-current-turn", "user", "Current turn", 0);
+        view = await proof.renderCodeSwitch({ running, switchGeneration: "shown-before-aba", events: [turn] });
+        await view.choose("Conversation runtime", "codex-cli");
+        if (running) await view.click("Stop and switch");
+        const confirmation = view.panelMessage();
+        const output = codeTranscriptEvent("aba-unrelated-output", "assistant", "Same turn output", 1);
+        await view.ownerPoll({ events: [turn, output], updatedAt: "2026-10-20T23:00:01.000Z" });
+        assert.equal(view.panelMessage(), confirmation, "output and timestamps retain the observed confirmation");
+        assert.deepEqual([view.calls, view.choices], [[], []]);
+        const away = codeTranscriptEvent("aba-switch-away", "note", "Switched away", 2,
+          { source: "vivary-runtime-switch" });
+        const back = codeTranscriptEvent("aba-switch-back", "note", "Switched back", 3,
+          { source: "vivary-runtime-switch" });
+        // One actual owner snapshot has the same route and a different committed identity.
+        await view.ownerPoll({ switchGeneration: "committed-after-aba", events: [turn, output, away, back] });
+        assert.equal(view.panel(), null, "old consent cannot be silently rebound to the new generation");
+        assert.deepEqual(view.route(), { engine: "claude-cli", model: "claude-sonnet-5-5" });
+        assert.deepEqual([view.calls, view.choices], [[], []]);
+        await view.choose("Conversation runtime", "codex-cli");
+        if (running) { await view.click("Stop and switch"); await view.click("Stop and switch"); }
+        else await view.click("Switch");
+        assert.equal(view.calls.length, 1);
+        assert.equal(view.calls[0].params.expectedSwitchGeneration, "committed-after-aba");
+        if (running) assert.equal(view.calls[0].params.expectedTurnId, turn.id);
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
+
   await t.test("while this conversation works, Wait does nothing and Stop and switch confirms, then hands the switch to the host", async () => {
     const server = installChatServer();
     const view = await proof.renderCodeSwitch({ running: true });
@@ -1263,12 +1402,12 @@ test("Native chat controls", async t => {
       await view.click("Stop and switch");
       // One request. The host records the target, stops the run, and applies the switch when the run leaves it.
       assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
-        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true } }]);
+        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true, expectedSwitchGeneration: null, expectedTurnId: null } }]);
       assert.equal(view.settled, 1, "the parent reloads the run, which now carries the recorded target");
-      await view.update({ status: "running", phase: "stopping", pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5" } });
+      await view.ownerPoll({ status: "running", phase: "stopping", pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5" } });
       assert.equal(view.panel(), "Stopping the current request. This conversation then switches to Claude Code Opus 5.5.");
       assert.deepEqual(view.disabled(), [true, true]);
-      await view.update({ status: "paused", phase: "paused", model: "claude-opus-5-5", pendingSwitch: null });
+      await view.ownerPoll({ status: "paused", phase: "paused", model: "claude-opus-5-5", pendingSwitch: null, switchGeneration: "fixture-applied-pending" });
       assert.equal(view.panel(), null);
       assert.deepEqual(view.disabled(), [false, false]);
       assert.equal(view.calls.length, 1, "the view sends nothing more after the stop");
@@ -1283,6 +1422,55 @@ test("Native chat controls", async t => {
       assert.deepEqual(view.disabled(), [true, true]);
       assert.deepEqual(view.calls, []);
     } finally { await view.unmount(); server(); }
+  });
+
+  await t.test("a reloaded pending model remains visible as a disabled retained option after catalog drift", async () => {
+    const server = installChatServer();
+    const target = { engine: "codex-cli", model: "gpt-retired-recorded-target" };
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true, pendingSwitch: target });
+      assert.deepEqual(view.route(), target);
+      assert.deepEqual(view.disabled(), [true, true]);
+      assert.equal(view.optionDisabled("Conversation model", target.model), true);
+      assert.equal(view.panelMessage(), "Stopping the current request. This conversation then switches to Codex gpt-retired-recorded-target.");
+      assert.notEqual(view.sendDisabled(), false);
+      assert.deepEqual([view.calls, view.choices], [[], []]);
+    } finally { try { await view?.unmount(); } finally { server(); } }
+  });
+
+  for (const pending of [
+    { name: "runtime", target: { engine: "codex-cli", model: "gpt-other" }, label: "Codex GPT Other" },
+    { name: "same-engine model", target: { engine: "claude-cli", model: "claude-opus-5-5" }, label: "Claude Code Opus 5.5" },
+  ]) {
+    await t.test(`PR258 4331141818: reopening a durable ${pending.name} target displays it in both disabled selectors`, { timeout: 10_000 }, async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        // Only the server pending marker names the target. The recorded current route stays Claude Sonnet.
+        view = await proof.renderCodeSwitch({ running: true, pendingSwitch: pending.target });
+        assert.deepEqual(view.route(), pending.target, "the selectors must show the durable target after reopen");
+        const models = view.options("Conversation model");
+        if (pending.target.engine === "codex-cli") assert.deepEqual(models, ["gpt-fixture", "gpt-other"]);
+        else { assert.ok(models.includes("claude-opus-5-5")); assert.equal(models.includes("gpt-other"), false); }
+        assert.deepEqual(view.disabled(), [true, true]);
+        assert.equal(view.panelMessage(), "Stopping the current request. This conversation then switches to " + pending.label + ".");
+        assert.deepEqual([view.calls, view.choices], [[], []], "mounting neither switches nor saves an unaccepted route");
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
+
+  await t.test("PR258 4331141818 control: reopening without a pending target displays the unchanged current route", async () => {
+    const server = installChatServer();
+    let view;
+    try {
+      view = await proof.renderCodeSwitch({ running: true });
+      assert.deepEqual(view.route(), { engine: "claude-cli", model: "claude-sonnet-5-5" });
+      assert.equal(view.options("Conversation model").includes("gpt-other"), false);
+      assert.deepEqual(view.disabled(), [false, false]);
+      assert.equal(view.panel(), null);
+      assert.deepEqual([view.calls, view.choices], [[], []]);
+    } finally { try { await view?.unmount(); } finally { server(); } }
   });
 
   await t.test("a turn that finishes during the choice needs only the plain confirm", async () => {
@@ -1350,7 +1538,7 @@ test("Native chat controls", async t => {
       assert.deepEqual(view.calls, [], "the new turn still needs its own confirmation");
       await view.click("Stop and switch");
       assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
-        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true } }]);
+        params: { projectId: undefined, runId: "retained-run", engine: "claude-cli", model: "claude-opus-5-5", stop: true, expectedSwitchGeneration: null, expectedTurnId: turnB.id } }]);
     } finally { try { await view?.unmount(); } finally { server(); } }
   });
 
@@ -1377,7 +1565,7 @@ test("Native chat controls", async t => {
       assert.deepEqual(view.calls, [], "stopping requires its own confirmation");
       await view.click("Stop and switch");
       assert.deepEqual(view.calls, [{ name: "vivary-code-switch",
-        params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture", stop: true } }]);
+        params: { projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture", stop: true, expectedSwitchGeneration: null, expectedTurnId: null } }]);
     } finally { await view.unmount(); server(); }
   });
 

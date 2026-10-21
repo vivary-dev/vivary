@@ -357,7 +357,9 @@ for (const storage of ["legacy", "persisted", "unsaved"] as const) {
           assert.deepEqual([after.cleanupUnverified, after.cleanupRefusal], [before.cleanupUnverified, before.cleanupRefusal]);
           if (storage === "unsaved") assert.equal(hostSlots().unsaved.has(id), true, "the refusal remains authoritative");
         } else {
-          await assert.rejects(agent.switchVivaryCodeRuntime({ ownerEmail: OWNER, runId: id, workspace, ...target }),
+          // This newly seeded route has neither a durable generation nor a canonical switch note.
+          await assert.rejects(agent.switchVivaryCodeRuntime({ ownerEmail: OWNER, runId: id, workspace, ...target,
+            expectedSwitchGeneration: null }),
             { errorCode: "vivary_code_cleanup_required", statusCode: 409 });
           assert.deepEqual(metadataOf(id), before, "a refused switch changes neither route nor provider session");
           assert.deepEqual(listCodeAgentTranscriptEvents(id), transcript, "a refused switch adds no transcript entries");

@@ -37,6 +37,7 @@ import {
 } from "./code-execution-host";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
 import type { PreparedLinkedContext } from "../shared/linked-conversation";
+import { codeSwitchIdentitySchema, type CodeSwitchConsent } from "../shared/code-switch-observation";
 import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
 import { getVivaryRuntimeStatus, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
 
@@ -956,14 +957,21 @@ export async function getVivaryCodeState(
     run: selected
       ? {
           ...toRunSummary(selected),
-          turnId: events.findLast(event => event.kind === "user")?.id ?? null,
-          switchGeneration: metadataString(selected, "switchGeneration")
-            ?? events.findLast(event => event.kind === "note" && event.metadata?.source === VIVARY_CODE_SWITCH_SOURCE)?.id ?? null,
+          ...codeSwitchObservation(selected, events),
           events: anchored ? dedupeAdjacentAssistantEvents(anchored.entries.map(entry => entry.event), anchor?.eventId) : dedupeAdjacentAssistantEvents(
             events,
           ).slice(-MAX_TRANSCRIPT_EVENTS),
         }
       : null,
+  };
+}
+
+/** Snapshot and admission share full canonical history, before tail caps or anchored transcript windows. */
+function codeSwitchObservation(run: CodeAgentRunRecord, events: CodeAgentTranscriptEvent[]) {
+  return {
+    turnId: events.findLast(event => event.kind === "user")?.id ?? null,
+    switchGeneration: metadataString(run, "switchGeneration")
+      ?? events.findLast(event => event.kind === "note" && event.metadata?.source === VIVARY_CODE_SWITCH_SOURCE)?.id ?? null,
   };
 }
 
@@ -1443,12 +1451,18 @@ export async function switchVivaryCodeRuntime(input: {
   workspace?: VivaryCodeWorkspace;
   /** Reads the project grant again after the runtime checks, as a send does. */
   revalidateWorkspace?: () => Promise<VivaryCodeWorkspace | undefined>;
-  stop?: boolean;
-}): Promise<VivaryCodeState> {
+} & CodeSwitchConsent): Promise<VivaryCodeState> {
+  if (!codeSwitchIdentitySchema.safeParse(input.expectedSwitchGeneration).success
+    || (input.stop === true && !codeSwitchIdentitySchema.safeParse(input.expectedTurnId).success)) {
+    fail("Observe the conversation before confirming a runtime switch.", {
+      errorCode: "vivary_code_switch_observation_required", statusCode: 400,
+    });
+  }
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
   assertNoReconnection();
   const run = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
+  assertSwitchObservation(run, input);
   if (run.metadata?.linkedCreationPending) {
     fail("The linked history could not be verified. Retry from the original conversation.", {
       errorCode: "vivary_linked_history_unavailable", statusCode: 409,
@@ -1475,6 +1489,7 @@ export async function switchVivaryCodeRuntime(input: {
   // reconnection, or other switch lands between the last refusal and the update.
   assertNoReconnection();
   const current = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
+  assertSwitchObservation(current, input);
   assertRunCanSwitch(current, input.stop === true);
   if (metadataString(current, "engine") !== fromEngine || modelFromRun(current) !== fromModel) {
     fail("This conversation changed while its runtime was checked. Choose again.", {
@@ -1495,6 +1510,16 @@ export async function switchVivaryCodeRuntime(input: {
     applyVivaryCodeRuntimeSwitch(current, to);
   }
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+}
+
+function assertSwitchObservation(run: CodeAgentRunRecord, consent: CodeSwitchConsent): void {
+  const current = codeSwitchObservation(run, listCodeAgentTranscriptEvents(run.id));
+  if (current.switchGeneration !== consent.expectedSwitchGeneration
+    || (consent.stop === true && current.turnId !== consent.expectedTurnId)) {
+    fail("This conversation changed. Choose its runtime and confirm again.", {
+      errorCode: "vivary_code_switch_conflict", statusCode: 409,
+    });
+  }
 }
 
 function assertNoReconnection(): void {

@@ -7709,8 +7709,8 @@ route another window selected while the action awaited its state response. The
 composer uses that returned route for its selectors, remembered choice, and Send.
 Before putting the returned state in the two exact workspace and selected-run
 queries, the view cancels their older polling requests. It retains the accepted
-run until its parent observes the same generation and route, or a later snapshot
-from those queries after cancellation. That allows a newer switch to arrive
+run until its parent observes a snapshot from those queries after cancellation.
+That allows a newer switch to arrive
 before the accepted generation renders. Opaque generation values carry identity,
 not ordering, so an arbitrary different value cannot prove that a late response
 is newer.
@@ -7731,9 +7731,23 @@ status, and `updatedAt` changes advance neither identity. The workspace owner
 passes the switch generation to Session details, so an open panel refreshes after
 switches away and back to the same route, including a route commit whose note has
 not yet appended. An unrelated update does not trigger that refresh.
-Confirming Stop and switch
-sends one `vivary-code-switch` request with `stop`, and the composer then shows
-the recorded target until the host applies it. Leaving or reloading the view
+Every switch carries the nullable `expectedSwitchGeneration` captured when the
+owner chose its target. Stop also requires the nullable `expectedTurnId` captured
+when the owner chose Stop. The strict action accepts only nonblank opaque strings
+of at most 128 characters or explicit null. Omission is refused. Null matches only
+canonical absence. Snapshot and admission share the same full-history identity
+owner. Admission checks a fresh owned record initially and after awaited checks,
+with no await between final validation and mutation. A stale route generation or
+Stop turn refuses with a conflict before any route, session, transcript, pending
+target or Stop mutation, including matching-route Stop. A same-route switch away
+and back invalidates an open choice and requires a new deliberate choice.
+
+Confirming Stop and switch sends one request with `stop`. Plain and Stop replies
+share the same authoritative state acceptance. An applied reply immediately owns
+the Send route, while a pending reply keeps Send gated without saving its target
+as an accepted choice. After reload, both disabled selectors and the model list
+show the durable pending target, retaining an unavailable recorded model as a
+disabled option after catalog drift. Leaving or reloading the view
 does not cancel the recorded switch. A refused switch keeps the route and shows
 the server's reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
 draws these states. A linked conversation, described next, remains the way to
@@ -8318,6 +8332,61 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-21 Focused working-tree verification follow-up for PR #258 at base
+`46196cc4`. Green-v2 completed at 00:49:15 UTC with routes/state 48/48,
+components 63/63, host/schema/cleanup/model choices 67/67 and native owner
+actions/schema 21/21, totaling 199/199. Typecheck exited 0. All five steps and
+all 27 protected regressions passed with no failures, skips, cancellations or
+todos. Job and guard exits were 0 with no reserve stop. Minimum persistent
+availability was 11,225,870,336 bytes and ending availability was
+11,236,143,104 bytes.
+
+The first attempt remains a failed batch. Routes/state passed 48/48 and
+components passed 61/63 with one catalog-drift fixture failure and its parent.
+Its 20 protected route/component cases passed, but the remaining three stages
+were unrun. The subsequent one-line fixture correction reads the option's
+disabled attribute instead of its unsupported DOM property. That continuation
+exited 0, ran no tests and preserved all other candidate and historical files.
+Green-v2 then exercised the complete batch. Earlier old-code assertions remain
+separately recorded for the applied Stop reply's route, reopened pending targets,
+stale generation admission and the delayed turn-A to turn-B Stop admission case.
+Schema and forwarding failures remain additional contract evidence.
+
+These are focused fixture/source receipts for an uncommitted working tree.
+They cover source slices, the real component and installed adapter, action
+validation and Native-store controls, without proving live provider execution
+or killed-host durability. The documentation added here was not built or tested
+by that run. Controller source review, actual capture verification, commit/push,
+final integrated-head CI and required reviews/gates, dev integration, actual
+provider and UI journeys, and packaged Windows acceptance remain pending.
+PR merge and production release are not authorized.
+
+2026-10-20 Third Codex review repairs for PR #258 at `46196cc4`. The retained
+unchanged-input run ended at 23:33:13 UTC. Routes completed 34 tests with 29 passes
+and five assertion failures. Components completed 60 tests with 52 passes and
+seven failing leaf assertions plus their parent. Host and schema tests completed
+26 tests with 21 passes and five failures. All controls passed with no skips,
+cancellation, memory limit or reserve stops. Four stale observations mutated the
+route and retained state, delayed turn-A consent stopped B, an applied Stop reply
+sent through the previous route, two reopened targets displayed the old
+selectors, and four UI payloads omitted the route observation. The strict action
+also rejected supplied observations and accepted their omission.
+
+The switch boundary now requires explicit bounded nullable route observations
+and, for Stop, canonical user-turn consent. Fresh admission and final validation
+use the same identity owner as selected snapshots. The composer invalidates ABA
+choices, forwards captured consent, shares authoritative reply acceptance for
+plain and Stop actions, and displays durable pending targets without authorizing
+Send or remembering an unaccepted choice. The 27 retained regressions and their
+behavior assertions remain, with caller migration and added final-await, ABA,
+turn-forwarding and catalog-drift controls. These fixtures exercise source-slice,
+real component and installed adapter, action-schema and Native-store boundaries.
+They do not prove live provider execution or a killed-host crash. Focused green
+tests, typecheck and final review of these repairs remain pending. Integrated
+final-head CI, real provider switching, screenshots, installed Windows acceptance
+with preserved profiles, dev integration approval, merge approval and production
+release remain separate pending gates.
 
 2026-10-20 Second Codex review repairs for PR #258 at `ad935f28`. The coordinator
 ran the prepared cases against unchanged product source. Route selection
