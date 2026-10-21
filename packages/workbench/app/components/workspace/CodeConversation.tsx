@@ -367,7 +367,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} model={run.model}
+          switchGeneration={run.switchGeneration} active={isCodeAgentRunActive(run)} />}
         {activeRun && <Badge variant="secondary" role="status" title={activeRun.title}>Working{activeRun.projectId !== projectId ? " in another project" : ""}</Badge>}
         <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
           <PopoverTrigger asChild>
@@ -394,7 +395,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
       <div className="local-agent-chat">
         {selection && codeState && !openingSavedRun ? <LocalCodeConversation key={selection.key}
           notices={conversationNotices} busyNoticeId={otherActiveRun ? busyNoticeId : undefined}
-          onNewConversation={newConversation} projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
+          projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
@@ -424,19 +425,25 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId, engine, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; active: boolean }) {
+function CodeSessionDetails({ runId, projectId, engine, model, switchGeneration, active }: {
+  runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; model: string;
+  switchGeneration?: string | null; active: boolean;
+}) {
   const [open, setOpen] = useState(false);
   // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
   }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
-  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  const route = JSON.stringify([engine, model, switchGeneration ?? null]);
+  const finalRefresh = useRef({ runId, projectId, route, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;
     const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
-    const settled = !scopeChanged && refresh.wasActive && !active;
+    // A committed switch clears the provider session even when two switches return to the same route between polls.
+    const settled = !scopeChanged && ((refresh.wasActive && !active) || refresh.route !== route);
     refresh.runId = runId;
     refresh.projectId = projectId;
+    refresh.route = route;
     refresh.wasActive = active;
     if (!open || scopeChanged || active) refresh.pending = false;
     else if (settled) refresh.pending = true;
@@ -446,7 +453,7 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
       refresh.pending = false;
       void details.refetch();
     }
-  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
+  }, [active, open, runId, projectId, route, details.isFetching, details.refetch]);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
@@ -502,13 +509,29 @@ function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, mode
     : engine?.claudeModels?.find(item => item.id === model)?.label ?? model;
 }
 
+/** A runtime or model the owner chose for a retained conversation, waiting on a confirm or on its run to stop. */
+type PendingSwitch = ModelChoice & {
+  step: "confirm" | "confirm-stop" | "stopping" | "switching";
+  expectedSwitchGeneration: string | null;
+  turnId?: string | null;
+};
+
+const SWITCH_TRANSFER = "The new session gets the visible conversation text, up to the last 24 messages. "
+  + "Tool output and the previous runtime's private session do not transfer.";
+
+function defaultModelFor(engine: VivaryCodeState["engines"][number]): string {
+  return engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
+    : engine.engine === "claude-cli"
+      ? engine.claudeModels?.find(model => model.support === "supported")?.id ?? engine.models[0] ?? "sonnet"
+      : "default";
+}
+
 type LocalCodeConversationProps = PreviewChatProps & {
   viewingMatch?: boolean;
   matchedEventId?: string | null;
   notices: ReactNode;
-  /** The rendered notice that another conversation's agent is working, which also locks the selectors. */
+  /** The rendered notice that another conversation's agent is working, which locks a new conversation's selectors. */
   busyNoticeId?: string;
-  onNewConversation: () => void;
   ownerKey: string;
   projectId: string | null;
   workspaceAvailable: boolean;
@@ -526,7 +549,26 @@ type LocalCodeConversationProps = PreviewChatProps & {
   onSettings: () => void;
 };
 
-function LocalCodeConversation(props: LocalCodeConversationProps) {
+function LocalCodeConversation(observed: LocalCodeConversationProps) {
+  const queryClient = useQueryClient();
+  const [acceptedRun, setAcceptedRun] = useState<VivaryCodeRunState | null>(null);
+  const stateQueryKeys = [
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined }],
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined, runId: observed.selection.runId ?? undefined }],
+  ];
+  // After acceptance, both caches contain the reply and all earlier requests have been cancelled. A later snapshot
+  // read from those caches is fresh even if another switch happened before the parent could render our generation.
+  const observedFromCache = stateQueryKeys.some(queryKey =>
+    queryClient.getQueryData<VivaryCodeState>(queryKey)?.run === observed.run);
+  const caughtUp = !!acceptedRun && observed.run?.id === acceptedRun.id
+    && observedFromCache;
+  // Keep the action's full run while parent polling still presents a previous route generation.
+  // Its old query requests are cancelled before the accepted state enters either owner cache below.
+  const props = acceptedRun && observed.selection.runId === acceptedRun.id && !caughtUp
+    ? { ...observed, run: acceptedRun } : observed;
+  useEffect(() => {
+    if (caughtUp || observed.selection.runId !== acceptedRun?.id) setAcceptedRun(null);
+  }, [caughtUp, observed.selection.runId, acceptedRun?.id]);
   const chatRef = useRef<AssistantChatHandle>(null);
   const [handoffStatus] = useState(createHandoffStatusHub);
   const { call } = useNativeActionCaller();
@@ -560,13 +602,26 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const runIdRef = useRef(props.selection.runId);
   runIdRef.current = props.selection.runId;
   const adapterOwnsMessages = useRef(false);
-  const [choice, setChoice] = useState(props.selection.choice ?? {
-    engine: props.run?.engine ?? props.state.defaultEngine,
-    model: props.run?.model ?? props.state.defaultModel,
-  });
+  const [choice, setChoice] = useState(props.run ? { engine: props.run.engine, model: props.run.model }
+    : props.selection.choice ?? { engine: props.state.defaultEngine, model: props.state.defaultModel });
+  // A retained conversation's route is the run's. Only vivary-code-switch changes it, from here or another window.
   useEffect(() => {
-    if (props.run && !props.selection.choice) setChoice({ engine: props.run.engine, model: props.run.model });
-  }, [props.run?.id, props.run?.engine, props.run?.model, props.selection.choice]);
+    if (props.run) setChoice({ engine: props.run.engine, model: props.run.model });
+  }, [props.run?.id, props.run?.engine, props.run?.model]);
+  const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
+  const [switchError, setSwitchError] = useState<string>();
+  // A recorded target is a display choice, never an accepted Send route or a remembered choice.
+  const serverPending = props.run?.pendingSwitch ?? null;
+  const shown = pendingSwitch ?? serverPending ?? choice;
+  const observationChanged = !!pendingSwitch
+    && pendingSwitch.expectedSwitchGeneration !== props.run?.switchGeneration;
+  // This conversation's own turn, never another conversation's. A switch waits only for this one.
+  const runWorking = props.streaming || (!!props.run && (isCodeAgentRunActive(props.run) || props.run.phase === "stopping"));
+  // Polling can start or settle a turn while a choice is open. Derive its legal actions on every render.
+  const switchStep = observationChanged ? undefined
+    : pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
+    : pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)
+      ? (runWorking ? "working" : "confirm") : pendingSwitch?.step;
 
   const createAdapter = useCallback<NonNullable<AssistantChatProps["createAdapter"]>>(context =>
     createLocalCodeChatAdapter({
@@ -606,13 +661,30 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
-  // A conversation with a run keeps its runtime and model, because its provider session and
-  // resume depend on them. The server refuses a change, so the selectors say why they are locked.
-  const routeLockId = useId();
-  const runEngine = props.state.engines.find(engine => engine.engine === props.run?.engine);
-  const keptRoute = props.selection.runId && props.run && !props.viewingMatch
-    ? `${runEngine?.label ?? props.run.engineLabel} and ${modelLabel(runEngine, props.run.model)}` : null;
-  const selectorReasonIds = [keptRoute ? routeLockId : null, props.busyNoticeId].filter(Boolean).join(" ") || undefined;
+  // The selectors show a pending switch's target. A switch target lists only what that runtime supports now.
+  const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
+  const shownModelChoices = !pendingSwitch && !serverPending ? modelChoices
+    : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
+  // A retained conversation switches in place (vivary-code-switch), so another conversation's run never locks it.
+  // A new conversation's selectors still wait for the host, and point at the busy notice that says why.
+  const retained = !!props.selection.runId;
+  const selectorReasonIds = retained ? undefined : props.busyNoticeId;
+  const selectorsDisabled = retained
+    ? props.viewingMatch || !props.workspaceAvailable || !props.run || !!serverPending
+      || (!!pendingSwitch && ["stopping", "switching"].includes(pendingSwitch.step))
+    : !props.workspaceAvailable || props.active || props.streaming;
+  const switchPanelId = useId();
+  // The server refuses a switch to a Claude model the installed version cannot confirm, so only listed,
+  // supported models are offered as switch targets. The current model stays selectable.
+  const modelOptionDisabled = (model: string) => {
+    const support = shownEngine?.claudeModels?.find(item => item.id === model)?.support;
+    return support === "upgrade-required"
+      || (retained && support === "unverified" && !(shown.engine === props.run?.engine && model === props.run?.model));
+  };
+  const routeLabel = (route: ModelChoice) => {
+    const engine = props.state.engines.find(item => item.engine === route.engine);
+    return `${engine?.label ?? route.engine} ${modelLabel(engine, route.model)}`;
+  };
   const events = props.run?.events ?? [];
   const snapshotKey = events.length + ":" + (events.at(-1)?.id ?? "") + ":" + (props.run?.status ?? "") + ":" + (props.matchedEventId ?? "");
   const viewKey = useRef(snapshotKey);
@@ -623,18 +695,106 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     && events.findLast(event => event.kind === "status")?.metadata?.reason === "user";
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
+  // Selectors show the unconfirmed target. Keep the draft, but pause the composer until the choice is resolved.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
-    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable;
+    || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable
+    || !!pendingSwitch || !!props.run?.pendingSwitch;
 
   function chooseRuntime(engineName: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
-    if (!engine || props.selection.runId || props.active || props.streaming) return;
+    if (!engine) return;
+    if (retained) {
+      requestSwitch({ engine: engine.engine,
+        model: engine.engine === props.run?.engine ? props.run.model : defaultModelFor(engine) });
+      return;
+    }
+    if (props.active || props.streaming) return;
     const model = engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
       : engine.engine === "claude-cli" ? engine.models[0] ?? "sonnet" : "default";
     const next = { engine: engine.engine, model };
     setChoice(next);
     props.onChoice(next);
   }
+
+  // Choosing a retained conversation's current route cancels a pending switch. Anything else asks first.
+  function requestSwitch(target: ModelChoice) {
+    const run = props.run;
+    setSwitchError(undefined);
+    if (!run || (target.engine === run.engine && target.model === run.model)) {
+      setPendingSwitch(null);
+      return;
+    }
+    setPendingSwitch(current => ({ ...target,
+      expectedSwitchGeneration: run.switchGeneration,
+      step: current?.step === "confirm-stop" && !observationChanged && runWorking
+        && current.turnId === run.turnId ? "confirm-stop" : "confirm",
+      turnId: run.turnId }));
+  }
+
+  async function acceptSwitchReply(state: VivaryCodeState, runId: string) {
+    if (state.error) throw new Error(state.error);
+    if (!state.run || state.run.id !== runId || state.projectId !== props.projectId) {
+      throw new Error("The switched conversation could not be loaded. Refresh before continuing.");
+    }
+    // Cancel pre-action polling before seeding these exact owner queries. Opaque generations have no order.
+    // Only a subsequent owner-cache snapshot may supersede the reply while parent props lag behind it.
+    await Promise.all(stateQueryKeys.map(queryKey => queryClient.cancelQueries({ queryKey, exact: true })));
+    setAcceptedRun(state.run);
+    for (const queryKey of stateQueryKeys) queryClient.setQueryData(queryKey, state);
+    const accepted = { engine: state.run.engine, model: state.run.model };
+    setChoice(accepted);
+    if (!state.run.pendingSwitch) props.onChoice(accepted);
+    setPendingSwitch(null);
+    props.onSettled();
+  }
+
+  async function completeSwitch(target: PendingSwitch) {
+    const runId = props.run?.id;
+    if (!runId || observationChanged || switchStep !== "confirm") return;
+    // The pending step stays out of the saved conversation choice.
+    setPendingSwitch({ ...target, step: "switching" });
+    try {
+      const state = await call<VivaryCodeState>("vivary-code-switch", {
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model,
+        expectedSwitchGeneration: target.expectedSwitchGeneration });
+      await acceptSwitchReply(state, runId);
+    } catch (failure) {
+      setPendingSwitch(null);
+      setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
+    }
+  }
+
+  // Stop and switch. The host records the target on the run, stops it, and applies the switch when the run leaves the
+  // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
+  async function stopThenSwitch(target: PendingSwitch) {
+    const runId = props.run?.id;
+    if (!runId || observationChanged || switchStep !== "confirm-stop"
+      || target.turnId === undefined || target.turnId !== props.run?.turnId) return;
+    setPendingSwitch({ ...target, step: "stopping" });
+    try {
+      const state = await call<VivaryCodeState>("vivary-code-switch", {
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model, stop: true,
+        expectedSwitchGeneration: target.expectedSwitchGeneration, expectedTurnId: target.turnId });
+      await acceptSwitchReply(state, runId);
+    } catch (failure) {
+      setPendingSwitch(null);
+      setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
+    }
+  }
+
+  useEffect(() => {
+    if (observationChanged && (pendingSwitch?.step === "confirm" || pendingSwitch?.step === "confirm-stop")) {
+      setPendingSwitch(null);
+      setSwitchError("This conversation changed. Choose its runtime and confirm again.");
+    }
+  }, [observationChanged, pendingSwitch?.step]);
+
+  useEffect(() => {
+    // A Stop confirmation belongs to the current turn. A later turn needs the owner's Stop choice again.
+    if (pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)) {
+      setPendingSwitch(current => current?.step === "confirm-stop" ? { ...current, step: "confirm" } : current);
+    }
+  }, [pendingSwitch?.step, pendingSwitch?.turnId, runWorking, props.run?.turnId]);
 
   return <HandoffStatusContext.Provider value={handoffStatus}><AssistantChat key={viewKey.current} ref={chatRef}
     tabId={draftThreadId}
@@ -652,15 +812,18 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.state.pendingApproval ? "Review the pending request above. Approve or deny before sending another message." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : pendingSwitch ? "Resolve the runtime or model choice above before sending another message." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
     availableModels={availableModels} onModelChange={(model, engine) => {
       const selected = props.state.engines.find(item => item.engine === engine);
-      if (selected && (!props.selection.runId || selected.engine === props.run?.engine)) {
-        const choice = { engine: selected.engine, model };
-        setChoice(choice);
-        props.onChoice(choice);
+      if (!selected) return;
+      if (retained) {
+        requestSwitch({ engine: selected.engine, model });
+        return;
       }
+      const choice = { engine: selected.engine, model };
+      setChoice(choice);
+      props.onChoice(choice);
     }}
     providerStatusChecksEnabled={false}
     showModelSelector={false}
@@ -718,12 +881,37 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <span>{selectedClaudeModel.message} Check Runtime settings.</span>
       </div>}
       {!selectedClaudeModel && choice.engine === "claude-cli" && <div className="local-agent-notice" role="status">
-        <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model for a new conversation.</span>
+        <span>Saved model {choice.model} is a legacy or unavailable choice. It has been kept. Choose a listed model to replace it.</span>
       </div>}
-      {keptRoute && <p className="local-agent-route-note">
-        <span id={routeLockId}>This conversation keeps {keptRoute}. Start a new conversation to use a different runtime or model.</span>
-        <Button variant="link" size="sm" disabled={!props.workspaceAvailable} onClick={props.onNewConversation}>New conversation</Button>
-      </p>}
+      {switchError && <div className="local-agent-notice" role="alert">
+        <span>{switchError}</span>
+        <Button variant="ghost" size="sm" onClick={() => setSwitchError(undefined)}>Dismiss</Button>
+      </div>}
+      {pendingSwitch && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
+        role={switchStep === "stopping" || switchStep === "switching" ? "status" : "group"}
+        aria-label="Switch runtime or model">
+        {switchStep === "confirm" && <>
+          <span>Switch this conversation from {routeLabel(props.run)} to {routeLabel(pendingSwitch)}? {SWITCH_TRANSFER}</span>
+          <Button variant="outline" size="sm" onClick={() => void completeSwitch(pendingSwitch)}>Switch</Button>
+          <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Cancel</Button>
+        </>}
+        {switchStep === "working" && <>
+          <span>This conversation is working. Wait for the current request to finish, or stop it and switch to {routeLabel(pendingSwitch)}.</span>
+          <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Wait</Button>
+          <Button variant="outline" size="sm" onClick={() => setPendingSwitch({ ...pendingSwitch, step: "confirm-stop", turnId: props.run?.turnId })}>Stop and switch</Button>
+        </>}
+        {switchStep === "confirm-stop" && <>
+          <span>Stop and switch to {routeLabel(pendingSwitch)}? The current request will be cancelled. Completed work stays in this conversation and the workspace. {SWITCH_TRANSFER}</span>
+          <Button variant="outline" size="sm" onClick={() => void stopThenSwitch(pendingSwitch)}>Stop and switch</Button>
+          <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Keep working</Button>
+        </>}
+        {switchStep === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
+        {switchStep === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
+      </div>}
+      {!pendingSwitch && serverPending && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
+        role="status" aria-label="Switch runtime or model">
+        <span>Stopping the current request. This conversation then switches to {routeLabel(serverPending)}.</span>
+      </div>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
         ? selectedEngine.modelCatalog.message : runtime?.message ?? "Choose a local runtime in Settings."}</p></div>
@@ -733,31 +921,38 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     composerToolbarSlot={<div className="local-agent-composer-controls">
         <label className="local-agent-composer-runtime">
           Runtime
-          <select aria-label="Conversation runtime" value={choice.engine} aria-describedby={selectorReasonIds}
+          <select aria-label="Conversation runtime" value={shown.engine}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : selectorReasonIds}
             className="local-agent-composer-select"
-            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming}
+            disabled={selectorsDisabled}
             onChange={event => chooseRuntime(event.target.value)}>
-            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}>
+            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}
+              disabled={retained && engine.engine !== props.run?.engine && !engine.configured}>
               {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
             </option>)}
           </select>
         </label>
         <label className="local-agent-composer-model">
           Model
-          <select aria-label="Conversation model" value={choice.model} aria-describedby={selectorReasonIds}
+          <select aria-label="Conversation model" value={shown.model}
+            aria-describedby={pendingSwitch || serverPending ? switchPanelId : selectorReasonIds}
             className="local-agent-composer-select"
-            disabled={!!props.selection.runId || !props.workspaceAvailable || props.active || props.streaming || !modelChoices.length}
+            disabled={selectorsDisabled || !shownModelChoices.length}
             onChange={event => {
               const model = event.target.value;
-              if (!selectedEngine || !modelChoices.includes(model)) return;
-              const next = { engine: selectedEngine.engine, model };
+              if (!shownEngine || !shownModelChoices.includes(model)) return;
+              const next = { engine: shownEngine.engine, model };
+              if (retained) {
+                requestSwitch(next);
+                return;
+              }
               setChoice(next);
               props.onChoice(next);
             }}>
-            {!modelChoices.includes(choice.model) && <option value={choice.model}>{choice.model} (saved, unavailable)</option>}
-            {modelChoices.map(model => <option key={model} value={model}
-              disabled={selectedEngine?.claudeModels?.find(item => item.id === model)?.support === "upgrade-required"}>
-              {modelLabel(selectedEngine, model)}
+            {!shownModelChoices.includes(shown.model) && <option value={shown.model} disabled>{shown.model} (saved, unavailable)</option>}
+            {shownModelChoices.map(model => <option key={model} value={model}
+              disabled={modelOptionDisabled(model)}>
+              {modelLabel(shownEngine, model)}
             </option>)}
           </select>
         </label>
