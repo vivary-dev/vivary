@@ -177,6 +177,7 @@ export async function publishNpmArchive(candidateDirectory) {
     if (validation.error || validation.status !== 0) refuse("the exact npm archive failed release-artifact validation.");
     if (await executableSha256(archive) !== digest) refuse("the checked npm archive changed.");
     let npm;
+    // guard:allow-env-credential - Executable search path used to locate the installed npm entrypoint.
     for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
       if (!path.isAbsolute(directory)) continue;
       try {

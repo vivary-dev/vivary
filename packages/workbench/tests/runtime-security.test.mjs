@@ -161,17 +161,22 @@ test("npm publisher rechecks its actual Node and exact validated archive before 
   await writeFile(validator, `#!${process.execPath}\nimport fs from 'node:fs'; import path from 'node:path';
 const dir = process.argv[process.argv.indexOf('--artifacts') + 1];
 const archive = path.join(dir, fs.readdirSync(dir)[0]);
+// guard:allow-env-credential - Test fixture validation marker path in its owned temporary directory.
 fs.writeFileSync(process.env.VALIDATED, archive);
+// guard:allow-env-credential - Test fixture rejection switch set to the literal 1.
 if (process.env.REFUSE_ARCHIVE === '1') process.exit(9);\n`);
   await chmod(validator, 0o700);
   await writeFile(path.join(bin, "package.json"), '{"type":"module"}');
   const npm = path.join(bin, "npm-cli.js");
   await writeFile(npm, `import fs from 'node:fs'; import assert from 'node:assert/strict';
 assert.equal(process.argv[2], 'publish'); assert.equal(process.argv.length, 4);
+// guard:allow-env-credential - Test fixture validation marker path used to compare the checked archive.
 const archive = process.argv[3]; assert.equal(archive, fs.readFileSync(process.env.VALIDATED, 'utf8'));
 assert.equal(fs.readFileSync(archive, 'utf8'), 'fixture archive bytes');
+// guard:allow-env-credential - Test fixture publication marker path in its owned temporary directory.
 fs.writeFileSync(process.env.PUBLISHED, archive);`);
   await symlink(npm, path.join(bin, "npm"));
+  // guard:allow-env-credential - Test fixture executable search path for the fake validator and npm.
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VALIDATED: validation, PUBLISHED: marker };
   let result = child([guard, "publish-npm", candidate], { env: { ...env, REFUSE_ARCHIVE: "1" } });
   assert.equal(result.status, 1);

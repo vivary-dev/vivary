@@ -843,6 +843,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+The runtime security guard uses six documented credential-scanner annotations for the installed npm executable search path and isolated test fixture marker paths and rejection switch. These reads do not select user credentials. The annotations leave runtime admission, archive validation, publication checks, and environment access unchanged. The existing trust boundaries still apply.
+
 2026-10-21 PR #260 runtime security port. The frozen tested security sources add
 actual Node admission at build, start, package, installer and protected npm
 boundaries. The canonical Python bootstrap runs before JavaScript actions in
