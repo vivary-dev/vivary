@@ -866,6 +866,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-21 CI pip pin correction for PR #258. The Python bootstrap in
+`.github/workflows/ci.yml` now pins `pip==26.2.2` instead of `pip==26.0.1`,
+preventing that step from reintroducing the incident-affected certifi bundled
+with the old pip. The controller verified the new pip's provenance through OIDC
+and updated the existing Linux CI virtual environment. This correction covers
+only this workflow pin, without establishing protection of every Python
+environment, package source, platform or application. Product architecture is
+unchanged. The earlier focused 199/199 tests remain historical evidence and do
+not validate these new workflow bytes or establish final-head server CI.
+Workflow validation, explicit independent review of this CI change, the staged
+HLDD check, capture verification and owner Entire approval before merge remain
+pending. No merge or release result is established.
+
 2026-10-21 Focused working-tree verification follow-up for PR #258 at base
 `46196cc4`. Green-v2 completed at 00:49:15 UTC with routes/state 48/48,
 components 63/63, host/schema/cleanup/model choices 67/67 and native owner

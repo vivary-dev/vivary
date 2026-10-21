@@ -694,7 +694,7 @@ jobs:
           npm install --global pnpm@10.33.2
           pnpm --dir packages/workbench install --frozen-lockfile
       - name: install pinned Python launcher tooling
-        run: python -m pip install pip==26.0.1
+        run: python -m pip install pip==26.2.2
       - name: workbench state transport
         run: |
           pnpm --dir packages/workbench exec tsx --test tests/local-access.test.ts tests/owner-sign-in.test.ts tests/native-state.test.ts tests/native-actions.test.ts tests/desktop-host.test.ts tests/chat-scope.test.ts tests/native-chat-project.test.ts
