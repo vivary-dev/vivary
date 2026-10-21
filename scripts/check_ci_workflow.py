@@ -114,6 +114,130 @@ def job_block(text: str, name: str) -> str:
     return jobs[start:end]
 
 
+NODE_GUARD = "node packages/workbench/bin/runtime-security.mjs"
+NODE_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "site")
+CI_JOBS = ("changes", "test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "review", "site")
+RUNNER_BOOTSTRAP = Path(__file__).resolve().with_name("check_runner_action_node.py")
+BOOTSTRAP_ANCHOR = "runner_action_node_bootstrap"
+BOOTSTRAP_ALIAS = "      - *" + BOOTSTRAP_ANCHOR + "\n"
+
+# Official manifests examined by the controller, not mutable release tags.
+# Runner dispatch source 197ca027b90de199464dee3bb9ff198a1db60967:
+# NodeScriptActionHandler.cs:116-118 selects externals/node24/bin/node.
+# JobExtension.cs:325-330 prepares pre steps before workflow steps, so no-pre
+# is essential to the first-step admission argument, including post actions.
+ACTION_MANIFESTS = {
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": {"using": "node24", "main": "dist/index.js", "post": "dist/index.js"},
+    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
+    "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
+    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9": {"using": "node24", "main": "dist/upload/index.js"},
+}
+
+
+def validate_action_manifest(reference: str, runs: dict) -> None:
+    require(reference in ACTION_MANIFESTS, "unproved or mutable action identity: " + reference)
+    require(runs == ACTION_MANIFESTS[reference] and "pre" not in runs and runs.get("using") == "node24",
+            "action main/post/no-pre metadata mismatch: " + reference)
+
+
+def runner_bootstrap_step() -> str:
+    source = RUNNER_BOOTSTRAP.read_text(encoding="utf-8").replace("\r\n", "\n")
+    require(source.endswith("\n") and "\r" not in source, "canonical runner bootstrap must use LF and a final newline")
+    return ("      - &" + BOOTSTRAP_ANCHOR + "\n"
+            "        name: runner action Node admission\n"
+            "        id: runner_action_node\n"
+            "        shell: python -I -B {0}\n"
+            "        run: |\n" + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
+
+
+def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False) -> None:
+    jobs = text.split("\njobs:\n", 1)[-1]
+    headers = re.findall(r"(?m)^  ([\w-]+):\s*$", jobs)
+    require(tuple(headers) == names, "runner bootstrap must cover the exact job inventory")
+    canonical = runner_bootstrap_step().rstrip("\n")
+    require(len(re.findall(r"(?m)^      - &", jobs)) == 1, "exactly one complete bootstrap mapping anchor is required")
+    total_uses = 0
+    for index, name in enumerate(names):
+        job = job_block(text, name)
+        header = job.split("    steps:", 1)[0]
+        require(not re.search(r"(?m)^\s+(?:container|services|continue-on-error):", header),
+                name + " has unsupported container/failure configuration")
+        supported = "    runs-on: ubuntu-latest\n" in header or "    runs-on: windows-latest\n" in header
+        if name == "orientation-proof":
+            supported = "    runs-on: ${{ matrix.os }}\n" in header and "        os: [ubuntu-latest, windows-latest]\n" in header
+        require(supported, name + " requires the approved Ubuntu/Windows x64 configuration")
+        steps = re.split(r"(?m)(?=^      - )", job)[1:]
+        require(bool(steps), name + " has no bootstrap")
+        expected = canonical if index == 0 else BOOTSTRAP_ALIAS.rstrip("\n")
+        require(steps[0].rstrip("\n") == expected, name + " first step must be the canonical unconditional Python bootstrap")
+        require(sum(step.count("id: runner_action_node") for step in steps[1:]) == 0,
+                name + " cannot replace the bootstrap result")
+        for step in steps[1:]:
+            require(not step.startswith(("      - &", "      - *")) and "        <<:" not in step,
+                    name + " has an unproved step alias or merge")
+            require(re.match(r"^      - (?:name|uses|run|if|id|shell|env):", step) is not None,
+                    name + " has an unsupported step mapping")
+            uses = re.findall(r"(?m)^(?:      - |        )uses: (\S+)\s*$", step)
+            if not uses:
+                continue
+            require(len(uses) == 1, name + " has ambiguous action identity")
+            reference = uses[0]
+            validate_action_manifest(reference, ACTION_MANIFESTS.get(reference, {}))
+            if reference.startswith("actions/setup-node@"):
+                pin = "820762786026740c76f36085b0efc47a31fe5020" if npm else "949feb2413d6458794dcd2491c4babbbce0c15c1"
+                require(reference == "actions/setup-node@" + pin, name + " has the wrong setup-node identity")
+            require("continue-on-error:" not in step, name + " cannot ignore an action failure")
+            conditions = re.findall(r"(?m)^        if: (.+)$", step)
+            if conditions:
+                require(len(conditions) == 1, name + " has ambiguous action conditions")
+                expression = conditions[0].removeprefix("${{").removesuffix("}}").strip()
+                require("||" not in expression and "steps.runner_action_node.outcome == 'success'" in [part.strip() for part in expression.split("&&")],
+                        name + " conditional action must require bootstrap success")
+            total_uses += 1
+    require(total_uses == len(re.findall(r"(?m)^\s*(?:-\s+)?uses:", jobs)), "unproved action outside an admitted step")
+    if npm:
+        publish = job_block(text, "publish").split("    steps:", 1)[0]
+        require("    needs: verify\n" in publish and "    if: ${{ inputs.publish && needs.verify.result == 'success' }}" in publish,
+                "npm publication requires explicit approval and successful verify dependency")
+    else:
+        orientation = job_block(text, "orientation-proof")
+        require("if: ${{ !cancelled() && steps.runner_action_node.outcome == 'success' }}" in orientation,
+                "orientation upload must survive later failure only after bootstrap success")
+        require("uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" in orientation,
+                "orientation receipt upload must retain its exact no-pre action")
+
+
+def check_runtime_security(text: str) -> None:
+    for name in NODE_JOBS:
+        job = job_block(text, name)
+        steps = re.split(r"(?m)(?=^      - )", job)[1:]
+        setups = [i for i, step in enumerate(steps) if "uses: actions/setup-node@" in step]
+        guards = [i for i, step in enumerate(steps) if NODE_GUARD in step]
+        require(len(setups) == len(guards) == 1, f"{name} needs exactly one actual Node guard and setup")
+        require(guards[0] == setups[0] + 1, f"{name} Node guard must immediately follow setup-node")
+        guard = steps[guards[0]]
+        require(re.search(r"(?m)^        run: " + re.escape(NODE_GUARD) + r"\s*$", guard) is not None,
+                f"{name} Node guard must be an unconditional standalone command")
+        require(not re.search(r"(?m)^\s+(?:if|continue-on-error|working-directory|env):", guard),
+                f"{name} Node guard cannot be skipped, redirected or ignored")
+        require("continue-on-error:" not in job.split("    steps:", 1)[0], f"{name} cannot ignore job failure")
+        before = "".join(steps[:guards[0]])
+        require(not re.search(r"(?m)^\s*(?:run:\s*)?(?:npm|pnpm|corepack)\s", before),
+                f"{name} must admit Node before package operations")
+        for step in steps:
+            # A one-line YAML run step includes its list dash. Inspect its command,
+            # as well as block commands, rather than the surrounding YAML text.
+            commands = re.sub(r"(?m)^      - run:\s*", "", step)
+            commands = re.sub(r"(?m)^        run:\s*", "", commands)
+            require(not re.search(r"(?m)^\s*['\"]?(?:agent-native|astro) build(?:\s|$|['\"])", commands),
+                    f"{name} direct builds must use the guarded package build command")
+    require("node --test packages/workbench/tests/runtime-security.test.mjs" in job_block(text, "workbench"),
+            "workbench must run Node security policy and entry tests")
+    require("python scripts/tests/test_npm_trusted_publish_workflow.py" in job_block(text, "test"),
+            "tests job must run npm runtime/publication mutation tests")
+
+
 def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     changes_job = job_block(text, "changes")
@@ -347,6 +471,10 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
+    check_runtime_security(text)
+    check_runner_action_bootstrap(text, CI_JOBS)
+    require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
+            "tests job must run the runner action bootstrap regressions")
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
 

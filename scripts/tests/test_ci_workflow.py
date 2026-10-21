@@ -43,7 +43,7 @@ RELEASE_BUILD_COMMANDS = _load().release_build_commands()
 
 
 def _workflow(site_steps: str, trailing_job: str = "") -> str:
-    return (
+    text = (
         "name: ci\n"
         "on:\n"
         "  workflow_dispatch:\n"
@@ -183,6 +183,45 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         f"{site_steps}"
         f"{trailing_job}"
     )
+
+    module = _load()
+    for name in module.NODE_JOBS:
+        block = module.job_block(text, name)
+        setup = (
+            '      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n'
+            '        with:\n          node-version: "22"\n'
+            '      - name: actual Node security admission\n'
+            f'        run: {module.NODE_GUARD}\n'
+        )
+        if name == "workbench":
+            setup += '      - run: node --test packages/workbench/tests/runtime-security.test.mjs\n'
+        if name == "test":
+            setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
+        if '    steps: []\n' in block:
+            updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
+        else:
+            updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
+        text = text.replace(block, updated, 1)
+    for index, name in enumerate(module.CI_JOBS):
+        block = module.job_block(text, name)
+        bootstrap = module.runner_bootstrap_step() if index == 0 else module.BOOTSTRAP_ALIAS
+        host = '    runs-on: ubuntu-latest\n'
+        if name == 'orientation-proof':
+            host = '    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n'
+            block_with_upload = block + (
+                '      - name: preserve orientation receipt\n'
+                "        if: ${{ !cancelled() && steps.runner_action_node.outcome == 'success' }}\n"
+                '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n'
+            )
+        else:
+            block_with_upload = block
+        if '    steps: []\n' in block_with_upload:
+            updated = block_with_upload.replace('    steps: []\n', host + '    steps:\n' + bootstrap, 1)
+        else:
+            updated = block_with_upload.replace('    steps:\n', host + '    steps:\n' + bootstrap, 1)
+        text = text.replace(block, updated, 1)
+    return text
 
 
 INSTALL = (
@@ -527,6 +566,47 @@ def test_hldd_must_use_the_actual_pr_head():
     )
     message = _run(workflow)
     assert message and "actual PR head" in message
+
+
+def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
+    module = _load()
+    text = _workflow(INSTALL + AUDIT)
+    guard_step = '      - name: actual Node security admission\n        run: ' + module.NODE_GUARD + '\n'
+    for name in module.NODE_JOBS:
+        block = module.job_block(text, name)
+        missing = text.replace(block, block.replace(guard_step, '', 1), 1)
+        assert _run(missing), name
+        unrelated = missing + '\n  unrelated:\n    steps:\n' + guard_step
+        assert _run(unrelated), name
+        for alteration in (
+            guard_step.replace('        run:', '        if: false\n        run:'),
+            guard_step.replace('        run:', '        continue-on-error: true\n        run:'),
+            guard_step.replace(module.NODE_GUARD, module.NODE_GUARD + ' || true'),
+            guard_step.replace(module.NODE_GUARD, module.NODE_GUARD + '; exit 0'),
+        ):
+            assert _run(text.replace(block, block.replace(guard_step, alteration, 1), 1)), (name, alteration)
+        delayed = block.replace(guard_step, '', 1) + '      - run: echo before delayed admission\n' + guard_step
+        assert _run(text.replace(block, delayed, 1)), name
+
+
+def test_node_guard_cannot_follow_install_or_an_unguarded_direct_build():
+    module = _load()
+    text = _workflow(INSTALL + AUDIT)
+    block = module.job_block(text, 'workbench')
+    guard_step = '      - name: actual Node security admission\n        run: ' + module.NODE_GUARD + '\n'
+    for command in ('npm install', 'pnpm install', 'agent-native build', 'astro build'):
+        mutation = block.replace(guard_step, '      - run: ' + command + '\n' + guard_step, 1)
+        assert _run(text.replace(block, mutation, 1)), command
+    for command in ('agent-native build', 'astro build'):
+        assert _run(text.replace(block, block + '      - run: ' + command + '\n', 1)), command
+
+
+def test_node_guard_suites_and_required_changes_success_cannot_be_removed():
+    text = _workflow(INSTALL + AUDIT)
+    for command in ('node --test packages/workbench/tests/runtime-security.test.mjs',
+                    'python scripts/tests/test_npm_trusted_publish_workflow.py'):
+        assert _run(text.replace(command, 'echo skipped', 1)), command
+    assert _run(text.replace('    needs: changes\n', '', 1))
 
 
 if __name__ == "__main__":

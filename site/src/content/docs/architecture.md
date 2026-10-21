@@ -56,11 +56,19 @@ carry it. `vivary-set-project-kind` is an owner-only action (no agent, MCP, or
 chat tool route). [`setLocalProjectKind`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-services.mjs)
 admits the owner's project scope and writes only that row, never project files.
 It writes through the local project service, so only the local host can save a
-kind. The catalog returns the kind and `kindEditable`, which is true only there,
+kind. Its route shares the project's startup gate and bounded shutdown drain,
+so an active kind write keeps the provider open until completion or the drain
+deadline. The action's existing scope and binding revalidation still applies.
+The catalog returns the kind and `kindEditable`, which is true only there,
 and Project details offers the kind control only when it is true. New project asks for it in
 [`WorkspaceKindDialog`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/WorkspaceKindDialog.tsx)
 before the form, which fills the matching preset, and saves it after
-registration. Open folder registers the folder unchanged, asks, then selects the
+registration. The form reports when its connected name input is enabled after
+the pattern catalog loads. New project hands focus there and overrides the
+closing dialog's restoration so a removed trigger cannot take it back. Cancel
+returns to the connected opener, and Change kind focuses the current card while
+retaining the form. Route or project changes, unmount and a later focus move
+cancel a pending handoff. Open folder registers the folder unchanged, asks, then selects the
 project. A repeated Open folder that finds the folder registered asks again while
 its kind is Not set. If the retained editable catalog omits the registered
 project, its kind is uncertain and Open folder asks before selection. This also
@@ -467,6 +475,14 @@ project binding and document, holding the pending request and the saved record.
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](/commands/) and [package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages).
 
+The desktop builder pins build-only pip 26.2.2 and setuptools 84.0.0, verifies
+pip's vendored distlib 0.4.2, and keeps the existing offline build and portable
+wheel checks. The Windows console stub and retained distlib license must match
+their authenticated sizes and hashes before those bytes are written. The
+[desktop packaging contract](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md) owns the exact inputs,
+relative launcher paths and interpreter flags. Python and component versions
+remain unchanged.
+
 ### The shared seam: vivary-core
 
 Core is a library shared by Tropo, Strato, Ozone, and Exo. It owns deterministic
@@ -744,6 +760,71 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 
 ## Delivery and known gaps
 
+Production Node admission is owned by
+[`runtime-security.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/bin/runtime-security.mjs). It
+checks the actual process version, platform, architecture and executable SHA-256,
+and refuses Electron as an ordinary Node substitute. The
+[October 2026 Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+sets separate floors of 22.23.4, 24.22.1 and 26.12.1 within those supported major
+lines. The policy records all ten advisory identifiers and their affected lines,
+including CVE-2026-111497 on all three. EOL, unknown and prerelease runtimes fail
+admission. A policy pass for Node 26 does not select it for Vivary or establish
+project compatibility. Dependency audits, engine declarations and version
+markers do not satisfy this gate. Runtime selections remain unchanged, so
+affected selections stay blocked for production work.
+
+Workbench start checks before port probing, user-state creation or server
+import. Workbench and site build commands check the process that imports the
+actual builder. Site Node is a static-site build tool, not a deployed server.
+CI checks after Node selection and before Node package operations. Both npm jobs
+check their own runtime and retain the npm 11.5.1 minimum. Protected publication
+copies one candidate tarball, validates that exact copy, checks its hash again
+in the publisher process and passes that archive to npm. Release tag, commit,
+version, protected environment, dependency success and OIDC gates still apply.
+
+The runner's JavaScript action interpreter has a separate admission boundary.
+The canonical `scripts/check_runner_action_node.py` source is mirrored verbatim
+into a first-step Python mapping in CI and npm publication, then aliased into
+every other job. It needs neither checkout nor selected Node. It finds one live
+`Runner.Worker` ancestor from native parent, creation and executable metadata,
+derives that runner root's `externals/node24/bin/node` or `node.exe`, checks its
+native x64 binary identity and hashes the executable before and after a
+sanitized, bounded absolute version probe. Python applies the advisory floors
+and requires this interpreter to be major 24. PATH Node cannot rescue an affected
+provider interpreter. Missing or reused process identity, ambiguous ancestry,
+unsupported hosts or containers, changed bytes and unproved selection overrides
+refuse admission. No provider binary is downloaded, modified, forced or restarted.
+
+First-step placement relies on the exact no-pre action manifests bound in the
+workflow contract checker. The examined runner dispatch source is commit
+`197ca027b90de199464dee3bb9ff198a1db60967`, whose action preparation runs pre
+hooks before ordinary steps. Only the supplied immutable node24 checkout,
+setup-python, setup-node and upload-artifact identities are admitted, including
+their bound main and post paths. Mutable, unknown, composite and Docker actions
+remain held. The orientation upload requires both `!cancelled()` and successful
+bootstrap outcome, preserving its receipt after a later test failure. Each npm
+job checks independently, and publication still requires successful verification.
+The supplied official metadata meets the contributor publication-age rule for
+the newer CI setup-node and upload-artifact identities. Age and GitHub PGP
+signatures do not establish OIDC build attestation or waive another exact-identity
+provenance requirement. This boundary covers the ten enumerated CI/npm jobs,
+not every workflow or independently operated runner. Native runner execution
+and independent review remain necessary to validate its assumptions.
+
+Desktop packaging checks its build process and binds copied Linux Node bytes
+to that process's executable hash. Staged runtime collection requires native
+matching-platform evidence. Windows also requires an authenticated asset binding,
+and the retained affected Windows asset cannot pass. Installer admission
+rechecks the payload manifest and runtime before invoking NSIS. Runtime evidence
+uses the existing build metadata and package manifest. Electron publication
+remains held for every candidate. Version 44.3.0 is unacceptable, and 44.9.3
+declares Node 24.22.0 with incomplete advisory backport evidence. A fixed
+standalone Node or one matched Chromium Brotli fix does not clear that hold.
+These source gates do not establish protection of every runtime, environment
+or vulnerability. Raw PyPI and manual registry publication remain held. No
+tracked PyPI publication workflow exists, and these scripts cannot prevent an
+independently credentialed raw upload.
+
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
 
 Issue #19's five project read reports entered `dev` in PR #89. Its receipt records hosted fake-provider proof and the Windows packages, including the final `e6ccddf5` package, which passed the panel reads and the agent turn. PR #94 recorded that result, and the owner closed issue #19 on 2026-09-26. PR #90 added [route-question research](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/research/tropo-find-route-questions.md) only. It did not change Tropo's public path refusal or MCP privacy rules.
@@ -765,6 +846,87 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-21 PR #260 runtime security port. The frozen tested security sources add
+actual Node admission at build, start, package, installer and protected npm
+boundaries. The canonical Python bootstrap runs before JavaScript actions in
+all eight CI jobs and both npm jobs. The CI port applies only the tested security
+hunks, retaining PR260's existing commands and test lists. Both inline bootstrap
+payloads match the canonical source, action identities are immutable, and the
+orientation upload retains its successful-bootstrap conjunction. Package changes
+replace only the two build commands, preserving other scripts and dependencies.
+
+The project-kind, focus and pip/distlib repairs and their 97-test/typecheck
+receipts remain intact. Those results precede this port and do not validate the
+combined candidate. The port's focused branch-specific tests, runtime evidence,
+final-head server CI, independent review and remaining packaging and acceptance
+gates remain pending. No tests, probes, builds or reviews ran during this source
+port. Runtime pins, Electron publication and raw registry holds are unchanged.
+
+2026-10-21 PR #260 CI pip acquisition correction. The workbench CI tooling
+install now pins `pip==26.2.2` to match the existing build-only asset and backend
+tuple. Product behavior and runtime security gates are unchanged. This correction
+awaits focused validation and independent review with the combined candidate.
+
+2026-10-21 Project kind shutdown, New project focus and packaging repair (PR #260). The exact
+`vivary-set-project-kind` route now joins the existing project-action gate and
+bounded request drain. The provider's shutdown owner and the action's
+authorization checks are unchanged. The build-only pip tuple, Python backend
+validator and isolated-environment checks now agree on pip 26.2.2 and vendored
+distlib 0.4.2. The existing ScriptMaker, relative launcher and RECORD cleanup
+paths remain. License staging now checks size and digest before creating its
+destination and writes the same authenticated bytes. The console stub also
+retains its authenticated bytes through launcher construction.
+
+The old-source coordinator batch ended on 2026-10-21 at 18:34:26 UTC with raw
+exit 1. Project services passed 9 of 10 tests, with the held kind route observing
+provider close before release. Existing catalog drain and bounded shutdown
+controls passed. The actual-form component file passed 15 of 17 tests. Both
+Coding Enter and Personal Space left the connected, enabled name input
+unfocused. That fixture models keyboard activation explicitly and does not
+exercise Radix close restoration or Windows keyboard behavior. The source now
+forwards Toolkit's typed close-autofocus boundary to navigation. A one-shot
+request coordinates it with the real form's enabled input, prevents later
+restoration to the removed trigger and stops after focus is delivered or the
+context changes. Cancel restores the connected opener, and Change kind keeps
+the form and selected-card focus. Existing keyboard, pending-save and error
+handling remains in its owners.
+
+The preceding partial source turn ended at 18:55:31 UTC with native exit 0 and
+at 18:55:33 UTC with wrapper exit 11 because the required focus edits were absent.
+A separate reconciliation verified the eight completed edits and the other
+original scope and helper invariants. The original `scope-after.json` remains
+absent. That reconciliation is not green test evidence. The subsequent focus
+source continuation ended with wrapper exit 0 and native exit 0, bound by
+matching source input, scope and native receipts.
+
+Desktop tests passed 13 of 17. The pip asset tuple, real backend validator,
+altered-license copy boundary and installed-vendor launcher/RECORD case failed.
+Exact-license and stub controls, unknown-vendor refusal and altered-stub refusal
+passed. Vendor normalization occurs only in the retained boundary fixtures.
+All three old-source stages returned raw exit 1 with result, scope and helper
+guards passing. The two Workbench regression files are retained unchanged.
+The desktop test changes only its obsolete expected pip tuple.
+
+The coordinator's focused working-tree batch ended on 2026-10-21 at 19:23:03 UTC
+with raw exit 0. Each stage returned raw exit 0: `project-services` passed 10/10,
+`workspace-kind-dialog` passed 17/17, `desktop-original-runtime` passed 17/17,
+`new-conversation-controls` passed 53/53, and Workbench `typecheck` completed.
+All four test stages recorded zero failures, cancellations, skips or todos.
+Preflight passed 10/10, all result, scope and helper guards passed, and every
+guarded stage receipt reported no reserve stop. Typecheck still emitted the
+existing production-configuration diagnostics that `BETTER_AUTH_SECRET` is
+unset. Its raw exit 0 does not establish production or deployment readiness.
+
+The historical `new-conversation-controls` command retains `--test-force-exit`,
+so its pass does not establish graceful teardown. Linkedom's explicit activation
+and the Toolkit dialog stub leave actual Radix close restoration, real browser
+focus behavior and Windows keyboard acceptance unproven. The desktop fixture
+suite verifies its recorded packaging and authentication boundaries, not a
+Windows installer or release. Final exact-head server CI, required independent
+reviews, remaining packaging gates, actual UI and provider journeys, and packaged
+Windows acceptance remain pending. The earlier raw CI and old-source failures remain retained
+evidence. This documentation update reruns no validation.
 
 2026-10-21 Shared Native creation and loading fallback (PR #260 findings
 4331832605 and 4331832608). Code and sidebar owners now claim the same chat

@@ -46,11 +46,11 @@ export const ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS = Object.freeze([
   Object.freeze({
     provider: "PyPI",
     distribution: "pip",
-    version: "26.0.1",
-    fileName: "pip-26.0.1-py3-none-any.whl",
-    url: "https://files.pythonhosted.org/packages/de/f0/c81e05b613866b76d2d1066490adf1a3dbc4ee9d9c839961c3fc8a6997af/pip-26.0.1-py3-none-any.whl",
-    sha256: "bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b",
-    size: 1_787_723,
+    version: "26.2.2",
+    fileName: "pip-26.2.2-py3-none-any.whl",
+    url: "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+    sha256: "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
+    size: 1_819_850,
   }),
   Object.freeze({
     provider: "PyPI",

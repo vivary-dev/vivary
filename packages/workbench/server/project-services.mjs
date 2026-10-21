@@ -56,6 +56,7 @@ export const PROJECT_ACTION_PATHS = Object.freeze([
   "/_agent-native/actions/vivary-project-runtime-activity",
   "/_agent-native/actions/vivary-preview-managed-project-reconnection",
   "/_agent-native/actions/vivary-confirm-managed-project-reconnection",
+  "/_agent-native/actions/vivary-set-project-kind",
 ]);
 
 const controllers = new WeakMap();

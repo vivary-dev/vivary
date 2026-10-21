@@ -131,14 +131,14 @@ Python tools:
 
 | Tool | Version | SHA-256 |
 | --- | --- | --- |
-| [pip](https://pypi.org/project/pip/26.0.1/) | 26.0.1 | `bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b` |
+| [pip](https://pypi.org/project/pip/26.2.2/) | 26.2.2 | `fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70` |
 | [setuptools](https://pypi.org/project/setuptools/84.0.0/) | 84.0.0 | `51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670` |
 
 Each build then:
 
 1. Creates a temporary isolated build environment under the same `.tmp`
    directory, installs only the verified local pip and setuptools wheels, and
-   checks that pip vendors distlib 0.4.0.
+   checks that pip vendors distlib 0.4.2.
 2. Builds fresh pure-Python wheels from the owned `vivary`, `create-vivary`,
    `core`, `tropo`, `strato`, `ozone`, and `exo` sources without an
    index or build isolation.
@@ -159,14 +159,28 @@ adopt, doctor, capabilities, check, find, decide, review, impact, and control.
 Its logs and email-draft helpers remain available through the bundled CLI.
 
 Linux component commands resolve the bundled sibling `python3`. Windows uses
-pip's vendored distlib 0.4.0 console launcher and its supported
+pip's vendored distlib 0.4.2 console launcher and its supported
 `<launcher_dir>` interpreter path. Every standalone and component launcher
 passes `-I -X utf8 -B` so redirected Unicode output has the same encoding
 contract as the application adapter. See the first-party
-[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.0/PC/launcher.c).
+[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.2/PC/launcher.c).
 The packaged runtime omits pip and Python bytecode caches. It retains distlib's
 license at `licenses/LICENSE.distlib` for the copied Windows launcher stubs.
+The builder requires the authenticated 108,032-byte `t64.exe` with SHA-256
+`81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7`.
+Before creating the license destination, it requires the 14,531-byte LICENSE
+with SHA-256 `808e10c8a6ab8deb149ff9b3fb19f447a808094606d712a9ca57fead3552599d`.
+Both boundaries retain the authenticated bytes for the subsequent write.
+An unknown vendor, missing input, wrong size or wrong digest is refused.
 Electron Packager copies the staged Python tree with verbatim relative symlinks.
+
+The 2026-10-21 coordinator run against the prior packaging source returned raw
+exit 1 with 13 of 17 tests passing. The asset tuple and real backend validator
+disagreed with pip 26.2.2, altered license bytes reached the copy destination
+under fixture-only vendor normalization, and the real launcher/RECORD case
+rejected installed distlib 0.4.2. Exact-license and stub controls, unknown-vendor
+refusal and altered-stub refusal passed. Post-repair tests and packaging remain
+pending. These results do not establish packaged Windows acceptance.
 
 The manifest records the target, source revision, interpreter and component
 versions, wheel hashes, launchers, bridge hash, and license paths. The package

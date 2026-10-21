@@ -84,6 +84,16 @@ function RegistrationForm({ catalog, disabled, onClose }: { catalog: ProjectCata
   </form>;
 }
 
+type KindFocusRequest = {
+  context: string;
+  trigger: HTMLButtonElement;
+  previousFocus: Element | null;
+  target: "name" | "trigger";
+  input: HTMLInputElement | null;
+  pending: boolean;
+  closed: boolean;
+};
+
 export function ProjectNavigation() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -91,6 +101,16 @@ export function ProjectNavigation() {
     catalog, activeProject, checking, workspaceAvailable, selecting, error,
     refresh, selectProject, retrySelection,
   } = useProjects();
+  const kindFocus = useRef<KindFocusRequest | null>(null);
+  const focusContext = JSON.stringify([location.key, location.pathname, location.search, location.hash,
+    catalog?.scopeKey, activeProject?.projectId]);
+  const currentFocusContext = useRef(focusContext);
+  currentFocusContext.current = focusContext;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const projectHeading = useRef<HTMLHeadingElement>(null);
   const projectButtons = useRef(new Map<string, HTMLButtonElement>());
   const recoveryFocus = useRef<string | null>(null);
@@ -111,6 +131,7 @@ export function ProjectNavigation() {
     await refresh();
   }
   async function chooseProject(projectId: string | null) {
+    cancelKindFocus();
     recoveryFocus.current = null;
     setRecoveryNotice(null);
     if (await selectProject(projectId) && location.pathname !== "/") navigate("/");
@@ -122,6 +143,36 @@ export function ProjectNavigation() {
   const [kindPrompt, setKindPrompt] = useState<{ purpose: "new" }
     | { purpose: "open"; projectId: string; displayName: string } | null>(null);
   const [newProjectKind, setNewProjectKind] = useState<WorkspaceKind | null>(null);
+  function showNewProjectKind(trigger: HTMLButtonElement) {
+    kindFocus.current = { context: currentFocusContext.current, trigger, previousFocus: trigger,
+      target: "trigger", input: null, pending: true, closed: false };
+    setKindPrompt({ purpose: "new" });
+  }
+  function cancelKindFocus() {
+    // Keep the close override until Radix has finished, even when the destination is no longer current.
+    if (kindFocus.current) kindFocus.current.pending = false;
+  }
+  function focusKindTarget(request: KindFocusRequest) {
+    if (kindFocus.current !== request) return;
+    if (request.pending) {
+      if (!mounted.current || request.context !== currentFocusContext.current) {
+        request.pending = false;
+      } else {
+        const target = request.target === "name" ? request.input : request.trigger;
+        if (target?.isConnected && !target.disabled) {
+          const active = document.activeElement;
+          if (active && active.isConnected && active !== document.body && active !== target
+            && active !== request.previousFocus && active !== request.trigger) {
+            request.pending = false;
+          } else {
+            target.focus();
+            request.pending = document.activeElement !== target;
+          }
+        }
+      }
+    }
+    if (request.closed && !request.pending) kindFocus.current = null;
+  }
   const saveProjectKind = useSaveProjectKind();
   const { call } = useNativeActionCaller();
   const queryClient = useQueryClient();
@@ -131,6 +182,7 @@ export function ProjectNavigation() {
     retry: false, staleTime: Infinity,
   });
   async function openFolder() {
+    cancelKindFocus();
     setChoosing(true);
     setFolderError(undefined);
     try {
@@ -143,6 +195,7 @@ export function ProjectNavigation() {
         // A retry of an earlier Open folder returns already-registered. It asks again while the kind is still Not set.
         const refreshed = queryClient.getQueryData<CatalogResult>(CATALOG_QUERY_KEY);
         if (openedFolderNeedsKind(result.code, result.projectId, refreshed)) {
+          kindFocus.current = null;
           setKindPrompt({ purpose: "open", projectId: result.projectId, displayName: result.displayName ?? "This folder" });
         } else {
           await selectOpenedFolder(result.projectId);
@@ -161,6 +214,7 @@ export function ProjectNavigation() {
   }
   const lastCatalog = useRef<ProjectCatalog | null>(null);
   if (catalog) lastCatalog.current = catalog;
+  const closingKindFocus = kindFocus.current;
   return <section className="project-list" aria-labelledby="projects-heading">
     <div className="project-list-heading"><h2 id="projects-heading" ref={projectHeading} tabIndex={-1}>Projects</h2>
       <Button size="sm" variant="ghost" onClick={() => void refresh()} disabled={checking} aria-label="Refresh projects">Refresh</Button>
@@ -195,15 +249,16 @@ export function ProjectNavigation() {
             && <p role="status">This folder cannot be reconnected. Restore the original folder and refresh,
               or choose another project. Your conversations are saved.</p>}
         </li>)}</ul>}
-      {!creating && <Button size="sm" className="register-project-button" onClick={() => {
+      {!creating && <Button size="sm" className="register-project-button" onClick={event => {
         setRegistering(false);
         // Each new project starts with no kind chosen. Change kind inside the form keeps the current choice.
         setNewProjectKind(null);
-        setKindPrompt({ purpose: "new" });
+        showNewProjectKind(event.currentTarget);
       }}>New project</Button>}
       {!desktop.data?.folderPicker && !registering
         && catalog.locations.some(location => location.status === "available")
         && <Button size="sm" variant="outline" className="register-project-button" onClick={() => {
+          cancelKindFocus();
           setCreating(false);
           setRegistering(true);
         }}>Register existing folder</Button>}
@@ -213,8 +268,15 @@ export function ProjectNavigation() {
           : "No connected folders are available. You can create a managed project here."}</p>}
     </>}
     {creating && newProjectKind && <CreateProjectForm disabled={checking || selecting}
-      workspaceKind={newProjectKind} onChangeKind={() => setKindPrompt({ purpose: "new" })}
-      onClose={() => setCreating(false)}
+      workspaceKind={newProjectKind} onChangeKind={showNewProjectKind}
+      onNameInputReady={input => {
+        const request = kindFocus.current;
+        if (request) {
+          request.input = input;
+          if (request.target === "name" || request.closed) focusKindTarget(request);
+        }
+      }}
+      onClose={() => { cancelKindFocus(); setCreating(false); }}
       onCreated={async (projectId, kindSaved) => {
         setRecoveryNotice(kindSaved ? null
           : "Project created. Its kind could not be saved, so it shows Not set. Set it in Project details.");
@@ -226,6 +288,14 @@ export function ProjectNavigation() {
         catalog={lastCatalog.current} disabled={checking || !catalog} onClose={() => setRegistering(false)} />
     </div>}
     <WorkspaceKindDialog open={kindPrompt !== null}
+      onCloseAutoFocus={event => {
+        if (!closingKindFocus) return;
+        // Readiness may focus the input before the close animation finishes. Never restore a removed trigger
+        // afterward or take focus again if the owner has since moved it elsewhere.
+        event.preventDefault();
+        closingKindFocus.closed = true;
+        focusKindTarget(closingKindFocus);
+      }}
       current={kindPrompt?.purpose === "new" ? newProjectKind : null}
       description={kindPrompt?.purpose === "open"
         ? `${kindPrompt.displayName} is registered. Your choice is saved in Vivary. No files in the folder change.`
@@ -238,12 +308,19 @@ export function ProjectNavigation() {
           await selectOpenedFolder(prompt.projectId);
           return;
         }
+        if (kindFocus.current) {
+          kindFocus.current.target = "name";
+          kindFocus.current.previousFocus = document.activeElement;
+        }
         setNewProjectKind(kind);
         setCreating(true);
         setKindPrompt(null);
       }}
       onCancel={() => {
         const prompt = kindPrompt;
+        if (prompt?.purpose === "new" && kindFocus.current) {
+          kindFocus.current.previousFocus = document.activeElement;
+        }
         setKindPrompt(null);
         if (prompt?.purpose === "open") void selectOpenedFolder(prompt.projectId);
       }} />

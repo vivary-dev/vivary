@@ -327,6 +327,43 @@ test("shutdown closes the gate immediately and waits for an active project reque
   assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
 });
 
+test("shutdown drains the registered set-project-kind route before closing its provider", { timeout: 2000 }, async () => {
+  const fixture = fakeNitro();
+  const actionWait = deferred();
+  const actionStarted = deferred();
+  const runtime = fakeRuntime({ getH3App: fixture.getH3App });
+  const controller = startProjectServices(fixture.nitro, pluginDependencies(fixture, runtime, {
+    requestDrainMs: 1000,
+  }));
+  // Discovered actions register their real URL separately from the runtime's catalog handlers.
+  fixture.getH3App(fixture.nitro).use("/_agent-native/actions/vivary-set-project-kind", async () => {
+    actionStarted.resolve();
+    await actionWait.promise;
+    return Response.json({ ok: true });
+  });
+  let active;
+  let closing;
+  try {
+    assert.deepEqual(await controller.ready, { status: "open", failure: null });
+    active = fixture.request("/_agent-native/actions/vivary-set-project-kind");
+    await actionStarted.promise;
+    closing = fixture.close();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 0,
+      "the provider must stay open while its set-project-kind handler is running");
+    actionWait.resolve();
+    assert.equal((await active).status, 200);
+    await closing;
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
+    await controller.close();
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
+  } finally {
+    actionWait.resolve();
+    await active;
+    await (closing ?? controller.close());
+  }
+});
+
 
 test("shutdown closes the owned provider when an active request cannot drain", { timeout: 2000 }, async () => {
   const fixture = fakeNitro();

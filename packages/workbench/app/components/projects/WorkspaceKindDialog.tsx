@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@agent-native/toolkit/ui";
 import { IconCode, IconNotes } from "@tabler/icons-react";
@@ -19,12 +19,13 @@ const CHOICES: ReadonlyArray<{ kind: WorkspaceKind; title: string; body: string;
  * and Space work, and the arrow keys move between the two cards. Escape, the close button and Cancel all cancel.
  * `onChoose` may save. Its rejection keeps the dialog open with the message.
  */
-export function WorkspaceKindDialog({ open, description, current = null, onChoose, onCancel }: {
+export function WorkspaceKindDialog({ open, description, current = null, onChoose, onCancel, onCloseAutoFocus }: {
   open: boolean;
   description: string;
   current?: WorkspaceKind | null;
   onChoose: (kind: WorkspaceKind) => Promise<void> | void;
   onCancel: () => void;
+  onCloseAutoFocus?: ComponentProps<typeof DialogContent>["onCloseAutoFocus"];
 }) {
   const [saving, setSaving] = useState<WorkspaceKind | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export function WorkspaceKindDialog({ open, description, current = null, onChoos
 
   return <Dialog open={open} onOpenChange={next => { if (!next && !saving) onCancel(); }}>
     <DialogContent className="workspace-kind-dialog" closeLabel="Cancel"
+      onCloseAutoFocus={onCloseAutoFocus}
       onOpenAutoFocus={event => {
         // Focus the current kind, else the first card, instead of the close button.
         event.preventDefault();

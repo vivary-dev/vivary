@@ -131,7 +131,7 @@ const navigationStubs = new Map([
     export const CreateProjectForm = ({ workspaceKind, onClose }) => createElement("div", { "data-create-kind": workspaceKind },
       createElement("button", { type: "button", "data-create-close": "", onClick: onClose }, "Close form"));`],
 ]);
-const navigationBundle = await build({ stdin: { contents: `
+const navigationSource = `
   import { createElement, useEffect } from "react";
   import { QueryClientProvider } from "@tanstack/react-query";
   import { ProjectNavigation } from "./app/components/projects/ProjectNavigation";
@@ -150,7 +150,8 @@ const navigationBundle = await build({ stdin: { contents: `
   export function navigationView() {
     return createElement(QueryClientProvider, { client: globalThis.kindFixture.queryClient },
       createElement(ProjectProvider, null, createElement(Navigation)));
-  }`, loader: "tsx", resolveDir: workbench },
+  }`;
+const navigationBundle = await build({ stdin: { contents: navigationSource, loader: "tsx", resolveDir: workbench },
   bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
   plugins: [{ name: "navigation-services", setup(build) {
     build.onResolve({ filter: /.*/ }, args => navigationStubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
@@ -158,6 +159,21 @@ const navigationBundle = await build({ stdin: { contents: `
   } }] });
 const navigation = { exports: {} };
 compileFunction(navigationBundle.outputFiles[0].text, ["require", "module", "exports"])(require, navigation, navigation.exports);
+
+// This separate bundle removes only the form substitute and adds the icon required by the real form.
+// Its Input remains the plain input above, with no fixture autofocus or replacement node.
+const realFormStubs = new Map(navigationStubs);
+realFormStubs.delete("./CreateProjectForm");
+realFormStubs.set("@tabler/icons-react", navigationStubs.get("@tabler/icons-react") + `
+  export const IconFileText = () => null;`);
+const realFormBundle = await build({ stdin: { contents: navigationSource, loader: "tsx", resolveDir: workbench },
+  bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic", external: ["react", "react/*", "react-dom/*"],
+  plugins: [{ name: "real-form-navigation-services", setup(build) {
+    build.onResolve({ filter: /.*/ }, args => realFormStubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
+    build.onLoad({ filter: /.*/, namespace: "host" }, args => ({ contents: realFormStubs.get(args.path), loader: "tsx", resolveDir: workbench }));
+  } }] });
+const realFormNavigation = { exports: {} };
+compileFunction(realFormBundle.outputFiles[0].text, ["require", "module", "exports"])(require, realFormNavigation, realFormNavigation.exports);
 
 let host, root;
 test.beforeEach(() => {
@@ -358,6 +374,53 @@ test("New project starts with no kind chosen after an earlier project chose Pers
   assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"], "nothing is preselected");
   assert.equal(document.activeElement, cards()[0], "the first card takes focus, not the earlier choice");
 });
+
+for (const [kind, label, index, activation, keyLabel] of [
+  ["coding", "Coding", 0, "Enter", "Enter"],
+  ["personal", "Personal", 1, " ", "Space"],
+]) {
+  test(`New project focuses the real name field after ${label} is chosen with ${keyLabel}`, async () => {
+    kindFixture.call = async (name, input) => {
+      kindFixture.events.push(["call", name, input]);
+      if (name === "vivary-workspace-pattern-catalog") return { code: "catalog", patterns: [] };
+      throw new Error("Unexpected real-form action: " + name);
+    };
+    await act(async () => root.render(realFormNavigation.exports.navigationView()));
+    const newProject = () => [...host.querySelectorAll("button")].find(button => button.textContent === "New project");
+    await waitForNavigation(() => !!newProject(), "real-form project catalog");
+    const trigger = newProject();
+    await act(async () => trigger.focus());
+    assert.equal(document.activeElement === trigger, true, "New project starts with keyboard focus");
+    // Linkedom does not synthesize a native click from a key event, so model that activation explicitly.
+    await key(trigger, "Enter");
+    await act(async () => trigger.click());
+    assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")), ["false", "false"]);
+    assert.equal(document.activeElement === cards()[0], true, "the first card receives focus");
+    if (index === 1) await key(cards()[0], "ArrowRight");
+    const choice = cards()[index];
+    assert.equal(document.activeElement === choice, true, "keyboard focus reaches the chosen card");
+    assert.equal(choice.disabled, false);
+    await key(choice, activation);
+    await act(async () => choice.click());
+    await waitForNavigation(() => {
+      const input = host.querySelector("#new-project-name");
+      return !!input && !input.disabled && !host.querySelector("[role=dialog]");
+    }, "enabled real form after " + kind + " choice");
+    assert.equal(host.querySelector(".project-kind-summary strong").textContent, label);
+    assert.deepEqual(kindFixture.events.filter(event => event[0] === "call"),
+      [["call", "vivary-workspace-pattern-catalog", {}]]);
+    assert.equal(document.querySelector("#new-project-name").isConnected, true);
+    assert.equal(document.activeElement === document.querySelector("#new-project-name"), true,
+      "focus must move from the closed kind dialog into the enabled real form");
+    const change = [...host.querySelectorAll("button")].find(button => button.textContent === "Change");
+    await act(async () => change.focus());
+    await key(change, "Enter");
+    await act(async () => change.click());
+    assert.deepEqual(cards().map(card => card.getAttribute("aria-pressed")),
+      index === 0 ? ["true", "false"] : ["false", "true"]);
+    assert.equal(document.activeElement === cards()[index], true, "Change focuses the current kind");
+  });
+}
 
 // Claim 4330742974. Registration is in-memory fixture state. The lost-response trace is a mocked
 // host reply, not a real remote registration, filesystem operation, or network failure experiment.

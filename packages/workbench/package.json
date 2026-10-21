@@ -50,7 +50,7 @@
     "test:linked-conversations": "node --import tsx --test --test-concurrency=1 --test-timeout=60000 tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs",
     "test:handoff": "node --import tsx --test --test-concurrency=1 --test-timeout=120000 tests/handoff.test.ts tests/handoff-components.test.mjs tests/handoff-display-components.test.mjs tests/files-handoff-components.test.mjs",
     "test:maintained": "pnpm run test:registry-actions && pnpm run test:registry && pnpm run test:registry-http && pnpm run test:project-services && pnpm run test:shell && pnpm run test:mutation-admission && pnpm run test:mutation-quarantine && pnpm run test:chat-title && pnpm run test:chat-draft && pnpm run test:chat-draft-adapter && pnpm run test:shared-ui && pnpm run test:settings-chat-handoff && pnpm run test:native-chat && pnpm run test:chat-search && pnpm run test:linked-conversations && pnpm run test:handoff && pnpm run test:email && pnpm run test:credential-redaction && pnpm run test:browser-access && pnpm run test:mcp-oauth",
-    "build": "agent-native build",
+    "build": "node bin/runtime-security.mjs run ./node_modules/@agent-native/core/package.json agent-native build",
     "dev": "agent-native dev",
     "start": "node bin/start.mjs",
     "typecheck": "agent-native typecheck",
