@@ -18049,3 +18049,249 @@ diff --git a/dist/client/chat/repo-helpers.js b/dist/client/chat/repo-helpers.js
          if (drop)
              changed = true;
          return !drop;
+diff --git a/dist/client/chat/markdown-renderer.js b/dist/client/chat/markdown-renderer.js
+index 128dc832ed77ec26af49be89b5f79297fcf425e0..cc3b3e1526f39c2f96ad37fe1db994ba6dbe9d6d 100644
+--- a/dist/client/chat/markdown-renderer.js
++++ b/dist/client/chat/markdown-renderer.js
+@@ -1,4 +1,5 @@
+ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
++import { markdownFenceRenderer } from "./message-text-renderers.js";
+ // Owns: lazy react-markdown/shiki loaders, SmoothMarkdownText, MarkdownText,
+ // HighlightedCodeBlock wrapper, and the markdownComponents/markdownUrlTransform
+ // used by every markdown render path in AssistantChat.
+@@ -143,6 +144,32 @@
+     return "";
+ }
+ // ─── Markdown components ──────────────────────────────────────────────────────
++// Vivary: a table column cannot be narrower than its longest unbroken string, so one long URL,
++// hash, or identifier makes the whole table scroll. Each run of 20 or more non-whitespace
++// characters in a cell's text is wrapped in a span that Workbench CSS lets break anywhere. Text
++// inside bold, emphasis, or struck text is marked too, since it widens the column the same way.
++// The span adds no characters, so the DOM text, selection, and copied text stay identical.
++// Ordinary words are shorter than the threshold and keep breaking only at spaces. Inline code
++// and keyboard or sample text stay whole. A child rendered by a component, such as a link, is
++// left to that component, and Core's link component marks its own text.
++const LONG_TOKEN = /(\S{20,})/u;
++const KEEP_WHOLE = new Set(["code", "kbd", "samp", "pre"]);
++function markLongTokens(children) {
++    const mark = (child, index) => {
++        if (React.isValidElement(child)) {
++            const props = child.props;
++            if (typeof child.type !== "string" || KEEP_WHOLE.has(child.type) || props.children == null)
++                return child;
++            return React.cloneElement(child, undefined, markLongTokens(props.children));
++        }
++        if (typeof child !== "string" || !LONG_TOKEN.test(child))
++            return child;
++        return child.split(LONG_TOKEN).map((part, partIndex) => partIndex % 2 === 1
++            ? _jsx("span", { className: "agent-markdown-long-token", children: part }, `${index}-${partIndex}`)
++            : part);
++    };
++    return Array.isArray(children) ? children.map(mark) : mark(children, 0);
++}
+ export const markdownComponents = {
+     a(props) {
+         const { href, children, className, rel: _rel, target: _target, ...rest } = props;
+@@ -156,13 +183,21 @@
+         }
+         const isBuilderCta = isBuilderErrorCtaHref(href);
+         if (!isBuilderCta) {
+-            return (_jsx("a", { href: href, className: className, ...rest, children: children }));
++            return (_jsx("a", { href: href, className: className, ...rest, children: markLongTokens(children) }));
+         }
+         return (_jsxs("a", { href: href, target: "_blank", rel: "noreferrer", className: cn(CTA_BUTTON_CLASSES, className), ...rest, children: [_jsx("span", { children: children }), _jsx(IconExternalLink, { size: 13, strokeWidth: 2, "aria-hidden": "true" })] }));
+     },
+     table(props) {
+         const { children, ...rest } = props;
+         return (_jsx("div", { className: "agent-markdown-table-wrap", children: _jsx("table", { ...rest, children: children }) }));
++    },
++    th(props) {
++        const { node: _node, children, ...rest } = props;
++        return _jsx("th", { ...rest, children: markLongTokens(children) });
++    },
++    td(props) {
++        const { node: _node, children, ...rest } = props;
++        return _jsx("td", { ...rest, children: markLongTokens(children) });
+     },
+     pre(props) {
+         const { children, ...rest } = props;
+@@ -182,6 +217,9 @@
+             const langMatch = className.match(/\blanguage-([\w+-]+)\b/);
+             if (langMatch) {
+                 const code = extractCodeText(childProps.children).replace(/\n$/, "");
++                const Registered = markdownFenceRenderer(langMatch[1]);
++                if (Registered)
++                    return _jsx(Registered, { code: code, lang: langMatch[1] });
+                 return _jsx(HighlightedCodeBlock, { code: code, lang: langMatch[1] });
+             }
+         }
+diff --git a/dist/client/chat/markdown-renderer.d.ts b/dist/client/chat/markdown-renderer.d.ts
+index 58ccdbeee245d452751e9cca092125ce4da7c43a..0369c389582c344a63244aaf0e322316e05ddb2a 100644
+--- a/dist/client/chat/markdown-renderer.d.ts
++++ b/dist/client/chat/markdown-renderer.d.ts
+@@ -33,6 +33,8 @@ export declare function extractCodeText(child: React.ReactNode): string;
+ export declare const markdownComponents: {
+     a(props: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.JSX.Element;
+     table(props: React.TableHTMLAttributes<HTMLTableElement>): React.JSX.Element;
++    th(props: React.ThHTMLAttributes<HTMLTableCellElement>): React.JSX.Element;
++    td(props: React.TdHTMLAttributes<HTMLTableCellElement>): React.JSX.Element;
+     pre(props: React.HTMLAttributes<HTMLPreElement>): React.JSX.Element;
+ };
+ export declare function renderMarkdownToClipboardHtml(markdown: string): string | null;
+diff --git a/dist/cli/code-agent-executor.js b/dist/cli/code-agent-executor.js
+--- a/dist/cli/code-agent-executor.js
++++ b/dist/cli/code-agent-executor.js
+@@ -488,6 +488,8 @@
+     const cwd = options.run.cwd || process.cwd();
+     const model = normalizeClaudeCliModel(options.model);
+     const reasoningEffort = normalizeClaudeCliEffort(options.reasoningEffort);
++    // Each recorded reply names the engine and model that wrote it.
++    const replyMetadata = { engine: CLAUDE_CLI_ENGINE_NAME, model, ...(reasoningEffort ? { reasoningEffort } : {}) };
+     const streamToolOutputToStdout = options.streamToolOutputToStdout ??
+         process.env.AGENT_NATIVE_CODE_AGENT_STRUCTURED_STDOUT !== "1";
+     const assistantText = [];
+@@ -552,7 +554,7 @@
+                         ? event.errors.filter(value => typeof value === "string" && value.trim()).join("\n") : "";
+                     throw new Error(errors || (typeof event.result === "string" && event.result.trim()) || "Claude Code returned an error.");
+                 }
+-                const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames);
++                const text = appendClaudeParticipantTranscriptEvents(options.run.id, event, claudeToolNames, replyMetadata);
+                 if (!text)
+                     return;
+                 assistantText.push(text);
+@@ -560,19 +562,17 @@
+                     options.stdout?.write(text);
+             },
+         });
+-        const finalMessage = readClaudeParticipantResultText(result.events) ??
+-            (assistantText.join("\n\n").trim() || "Claude Code run completed.");
+-        appendCodeAgentTranscriptEvent({
+-            runId: options.run.id,
+-            kind: "system",
+-            message: finalMessage,
+-            metadata: {
+-                role: "assistant",
+-                engine: CLAUDE_CLI_ENGINE_NAME,
+-                model,
+-                ...(reasoningEffort ? { reasoningEffort } : {}),
+-            },
+-        });
++        // Claude's result repeats its last streamed message, which is already recorded. Record the result only
++        // when nothing streamed or it differs, so each reply is stored once.
++        const resultText = readClaudeParticipantResultText(result.events);
++        if (assistantText.length === 0 || (resultText !== null && resultText !== assistantText.at(-1))) {
++            appendCodeAgentTranscriptEvent({
++                runId: options.run.id,
++                kind: "system",
++                message: resultText ?? "Claude Code run completed.",
++                metadata: { role: "assistant", ...replyMetadata },
++            });
++        }
+         const pendingFollowUp = dequeueCodeAgentFollowUp(options.run.id);
+         if (pendingFollowUp) {
+             const message = pendingFollowUp.mode === "queued"
+@@ -714,7 +714,7 @@
+ function normalizeClaudeCliEffort(effort) {
+     return effort && effort !== "auto" ? effort : undefined;
+ }
+-function appendClaudeParticipantTranscriptEvents(runId, event, toolNames) {
++function appendClaudeParticipantTranscriptEvents(runId, event, toolNames, replyMetadata) {
+     const eventType = cliStringValue(event.type);
+     const message = asRecordValue(event.message);
+     const messageContent = Array.isArray(message?.content)
+@@ -737,7 +737,7 @@
+                 runId,
+                 kind: "system",
+                 message: text,
+-                metadata: { role: "assistant", source: "claude-cli" },
++                metadata: { role: "assistant", source: "claude-cli", ...replyMetadata },
+             });
+             continue;
+         }
+diff --git a/dist/client/chat/message-components.js b/dist/client/chat/message-components.js
+--- a/dist/client/chat/message-components.js
++++ b/dist/client/chat/message-components.js
+@@ -1,4 +1,5 @@
+ import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
++import { userMessageTextRenderer } from "./message-text-renderers.js";
+ // Owns: message-timestamp helpers, SelectionAttachedPill, UserMessage,
+ // AssistantMessage, MessageBranchPicker, CheckpointContext, MessageActionsContext,
+ // UserStoppedRunContext, RunningActivityStatus, ThinkingIndicator, and
+@@ -321,6 +322,9 @@
+ function UserMessageText({ text }) {
+     // Strip injected <context>...</context> blocks before display
+     const displayText = displayableUserMessageText(text);
++    const registered = userMessageTextRenderer(displayText);
++    if (registered)
++        return _jsx(registered.Component, { text: displayText });
+     const parts = [];
+     let lastIndex = 0;
+     let match;
+diff --git a/dist/client/chat/index.js b/dist/client/chat/index.js
+--- a/dist/client/chat/index.js
++++ b/dist/client/chat/index.js
+@@ -14,6 +14,7 @@
+ export { useSendToAgentChat } from "../use-send-to-agent-chat.js";
+ export { DESKTOP_LOCAL_CODE_CHANGE_EVENT, requestDesktopLocalCodeChange, } from "../desktop-local-code-change.js";
+ export { AGENT_SIDEBAR_DEFAULT_MAX_WIDTH, AGENT_SIDEBAR_MIN_WIDTH, AGENT_SIDEBAR_WIDE_WIDTH_RATIO, clampAgentSidebarWidth, getAgentSidebarMaxWidth, getAgentSidebarWideWidth, requestAgentSidebarOpen, SIDEBAR_STATE_CHANGE_EVENT, setAgentSidebarOpenPreference, } from "../agent-sidebar-state.js";
++export { registerMarkdownFenceRenderer, registerUserMessageTextRenderer, } from "./message-text-renderers.js";
+ export { clearReservedToolRenderersForTests, clearToolRenderersForTests, registerActionChatRenderer, registerFallbackToolRenderer, registerReservedActionChatRenderer, registerReservedFallbackToolRenderer, registerReservedToolRenderer, registerToolRenderer, resolveToolRenderer, } from "./tool-render-registry.js";
+ export { ACTION_CHAT_UI_DATA_CHART_RENDERER, ACTION_CHAT_UI_DATA_INSIGHTS_RENDERER, ACTION_CHAT_UI_DATA_TABLE_RENDERER, ACTION_CHAT_UI_DATA_WIDGET_RENDERER, ACTION_CHAT_UI_INLINE_EXTENSION_RENDERER, ACTION_CHAT_UI_WORKSPACE_FILE_RENDERER, } from "../../action-ui.js";
+ export { DATA_CHART_WIDGET, DATA_INSIGHTS_WIDGET, DATA_TABLE_WIDGET, createDataChartWidgetResult, createDataInsightsWidgetResult, createDataTableWidgetResult, dataChartWidgetResultSchema, dataChartWidgetSchema, dataInsightsWidgetResultSchema, dataTableWidgetResultSchema, dataTableWidgetSchema, dataWidgetResultSchema, isDataChartWidget, isDataTableWidget, isDataWidgetResult, normalizeDataWidgetKind, normalizeDataWidgetResult, } from "./widgets/data-widget-types.js";
+diff --git a/dist/client/chat/index.d.ts b/dist/client/chat/index.d.ts
+--- a/dist/client/chat/index.d.ts
++++ b/dist/client/chat/index.d.ts
+@@ -14,6 +14,7 @@
+ export { useSendToAgentChat } from "../use-send-to-agent-chat.js";
+ export { DESKTOP_LOCAL_CODE_CHANGE_EVENT, requestDesktopLocalCodeChange, type DesktopLocalCodeChangeDetail, } from "../desktop-local-code-change.js";
+ export { AGENT_SIDEBAR_DEFAULT_MAX_WIDTH, AGENT_SIDEBAR_MIN_WIDTH, AGENT_SIDEBAR_WIDE_WIDTH_RATIO, clampAgentSidebarWidth, getAgentSidebarMaxWidth, getAgentSidebarWideWidth, requestAgentSidebarOpen, SIDEBAR_STATE_CHANGE_EVENT, setAgentSidebarOpenPreference, type AgentSidebarStateChangeDetail, type AgentSidebarStateMode, type AgentSidebarStateSource, } from "../agent-sidebar-state.js";
++export { registerMarkdownFenceRenderer, registerUserMessageTextRenderer, type MarkdownFenceRendererProps, type UserMessageTextRenderer, } from "./message-text-renderers.js";
+ export { clearReservedToolRenderersForTests, clearToolRenderersForTests, registerActionChatRenderer, registerFallbackToolRenderer, registerReservedActionChatRenderer, registerReservedFallbackToolRenderer, registerReservedToolRenderer, registerToolRenderer, resolveToolRenderer, type ActionChatRendererRegistration, type ToolRendererComponent, type ToolRendererContext, type ToolRendererMatch, type ToolRendererProps, type ToolRendererRegistration, } from "./tool-render-registry.js";
+ export { ACTION_CHAT_UI_DATA_CHART_RENDERER, ACTION_CHAT_UI_DATA_INSIGHTS_RENDERER, ACTION_CHAT_UI_DATA_TABLE_RENDERER, ACTION_CHAT_UI_DATA_WIDGET_RENDERER, ACTION_CHAT_UI_INLINE_EXTENSION_RENDERER, ACTION_CHAT_UI_WORKSPACE_FILE_RENDERER, type ActionChatUIConfig, } from "../../action-ui.js";
+ export { DATA_CHART_WIDGET, DATA_INSIGHTS_WIDGET, DATA_TABLE_WIDGET, createDataChartWidgetResult, createDataInsightsWidgetResult, createDataTableWidgetResult, dataChartWidgetResultSchema, dataChartWidgetSchema, dataInsightsWidgetResultSchema, dataTableWidgetResultSchema, dataTableWidgetSchema, dataWidgetResultSchema, isDataChartWidget, isDataTableWidget, isDataWidgetResult, normalizeDataWidgetKind, normalizeDataWidgetResult, type DataChartSeriesDefinition, type DataChartWidget, type DataChartWidgetResult, type DataChartWidgetResultInput, type DataInsightsWidgetResult, type DataInsightsWidgetResultInput, type DataTableColumn, type DataTableWidget, type DataTableWidgetResult, type DataTableWidgetResultInput, type DataWidgetDisplay, type DataWidgetKind, type DataWidgetResult, type DataWidgetResultMetadata, } from "./widgets/data-widget-types.js";
+diff --git a/dist/client/chat/message-text-renderers.js b/dist/client/chat/message-text-renderers.js
+new file mode 100644
+--- /dev/null
++++ b/dist/client/chat/message-text-renderers.js
+@@ -0,0 +1,27 @@
++// Display renderers an app registers for its own message formats. The stored
++// message text is unchanged. Only the chat display uses these renderers.
++const fenceRenderers = new Map();
++const userTextRenderers = [];
++/** Render a fenced code block whose language is `lang` with `Component`, which receives the code. */
++export function registerMarkdownFenceRenderer(lang, Component) {
++    fenceRenderers.set(lang, Component);
++    return () => {
++        if (fenceRenderers.get(lang) === Component)
++            fenceRenderers.delete(lang);
++    };
++}
++export function markdownFenceRenderer(lang) {
++    return fenceRenderers.get(lang);
++}
++/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
++export function registerUserMessageTextRenderer(renderer) {
++    userTextRenderers.push(renderer);
++    return () => {
++        const index = userTextRenderers.indexOf(renderer);
++        if (index >= 0)
++            userTextRenderers.splice(index, 1);
++    };
++}
++export function userMessageTextRenderer(text) {
++    return userTextRenderers.find((renderer) => renderer.matches(text));
++}
+diff --git a/dist/client/chat/message-text-renderers.d.ts b/dist/client/chat/message-text-renderers.d.ts
+new file mode 100644
+--- /dev/null
++++ b/dist/client/chat/message-text-renderers.d.ts
+@@ -0,0 +1,9 @@
++import type { ComponentType } from "react";
++export type MarkdownFenceRendererProps = { code: string; lang: string };
++export type UserMessageTextRenderer = { matches: (text: string) => boolean; Component: ComponentType<{ text: string }> };
++/** Render a fenced code block whose language is `lang` with `Component`, which receives the code. */
++export declare function registerMarkdownFenceRenderer(lang: string, Component: ComponentType<MarkdownFenceRendererProps>): () => void;
++export declare function markdownFenceRenderer(lang: string): ComponentType<MarkdownFenceRendererProps> | undefined;
++/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
++export declare function registerUserMessageTextRenderer(renderer: UserMessageTextRenderer): () => void;
++export declare function userMessageTextRenderer(text: string): UserMessageTextRenderer | undefined;

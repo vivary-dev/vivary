@@ -36,6 +36,7 @@ import {
   type CleanupCheck, type CleanupFailure, type CleanupTarget, type EndAttempt, type EndOutcome, type LeftoverProcess,
 } from "./code-execution-host";
 import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
+import { repeatsAssistantReply } from "./linked-history";
 import type { PreparedLinkedContext } from "../shared/linked-conversation";
 import { codeSwitchIdentitySchema, type CodeSwitchConsent } from "../shared/code-switch-observation";
 import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
@@ -1991,14 +1992,7 @@ function dedupeAdjacentAssistantEvents(
   const result: CodeAgentTranscriptEvent[] = [];
   for (const event of events) {
     const previous = result.at(-1);
-    if (
-      previous &&
-      isAssistantEvent(previous) &&
-      isAssistantEvent(event) &&
-      previous.metadata?.phase === event.metadata?.phase &&
-      previous.metadata?.itemId === event.metadata?.itemId &&
-      previous.message.trim() === event.message.trim()
-    ) {
+    if (previous && repeatsAssistantReply(previous, event)) {
       if (previous.id !== anchorId) result[result.length - 1] = event;
       continue;
     }
