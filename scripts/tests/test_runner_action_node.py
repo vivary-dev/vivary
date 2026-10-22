@@ -4,6 +4,7 @@ import contextlib
 import ctypes
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -395,7 +396,8 @@ class RunnerDiagnosticTests(unittest.TestCase):
                             stack.enter_context(mock.patch.object(module.os, "readlink", side_effect=PermissionError("private ancestor path")))
                     self.assertEqual(module.main(), 1)
                 self.assertEqual(stdout.getvalue(), "")
-                self.assertEqual(stderr.getvalue(), f"Runner action Node: admission failed (phase={phase}, exception={expected_class})\n")
+                detail = ", observedNode=24.22.0, requiredNode=24.22.1" if phase == "interpreter-version" else ""
+                self.assertEqual(stderr.getvalue(), f"Runner action Node: admission failed (phase={phase}, exception={expected_class}{detail})\n")
                 self.assertEqual(probe.call_count, int(phase == "interpreter-probe"))
 
     def test_errors_outside_existing_catch_families_still_propagate(self):
@@ -602,6 +604,85 @@ class OwningWorkerBoundaryTests(unittest.TestCase):
                                 with self.assertRaises(RuntimeError): module.check_runner_action_node()
                         self.assertNotIn(1, calls)
                         probing.assert_called_once_with(interpreter, {"LANG": "C", "LC_ALL": "C"})
+
+
+
+class RunnerNumericDiagnosticTests(unittest.TestCase):
+    def all_sources(self):
+        auxiliary = (ROOT / ".github/workflows" / name for name in ("review-gate.yml", "steward.yml", "track-stats.yml"))
+        return sources() + [(path.name, inline_source(path.read_text())) for path in auxiliary]
+
+    def test_actual_policy_refusal_reports_only_bounded_canonical_observed_version(self):
+        for name, source in self.all_sources():
+            module = load_source(source)
+            for value in ("24.22.0", "v24.19.0", "22.23.4", "26.12.1", "18.99.0",
+                          "9999999999.9999999999.9999999999"):
+                observed = value.removeprefix("v")
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with self.subTest(source=name, value=value), \
+                     mock.patch.object(module, "check_runner_action_node", side_effect=lambda: module.node_version(value, selected_major=24)), \
+                     mock.patch.object(module.subprocess, "Popen", side_effect=AssertionError("no provider probe")) as probe, \
+                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(module.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "Runner action Node: admission failed (phase=interpreter-version, exception=RuntimeError, observedNode=" + observed + ", requiredNode=24.22.1)\n")
+                probe.assert_not_called()
+            self.assertEqual(module.node_version("v24.22.1", selected_major=24), "24.22.1")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch.object(module, "check_runner_action_node", return_value={"version": "24.22.1"}), \
+                 mock.patch.object(module, "admission_failure", side_effect=AssertionError("success must not format a refusal")), \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                self.assertEqual(module.main(), 0)
+            self.assertEqual(json.loads(stdout.getvalue()), {"version": "24.22.1"})
+            self.assertEqual(stderr.getvalue(), "")
+
+    def test_malformed_malicious_unicode_subclass_and_oversized_versions_remain_redacted(self):
+        class StringSubclass(str):
+            pass
+        values = (None, {}, [], b"24.22.0", 24, "", "24.022.0", "24.22", "24.22.0-rc.1",
+                  "24.22.0+private", "24.22.0\nPRIVATE_PATH", "/private/node24.22.0", "24.2２.0",
+                  "24.22.0\x00PRIVATE", "v9999999999.9999999999.9999999999", "9" * 40 + ".0.0",
+                  StringSubclass("24.22.0"))
+        for name, source in self.all_sources():
+            module = load_source(source)
+            for value in values:
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with self.subTest(source=name, kind=type(value).__name__), \
+                     mock.patch.object(module, "check_runner_action_node", side_effect=lambda: module.node_version(value, selected_major=24)), \
+                     mock.patch.object(module.subprocess, "Popen", side_effect=AssertionError("no provider probe")) as probe, \
+                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(module.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "Runner action Node: admission failed (phase=interpreter-version, exception=RuntimeError)\n")
+                probe.assert_not_called()
+
+    def test_foreign_same_name_frames_unselected_policy_and_nonpolicy_errors_stay_redacted(self):
+        def node_version(value, selected_major=None):
+            raise RuntimeError("PRIVATE_PATH 24.22.0 ENV=secret")
+        class DeniedFloors(dict):
+            def __contains__(self, key):
+                raise PermissionError("PRIVATE_FLOOR_METADATA")
+        for name, source in self.all_sources():
+            module = load_source(source)
+            generic = RuntimeError("PRIVATE 24.22.0")
+            generic.observedNode = "24.22.0"
+            calls = ((lambda: node_version("24.22.0", selected_major=24), "interpreter-version", "RuntimeError", False),
+                     (lambda: module.node_version("18.99.0"), "interpreter-version", "RuntimeError", False),
+                     (lambda: module.node_version("24.22.0", selected_major="24"), "interpreter-version", "RuntimeError", False),
+                     (lambda: module.node_version("24.22.0", selected_major=24), "interpreter-version", "PermissionError", True),
+                     (generic, "admission", "RuntimeError", False))
+            for call, phase, error_class, denied in calls:
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with self.subTest(source=name, phase=phase, error=error_class), contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(module, "check_runner_action_node", side_effect=call))
+                    stack.enter_context(mock.patch.object(module.subprocess, "Popen", side_effect=AssertionError("no provider probe")))
+                    stack.enter_context(contextlib.redirect_stdout(stdout))
+                    stack.enter_context(contextlib.redirect_stderr(stderr))
+                    if denied:
+                        stack.enter_context(mock.patch.object(module, "FLOORS", DeniedFloors(module.FLOORS)))
+                    self.assertEqual(module.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), f"Runner action Node: admission failed (phase={phase}, exception={error_class})\n")
 
 
 if __name__ == "__main__":

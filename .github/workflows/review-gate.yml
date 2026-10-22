@@ -328,11 +328,20 @@ jobs:
                   "node_version": "interpreter-version",
               }
               phase = "admission"
+              observed = None
               trace = error.__traceback__
               while trace is not None:
-                  phase = phases.get(trace.tb_frame.f_code.co_name, phase)
+                  frame = trace.tb_frame
+                  phase = phases.get(frame.f_code.co_name, phase)
+                  if isinstance(error, RuntimeError) and frame.f_code is node_version.__code__:
+                      value = frame.f_locals.get("value")
+                      selected = frame.f_locals.get("selected_major")
+                      if (type(value) is str and len(value) <= 32 and type(selected) is int and selected == 24
+                              and re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)):
+                          observed = value.removeprefix("v")
                   trace = trace.tb_next
-              return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__})"
+              detail = f", observedNode={observed}, requiredNode=24.22.1" if observed is not None else ""
+              return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__}{detail})"
 
 
           def main():
@@ -340,7 +349,7 @@ jobs:
                   print(json.dumps(check_runner_action_node(), sort_keys=True))
                   return 0
               except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
-                  # Report only owned phase labels and the class, never exception text or frame data.
+                  # Report only owned labels and validated numeric versions, never raw exception text.
                   print(admission_failure(error), file=sys.stderr)
                   return 1
 
