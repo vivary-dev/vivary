@@ -21,10 +21,18 @@ WORKFLOWS = (ROOT / ".github/workflows/ci.yml", ROOT / ".github/workflows/npm-tr
 
 
 def inline_source(text):
-    marker = "        shell: python -I -B {0}\n        run: |\n"
-    if text.count(marker) != 1:
-        raise AssertionError("one complete Python mapping is required")
-    lines = text.split(marker, 1)[1].splitlines(keepends=True)
+    header = ("      - &runner_action_node_bootstrap\n"
+              "        name: runner action Node admission\n"
+              "        id: runner_action_node\n"
+              "        shell: python -I -B {0}\n"
+              "        run: |\n")
+    steps = re.split(r"(?m)(?=^      - )", text)[1:]
+    selected = [step for step in steps if re.search(
+        r"(?m)^        (?:name: runner action Node admission|id: runner_action_node)$", step)]
+    anchors = re.findall(r"(?m)^      - &runner_action_node_bootstrap(?:\s|$)", text)
+    if len(selected) != 1 or len(anchors) != 1 or not selected[0].startswith(header):
+        raise AssertionError("one complete named runner bootstrap mapping is required")
+    lines = selected[0][len(header):].splitlines(keepends=True)
     source = []
     for line in lines:
         if line.startswith("          "):
@@ -32,7 +40,9 @@ def inline_source(text):
         elif not line.strip():
             source.append("\n")
         else:
-            break
+            raise AssertionError("runner bootstrap must contain only its literal Python body")
+    if not "".join(source).strip():
+        raise AssertionError("runner bootstrap Python body is required")
     # YAML's literal block clips trailing empty lines to one final newline.
     return "".join(source).rstrip("\n") + "\n"
 
@@ -102,6 +112,42 @@ def controlled_runner(module, directory, probe="v24.22.1"):
          mock.patch.object(module, "sanitized_environment", return_value={"LANG": "C", "LC_ALL": "C"}), \
          mock.patch.object(module, "probe_version", return_value=probe) as probing:
         yield root, worker, interpreter, chain, probing
+
+
+class InlineSourceTests(unittest.TestCase):
+    BOOTSTRAP = ("      - &runner_action_node_bootstrap\n"
+                 "        name: runner action Node admission\n"
+                 "        id: runner_action_node\n"
+                 "        shell: python -I -B {0}\n"
+                 "        run: |\n"
+                 "          selected = True\n")
+    GUARD = ("      - name: unrelated Python guard\n"
+             "        shell: python -I -B {0}\n"
+             "        run: |\n"
+             "          raise AssertionError('unrelated guard must not be selected')\n")
+
+    def test_inline_extraction_selects_runner_among_unrelated_python_guards(self):
+        self.assertEqual(inline_source(self.GUARD + self.BOOTSTRAP + self.GUARD), "selected = True\n")
+
+    def test_inline_extraction_refuses_missing_duplicate_or_malformed_runner(self):
+        mutations = {
+            "missing": self.GUARD,
+            "duplicate": self.BOOTSTRAP + self.BOOTSTRAP,
+            "duplicate-result": self.BOOTSTRAP + self.GUARD.replace(
+                "        shell:", "        id: runner_action_node\n        shell:"),
+            "anchor": self.BOOTSTRAP.replace("&runner_action_node_bootstrap", "&other_bootstrap"),
+            "name": self.BOOTSTRAP.replace("name: runner action Node admission", "name: other admission"),
+            "id": self.BOOTSTRAP.replace("id: runner_action_node", "id: other_result"),
+            "shell": self.BOOTSTRAP.replace("python -I -B {0}", "python {0}"),
+            "folded": self.BOOTSTRAP.replace("run: |", "run: >"),
+            "empty": self.BOOTSTRAP.replace("          selected = True\n", ""),
+            "dedented": self.BOOTSTRAP.replace("          selected", "        selected"),
+            "condition": self.BOOTSTRAP + "        if: false\n",
+            "ignored-failure": self.BOOTSTRAP + "        continue-on-error: true\n",
+        }
+        for name, text in mutations.items():
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                inline_source(text)
 
 
 class RunnerBootstrapTests(unittest.TestCase):

@@ -386,6 +386,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
@@ -399,11 +404,18 @@ jobs:
           python scripts/tests/test_hldd.py
           python scripts/check_hldd.py --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: install Python test runner
-        run: python -m pip install pytest packaging
+        run: python -I -m pip install pytest packaging
       - name: install release build frontend
-        run: python -m pip install uv==0.11.21
+        env:
+          PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
+        run: |
+          python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946"
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: CI workflow contract
         run: python scripts/check_ci_workflow.py
+      - name: pip runtime admission tests
+        run: python -I -B scripts/tests/test_pip_runtime.py
       - name: runner action Node bootstrap tests
         run: python -I -B scripts/tests/test_runner_action_node.py
       - name: CI workflow contract tests
@@ -447,7 +459,7 @@ jobs:
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: mcp read-only adapter
         run: |
-          python -m pip install "mcp==2.2.0"
+          python -I -m pip install "mcp==2.2.0"
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
@@ -463,15 +475,16 @@ jobs:
         shell: bash
         run: |
           artifacts="$(mktemp -d)"
-          uv build --out-dir "$artifacts" packages/core
-          uv build --out-dir "$artifacts" packages/tropo
-          uv build --out-dir "$artifacts" packages/strato
-          uv build --out-dir "$artifacts" packages/ozone
-          uv build --out-dir "$artifacts" packages/exo
-          uv build --out-dir "$artifacts" packages/create-vivary
-          uv build --out-dir "$artifacts" packages/memory-cognee
-          uv build --out-dir "$artifacts" packages/mcp
-          uv build --out-dir "$artifacts" packages/vivary
+          uv="$(python -I -B scripts/check_uv_runtime.py)" || exit $?
+          "$uv" build --out-dir "$artifacts" packages/core
+          "$uv" build --out-dir "$artifacts" packages/tropo
+          "$uv" build --out-dir "$artifacts" packages/strato
+          "$uv" build --out-dir "$artifacts" packages/ozone
+          "$uv" build --out-dir "$artifacts" packages/exo
+          "$uv" build --out-dir "$artifacts" packages/create-vivary
+          "$uv" build --out-dir "$artifacts" packages/memory-cognee
+          "$uv" build --out-dir "$artifacts" packages/mcp
+          "$uv" build --out-dir "$artifacts" packages/vivary
           npm pack packages/create-vivary/npm --pack-destination "$artifacts"
           python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"
       - name: core (governed-context seam; suite is the ported reference tests)
@@ -484,7 +497,7 @@ jobs:
           smoke="$(mktemp -d)"
           wheelhouse="$smoke/wheels"
           mkdir -p "$wheelhouse"
-          python -m pip wheel --no-deps --wheel-dir "$wheelhouse" \
+          python -I -m pip wheel --no-deps --wheel-dir "$wheelhouse" \
             ./packages/core \
             ./packages/tropo \
             ./packages/strato \
@@ -498,8 +511,8 @@ jobs:
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
           unset PYTHONPATH
-          "$venv_python" -m pip install --no-index --find-links "$wheelhouse" vivary
-          "$venv_python" -m pip check
+          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary
+          "$venv_python" -I -m pip check
           "$venv_python" -I scripts/check_installed_workspace_roles.py
           (
             cd "$smoke"
@@ -680,9 +693,10 @@ jobs:
           mcp_venv="$smoke/mcp-venv"
           python -m venv "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
-          "$mcp_python" -m pip install "mcp==2.2.0"
-          "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
-          "$mcp_python" -m pip check
+          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?
+          "$mcp_python" -I -m pip install "mcp==2.2.0"
+          "$mcp_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -I -m pip check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
           "$mcp_python" - <<'PY'
           from importlib.metadata import PackageNotFoundError, requires, version
@@ -717,7 +731,7 @@ jobs:
           else:
               raise AssertionError("optional MCP install pulled the vivary meta-package")
           PY
-          "$venv_python" -m pip install --no-index --find-links "$wheelhouse" --no-deps \
+          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
@@ -988,6 +1002,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
@@ -999,12 +1018,10 @@ jobs:
         run: |
           npm install --global pnpm@10.33.2
           pnpm --dir packages/workbench install --frozen-lockfile
-      - name: install pinned Python launcher tooling
-        run: python -m pip install pip==26.2.2
       - name: workbench state transport
         run: |
           pnpm --dir packages/workbench exec tsx --test tests/local-access.test.ts tests/owner-sign-in.test.ts tests/native-state.test.ts tests/native-actions.test.ts tests/desktop-host.test.ts tests/chat-scope.test.ts tests/native-chat-project.test.ts
-          pnpm --dir packages/workbench exec tsx --test --test-concurrency=1 tests/local-code-agent.test.ts tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts tests/code-state-snapshot.test.mjs tests/codex-models.test.ts tests/codex-executor.test.mjs tests/codex-app-server.test.ts tests/codex-transcript.test.mjs tests/codex-active-state.test.mjs tests/core-message-parent.test.mjs tests/local-root-provider.test.mjs tests/native-registry-scope.test.mjs tests/codex-approval.test.ts tests/code-execution-host.test.ts tests/local-runtime-setup.test.ts tests/local-code-approval-restart.test.ts tests/local-code-cleanup-refusal.test.ts tests/code-host-lifecycle.test.ts tests/desktop-server-shutdown.test.mjs tests/managed-projects.test.mjs tests/managed-project-reconnection.test.mjs tests/creator-runner.test.ts tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs tests/project-files.test.ts tests/project-memory.test.ts tests/file-draft-state.test.ts tests/original-runtime.test.ts tests/original-runtime-shutdown.test.ts tests/original-runtime-control-shutdown.test.ts tests/project-search.test.ts tests/project-file-location.test.ts tests/project-search-state.test.ts tests/project-read.test.ts tests/project-evaluate.test.ts tests/project-evaluate-form.test.ts tests/documentation-links.test.mjs tests/project-adoption.test.ts tests/project-adoption-service.test.mjs tests/project-preview.test.ts tests/preview-isolation.test.ts tests/local-registry-model.test.mjs tests/workspace-kind-dialog-component.test.mjs tests/sidebar-mark-component.test.mjs
+          pnpm --dir packages/workbench exec tsx --test --test-concurrency=1 tests/local-code-agent.test.ts tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts tests/code-state-snapshot.test.mjs tests/codex-models.test.ts tests/codex-executor.test.mjs tests/codex-app-server.test.ts tests/codex-transcript.test.mjs tests/codex-active-state.test.mjs tests/core-message-parent.test.mjs tests/local-root-provider.test.mjs tests/native-registry-scope.test.mjs tests/codex-approval.test.ts tests/code-execution-host.test.ts tests/local-runtime-setup.test.ts tests/local-code-approval-restart.test.ts tests/local-code-cleanup-refusal.test.ts tests/code-host-lifecycle.test.ts tests/desktop-server-shutdown.test.mjs tests/managed-projects.test.mjs tests/project-creation-shutdown.test.mjs tests/managed-project-reconnection.test.mjs tests/creator-runner.test.ts tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs tests/project-files.test.ts tests/project-memory.test.ts tests/file-draft-state.test.ts tests/original-runtime.test.ts tests/original-runtime-shutdown.test.ts tests/original-runtime-control-shutdown.test.ts tests/project-search.test.ts tests/project-file-location.test.ts tests/project-search-state.test.ts tests/project-read.test.ts tests/project-evaluate.test.ts tests/project-evaluate-form.test.ts tests/documentation-links.test.mjs tests/project-adoption.test.ts tests/project-adoption-service.test.mjs tests/project-preview.test.ts tests/preview-isolation.test.ts tests/local-registry-model.test.mjs tests/workspace-kind-dialog-component.test.mjs tests/sidebar-mark-component.test.mjs
           node --test packages/desktop/tests/main.test.mjs packages/desktop/tests/original-runtime.test.mjs packages/desktop/tests/package-snapshot.test.mjs packages/desktop/tests/installer-script.test.mjs packages/desktop/tests/installer-build.test.mjs packages/workbench/tests/startup.test.mjs
           python packages/workbench/tests/managed-projects-python.test.py
           pnpm --dir packages/workbench typecheck
@@ -1049,12 +1066,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - name: source navigation contract on Windows
         run: python -B scripts/check-source-navigation.py --check
       - name: source navigation contract tests on Windows
         run: python -B scripts/tests/test-source-navigation.py
       - name: install test runner
-        run: python -m pip install pytest packaging
+        run: python -I -m pip install pytest packaging
       - name: preview owner startup cancellation on Windows
         run: python -m pytest packages/workbench/tests/test_windows_preview_owner.py -q
       - name: thin init CLI on Windows
@@ -1089,7 +1111,7 @@ jobs:
           $smoke = Join-Path $env:RUNNER_TEMP "vivary-wheel-$([guid]::NewGuid())"
           $wheelhouse = Join-Path $smoke "wheels"
           New-Item -ItemType Directory -Path $wheelhouse -Force | Out-Null
-          python -m pip wheel --no-deps --wheel-dir $wheelhouse `
+          python -I -m pip wheel --no-deps --wheel-dir $wheelhouse `
             ./packages/core `
             ./packages/tropo `
             ./packages/strato `
@@ -1104,9 +1126,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
           $scripts = Join-Path $smoke "venv\Scripts"
           $python = Join-Path $scripts "python.exe"
-          & $python -m pip install --no-index --find-links $wheelhouse vivary
+          & $python -I -m pip install --no-index --find-links $wheelhouse vivary
           if ($LASTEXITCODE -ne 0) { throw "vivary install failed" }
-          & $python -m pip check
+          & $python -I -m pip check
           if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
           & $python -I scripts/check_installed_workspace_roles.py
           if ($LASTEXITCODE -ne 0) { throw "installed role API failed" }
@@ -1154,11 +1176,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
-          & $mcpPython -m pip install "mcp==2.2.0"
+          & $mcpPython -I -B scripts/check_pip_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }
+          & $mcpPython -I -m pip install "mcp==2.2.0"
           if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
-          & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
+          & $mcpPython -I -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
-          & $mcpPython -m pip check
+          & $mcpPython -I -m pip check
           if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }
           & (Join-Path $mcpScripts "vivary-mcp.exe") --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "vivary-mcp entrypoint failed" }
@@ -1212,13 +1236,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: install pinned uv runner
-        run: python -m pip install uv==0.11.21
+        env:
+          PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
+        run: |
+          python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ runner.os == 'Linux' && 'https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946' || runner.os == 'Windows' && 'https://files.pythonhosted.org/packages/32/ea/771744a784b16aa21d195cb5d5d5a2878d72fa00fc26f11ea3f9646994fe/uv-0.13.5-py3-none-win_amd64.whl#sha256=1fb29fc46ba12033e2ef95a95ac79d649e71bbb1358419bbbcbd19d86026ef2f' || '' }}"
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: governed context adapter (Windows path contract)
         if: runner.os == 'Windows'
         run: python packages/tropo/tests/test_tropo.py
@@ -1227,6 +1261,8 @@ jobs:
           python packages/create-vivary/tests/test_init_thin.py
           python packages/create-vivary/tests/test_record_workflow.py
           python packages/create-vivary/tests/test_adopt.py
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: run disposable orientation proof
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt

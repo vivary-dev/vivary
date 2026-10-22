@@ -3,6 +3,7 @@ import { z } from "zod";
 import { workspacePatternChoices, workspacePreset } from "../shared/workspace-patterns.ts";
 import { workspaceKind } from "../shared/workspace-kind.ts";
 import { createManagedProject } from "../server/managed-projects.mjs";
+import { withLocalProjectCreation } from "../server/project-services.mjs";
 
 export default defineAction({
   description: "Create and register the exact reviewed managed Vivary project.",
@@ -21,7 +22,7 @@ export default defineAction({
   audit: { recordInputs: false, target: () => ({ visibility: "private" }) },
   run: async (input, context?: ActionRunContext) => {
     try {
-      return await createManagedProject(context, input);
+      return await withLocalProjectCreation(context, admitted => createManagedProject(admitted, input));
     } catch (error) {
       fail(error instanceof Error ? error.message : "The project could not be created.", {
         statusCode: 409,

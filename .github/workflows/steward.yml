@@ -14,8 +14,302 @@ jobs:
   daily-health-check:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v7.0.1 pinned to an immutable commit SHA.
+      - &runner_action_node_bootstrap
+        name: runner action Node admission
+        id: runner_action_node
+        shell: python -I -B {0}
+        run: |
+          """Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
+
+          import ctypes
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          import platform
+          import re
+          import struct
+          import subprocess
+          import sys
+          import threading
+
+
+          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+          # Checked by the controller on 2026-10-21. CVE-2026-111497 is a Brotli
+          # out-of-bounds write / RCE on all three lines. This is known-advisory coverage,
+          # not a zero-vulnerability claim or permission to select another project runtime.
+          FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
+          MAX_ANCESTORS = 64
+          PROBE_TIMEOUT = 10
+          KNOWN_SELECTION_FLAGS = {
+              "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
+              "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION",
+              "ACTIONS_RUNNER_FORCED_INTERNAL_NODE_VERSION",
+          }
+
+
+          def refuse(message):
+              raise RuntimeError("Runner action Node: " + message)
+
+
+          def node_version(value, selected_major=None):
+              if not isinstance(value, str) or not re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value):
+                  refuse("malformed or prerelease version")
+              major, minor, patch = map(int, value.removeprefix("v").split("."))
+              if major not in FLOORS or (minor, patch) < FLOORS[major]:
+                  refuse("EOL, unknown or advisory-affected Node release")
+              if selected_major is not None and major != selected_major:
+                  refuse("the action interpreter must actually be Node 24")
+              return f"{major}.{minor}.{patch}"
+
+
+          def check_selection_overrides(environment):
+              # Examined runner dispatch leaves explicit node24 on node24 for the known
+              # migration flags. Internal-function selection does not select action Node.
+              for name, value in environment.items():
+                  if value and "NODE" in name and name.startswith(("ACTIONS_", "FORCE_JAVASCRIPT_")) and name not in KNOWN_SELECTION_FLAGS:
+                      refuse("unproved selection override " + name)  # Report names, never values.
+
+
+          def check_host(system, machine, environment, container=False):
+              if system not in ("linux", "win32") or machine.lower() not in ("x86_64", "amd64") or struct.calcsize("P") != 8:
+                  refuse("only native Linux/Windows x64 hosts are supported")
+              if environment.get("RUNNER_ARCH", "X64") != "X64" or environment.get("RUNNER_OS", {"linux": "Linux", "win32": "Windows"}[system]) != {"linux": "Linux", "win32": "Windows"}[system]:
+                  refuse("runner OS/architecture disagrees with the native host")
+              if container:
+                  refuse("container execution is unsupported")
+              check_selection_overrides(environment)
+
+
+          def container_host(system):
+              if any(os.environ.get(name) for name in ("CONTAINER_SANDBOX_MOUNT_POINT", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_RUNNING_IN_CONTAINERS")):
+                  return True
+              if system == "linux":
+                  if any(Path(name).exists() for name in ("/.dockerenv", "/run/.containerenv", "/run/systemd/container")):
+                      return True
+                  return bool(re.search(r"docker|kubepods|containerd|lxc", Path("/proc/1/cgroup").read_text()))
+              return False
+
+
+          def parse_linux_stat(text):
+              pid, separator, rest = text.partition(" (")
+              name, closing, tail = rest.rpartition(") ")
+              fields = tail.split()
+              if not separator or not closing or not pid.isdecimal() or len(fields) < 20 or fields[0] in ("Z", "X"):
+                  refuse("unreadable Linux process identity")
+              try:
+                  return {"pid": int(pid), "ppid": int(fields[1]), "created": int(fields[19])}
+              except ValueError:
+                  refuse("malformed Linux process identity")
+
+
+          def linux_process(pid):
+              folder = Path("/proc") / str(pid)
+              before = parse_linux_stat((folder / "stat").read_text())
+              executable = os.readlink(folder / "exe")
+              after = parse_linux_stat((folder / "stat").read_text())
+              if before != after or before["pid"] != pid or executable.endswith(" (deleted)") or not Path(executable).is_absolute():
+                  refuse("Linux process disappeared, changed or reused its PID")
+              return {**before, "exe": str(Path(executable).resolve(strict=True))}
+
+
+          def windows_process(pid):
+              from ctypes import wintypes
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              ntdll = ctypes.WinDLL("ntdll")
+
+              class BasicInformation(ctypes.Structure):
+                  _fields_ = [("reserved", ctypes.c_void_p), ("peb", ctypes.c_void_p),
+                              ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_size_t), ("parent", ctypes.c_size_t)]
+
+              kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+              kernel.OpenProcess.restype = wintypes.HANDLE
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+              kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+              kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+              kernel.WaitForSingleObject.restype = wintypes.DWORD
+              ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
+              ntdll.NtQueryInformationProcess.restype = wintypes.LONG
+              handle = kernel.OpenProcess(0x1000 | 0x100000, False, pid)
+              if not handle:
+                  refuse("unreadable Windows process identity")
+              try:
+                  info = BasicInformation()
+                  size = wintypes.ULONG()
+                  if ntdll.NtQueryInformationProcess(handle, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(size)) != 0:
+                      refuse("Windows parent identity is unavailable")
+                  times = [wintypes.FILETIME() for _ in range(4)]
+                  if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+                      refuse("Windows creation identity is unavailable")
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = wintypes.DWORD(len(buffer))
+                  if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)) or info.pid != pid or kernel.WaitForSingleObject(handle, 0) != 258:
+                      refuse("Windows process disappeared or reused its PID")
+                  return {"pid": pid, "ppid": int(info.parent), "created": (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime, "exe": buffer.value}
+              finally:
+                  kernel.CloseHandle(handle)
+
+
+          def discover_worker(pid, read_process, system):
+              chain = []
+              seen = set()
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              while pid:
+                  if pid in seen or len(chain) >= MAX_ANCESTORS:
+                      refuse("cyclic or overlong process ancestry")
+                  seen.add(pid)
+                  item = read_process(pid)
+                  if item["pid"] != pid or item["created"] <= 0 or item["ppid"] < 0 or not paths(item["exe"]).is_absolute():
+                      refuse("missing process identity")
+                  chain.append(item)
+                  pid = item["ppid"]
+              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
+              workers = [item for item in chain[1:] if (paths(item["exe"]).name.lower() if system == "win32" else paths(item["exe"]).name) == expected]
+              if len(workers) != 1:
+                  refuse("exactly one Runner.Worker ancestor is required")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("ancestry changed or reused a process identity")
+              return workers[0], chain
+
+
+          def runner_paths(worker, system):
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              executable = paths(worker["exe"])
+              directory = executable.parent.name.lower() if system == "win32" else executable.parent.name
+              if not executable.is_absolute() or directory != "bin" or ".." in executable.parts:
+                  refuse("Worker is not in the runner root's bin directory")
+              root = executable.parent.parent
+              node = root / "externals" / "node24" / "bin" / ("node.exe" if system == "win32" else "node")
+              return str(root), str(node)
+
+
+          def binary_x64(file, system):
+              with open(file, "rb") as stream:
+                  header = stream.read(64)
+                  if system == "linux":
+                      if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 62:
+                          refuse("expected a Linux x64 ELF executable")
+                  else:
+                      if len(header) != 64 or header[:2] != b"MZ":
+                          refuse("expected a Windows x64 PE executable")
+                      offset = struct.unpack_from("<I", header, 60)[0]
+                      if not 64 <= offset <= 1024 * 1024:
+                          refuse("malformed PE header")
+                      stream.seek(offset)
+                      pe = stream.read(26)
+                      if len(pe) != 26 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664 or struct.unpack_from("<H", pe, 24)[0] != 0x20b:
+                          refuse("expected a Windows x64 PE32+ executable")
+
+
+          def sha256(file):
+              digest = hashlib.sha256()
+              with open(file, "rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+
+          def sanitized_environment(system):
+              environment = {"LANG": "C", "LC_ALL": "C"}
+              if system == "win32":
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = kernel.GetWindowsDirectoryW(buffer, len(buffer))
+                  if not 0 < length < len(buffer):
+                      refuse("Windows directory is unavailable")
+                  environment["SystemRoot"] = buffer.value
+              return environment
+
+
+          def probe_version(executable, environment):
+              # Bound output as well as elapsed time, without running any JavaScript guard.
+              process = subprocess.Popen([str(executable), "--version"], stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
+                                         cwd=str(executable.parent), shell=False)
+              output = []
+              def read_output():
+                  try:
+                      output.append(process.stdout.read(129))
+                  except OSError:
+                      output.append(b"")
+              reader = threading.Thread(target=read_output, daemon=True)
+              reader.start()
+              try:
+                  reader.join(PROBE_TIMEOUT)
+                  if reader.is_alive() or not output or len(output[0]) > 128:
+                      refuse("interpreter probe timed out or exceeded its output bound")
+                  try:
+                      status = process.wait(timeout=2)
+                  except subprocess.TimeoutExpired:
+                      refuse("interpreter probe timed out")
+                  if status != 0:
+                      refuse("interpreter probe failed")
+                  try:
+                      text = output[0].decode("ascii")
+                  except UnicodeDecodeError:
+                      refuse("interpreter probe returned malformed output")
+                  if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:\r?\n)?", text):
+                      refuse("interpreter probe returned malformed output")
+                  return text.rstrip("\r\n")
+              finally:
+                  if process.poll() is None:
+                      process.kill()
+                  process.wait(timeout=2)
+                  reader.join(2)
+                  # A failed probe may leave an inherited pipe open. Never block on a
+                  # buffered close while the bounded daemon reader still owns that pipe.
+                  if not reader.is_alive():
+                      process.stdout.close()
+
+
+          def check_runner_action_node():
+              system = sys.platform
+              check_host(system, platform.machine(), os.environ, container_host(system))
+              if system == "win32":
+                  # Refuse x64 emulation on ARM even when the Python process reports AMD64.
+                  from ctypes import wintypes
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  kernel.GetCurrentProcess.restype = wintypes.HANDLE
+                  kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
+                  process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
+                  if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
+                      refuse("native Windows x64 identity is required")
+              read_process = windows_process if system == "win32" else linux_process
+              worker, chain = discover_worker(os.getpid(), read_process, system)
+              root, selected = runner_paths(worker, system)
+              interpreter = Path(selected)
+              if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
+                  refuse("missing interpreter or a path outside the discovered runner root")
+              binary_x64(worker["exe"], system)
+              binary_x64(interpreter, system)
+              worker_hash, before = sha256(worker["exe"]), sha256(interpreter)
+              version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
+              if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
+                  refuse("Worker or interpreter bytes changed during the probe")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("Worker ancestry changed or reused a process identity")
+              return {"worker": worker, "workerSha256": worker_hash, "root": root,
+                      "interpreter": str(interpreter), "sha256": before, "version": version,
+                      "platform": system, "architecture": "x64"}
+
+
+          def main():
+              try:
+                  print(json.dumps(check_runner_action_node(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
+                  # No environment values or command arguments are recorded.
+                  print(str(error) if isinstance(error, RuntimeError) else "Runner action Node: required metadata or interpreter evidence is unavailable", file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        # actions/checkout v7.0.1 pinned to an immutable commit SHA.
         with:
           persist-credentials: false
 

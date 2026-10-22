@@ -57,9 +57,11 @@ export const PROJECT_ACTION_PATHS = Object.freeze([
   "/_agent-native/actions/vivary-preview-managed-project-reconnection",
   "/_agent-native/actions/vivary-confirm-managed-project-reconnection",
   "/_agent-native/actions/vivary-set-project-kind",
+  "/_agent-native/actions/vivary-create-new-project",
 ]);
 
 const controllers = new WeakMap();
+const admittedCreations = new WeakMap();
 const LOCAL_SERVICE = Symbol.for("vivary.local-project-services.v1");
 const LOCAL_VERIFICATION = "local-stat-revalidated-v1";
 const deepFreeze = value => {
@@ -193,6 +195,7 @@ export function startProjectServices(nitroApp, dependencies) {
 
   const snapshot = () => Object.freeze({ status, failure });
   const finishRequest = event => {
+    admittedCreations.delete(event);
     if (!activeRequests.delete(event) || activeRequests.size !== 0) return;
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
@@ -209,6 +212,7 @@ export function startProjectServices(nitroApp, dependencies) {
       new Promise(resolve => { timer = setTimeout(resolve, drainMs); }),
     ]);
     clearTimeout(timer);
+    for (const event of activeRequests) admittedCreations.delete(event);
     activeRequests.clear();
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
@@ -336,7 +340,20 @@ export function startProjectServices(nitroApp, dependencies) {
       runtime.mountProjectCatalog(nitroApp, { catalog, auth });
       runtime.mountProjectRuntimeReadiness(nitroApp, { readiness, auth });
       runtime.mountProjectRuntimeActivity(nitroApp, { activity, auth });
-      if (local) globalThis[LOCAL_SERVICE] = { controller, provider, registry, catalog };
+      if (local) globalThis[LOCAL_SERVICE] = {
+        controller, provider, registry, catalog,
+        async runCreation(context, run) {
+          if (status !== "open") {
+            throw Object.assign(new Error("Local project folders are not ready."), { statusCode: 503 });
+          }
+          activeRequests.add(context);
+          try {
+            return await run(context);
+          } finally {
+            finishRequest(context);
+          }
+        },
+      };
       status = "open";
       return snapshot();
     } catch (error) {
@@ -366,7 +383,10 @@ const CHAT_CATALOG = Symbol("chat catalog");
 // matchChatProject, or the project matchChatProject admitted it for.
 function localService(context, tool) {
   const service = globalThis[LOCAL_SERVICE];
-  if (!service || service.controller.snapshot().status !== "open") {
+  const status = service?.controller.snapshot().status;
+  // Only the exact creation admitted before close may finish its registration and kind save.
+  const finishingCreation = status === "closing" && admittedCreations.get(context) === service;
+  if (!service || (status !== "open" && !finishingCreation)) {
     throw Object.assign(new Error("Local project folders are not ready."), { statusCode: 503 });
   }
   const chatTool = context?.caller === "tool" && tool !== undefined
@@ -382,6 +402,18 @@ function localService(context, tool) {
   // stays "tool" everywhere outside this module.
   return { service, owner: Object.freeze({ userEmail: context.userEmail, orgId: context.orgId,
     appId: "workbench", caller: chatTool ? "http" : context.caller }) };
+}
+
+/** Keep one admitted owner creation usable until its files, registration and kind save settle. */
+export async function withLocalProjectCreation(context, run) {
+  const { service } = localService(context);
+  const admitted = Object.freeze({ ...context });
+  admittedCreations.set(admitted, service);
+  try {
+    return await service.runCreation(admitted, run);
+  } finally {
+    admittedCreations.delete(admitted);
+  }
 }
 
 /**

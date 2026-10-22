@@ -20,6 +20,10 @@ export type LocalProjectHistory = Readonly<Pick<
 >>;
 
 export function getLocalProjectAccess(context: ActionRunContext | undefined): Promise<CatalogResult>;
+export function withLocalProjectCreation<T>(
+  context: ActionRunContext | undefined,
+  run: (context: ActionRunContext) => Promise<T>,
+): Promise<T>;
 export type ChatScopeMatch =
   | { kind: "not-project" }
   | { kind: "personal" }
