@@ -6,6 +6,7 @@ import { z } from "zod";
 import { hasOwnedVivaryCodeSubmit, type VivaryCodeReadScope } from "./local-code-agent";
 import type { VivaryChatIdentity } from "../app/lib/chat-scope";
 import { threadBelongsToChatIdentity } from "./chat-identity";
+export { createCodeDraftIdentity } from "./conversation-admission";
 
 const revision = z.string().uuid();
 export const chatDraftRecordSchema = z.discriminatedUnion("status", [
@@ -19,11 +20,6 @@ export const chatDraftNextSchema = z.discriminatedUnion("status", [
   z.object({ text: z.literal(""), status: z.literal("cleared"), submitId: z.null() }).strict(),
 ]);
 export type ChatDraftRecord = z.infer<typeof chatDraftRecordSchema>;
-
-export function createCodeDraftIdentity(ownerEmail: string, orgId: string, projectId: string | null) {
-  const key = createHash("sha256").update(JSON.stringify([ownerEmail.toLowerCase(), orgId, projectId])).digest("hex");
-  return { storageKey: "vivary-code-draft-v1:" + key };
-}
 
 function chatDraftIndexPrefix(identity: Pick<VivaryChatIdentity, "storageKey">): string {
   const hash = createHash("sha256").update(identity.storageKey).digest("hex");

@@ -11,14 +11,15 @@ Object.assign(process.env, { APP_NAME: "VivaryInboxTest", DATABASE_URL: database
   VIVARYINBOXTEST_DATABASE_URL: database, AGENT_NATIVE_CODE_AGENTS_HOME: path.join(temporary, "code") });
 const { getDbExec, withMigrationRuntime, closeDbExec } = await import("@agent-native/core/db");
 const coreAgentChat = import.meta.resolve("@agent-native/core/client/agent-chat");
-const { createThread, updateThreadData, ensureChatThreadTables } = await import(
+const { createThread, getThread, updateThreadData, ensureChatThreadTables, setThreadQueuedMessages } = await import(
   new URL("../../chat-threads/store.js", coreAgentChat).href);
 const { ensureRunTables } = await import(new URL("../../agent/run-store.js", coreAgentChat).href);
 const inbox = await import("../server/conversation-inbox.ts");
 const { createVivaryChatIdentity } = await import("../server/chat-identity.ts");
 const metaAction = (await import("../actions/vivary-code-conversation-meta.ts")).default;
 const archiveAction = (await import("../actions/vivary-conversation-archive.ts")).default;
-const { changeIndexedChatDraft, createCodeDraftIdentity } = await import("../server/chat-draft.ts");
+const draftAction = (await import("../actions/vivary-chat-draft.ts")).default;
+const { changeIndexedChatDraft, createCodeDraftIdentity, chatDraftKey, readChatDraft } = await import("../server/chat-draft.ts");
 const { codeDraftThreadId } = await import("../shared/code-draft.ts");
 async function saveDraft(identity: { storageKey: string }, threadId: string, text: string, pending = false, user = owner) {
   await asUser(user, orgId, () => changeIndexedChatDraft(identity, threadId, null, pending
@@ -407,39 +408,236 @@ test("message search keeps a project's API chats searchable when its Code histor
     { codeScope: undefined, label: "Unassigned" });
 });
 
-test("Code archive that meets a send admitted during its checks is undone and refused", async () => {
-  codeRun("race-code", "alpha");
-  // The run turns active only once its record says archived: a send admitted after the checks, before the write.
-  const runs = host.activeRuns as Map<string, HostRun> & { [Symbol.iterator]: () => IterableIterator<[string, HostRun]> };
-  const late = { ownerEmail: owner, orgId, stopReason: null, workspace: { label: "alpha" }, requests: new Map() } as HostRun;
-  runs[Symbol.iterator] = function* () {
-    yield* Map.prototype.entries.call(runs);
-    if (getCodeAgentRunRecord("race-code")?.metadata?.archivedAt) yield ["race-code", late];
-  };
-  try {
-    await assert.rejects(codeChange("race-code", "alpha", { operation: "archive" }),
-      (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /is working/.test(error.message));
-  } finally { delete (runs as Partial<typeof runs>)[Symbol.iterator]; }
-  assert.equal(getCodeAgentRunRecord("race-code")?.metadata?.archivedAt ?? null, null, "the archive was undone");
-});
+// These replace post-archive map/SQL injections with independent callers of the actual admission paths.
+// A paused store read never awaits the competing writer: the test releases the first actor, then joins both.
+function admissionGate() {
+  let release = () => {};
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  return { wait, release };
+}
 
-test("API chat archive that meets a turn started during its checks is undone and refused", async () => {
-  await nativeThread("race-native", nativeScope(null), 7_000);
-  const db = getDbExec() as { execute: (query: { sql: string; args: unknown[] }) => Promise<unknown> };
-  const execute = db.execute;
-  db.execute = async query => {
-    const result = await execute.call(db, query);
-    // A turn starts right after the archive write lands.
-    if (/^\s*UPDATE chat_threads SET archived_at/i.test(query.sql) && query.args[0] != null) {
-      await execute.call(db, { sql: "INSERT INTO agent_runs (id, thread_id, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?)",
-        args: ["race-run", "race-native", "running", Date.now(), null] });
+function observeSettlement(promise: Promise<unknown>): () => boolean {
+  let settled = false;
+  // Both branches observe the actor without creating a rejected observer promise.
+  void promise.then(() => { settled = true; }, () => { settled = true; });
+  return () => settled;
+}
+
+function pauseDraftStore(key: string, boundary: "read" | "write", failure?: Error) {
+  const db = getDbExec(), execute = db.execute;
+  const entered = admissionGate(), proceed = admissionGate();
+  let paused = false;
+  db.execute = async statement => {
+    if (typeof statement !== "string") {
+      const args = Array.isArray(statement.args) ? statement.args : [];
+      const matches = boundary === "read"
+        ? /^\s*SELECT value FROM application_state WHERE session_id = \? AND key = \?/i.test(statement.sql) && args[1] === key
+        : /^\s*UPDATE application_state SET value = /i.test(statement.sql) && args[3] === key;
+      if (!paused && matches) {
+        paused = true;
+        entered.release();
+        await proceed.wait;
+        if (failure) throw failure;
+      }
     }
+    return execute.call(db, statement);
+  };
+  return { entered: entered.wait, release: proceed.release, restore: () => { db.execute = execute; } };
+}
+
+async function personalCodeDraft(id: string) {
+  const threadId = codeDraftThreadId(null, id), identity = createCodeDraftIdentity(owner, orgId, null);
+  const text = `Keep the exact unsent text for ${id}`;
+  codeRun(id, null, { draftThreadId: threadId });
+  await saveDraft(identity, threadId, text);
+  const expected = await asUser(owner, orgId, () => readChatDraft(identity, threadId));
+  assert.ok(expected);
+  const pending = async (record = expected) => {
+    const result = await asUser(owner, orgId, () => draftAction.run({ operation: "change", kind: "code",
+      projectId: null, threadId, expected: record, next: { text, status: "pending", submitId: crypto.randomUUID() } },
+    { userEmail: owner, orgId }));
+    assert.ok("changed" in result);
     return result;
   };
-  try {
+  const read = () => asUser(owner, orgId, () => readChatDraft(identity, threadId));
+  const archive = (operation: "archive" | "restore") => codeChange(id, null, { operation });
+  const archived = async () => typeof getCodeAgentRunRecord(id)?.metadata?.archivedAt === "string";
+  return { identity, threadId, text, expected, pending, read, archive, archived };
+}
+
+async function personalNativeDraft(id: string) {
+  const threadId = id;
+  const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" });
+  const text = `Keep the exact unsent text for ${id}`;
+  await nativeThread(threadId, identity.scope, 8_000);
+  await saveDraft(identity, threadId, text);
+  const expected = await asUser(owner, orgId, () => readChatDraft(identity, threadId));
+  assert.ok(expected);
+  const pending = async (record = expected) => {
+    const result = await asUser(owner, orgId, () => draftAction.run({ operation: "change", kind: "project",
+      projectId: null, threadId, expected: record, next: { text, status: "pending", submitId: crypto.randomUUID() } },
+    { userEmail: owner, orgId }));
+    assert.ok("changed" in result);
+    return result;
+  };
+  const read = () => asUser(owner, orgId, () => readChatDraft(identity, threadId));
+  const archive = (operation: "archive" | "restore") => asUser(owner, orgId, () => inbox.changeNativeConversation({
+    ownerEmail: owner, orgId, projectId: null, threadId, change: { operation } }));
+  const archived = async () => (await getThread(threadId))?.archivedAt != null;
+  return { identity, threadId, text, expected, pending, read, archive, archived };
+}
+
+for (const [kind, create] of [["Code", personalCodeDraft], ["API chat", personalNativeDraft]] as const) {
+  test(`${kind} archive wins a paused draft read before pending admission, preserving text until Restore`, { timeout: 10_000 }, async () => {
+    const fixture = await create(`ordered-${kind.replaceAll(" ", "-")}-archive-first`);
+    const pause = pauseDraftStore(chatDraftKey(fixture.identity, fixture.threadId), "read");
+    const archive = fixture.archive("archive");
+    let pending: ReturnType<typeof fixture.pending> | undefined;
+    try {
+      await pause.entered;
+      pending = fixture.pending();
+      const pendingSettled = observeSettlement(pending);
+      // Attach the refusal assertion before releasing the archive, so rejections are always observed.
+      const refused = assert.rejects(pending, { statusCode: 409, errorCode: "vivary_conversation_archived" });
+      void refused.catch(() => {});
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(pendingSettled(), false, "pending waits while archive holds admission at the draft read");
+      pause.release();
+      assert.deepEqual(await archive, { changed: true });
+      await refused;
+    } finally {
+      pause.release();
+      await Promise.allSettled([archive, ...(pending ? [pending] : [])]);
+      pause.restore();
+    }
+    assert.equal(await fixture.archived(), true);
+    assert.deepEqual(await fixture.read(), fixture.expected, "refusal preserves the saved text, submit state and revision");
+    await fixture.archive("restore");
+    const resumed = await fixture.pending();
+    assert.equal(resumed.changed, true, "Restore makes the same expected revision admissible again");
+    assert.equal(resumed.record?.status, "pending");
+    assert.equal(resumed.record?.text, fixture.text);
+    assert.notEqual(resumed.record?.revision, fixture.expected.revision);
+  });
+
+  test(`${kind} pending admission wins its paused CAS before archive and is never overwritten`, { timeout: 10_000 }, async () => {
+    const fixture = await create(`ordered-${kind.replaceAll(" ", "-")}-pending-first`);
+    const pause = pauseDraftStore(chatDraftKey(fixture.identity, fixture.threadId), "write");
+    const pending = fixture.pending();
+    let archive: ReturnType<typeof fixture.archive> | undefined;
+    try {
+      await pause.entered;
+      archive = fixture.archive("archive");
+      const archiveSettled = observeSettlement(archive);
+      const refused = assert.rejects(archive, (error: { statusCode?: number; errorCode?: string; message: string }) =>
+        error.statusCode === 409 && error.errorCode === "vivary_conversation_archive_pending" && /still being sent/.test(error.message));
+      void refused.catch(() => {});
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(archiveSettled(), false, "archive waits while pending holds admission at its CAS");
+      pause.release();
+      const accepted = await pending;
+      assert.equal(accepted.changed, true);
+      await refused;
+      assert.deepEqual(await fixture.read(), accepted.record, "archive preserves the exact winning pending CAS");
+    } finally {
+      pause.release();
+      await Promise.allSettled([pending, ...(archive ? [archive] : [])]);
+      pause.restore();
+    }
+    assert.equal(await fixture.archived(), false);
+  });
+
+  test(`a stale ${kind} pending CAS preserves the newer draft and releases archive admission`, { timeout: 10_000 }, async () => {
+    const fixture = await create(`ordered-${kind.replaceAll(" ", "-")}-stale-cas`);
+    const newer = await asUser(owner, orgId, () => changeIndexedChatDraft(fixture.identity, fixture.threadId, fixture.expected,
+      { text: "A newer saved edit", status: "draft", submitId: null }));
+    assert.equal(newer.changed, true);
+    const stale = await fixture.pending();
+    assert.equal(stale.changed, false);
+    assert.deepEqual(stale.record, newer.record);
+    assert.deepEqual(await fixture.read(), newer.record, "the stale sender never replaces the newer text or revision");
+    await fixture.archive("archive");
+    assert.equal(await fixture.archived(), true, "a CAS conflict releases admission");
+  });
+
+  test(`a failed ${kind} pending write releases admission and preserves the durable draft`, { timeout: 10_000 }, async () => {
+    const fixture = await create(`ordered-${kind.replaceAll(" ", "-")}-write-failure`);
+    const injected = new Error("fixture pending CAS storage failure");
+    const pause = pauseDraftStore(chatDraftKey(fixture.identity, fixture.threadId), "write", injected);
+    const pending = fixture.pending();
+    const failed = assert.rejects(pending, injected);
+    void failed.catch(() => {});
+    let archive: ReturnType<typeof fixture.archive> | undefined;
+    try {
+      await pause.entered;
+      archive = fixture.archive("archive");
+      const archiveSettled = observeSettlement(archive);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(archiveSettled(), false, "archive waits for the pending CAS even when storage will fail");
+      pause.release();
+      await failed;
+      assert.deepEqual(await archive, { changed: true }, "an operation thrown inside admission releases the next caller");
+    } finally {
+      pause.release();
+      await Promise.allSettled([pending, ...(archive ? [archive] : [])]);
+      pause.restore();
+    }
+    assert.deepEqual(await fixture.read(), fixture.expected, "failed persistence changes no draft text or revision");
+  });
+}
+
+test("API chat admission preserves owner, organization and project refusal without changing the draft", async () => {
+  const fixture = await personalNativeDraft("ordered-native-access-refusal");
+  const before = await getThread(fixture.threadId);
+  for (const [userEmail, org] of [["other@example.test", orgId], [owner, "org-b"]] as const) {
+    await assert.rejects(asUser(userEmail, org, () => draftAction.run({ operation: "change", kind: "project",
+      projectId: null, threadId: fixture.threadId, expected: fixture.expected,
+      next: { text: "An unauthorized pending write", status: "pending", submitId: crypto.randomUUID() } },
+    { userEmail, orgId: org })), { statusCode: 404 });
+  }
+  for (const mismatch of [{ ownerEmail: "other@example.test" }, { orgId: "org-b" }, { projectId: "alpha" }]) {
     await assert.rejects(asUser(owner, orgId, () => inbox.changeNativeConversation({ ownerEmail: owner, orgId,
-      projectId: null, threadId: "race-native", change: { operation: "archive" } })),
-    (error: { statusCode?: number; message: string }) => error.statusCode === 409 && /is working/.test(error.message));
-  } finally { db.execute = execute; }
-  assert.equal((await load()).rows.find(row => row.id === "native:race-native")?.archived, false, "the archive was undone");
+      projectId: null, threadId: fixture.threadId, change: { operation: "archive" }, ...mismatch })), { statusCode: 404 });
+  }
+  assert.deepEqual(await getThread(fixture.threadId), before);
+  assert.deepEqual(await fixture.read(), fixture.expected);
+});
+
+test("API chat archive and queued-message persistence obey both admission orders", { timeout: 10_000 }, async () => {
+  const threadId = "ordered-native-queue";
+  await nativeThread(threadId, nativeScope(null), 7_000);
+  const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: null, label: "Personal workspace" });
+  await saveDraft(identity, threadId, "Keep the API chat draft");
+  const before = await getThread(threadId);
+  assert.ok(before);
+  const archive = () => asUser(owner, orgId, () => inbox.changeNativeConversation({ ownerEmail: owner, orgId,
+    projectId: null, threadId, change: { operation: "archive" } }));
+  const pause = pauseDraftStore(chatDraftKey(identity, threadId), "read");
+  const archiving = archive();
+  const queued = [{ id: "queue-after-archive", text: "A queued follow-up" }];
+  let queuing: ReturnType<typeof setThreadQueuedMessages> | undefined;
+  try {
+    await pause.entered;
+    queuing = setThreadQueuedMessages(threadId, queued, { ownerEmail: owner });
+    const queuingSettled = observeSettlement(queuing);
+    const refused = assert.rejects(queuing, { statusCode: 409 });
+    void refused.catch(() => {});
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(queuingSettled(), false, "queue persistence waits while archive holds admission at the draft read");
+    pause.release();
+    await archiving;
+    await refused;
+  } finally {
+    pause.release();
+    await Promise.allSettled([archiving, ...(queuing ? [queuing] : [])]);
+    pause.restore();
+  }
+  assert.equal((await getThread(threadId))?.threadData, before.threadData, "refused queue persistence keeps all messages");
+  await asUser(owner, orgId, () => inbox.changeNativeConversation({ ownerEmail: owner, orgId,
+    projectId: null, threadId, change: { operation: "restore" } }));
+  assert.equal(await setThreadQueuedMessages(threadId, queued, { ownerEmail: owner }), true, "Restore permits queue admission");
+  await assert.rejects(archive(), (error: { statusCode?: number; message: string }) =>
+    error.statusCode === 409 && /queued messages/.test(error.message));
+  assert.equal((await getThread(threadId))?.archivedAt, null, "queue first keeps the conversation open");
+  assert.deepEqual(JSON.parse((await getThread(threadId))!.threadData).queuedMessages, queued);
 });

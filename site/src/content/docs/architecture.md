@@ -398,7 +398,9 @@ starts in the filtered project, or with All projects in the open conversation's
 project, and the header names that destination and its folder before anything
 is created. New conversation for another project is the explicit action that
 selects it. An API chat there is created once that project's Native scope has
-mounted. A row shows its title,
+mounted. Code creation in Personal workspace requires a resolved folder, whether Personal is already selected
+or is the filtered destination from another project. Without a folder, New conversation starts an API chat and
+the Code choice stays disabled. A row shows its title,
 one state as text with an icon, its project in All projects, and its runtime for
 Code. The selected row is `aria-current` and holds the list's one Tab stop.
 Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
@@ -408,14 +410,19 @@ with a message and the field stays open. No row state is a live region and no du
 project in the filter scope are listed first, labeled Draft or Review send.
 Search filters titles at once. From two characters it also searches user messages
 and agent replies through the existing `vivary-chat-search` owner action and
-`chat-content-search.ts`, one first page per scope: the filtered project, or with
-All projects Personal workspace and the projects with the newest conversations, at
-most six, with a note naming how many were searched. The results show the matched
+`chat-content-search.ts`. It searches the filtered project, or with All projects, Personal workspace and the
+projects with the newest conversations, at most six, with a note naming how many were searched. Each scope
+follows `continueChatSearch`, requesting at most 12 pages and stopping further requests once elapsed time
+reaches three seconds, enough hits arrive, or the end is reached. An in-flight page can take longer. Search more
+resumes scopes with a continuation and retries failed
+scopes. A failed scope stays reported until it answers. The results show the matched
 text and open the exact message, in another project through the route hold. The
 list says when nothing matches, and separately when search is unavailable, and the
 selection stays while results load.
 
-Opening a row in the selected project navigates to its route. A row in another
+Opening a row in the selected project navigates to its route. While another project selection is pending, the
+click also claims a newer hold and selection, so the older request cannot take over. It lands immediately,
+because an already selected project does not reset its route. A row in another
 project selects the project and holds the target route. `Workspace.tsx` clears
 the old conversation route when the project changes, and the new project then
 restores its saved conversation onto the bare route. The inbox navigates once the
@@ -424,19 +431,22 @@ releases the target once it has held for 750 ms or the owner presses a key or th
 pointer. This hold is `holdConversationRoute` in
 [`conversation-route-hold.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-route-hold.ts), which the Agent
 work strip also uses. `CodeRunControl` in the layout applies the page's one hold, so the inbox
-only calls it. New conversation in another project uses the same hold. An
-API chat created after the project change is held on a bare route and replaces a
-route the new project already restored. Native rename, pin and archive go through the owner
+only calls it. New conversation in another project uses the same hold. An API chat's completion retains the
+identity of its creation request. A later inbox open or Code creation invalidates it, and leaving its Native scope
+suppresses late navigation and failure notices. Project route resets and saved-view restores keep the request current;
+its completed API chat is held on a bare route or replaces the route the new project already restored.
+Native rename, pin and archive go through the owner
 action `vivary-conversation-archive`, never Native's thread routes, because a private-proxy
 browser can authenticate a POST only to an owner action. Restore goes through the same action,
 because `vivary-native-archive` needs the project's Code history and the inbox lists API chats
 of projects whose Code history is unavailable.
 Archiving the open conversation closes its route for Code too, and opening an archived
-Code row restores it first, because a Code send never checks archive and a run could start
-hidden in the Archived section. A step that finishes after an await (archive, a restore
-before opening, API chat creation)
-changes the route only while the route is still the one it started from. A deferred API chat
-for another project is dropped once the owner selects a different project.
+Code row restores it before presenting an editable conversation. A later send to an archived conversation
+refuses until Restore. Archive, restore before opening, and API chat creation in the selected project
+change the route after an await only while it still matches the starting route. Cross-project API chat creation
+uses its request identity and Native scope lifetime instead, allowing project reset and restore to finish while
+newer inbox opens still win. A deferred API chat whose creation has not started is dropped after its requested
+project was reached and the owner selects a different project.
 
 Code rename, archive and pin go through the owner action
 [`vivary-code-conversation-meta`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-code-conversation-meta.ts).
@@ -455,9 +465,22 @@ Archive waits for unresolved work, for Code and API chat alike, and refuses with
 `vivary_conversation_archive_pending` (409) and a message naming what to resolve:
 a pending approval or a working or stopping run for Code, a running turn or queued
 messages in the thread for API chat, and for both a send from the draft that is
-still pending. Archive shares no lock with send admission, so the checks run again after
-the archive write, and work admitted in between undoes the archive and refuses it. A send
-that starts after archive finishes still runs, because neither send path reads archive. A Code run's pending draft is found the way the inbox marks its row
+still pending. The inbox's owner archive actions, pending draft CAS and final send admission
+share locks in Vivary's single server process. Native uses one admission key per thread,
+also shared by queued-message persistence. Code uses the same owner/organization/project
+identity as its draft store, so a retained run and its legacy draft aliases share admission.
+Core's mutex map is process-global across bundled copies. Native keeps admission through
+durable run insertion and user-message preparation. Its `onRunPrepared` callback takes the
+separate thread-data JSON lock. The SQL run-slot probe alone is not a lease.
+
+If a pending draft CAS succeeds or an admitted send is still active, archive returns its existing
+409. If archive wins first, later pending writes and sends return 409 before transcript
+append or worker launch and preserve the saved draft text. They remain refused until Restore. Code resolves
+the live project grant, binding and policy again after waiting for admission. Runtime
+discovery stays outside the lock, and no await follows that final validation through the
+host claim. These locks coordinate only one server process.
+
+A Code run's pending draft is found the way the inbox marks its row
 Review send, through `linkedCodeDraftRuns`, which also reads a draft ID kept only in
 an older run's transcript. Archive never stops, approves, sends or discards anything. The inbox
 archives, renames and pins an API chat only through the owner action
@@ -467,9 +490,10 @@ same write as Core's rename route: the title and `_titleOverride`, with the save
 Core's revision check. `VIVARY_OWNER_ACTIONS` in
 [`owner-actions.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/owner-actions.ts) names this action and
 `vivary-code-conversation-meta`, so both accept the private proxy session on a POST. Restore uses
-`vivary-native-archive` and returns the row to its place, since rows sort by
+`vivary-conversation-archive` and returns the row to its place, since rows sort by
 creation time. The Unassigned conversations list (`ChatHistory.tsx`) and the
-project history this inbox replaces still call Core's archive route directly.
+project history this inbox replaces still call Core's archive route directly; those legacy
+generic routes retain their existing archive policy and are outside the inbox admission contract.
 
 Rename keeps a manual API chat title against later generated titles on the server.
 Core's `renameThread` (`dist/chat-threads/store.js`, about line 750) stores
@@ -1067,6 +1091,40 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-22 Inbox archive and send admission (review threads 4324883731 and 4325071865). The Conversation inbox
+section now describes the shared Native thread and Code owner/organization/project locks, the separate Native
+JSON lock, archive/send ordering, draft preservation and live project validation after the admission wait. Both
+live-project controls failed on source v1 at the intended missing-409 assertion. Source v2 then passed the strengthened
+inbox suite, 28/28, and Code concurrency suite, 12/12. Each run loaded all four candidate Core modules
+(`chat-threads/store.js`, `server/index.js`, `agent/run-store.js` and `agent/production-agent.js`) through a process-local
+loader, leaving installed Core unchanged. Evidence inspected: the source, test files, staged test hashes and collected
+run receipts/logs. Removing either archive lock made its named race test fail, then each temporary mutation was
+restored. Four genuine Native handler controls passed: run INSERT failure, duplicate-row ownership, preparation
+failure cleanup and durable Stop before worker launch. They use the real H3 request, sharing registration and stores
+with a custom engine whose stream is never called. The earlier Native fixture registration failure is retained as a
+setup failure. Installed patch and lockfile reconciliation, type checking, full CI and Windows acceptance remain
+unverified. Background dispatch and private plugin persistence are outside these handler controls.
+
+2026-10-22 Inbox API chat completion keeps newer navigation. Cross-project creation checks its request identity
+before using the existing route hold, and a Native scope that unmounts cannot navigate or report a late failure. The
+existing slow-creation component control now covers Alpha and Beta, plus an external project switch after draft
+initialization starts. The selection fixture's refusal is before its active-project commit; it does not represent a
+durable-save failure after ProjectContext has exposed its pending target. Source/test inspection only; runtime
+checks and actual browser/Windows acceptance remain pending.
+
+2026-10-22 Inbox same-project landing during a pending open (review thread 4324883747). The selected-project
+row now lands before the selection await while retaining the newer hold and selection. The component fixture
+refuses stale selections before changing the active project, matching ProjectContext instead of manufacturing
+a project reset. Its original route assertion and failure/later-click controls cover this boundary. The cross-project
+restore path remains unchanged. Real browser and Windows acceptance remain pending.
+
+2026-10-22 Inbox Personal Code folder readiness (review thread 4326853909). Personal Code creation now requires
+resolved folder data even when Personal is already selected. API chat remains available without a folder.
+The existing component harness covers missing and present folders in active Personal, alongside the existing
+cross-project case. The canonical inbox description also now names bounded search continuation and retry,
+and the current restore action, matching the existing implementation and its component tests. Actual Windows
+acceptance and the sidebar swap after PR260 integration remain pending.
 
 2026-10-20 Inbox failed search scopes across Search more (W5b, review thread 4325272339). Message search keeps
 the projects whose request failed, retries them on Search more, and keeps reporting them until they answer.

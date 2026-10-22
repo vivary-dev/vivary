@@ -141,7 +141,7 @@ type Shared = {
   setNotice: (value: string | undefined) => void;
   openRow: (row: InboxListRow, scope: NativeScope | null) => Promise<void>;
   change: (row: InboxListRow, operation: RowOperation, title?: string) => Promise<void>;
-  /** Opens a route in the selected project, held against the route restores that follow a project change. */
+  /** Opens a newly created API chat while its cross-project creation request is still current. */
   hold: (href: string) => void;
   /** Opens a route in any project, selecting that project first when it is not the selected one. */
   openHref: (projectId: string | null, href: string) => Promise<void>;
@@ -189,7 +189,7 @@ export function ConversationInbox() {
   const latestRoute = useRef(location);
   latestRoute.current = location;
   const currentRoute = () => latestRoute.current.pathname + latestRoute.current.search;
-  const startedFrom = useRef<string | null>(null);
+  const pendingNativeStart = useRef<{ from: string } | null>(null);
   // New conversation in another project is the explicit action that selects it. The API chat waits for that project's
   // Native scope.
   const [pendingNative, setPendingNative] = useState<string | null>();
@@ -204,6 +204,7 @@ export function ConversationInbox() {
   }, [pendingNative, activeProjectId, checking]);
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
+    pendingNativeStart.current = null;
     setNotice(undefined);
     if (row.archived) {
       // An archived conversation is restored before it opens. Native cannot open one, and a Code send never checks
@@ -241,11 +242,14 @@ export function ConversationInbox() {
   async function openHref(projectId: string | null, href: string) {
     // Opening a conversation replaces a deferred API chat request.
     setPendingNative(undefined);
+    pendingNativeStart.current = null;
     if (projectId === activeProjectId && selectionsPending.current === 0) {
       navigate(href);
       return;
     }
     const release = holdConversationRoute(projectId, href);
+    // A same-project selection may not reset the route, so land its row before waiting.
+    if (projectId === activeProjectId) navigate(href);
     // A newer open owns the route by now, so a slow failure here neither releases it nor reports over it.
     if (!await select(projectId) && release()) {
       setNotice("That project is unavailable. Its conversations are retained.");
@@ -283,18 +287,20 @@ export function ConversationInbox() {
   // A conversation created right after a project change. The route left behind and a bare route are held: Workspace
   // still clears the first, and the new project's restore can still fill the second. A route the restore already filled
   // stays put, so it is replaced directly.
+  const nativeStart = pendingNativeStart.current;
   function hold(href: string) {
+    if (!nativeStart || pendingNativeStart.current !== nativeStart) return;
     const { pathname, search } = latestRoute.current;
     const route = pathname + search;
-    if (route !== startedFrom.current && hasWorkspaceRoute(pathname, search)) navigate(href, { replace: true });
+    if (route !== nativeStart.from && hasWorkspaceRoute(pathname, search)) navigate(href, { replace: true });
     else holdConversationRoute(activeProjectId, href);
-    startedFrom.current = null;
+    pendingNativeStart.current = null;
   }
   async function startIn(projectId: string | null, kind: "code" | "native") {
     setNotice(undefined);
+    pendingNativeStart.current = kind === "native" ? { from: currentRoute() } : null;
     const release = kind === "code" ? holdConversationRoute(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
     if (kind === "native") {
-      startedFrom.current = location.pathname + location.search;
       setPendingNative(projectId);
     }
     if (!await select(projectId)) {
@@ -350,10 +356,15 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const draftsHeading = useId();
 
   const creatingNative = useRef(false);
+  const nativeScopeMounted = useRef(true);
+  useEffect(() => {
+    nativeScopeMounted.current = true;
+    return () => { nativeScopeMounted.current = false; };
+  }, []);
   function newCode() {
     if (!codeReady) return;
     if (elsewhere) return void shared.startIn(destinationId, "code");
-    navigate("/?run=new&draft=" + crypto.randomUUID());
+    void shared.openHref(destinationId, "/?run=new&draft=" + crypto.randomUUID());
   }
   // A Native conversation for another project is created once that project's Native scope has mounted.
   useEffect(() => {
@@ -376,12 +387,13 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
         operation: "change", kind: scope.identity.kind, projectId: scope.identity.projectId, threadId, expected: null,
         next: { status: "cleared", text: "", submitId: null } });
       if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
+      if (!nativeScopeMounted.current) return;
       const href = `/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`;
       if (afterProjectChange) shared.hold(href);
       // A conversation the owner opened while the chat was created keeps the route.
       else if (shared.currentRoute() === from) navigate(href);
     } catch {
-      setNotice("The conversation could not be saved. Try again.");
+      if (nativeScopeMounted.current) setNotice("The conversation could not be saved. Try again.");
     } finally {
       creatingNative.current = false;
     }
@@ -398,7 +410,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
   const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
   // Code runs in a folder. Personal workspace may have none, and then only its API chats exist, as the server lists.
-  const codeReady = canStart && (!elsewhere || destinationId !== null || folder.data !== undefined);
+  const codeReady = canStart && (destinationId !== null || folder.data !== undefined);
   const section = useRef<HTMLElement>(null);
   const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
     // A section that loses its last row hands focus to New conversation, as the project history does.

@@ -2,13 +2,14 @@ import { fail } from "@agent-native/core/action";
 import { updateCodeAgentRunRecord, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { getDbExec, isPostgres } from "@agent-native/core/db";
 import {
-  getThread, listThreads, setThreadArchived, setThreadPinned, updateThreadData, type ChatThread,
+  getThread, listThreads, setThreadArchived, setThreadPinned, updateThreadData, withThreadAdmissionLock, type ChatThread,
 } from "@agent-native/core/server";
 import { codeDraftSelectionKey } from "../shared/code-draft";
 import { LINKED_TARGET_SOURCE_URL } from "../shared/linked-conversation";
 import { createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts, readChatDraft } from "./chat-draft";
 import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-identity";
 import { projectChatScopeId } from "./chat-project-scope.mjs";
+import { withCodeConversationAdmission } from "./conversation-admission";
 import {
   engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, linkedCodeDraftRuns, listOwnedVivaryCodeRuns, modelFromRun,
   type VivaryCodeActiveRun, type VivaryCodeProjectHistory, type VivaryCodeReadScope, type VivaryCodeWorkspace,
@@ -295,21 +296,23 @@ export type NativeConversationChange = { operation: "rename"; title: string }
  */
 export async function changeNativeConversation(input: { ownerEmail: string; orgId: string; projectId: string | null;
   threadId: string; change: NativeConversationChange }): Promise<{ changed: true }> {
-  const identity = createVivaryChatIdentity(input.ownerEmail, input.orgId,
-    { kind: "project", projectId: input.projectId, label: "" });
-  const thread = await getThread(input.threadId);
-  if (!thread || !threadBelongsToChatIdentity(identity, thread, input.ownerEmail, input.orgId)) {
-    fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
-  }
-  const change = input.change;
-  let changed: boolean;
-  if (change.operation === "archive") changed = await archiveNativeThread(identity, thread);
-  else if (change.operation === "rename") changed = await renameNativeThread(thread, change.title);
-  else if (change.operation === "restore") changed = await setThreadArchived(input.threadId, false, { ownerEmail: thread.ownerEmail });
-  // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
-  else changed = await setThreadPinned(input.threadId, change.operation === "pin", { ownerEmail: thread.ownerEmail });
-  if (!changed) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
-  return { changed: true };
+  return withThreadAdmissionLock<{ changed: true }>(input.threadId, async () => {
+    const identity = createVivaryChatIdentity(input.ownerEmail, input.orgId,
+      { kind: "project", projectId: input.projectId, label: "" });
+    const thread = await getThread(input.threadId);
+    if (!thread || !threadBelongsToChatIdentity(identity, thread, input.ownerEmail, input.orgId)) {
+      fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+    }
+    const change = input.change;
+    let changed: boolean;
+    if (change.operation === "archive") changed = await archiveNativeThread(identity, thread);
+    else if (change.operation === "rename") changed = await renameNativeThread(thread, change.title);
+    else if (change.operation === "restore") changed = await setThreadArchived(input.threadId, false, { ownerEmail: thread.ownerEmail });
+    // Core's owner filter is case-sensitive, so pass the stored owner after the case-insensitive check.
+    else changed = await setThreadPinned(input.threadId, change.operation === "pin", { ownerEmail: thread.ownerEmail });
+    if (!changed) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+    return { changed: true };
+  });
 }
 
 /**
@@ -328,7 +331,8 @@ async function renameNativeThread(thread: ChatThread, requested: string): Promis
 async function nativeArchiveRefusal(identity: ReturnType<typeof createVivaryChatIdentity>,
   threadId: string): Promise<string | null> {
   const latest = await agentRunsTableExists() ? await getDbExec().execute({
-    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT 1", args: [threadId] })
+    sql: "SELECT status FROM agent_runs WHERE thread_id = ? ORDER BY started_at DESC, CASE WHEN status = 'running' THEN 0 ELSE 1 END LIMIT 1",
+    args: [threadId] })
     : { rows: [] };
   if (latest.rows[0]?.status === "running") return ARCHIVE_REFUSALS.working;
   let queued: unknown;
@@ -339,21 +343,11 @@ async function nativeArchiveRefusal(identity: ReturnType<typeof createVivaryChat
   return null;
 }
 
-/**
- * Native's send path shares no lock with archive, so the checks run again after the write. Work admitted between the
- * first checks and the write undoes the archive and refuses it. A send that starts after archive finishes still runs,
- * because Native's send path does not read archive.
- */
+/** The caller holds Native admission until the refusal checks and archive write finish. */
 async function archiveNativeThread(identity: ReturnType<typeof createVivaryChatIdentity>, thread: ChatThread): Promise<boolean> {
   const before = await nativeArchiveRefusal(identity, thread.id);
   if (before) refuseArchive(before);
-  if (!await setThreadArchived(thread.id, true, { ownerEmail: thread.ownerEmail })) return false;
-  const after = await nativeArchiveRefusal(identity, thread.id);
-  if (after) {
-    await setThreadArchived(thread.id, false, { ownerEmail: thread.ownerEmail });
-    refuseArchive(after);
-  }
-  return true;
+  return setThreadArchived(thread.id, true, { ownerEmail: thread.ownerEmail });
 }
 
 export const MAX_TITLE_LENGTH = 160;
@@ -370,36 +364,33 @@ export type CodeConversationChange =
  */
 export async function changeCodeConversation(input: { ownerEmail: string; orgId?: string; runId: string;
   projectId: string | null; scope: VivaryCodeReadScope; change: CodeConversationChange }): Promise<{ changed: true }> {
-  // `scope` is the project's current history, or Personal workspace's folder, resolved for this request. A run from a
-  // revoked grant or a replaced binding fails `isOwnedRun`, as it does when the conversation is opened.
-  const owned = listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId).find(run => run.id === input.runId
-    && (typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null) === input.projectId
-    && isOwnedRun(run, input.ownerEmail, input.orgId, input.scope));
-  if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
-  if (input.change.operation === "archive") {
-    const before = await codeArchiveRefusal(input);
-    if (before) refuseArchive(before);
-  }
-  const now = new Date().toISOString();
-  const change = input.change;
-  // The updater reads the record under Core's file lock, so a concurrent worker write keeps its own updatedAt.
-  const updated = updateCodeAgentRunRecord(input.runId, record => change.operation === "rename"
-    ? { title: change.title.trim(), updatedAt: record.updatedAt,
-      metadata: typeof record.metadata?.generatedTitle === "string" ? {} : { generatedTitle: record.title } }
-    : { updatedAt: record.updatedAt, metadata: change.operation === "archive" ? { archivedAt: now }
-      : change.operation === "restore" ? { archivedAt: null } : { pinnedAt: change.operation === "pin" ? now : null } });
-  if (!updated) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
-  if (change.operation === "archive") {
-    // Code send admission shares no lock with archive, so the checks run again after the write. A send admitted in
-    // between undoes the archive and refuses it. A send after archive finishes still runs, because sends do not read
-    // `metadata.archivedAt` (local-code-agent.ts).
-    const after = await codeArchiveRefusal(input);
-    if (after) {
-      updateCodeAgentRunRecord(input.runId, record => ({ updatedAt: record.updatedAt, metadata: { archivedAt: null } }));
-      refuseArchive(after);
+  const requireOwned = () => {
+    // `scope` is current project history or Personal's folder. Recheck after waiting for admission.
+    const owned = listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId).find(run => run.id === input.runId
+      && (typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null) === input.projectId
+      && isOwnedRun(run, input.ownerEmail, input.orgId, input.scope));
+    if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+  };
+  requireOwned();
+  // Initialization can inspect recovered workers. It finishes before admission is held.
+  if (input.change.operation === "archive") await getVivaryCodeHostState(input.ownerEmail, input.orgId);
+  return withCodeConversationAdmission<{ changed: true }>(input.ownerEmail, input.orgId, input.projectId, async () => {
+    requireOwned();
+    if (input.change.operation === "archive") {
+      const before = await codeArchiveRefusal(input);
+      if (before) refuseArchive(before);
     }
-  }
-  return { changed: true };
+    const now = new Date().toISOString();
+    const change = input.change;
+    // The updater reads the record under Core's file lock, so a concurrent worker write keeps its own updatedAt.
+    const updated = updateCodeAgentRunRecord(input.runId, record => change.operation === "rename"
+      ? { title: change.title.trim(), updatedAt: record.updatedAt,
+        metadata: typeof record.metadata?.generatedTitle === "string" ? {} : { generatedTitle: record.title } }
+      : { updatedAt: record.updatedAt, metadata: change.operation === "archive" ? { archivedAt: now }
+        : change.operation === "restore" ? { archivedAt: null } : { pinnedAt: change.operation === "pin" ? now : null } });
+    if (!updated) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
+    return { changed: true };
+  });
 }
 
 /** Why a Code conversation cannot be archived now: an approval, a working or stopping run, or a pending send. */

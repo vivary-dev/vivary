@@ -153,8 +153,10 @@ let host, root;
 test.beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   const listeners = new Set();
+  let latestSelection = 0;
   globalThis.inboxFixture = {
     version: 0, active: "alpha", calls: [], switched: [], state: new Map(), drafts: {}, rows: rows(),
+    selectionCommits: [], failedSelections: [],
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     notify() { inboxFixture.version++; for (const listener of listeners) listener(); },
     // A project named in identityBlocked has not loaded its Native identity yet.
@@ -165,8 +167,12 @@ test.beforeEach(() => {
       activeProject: catalog.projects.find(project => project.projectId === inboxFixture.active) ?? null,
       refresh: async () => {},
       selectProject: async projectId => {
+        const attempt = ++latestSelection;
         inboxFixture.calls.push({ name: "selectProject", projectId });
-        await new Promise(resolve => setTimeout(resolve, 5));
+        await (inboxFixture.selectionWait?.(projectId) ?? new Promise(resolve => setTimeout(resolve, 5)));
+        // ProjectContext refuses stale requests before they can change the selected project.
+        if (attempt !== latestSelection || inboxFixture.failedSelections.includes(projectId)) return false;
+        inboxFixture.selectionCommits.push(projectId);
         inboxFixture.active = projectId; inboxFixture.notify(); return true;
       } }),
     read: async (name, input) => {
@@ -328,6 +334,40 @@ test("Personal workspace without a folder offers only API chat from another proj
   assert.equal(inboxFixture.active, null);
   assert.doesNotMatch(route(), /run=new/, "no Code draft that cannot run");
   assert.equal(route(), "?runtime=native&history=project&thread=new-native");
+});
+
+test("the active Personal workspace without a folder offers only API chat", async () => {
+  inboxFixture.active = null;
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+  inboxFixture.noPersonalFolder = true;
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render();
+  await act(async () => document.dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  assert.equal(button("Code conversation").disabled, true, "Code needs the active Personal workspace's folder");
+  assert.equal(button("API chat (separate billing)").disabled, false);
+  await act(async () => button("New conversation").click());
+  await settle();
+  assert.equal(inboxFixture.active, null);
+  assert.equal(inboxFixture.calls.some(call => call.name === "selectProject"), false, "Personal is already selected");
+  assert.doesNotMatch(route(), /run=new/, "no Code draft that cannot run");
+  assert.equal(route(), "?runtime=native&history=project&thread=new-native");
+});
+
+test("the active Personal workspace with a folder keeps Code creation available", async () => {
+  inboxFixture.active = null;
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+  await render();
+  assert.match(host.querySelector(".conversation-inbox__destination").textContent, /home-folder, folder \/work\/home-folder/);
+  await act(async () => document.dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  assert.equal(button("Code conversation").disabled, false);
+  assert.equal(button("API chat (separate billing)").disabled, false);
+  await act(async () => button("Code conversation").click());
+  assert.match(route(), /^\?run=new&draft=[0-9a-f-]{36}$/);
+  assert.equal(inboxFixture.calls.some(call => call.name === "selectProject"), false, "Personal is already selected");
+  assert.equal(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"), false, "Code starts without creating an API chat");
 });
 
 test("a saved project filter is restored after a restart, and a project that left the catalog lists everything", async () => {
@@ -513,18 +553,49 @@ test("a slow API chat archive closes its route only while that conversation is s
   assert.equal(route(), "?run=a1", "the conversation opened meanwhile stays open");
 });
 
-test("a slow API chat creation does not replace a conversation opened meanwhile", async () => {
+for (const projectId of ["alpha", "beta"]) test(`a slow API chat creation does not replace a conversation opened meanwhile${projectId === "beta" ? " after selecting another project" : ""}`, async () => {
   const slow = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: projectId });
   inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
     if (name === "vivary-chat-draft") await slow.wait; return { changed: true, record: { status: "cleared" } }; };
   await render("/?run=a1");
   await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
   await act(async () => button("API chat (separate billing)").click());
   await settle();
-  await openRow("code:a3");
+  assert.equal(inboxFixture.active, projectId, "creation has reached its destination project");
+  const drafts = inboxFixture.calls.filter(call => call.name === "vivary-chat-draft");
+  assert.equal(drafts.length, 1, "draft initialization has started before the later click");
+  assert.equal(drafts[0].input.projectId, projectId, "creation uses the destination's active Native identity");
+  const expected = projectId === "beta" ? "?run=b1" : "?run=a3";
+  await openRow(projectId === "beta" ? "code:b1" : "code:a3");
+  assert.equal(route(), expected, "the later row is open before draft initialization finishes");
   await act(async () => slow.release());
   await settle();
-  assert.equal(route(), "?run=a3");
+  assert.equal(route(), expected, "the conversation opened meanwhile stays open after creation finishes");
+});
+
+test("a slow API chat creation cannot reopen its Native scope after an external project switch", async () => {
+  const slow = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
+  inboxFixture.savedRoutes = { alpha: "run=a3", beta: "run=b-saved" };
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    if (name === "vivary-chat-draft") await slow.wait; return { changed: true, record: { status: "cleared" } }; };
+  await render("/?run=a1");
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  await act(async () => button("API chat (separate billing)").click());
+  await settle();
+  assert.equal(inboxFixture.active, "beta");
+  const drafts = inboxFixture.calls.filter(call => call.name === "vivary-chat-draft");
+  assert.equal(drafts.length, 1, "draft initialization is already waiting in Beta's Native scope");
+  assert.equal(drafts[0].input.projectId, "beta");
+  // A project change elsewhere in the app unmounts Beta's Native scope without an inbox open.
+  await act(async () => { inboxFixture.active = "alpha"; inboxFixture.notify(); });
+  await settle();
+  assert.equal(route(), "?run=a3", "Alpha restored its saved conversation before the old creation finished");
+  await act(async () => slow.release());
+  await settle();
+  assert.equal(inboxFixture.active, "alpha");
+  assert.equal(route(), "?run=a3", "the unmounted Native scope cannot replace the new project's route");
 });
 
 test("an archived API chat is restored through the owner action that does not need Code history", async () => {
@@ -625,9 +696,70 @@ test("a row in the open project clicked while another project is still opening w
   });
   await settle();
   assert.equal(inboxFixture.active, "alpha", "the slower open of Beta does not take over");
-  assert.equal(host.querySelector("#route").textContent, "?run=a3");
+  assert.deepEqual(inboxFixture.selectionCommits, ["alpha"], "a stale request never manufactures a project reset");
+  assert.equal(host.querySelector("#route").textContent, "?run=a3", "the clicked row opens without a project reset");
   // The page-wide hold releases once its route has held, so the next test starts without it.
   await act(async () => new Promise(resolve => setTimeout(resolve, 900)));
+});
+
+test("a failed same-project selection keeps the clicked row and supersedes the earlier project open", async () => {
+  const earlier = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.selectionWait = projectId => projectId === "beta" ? earlier.wait : undefined;
+  inboxFixture.failedSelections = ["alpha"];
+  await render("/?run=a1");
+  await act(async () => {
+    rowButtons().find(item => item.dataset.rowId === "code:b1").click();
+    rowButtons().find(item => item.dataset.rowId === "code:a3").click();
+  });
+  await settle();
+  assert.equal(route(), "?run=a3", "opening a row in the selected project needs no project change");
+  assert.match(host.querySelector('[role="alert"]').textContent, /That project is unavailable/);
+  await act(async () => earlier.release());
+  await settle();
+  assert.equal(inboxFixture.active, "alpha");
+  assert.deepEqual(inboxFixture.selectionCommits, [], "neither a failed nor a superseded request changes the project");
+  assert.equal(route(), "?run=a3", "the late earlier request cannot replace the clicked row");
+});
+
+test("older selection completions cannot replace a later row click or report over it", async () => {
+  const beta = gate(), firstAlpha = gate();
+  let alphaRequests = 0;
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.selectionWait = projectId => projectId === "beta" ? beta.wait
+    : ++alphaRequests === 1 ? firstAlpha.wait : undefined;
+  inboxFixture.failedSelections = ["beta"];
+  await render("/?run=a1");
+  await act(async () => {
+    rowButtons().find(item => item.dataset.rowId === "code:b1").click();
+    rowButtons().find(item => item.dataset.rowId === "code:a3").click();
+  });
+  assert.equal(route(), "?run=a3", "the selected-project row lands before its selection completes");
+  await act(async () => rowButtons().find(item => item.dataset.rowId === "code:a1").click());
+  await settle();
+  await act(async () => firstAlpha.release());
+  await act(async () => beta.release());
+  await settle();
+  assert.equal(inboxFixture.active, "alpha");
+  assert.deepEqual(inboxFixture.selectionCommits, ["alpha"], "only the latest request commits");
+  assert.equal(route(), "?run=a1", "the later row keeps its route after both older requests finish");
+  assert.equal(host.querySelector('[role="alert"]'), null, "a stale failure reports nothing over the newer click");
+  await act(async () => document.dispatchEvent(new window.Event("keydown", { bubbles: true })));
+});
+
+test("a failed cross-project open releases its hold and keeps the selected project's route", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.failedSelections = ["beta"];
+  await render("/?run=a1");
+  await act(async () => rowButtons().find(item => item.dataset.rowId === "code:b1").click());
+  await settle();
+  assert.equal(inboxFixture.active, "alpha");
+  assert.equal(route(), "?run=a1");
+  assert.match(host.querySelector('[role="alert"]').textContent, /That project is unavailable/);
+  await act(async () => rowButtons().find(item => item.dataset.rowId === "code:a3").click());
+  await settle();
+  assert.equal(route(), "?run=a3", "the failed open leaves no hold over the next row");
+  assert.equal(host.querySelector('[role="alert"]'), null);
 });
 
 test("a row in the selected project opens directly and Native rows select their thread", async () => {

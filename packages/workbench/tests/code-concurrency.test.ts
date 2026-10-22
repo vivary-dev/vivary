@@ -34,6 +34,9 @@ after(async () => {
 });
 
 const agent = await import("../server/local-code-agent.ts");
+const { changeCodeConversation } = await import("../server/conversation-inbox.ts");
+const { withCodeConversationAdmission } = await import("../server/conversation-admission.ts");
+const { runWithRequestContext } = await import("@agent-native/core/server");
 const { getVivaryRuntimeStatus } = await import("../server/local-runtime-setup.ts");
 const { SHARED_FOLDER_WARNING } = await import("../shared/code-concurrency.ts");
 const { getCodeAgentRunRecord, listCodeAgentRunRecords, listCodeAgentTranscriptEvents, updateCodeAgentRunRecord } =
@@ -140,6 +143,98 @@ const send = (workspace: Workspace, message: string, extra: Partial<Parameters<t
   agent.sendVivaryCodeMessage({ ...owner, workspace, message, engine: "claude-cli", model: "claude-sonnet-5-5",
     revalidateWorkspace: async () => workspace, ...extra });
 const codex = { engine: "codex-cli" as const, model: "gpt-6-astra" };
+
+const changeArchive = (workspace: Workspace, runId: string, operation: "archive" | "restore") =>
+  runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, () => changeCodeConversation({
+    ...owner, runId, projectId: workspace.projectId ?? null, scope: workspace, change: { operation } }));
+
+test("archive refuses a real Code send without draft IDs until Restore, and a working send refuses archive", {
+  timeout: 60_000, skip: process.platform === "win32",
+}, async () => {
+  const { fixture, folder } = await ipcFixture("archive-send-orders");
+  const workspace = project(folder, "archive_send_orders");
+  const runId = (await send(workspace, "Finish the original turn")).run!.id;
+  await waitFor(() => !host().activeRuns.has(runId), "the original turn to finish");
+  const before = listCodeAgentTranscriptEvents(runId);
+  const startsBefore = await readFile(path.join(fixture, "starts.jsonl"), "utf8");
+  try {
+    await changeArchive(workspace, runId, "archive");
+    const archived = getCodeAgentRunRecord(runId);
+    // Neither optional draftThreadId nor draftSubmitId is supplied by this real send.
+    await assert.rejects(send(workspace, "A refused archived turn", { runId }),
+      { statusCode: 409, errorCode: "vivary_conversation_archived" });
+    assert.deepEqual(getCodeAgentRunRecord(runId), archived, "a refused send leaves the durable run untouched");
+    assert.deepEqual(listCodeAgentTranscriptEvents(runId), before, "no refused user message enters the transcript");
+    assert.equal(host().activeRuns.has(runId), false, "no worker slot is claimed");
+    assert.equal(await readFile(path.join(fixture, "starts.jsonl"), "utf8"), startsBefore, "no worker starts");
+
+    await changeArchive(workspace, runId, "restore");
+    const accepted = await send(workspace, "Work after Restore", { runId });
+    assert.equal(accepted.run?.id, runId);
+    await waitFor(async () => (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n").length === 2,
+      "the restored turn's worker");
+    const working = listCodeAgentTranscriptEvents(runId);
+    await assert.rejects(changeArchive(workspace, runId, "archive"),
+      (error: { statusCode?: number; errorCode?: string; message: string }) => error.statusCode === 409
+        && error.errorCode === "vivary_conversation_archive_pending" && /is working/.test(error.message));
+    assert.equal(getCodeAgentRunRecord(runId)?.metadata?.archivedAt ?? null, null, "send first keeps the conversation open");
+    assert.equal(host().activeRuns.has(runId), true, "archive never stops the admitted worker");
+    assert.deepEqual(listCodeAgentTranscriptEvents(runId), working);
+    assert.deepEqual(working.filter(event => event.kind === "user").map(event => event.message),
+      ["Finish the original turn", "Work after Restore"]);
+  } finally { await settle(runId); }
+});
+
+for (const change of ["revoke", "replace-binding"] as const) {
+  test(`Code send rechecks a live ${change} after waiting for archive admission`, {
+    timeout: 60_000, skip: process.platform === "win32",
+  }, async () => {
+    const { fixture, folder } = await ipcFixture(`archive-wait-${change}`);
+    const workspace = project(folder, `archive_wait_${change.replaceAll("-", "_")}`);
+    const runId = (await send(workspace, "Finish before the grant changes")).run!.id;
+    await waitFor(() => !host().activeRuns.has(runId), "the first turn to finish");
+    const before = listCodeAgentTranscriptEvents(runId);
+    const startsBefore = await readFile(path.join(fixture, "starts.jsonl"), "utf8");
+    let releaseAdmission = () => {}, reachedRuntime = () => {};
+    const admissionGate = new Promise<void>(resolve => { releaseAdmission = resolve; });
+    const runtimeReady = new Promise<void>(resolve => { reachedRuntime = resolve; });
+    let enteredAdmission = () => {};
+    const held = new Promise<void>(resolve => { enteredAdmission = resolve; });
+    const blocker = withCodeConversationAdmission(owner.ownerEmail, owner.orgId, workspace.projectId ?? null, async () => {
+      enteredAdmission();
+      await admissionGate;
+    });
+    let live: Workspace | undefined = workspace;
+    let pending: ReturnType<typeof send> | undefined;
+    try {
+      await held;
+      pending = send(workspace, "A turn whose grant changed while waiting", { runId,
+        revalidateWorkspace: async () => live,
+        loadLinkedContext: async () => { reachedRuntime(); return null; } });
+      const refused = assert.rejects(pending, { statusCode: 409, errorCode: "vivary_code_project_changed" });
+      await runtimeReady;
+      // Runtime/credential awaits have finished. Drain the remaining resolved callbacks so the send is waiting on
+      // the held scope admission; no actor is injected into an archive or storage callback.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      live = change === "revoke" ? undefined : { ...workspace, bindingId: "replacement-binding", bindingRevision: 2 };
+      releaseAdmission();
+      await blocker;
+      await refused;
+      assert.deepEqual(listCodeAgentTranscriptEvents(runId), before, "a stale live grant appends no user message");
+      assert.equal(host().activeRuns.has(runId), false, "a stale live grant starts no worker");
+      assert.equal(await readFile(path.join(fixture, "starts.jsonl"), "utf8"), startsBefore);
+      live = workspace;
+      await send(workspace, "Finish after the live grant returns", { runId, revalidateWorkspace: async () => live });
+      await waitFor(() => !host().activeRuns.has(runId), "the admitted recovery turn to finish");
+      assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.message),
+        ["Finish before the grant changes", "Finish after the live grant returns"], "refusal releases the scope lock");
+    } finally {
+      releaseAdmission();
+      await Promise.allSettled([blocker, ...(pending ? [pending] : [])]);
+      await settle(runId);
+    }
+  });
+}
 
 test("Claude Code and Codex conversations run in one project with their own approvals, routing, and Stop", { timeout: 120_000,
   skip: process.platform === "win32" }, async () => {
