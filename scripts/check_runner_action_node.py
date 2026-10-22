@@ -275,13 +275,31 @@ def check_runner_action_node():
             "platform": system, "architecture": "x64"}
 
 
+def admission_failure(error):
+    phases = {
+        "container_host": "container-detection", "check_host": "host-policy",
+        "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
+        "linux_process": "process-identity", "windows_process": "process-identity",
+        "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+        "binary_x64": "binary-identity", "sha256": "binary-hash",
+        "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
+        "node_version": "interpreter-version",
+    }
+    phase = "admission"
+    trace = error.__traceback__
+    while trace is not None:
+        phase = phases.get(trace.tb_frame.f_code.co_name, phase)
+        trace = trace.tb_next
+    return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__})"
+
+
 def main():
     try:
         print(json.dumps(check_runner_action_node(), sort_keys=True))
         return 0
     except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
-        # No environment values or command arguments are recorded.
-        print(str(error) if isinstance(error, RuntimeError) else "Runner action Node: required metadata or interpreter evidence is unavailable", file=sys.stderr)
+        # Report only owned phase labels and the class, never exception text or frame data.
+        print(admission_failure(error), file=sys.stderr)
         return 1
 
 

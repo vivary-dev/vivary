@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
 import tempfile
 import types
@@ -342,6 +343,74 @@ class RunnerBootstrapTests(unittest.TestCase):
                     marker = Path(directory) / (action + ".marker")
                     if result == 0: marker.write_text("admitted")
                     self.assertFalse(marker.exists(), action)
+
+
+class RunnerDiagnosticTests(unittest.TestCase):
+    def all_sources(self):
+        auxiliary = (ROOT / ".github/workflows" / name for name in ("review-gate.yml", "steward.yml", "track-stats.yml"))
+        return sources() + [(path.name, inline_source(path.read_text())) for path in auxiliary]
+
+    def test_supported_errors_report_only_phase_and_exception_class(self):
+        errors = (RuntimeError("private policy value"), PermissionError("private path"),
+                  ValueError("private value"), TypeError("private argument"), KeyError("private key"),
+                  AttributeError("private attribute"), subprocess.TimeoutExpired("private command", 1))
+        for name, source in self.all_sources():
+            self.assertEqual(source, CANONICAL.read_text())
+            for error in errors:
+                module = load_source(source)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with self.subTest(source=name, error=type(error).__name__), \
+                     mock.patch.object(module, "check_runner_action_node", side_effect=error), \
+                     mock.patch.object(module.subprocess, "Popen", side_effect=AssertionError("no probe")) as probe, \
+                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(module.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "Runner action Node: admission failed (phase=admission, exception=" + type(error).__name__ + ")\n")
+                probe.assert_not_called()
+
+    def test_actual_guard_failures_identify_container_process_probe_and_policy_phases(self):
+        fields = ["S", "20"] + ["0"] * 17 + ["300"]
+        for name, source in self.all_sources():
+            for phase in ("container-detection", "process-identity", "interpreter-probe", "interpreter-version"):
+                module = load_source(source)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                expected_class = "RuntimeError" if phase == "interpreter-version" else "PermissionError"
+                with self.subTest(source=name, phase=phase), contextlib.ExitStack() as stack:
+                    stack.enter_context(contextlib.redirect_stdout(stdout))
+                    stack.enter_context(contextlib.redirect_stderr(stderr))
+                    probe = stack.enter_context(mock.patch.object(module.subprocess, "Popen", side_effect=PermissionError("private executable path")))
+                    if phase == "interpreter-probe":
+                        stack.enter_context(mock.patch.object(module, "check_runner_action_node", side_effect=lambda: module.probe_version(Path("private-selected-node"), {})))
+                    elif phase == "interpreter-version":
+                        stack.enter_context(mock.patch.object(module, "check_runner_action_node", side_effect=lambda: module.node_version("24.22.0", selected_major=24)))
+                    else:
+                        stack.enter_context(mock.patch.object(module.sys, "platform", "linux"))
+                        stack.enter_context(mock.patch.object(module.platform, "machine", return_value="x86_64"))
+                        stack.enter_context(mock.patch.dict(module.os.environ, {}, clear=True))
+                        if phase == "container-detection":
+                            stack.enter_context(mock.patch.object(module.Path, "exists", return_value=False))
+                            stack.enter_context(mock.patch.object(module.Path, "read_text", side_effect=PermissionError("private cgroup path")))
+                        else:
+                            stack.enter_context(mock.patch.object(module, "container_host", return_value=False))
+                            stack.enter_context(mock.patch.object(module.os, "getpid", return_value=30))
+                            stack.enter_context(mock.patch.object(module.Path, "read_text", return_value="30 (python) " + " ".join(fields)))
+                            stack.enter_context(mock.patch.object(module.os, "readlink", side_effect=PermissionError("private ancestor path")))
+                    self.assertEqual(module.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), f"Runner action Node: admission failed (phase={phase}, exception={expected_class})\n")
+                self.assertEqual(probe.call_count, int(phase == "interpreter-probe"))
+
+    def test_errors_outside_existing_catch_families_still_propagate(self):
+        for name, source in self.all_sources():
+            module = load_source(source)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(source=name), \
+                 mock.patch.object(module, "check_runner_action_node", side_effect=LookupError("private value")), \
+                 mock.patch.object(module.subprocess, "Popen", side_effect=AssertionError("no probe")) as probe, \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), self.assertRaises(LookupError):
+                module.main()
+            self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+            probe.assert_not_called()
 
 
 class WorkflowBootstrapTests(unittest.TestCase):
