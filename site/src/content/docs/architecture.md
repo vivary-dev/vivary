@@ -785,15 +785,21 @@ version, protected environment, dependency success and OIDC gates still apply.
 The runner's JavaScript action interpreter has a separate admission boundary.
 The canonical `scripts/check_runner_action_node.py` source is mirrored verbatim
 into a first-step Python mapping in CI and npm publication, then aliased into
-every other job. It needs neither checkout nor selected Node. It finds one live
-`Runner.Worker` ancestor from native parent, creation and executable metadata,
-derives that runner root's `externals/node24/bin/node` or `node.exe`, checks its
-native x64 binary identity and hashes the executable before and after a
-sanitized, bounded absolute version probe. Python applies the advisory floors
-and requires this interpreter to be major 24. PATH Node cannot rescue an affected
-provider interpreter. Missing or reused process identity, ambiguous ancestry,
-unsupported hosts or containers, changed bytes and unproved selection overrides
-refuse admission. No provider binary is downloaded, modified, forced or restarted.
+every other job. It needs neither checkout nor selected Node. The owning-Worker
+boundary follows native parent, creation and executable identities from the
+current process through its nearest live `Runner.Worker` ancestor. It validates
+that Worker's bin layout and revalidates every identity in this relevant prefix
+before admission and after the interpreter probe. It does not read executable
+metadata above the owning Worker or claim unique Worker ancestry through PID 1.
+The collector still checks the actual Worker and its runner root's
+`externals/node24/bin/node` or `node.exe`, native x64 binary identities, unchanged
+hashes and a sanitized, bounded absolute version probe. Python applies the
+advisory floors and requires this interpreter to be major 24. PATH Node cannot
+rescue an affected provider interpreter. Missing, unreadable, stale or reused
+relevant process identity, cyclic or overlong relevant ancestry, a bad nearest
+Worker layout, unsupported hosts or containers, changed bytes and unproved
+selection overrides refuse admission. A bad nearest Worker cannot fall back to
+a higher candidate. No provider binary is downloaded, modified, forced or restarted.
 
 First-step placement relies on the exact no-pre action manifests bound in the
 workflow contract checker. The examined runner dispatch source is commit
@@ -846,6 +852,8 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+Owning-Worker admission boundary (2026-10-22). This change narrows the previous whole-ancestry uniqueness proof through PID 1 to the current process and its nearest owning Runner.Worker. Protected service ancestors above that Worker do not select this action's interpreter. The relevant prefix retains native identity, creation time, parent, cycle/depth and before/after checks; Worker layout, native binary identity, same-root Node selection, hashes, version floors and class-only failure diagnostics remain enforced. Controls cover protected upper ancestors, an unrelated higher Worker, unreadable/stale/reused relevant identities, bad nearest layout without fallback, missing/cyclic/deep ancestry and the collector's final revalidation. Platform fixtures exercise this boundary without importing provider binaries. The retained hosted diagnostic identifies denied process metadata before the interpreter probe, but not the denied PID or selected Node version. Actual hosted admission and final CI remain required.
 
 Runner admission diagnostics (2026-10-22). The pre-action guard reports a fixed failure-phase label and exception class when metadata or interpreter admission fails. It records no exception text, paths, arguments, environment values or frame data. Process ancestry, executable identity, version floors, refusal status and publication dependencies are unchanged. The focused controls exercise actual guard failure paths and every inline workflow copy. A failed metadata check does not establish an affected interpreter version.
 

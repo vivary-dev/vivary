@@ -156,9 +156,13 @@ jobs:
 
 
           def discover_worker(pid, read_process, system):
+              # The nearest owning Worker selects this action's interpreter. Its own
+              # service ancestors are outside that execution boundary.
               chain = []
               seen = set()
               paths = PureWindowsPath if system == "win32" else PurePosixPath
+              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
+              worker = None
               while pid:
                   if pid in seen or len(chain) >= MAX_ANCESTORS:
                       refuse("cyclic or overlong process ancestry")
@@ -167,15 +171,20 @@ jobs:
                   if item["pid"] != pid or item["created"] <= 0 or item["ppid"] < 0 or not paths(item["exe"]).is_absolute():
                       refuse("missing process identity")
                   chain.append(item)
+                  if item["ppid"] in seen:
+                      refuse("cyclic or overlong process ancestry")
+                  name = paths(item["exe"]).name
+                  if len(chain) > 1 and (name.lower() if system == "win32" else name) == expected:
+                      runner_paths(item, system)
+                      worker = item
+                      break
                   pid = item["ppid"]
-              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
-              workers = [item for item in chain[1:] if (paths(item["exe"]).name.lower() if system == "win32" else paths(item["exe"]).name) == expected]
-              if len(workers) != 1:
-                  refuse("exactly one Runner.Worker ancestor is required")
+              if worker is None:
+                  refuse("an owning Runner.Worker ancestor is required")
               for item in chain:
                   if read_process(item["pid"]) != item:
                       refuse("ancestry changed or reused a process identity")
-              return workers[0], chain
+              return worker, chain
 
 
           def runner_paths(worker, system):

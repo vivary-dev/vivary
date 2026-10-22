@@ -5,7 +5,7 @@ import ctypes
 import importlib.util
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import struct
 import subprocess
@@ -86,7 +86,7 @@ def process_chain(root, system="linux"):
     if system == "win32":
         worker, python, init = r"C:\runner\bin\Runner.Worker.exe", r"C:\Python\python.exe", r"C:\Windows\init.exe"
     else:
-        worker, python, init = str(root / "bin/Runner.Worker"), "/usr/bin/python3", "/sbin/init"
+        worker, python, init = str(PurePosixPath(root.as_posix()) / "bin/Runner.Worker"), "/usr/bin/python3", "/sbin/init"
     return {30: {"pid": 30, "ppid": 20, "created": 300, "exe": python},
             20: {"pid": 20, "ppid": 1, "created": 200, "exe": worker},
             1: {"pid": 1, "ppid": 0, "created": 1, "exe": init}}
@@ -210,24 +210,24 @@ class RunnerBootstrapTests(unittest.TestCase):
             kernel.OpenProcess.call = lambda *args: None
             with self.assertRaisesRegex(RuntimeError, "unreadable"): module.windows_process(20)
 
-    def test_unique_worker_ancestry_and_same_root_on_linux_and_windows(self):
+    def test_owning_worker_prefix_and_same_root_on_linux_and_windows(self):
         for name, source in sources():
             module = load_source(source)
             for system in ("linux", "win32"):
                 chain = process_chain(Path("/runner"), system)
                 worker, observed = module.discover_worker(30, lambda pid: dict(chain[pid]), system)
                 root, node = module.runner_paths(worker, system)
-                self.assertEqual(len(observed), 3)
+                self.assertEqual([item["pid"] for item in observed], [30, 20])
                 self.assertEqual(root, r"C:\runner" if system == "win32" else "/runner")
                 self.assertEqual(node, r"C:\runner\externals\node24\bin\node.exe" if system == "win32" else "/runner/externals/node24/bin/node")
-                with mock.patch.object(module, "MAX_ANCESTORS", 2), self.assertRaisesRegex(RuntimeError, "overlong"):
+                with mock.patch.object(module, "MAX_ANCESTORS", 1), self.assertRaisesRegex(RuntimeError, "overlong"):
                     module.discover_worker(30, lambda pid: dict(chain[pid]), system)
-                for mode in ("missing", "ambiguous", "reused", "unreadable", "cycle"):
+                for mode in ("missing", "reused", "unreadable", "cycle", "bad-path"):
                     altered = {pid: dict(value) for pid, value in chain.items()}
                     calls = {}
                     if mode == "missing": altered[20]["exe"] = altered[30]["exe"]
-                    if mode == "ambiguous": altered[1]["exe"] = altered[20]["exe"]
-                    if mode == "cycle": altered[1]["ppid"] = 30
+                    if mode == "cycle": altered[20]["ppid"] = 30
+                    if mode == "bad-path": altered[20]["exe"] = r"C:\other\Runner.Worker.exe" if system == "win32" else "/other/Runner.Worker"
                     def read(pid):
                         calls[pid] = calls.get(pid, 0) + 1
                         if mode == "unreadable" and pid == 20: raise PermissionError("fixture process denied")
@@ -236,8 +236,6 @@ class RunnerBootstrapTests(unittest.TestCase):
                         return item
                     with self.subTest(source=name, system=system, mode=mode), self.assertRaises((RuntimeError, PermissionError)):
                         module.discover_worker(30, read, system)
-                with self.assertRaises(RuntimeError):
-                    module.runner_paths({**worker, "exe": r"C:\other\Runner.Worker.exe" if system == "win32" else "/other/Runner.Worker"}, system)
 
     def test_unsupported_hosts_containers_and_unproved_overrides_refuse_without_values(self):
         module = load_source(CANONICAL.read_text())
@@ -490,6 +488,120 @@ class WorkflowBootstrapTests(unittest.TestCase):
             terms["steps.runner_action_node.outcome == 'success'"] = False
             if all(terms[part.strip()] for part in condition.split("&&")): marker.write_text("uploaded")
             self.assertFalse(marker.exists())
+
+
+
+class OwningWorkerBoundaryTests(unittest.TestCase):
+    def all_sources(self):
+        auxiliary = (ROOT / ".github/workflows" / name for name in ("review-gate.yml", "steward.yml", "track-stats.yml"))
+        return sources() + [(path.name, inline_source(path.read_text())) for path in auxiliary]
+
+    def test_protected_or_second_worker_above_owner_is_outside_the_boundary(self):
+        for name, source in self.all_sources():
+            module = load_source(source)
+            for system in ("linux", "win32"):
+                for above in ("protected", "another-worker"):
+                    chain = process_chain(Path("/runner"), system)
+                    chain[1]["exe"] = chain[20]["exe"]
+                    calls = []
+                    def read(pid):
+                        calls.append(pid)
+                        if above == "protected" and pid == 1:
+                            raise PermissionError("protected service ancestor")
+                        return dict(chain[pid])
+                    with self.subTest(source=name, system=system, above=above):
+                        worker, prefix = module.discover_worker(30, read, system)
+                        self.assertEqual(worker, chain[20])
+                        self.assertEqual([item["pid"] for item in prefix], [30, 20])
+                        self.assertEqual(calls, [30, 20, 30, 20])
+                        root, node = module.runner_paths(worker, system)
+                        self.assertEqual(root, r"C:\runner" if system == "win32" else "/runner")
+                        self.assertEqual(node, r"C:\runner\externals\node24\bin\node.exe" if system == "win32" else "/runner/externals/node24/bin/node")
+
+    def test_unreadable_stale_reused_or_changed_relevant_prefix_refuses(self):
+        for name, source in self.all_sources():
+            module = load_source(source)
+            for system in ("linux", "win32"):
+                for selected in (30, 20):
+                    for mode in ("unreadable", "stale", "created", "ppid", "exe", "bad-pid", "zero-created", "negative-parent", "relative-exe"):
+                        chain = process_chain(Path("/runner"), system)
+                        calls = {}
+                        def read(pid):
+                            calls[pid] = calls.get(pid, 0) + 1
+                            item = dict(chain[pid])
+                            if pid == selected:
+                                if mode == "unreadable": raise PermissionError("prefix denied")
+                                if mode == "stale" and calls[pid] > 1: raise FileNotFoundError("prefix disappeared")
+                                if mode in ("created", "ppid", "exe") and calls[pid] > 1:
+                                    item[mode] = item[mode] + 1 if mode != "exe" else item[mode] + ".changed"
+                                if mode == "bad-pid": item["pid"] += 1
+                                if mode == "zero-created": item["created"] = 0
+                                if mode == "negative-parent": item["ppid"] = -1
+                                if mode == "relative-exe": item["exe"] = "relative/executable"
+                            return item
+                        with self.subTest(source=name, system=system, selected=selected, mode=mode), self.assertRaises((RuntimeError, OSError)):
+                            module.discover_worker(30, read, system)
+
+    def test_missing_cyclic_deep_and_bad_owner_layout_refuse_without_fallback(self):
+        for name, source in self.all_sources():
+            module = load_source(source)
+            for system in ("linux", "win32"):
+                for mode in ("missing", "self-is-not-owner", "cycle", "owner-parent-cycle", "deep", "bad-owner-path"):
+                    chain = process_chain(Path("/runner"), system)
+                    chain[1]["exe"] = chain[20]["exe"]
+                    if mode in ("missing", "self-is-not-owner", "cycle", "deep"):
+                        chain[20]["exe"] = chain[30]["exe"]
+                        chain[1]["exe"] = chain[30]["exe"]
+                    if mode == "self-is-not-owner":
+                        chain[30]["exe"] = r"C:\runner\bin\Runner.Worker.exe" if system == "win32" else "/runner/bin/Runner.Worker"
+                    if mode == "cycle": chain[20]["ppid"] = 30
+                    if mode == "owner-parent-cycle": chain[20]["ppid"] = 30
+                    if mode == "bad-owner-path":
+                        chain[20]["exe"] = r"C:\other\Runner.Worker.exe" if system == "win32" else "/other/Runner.Worker"
+                    calls = []
+                    def read(pid):
+                        calls.append(pid)
+                        return dict(chain[pid])
+                    with self.subTest(source=name, system=system, mode=mode), mock.patch.object(module, "MAX_ANCESTORS", 2 if mode == "deep" else 64), self.assertRaises(RuntimeError):
+                        module.discover_worker(30, read, system)
+                    if mode in ("owner-parent-cycle", "bad-owner-path"):
+                        self.assertNotIn(1, calls, "a bad nearest Worker must not fall back to a higher Worker")
+
+    @unittest.skipUnless(sys.platform == "linux", "full ELF collector fixture uses native Linux paths")
+    def test_actual_collector_keeps_runtime_checks_and_final_prefix_revalidation(self):
+        for name, source in self.all_sources():
+            for mode in ("fixed", "prefix-changed-after-probe", "worker-changed-after-probe", "affected-node"):
+                module = load_source(source)
+                with self.subTest(source=name, mode=mode), tempfile.TemporaryDirectory() as directory:
+                    with controlled_runner(module, directory) as (root, worker, interpreter, chain, probing):
+                        calls = []
+                        def read(pid):
+                            calls.append(pid)
+                            if pid == 1: raise PermissionError("protected service ancestor")
+                            return dict(chain[pid])
+                        if mode == "prefix-changed-after-probe":
+                            def change(*args):
+                                chain[30]["created"] += 1
+                                return "v24.22.1"
+                            probing.side_effect = change
+                        if mode == "worker-changed-after-probe":
+                            def change_worker(*args):
+                                worker.write_bytes(elf() + b"changed worker bytes")
+                                return "v24.22.1"
+                            probing.side_effect = change_worker
+                        if mode == "affected-node": probing.return_value = "v24.22.0"
+                        with mock.patch.object(module, "linux_process", side_effect=read):
+                            if mode == "fixed":
+                                actual = module.check_runner_action_node()
+                                self.assertEqual(actual["interpreter"], str(interpreter))
+                                self.assertEqual(actual["sha256"], module.sha256(interpreter))
+                                self.assertEqual(actual["workerSha256"], module.sha256(worker))
+                                self.assertEqual(actual["version"], "24.22.1")
+                                self.assertEqual(calls, [30, 20, 30, 20, 30, 20])
+                            else:
+                                with self.assertRaises(RuntimeError): module.check_runner_action_node()
+                        self.assertNotIn(1, calls)
+                        probing.assert_called_once_with(interpreter, {"LANG": "C", "LC_ALL": "C"})
 
 
 if __name__ == "__main__":
