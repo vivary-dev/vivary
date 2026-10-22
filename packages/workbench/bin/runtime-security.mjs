@@ -22,10 +22,10 @@ export const NODE_ADVISORIES = Object.freeze([
   ["CVE-2026-106073", [22, 24, 26]], // realpathSync permission bypass
 ].map(([id, majors]) => Object.freeze({ id, majors: Object.freeze(majors) })));
 
-// This is the existing authenticated windows-target.mjs asset, not a new runtime selection.
-// It is affected and cannot pass admission. A replacement needs its own authenticated binding and native probe.
-const WINDOWS_NODE_ASSET = Object.freeze({ version: "24.20.0", platform: "win32", arch: "x64",
-  fileName: "node-v24.20.0-win-x64.exe", sha256: "5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5" });
+// Exact executable independently bound by the signed Node 24.22.1 release manifest.
+// Its retained native Windows probe is separate; staged bytes and facts are still checked below.
+const WINDOWS_NODE_ASSET = Object.freeze({ version: "24.22.1", platform: "win32", arch: "x64",
+  fileName: "node-v24.22.1-win-x64.exe", sha256: "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5" });
 const helper = fileURLToPath(import.meta.url);
 const repository = path.resolve(path.dirname(helper), "../../..");
 
@@ -109,7 +109,7 @@ export async function validateStagedNode(executable, target) {
   if (target.platform === "win32") {
     if (claimedVersion !== WINDOWS_NODE_ASSET.version) refuse("no authenticated Windows asset binding exists for this release.");
     if (await executableSha256(executable) !== WINDOWS_NODE_ASSET.sha256) refuse("Windows Node bytes do not match the authenticated asset.");
-    // Never execute the retained affected Windows asset merely to collect evidence.
+    // Apply the security floor before native evidence collection.
     assertNodeVersion(claimedVersion);
     source = WINDOWS_NODE_ASSET;
   } else {

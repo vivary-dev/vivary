@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { snapshotTrackedRepository } from "../package.mjs";
+import { prepareWindowsX64Target } from "../windows-target.mjs";
 import { fileURLToPath } from "node:url";
 import { assertDesktopPayload, assertNodeVersion, collectCurrentNode, validateStagedNode } from "../../workbench/bin/runtime-security.mjs";
 
@@ -89,22 +90,59 @@ test("real desktop packaging entry refuses before a packager or staging can run"
 test("staged standalone runtime binding refuses replaced bytes, forged releases and unsupported targets", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-staged-node-"));
   try {
-    const executable = path.join(directory, "node");
+    const executable = path.join(directory, process.platform === "win32" ? "node.exe" : "node");
     const target = { platform: process.platform, arch: process.arch, nodeVersion: process.version };
     await copyFile(process.execPath, executable);
     let safe = false;
     try { assertNodeVersion(process.versions.node); safe = true; } catch { /* Diagnostic runtimes remain importable. */ }
-    if (safe && process.platform === "linux" && process.arch === "x64") {
-      const actual = await collectCurrentNode();
+    const actual = await collectCurrentNode();
+    const authenticatedWindows = actual.platform === "win32" && actual.arch === "x64"
+      && actual.versions.node === "24.22.1" && actual.versions.modules === "137"
+      && actual.sha256 === "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5";
+    if ((safe && process.platform === "linux" && process.arch === "x64") || authenticatedWindows) {
       assert.equal((await validateStagedNode(executable, target)).sha256, actual.sha256);
     } else await assert.rejects(validateStagedNode(executable, target), /Runtime security/);
     await writeFile(executable, "replaced bytes with safe build metadata");
     await assert.rejects(validateStagedNode(executable, target), /Runtime security/);
-    await assert.rejects(validateStagedNode(executable, { platform: "win32", arch: "x64", nodeVersion: "24.20.0" }), /authenticated asset/);
-    await assert.rejects(validateStagedNode(executable, { platform: "win32", arch: "x64", nodeVersion: "24.22.1" }), /authenticated Windows/);
+    await assert.rejects(validateStagedNode(executable, { platform: "win32", arch: "x64", nodeVersion: "24.20.0" }), /no authenticated Windows asset binding/);
+    await assert.rejects(validateStagedNode(executable, { platform: "win32", arch: "x64", nodeVersion: "24.22.1" }), /Windows Node bytes do not match the authenticated asset/);
     await assert.rejects(validateStagedNode(executable, { platform: "darwin", arch: "x64", nodeVersion: "24.22.1" }), /unsupported/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+for (const fixture of [
+  { name: "rejects the affected 24.20.0 marker before staging assets", nodeVersion: "v24.20.0", nodeAbi: "137",
+    refusal: /Windows packaging requires Workbench built with Node 24\.22\.1 ABI 137\./ },
+  { name: "rejects a fixed release with the wrong ABI before staging assets", nodeVersion: "v24.22.1", nodeAbi: "136",
+    refusal: /Windows packaging requires Workbench built with Node 24\.22\.1 ABI 137\./ },
+  { name: "accepts the fixed version and ABI through the next SQLite validation boundary", nodeVersion: "v24.22.1", nodeAbi: "137",
+    refusal: /Windows packaging requires traced better-sqlite3 12\.11\.1\./ },
+]) {
+  test("Windows traced runtime " + fixture.name, async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-windows-traced-runtime-"));
+    try {
+      const runtimeDir = path.join(directory, "workbench");
+      const server = path.join(runtimeDir, ".output/server");
+      const sqlite = path.join(server, "node_modules/better-sqlite3");
+      await mkdir(path.join(sqlite, "build/Release"), { recursive: true });
+      const marker = path.join(server, ".agent-native-node-runtime.json");
+      const originalMarker = JSON.stringify({ nodeVersion: fixture.nodeVersion, nodeAbi: fixture.nodeAbi,
+        platform: "linux", arch: "x64" }) + "\n";
+      await writeFile(marker, originalMarker);
+      // A deliberately different SQLite version stops the accepted marker before any download.
+      await writeFile(path.join(sqlite, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "12.11.0" }));
+      const binding = path.join(sqlite, "build/Release/better_sqlite3.node");
+      await writeFile(binding, "unchanged fixture binding\n");
+      const nodeDir = path.join(directory, "node");
+      const cacheDirectory = path.join(directory, "cache");
+      await assert.rejects(prepareWindowsX64Target({ runtimeDir, nodeDir, cacheDirectory }), fixture.refusal);
+      assert.equal(await readFile(marker, "utf8"), originalMarker);
+      assert.equal(await readFile(binding, "utf8"), "unchanged fixture binding\n");
+      assert.equal(await lstat(nodeDir).catch(() => null), null, "no staged Node before runtime validation");
+      assert.equal(await lstat(cacheDirectory).catch(() => null), null, "the offline fixture must stop before downloads");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+}
 
 test("safe build metadata cannot authorize missing or replaced desktop runtime evidence", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-payload-node-"));

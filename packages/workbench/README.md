@@ -49,7 +49,8 @@ node packages/workbench/bin/start.mjs --port 5173 --data-dir /path/to/data
 node packages/workbench/bin/start.mjs --workspace /path/to/workspace
 ```
 
-Source startup requires Node 22.22.0 or newer and built dependencies. The
+Source startup requires Node 22.23.4 or a newer supported release that passes
+the runtime guard, and built dependencies. The
 [private desktop package](../desktop/README.md) bundles its own Node runtime.
 
 ## Settings and models

@@ -211,6 +211,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
         if '    steps: []\n' in block:
             updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
         else:
@@ -221,7 +222,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         setup = (
             '      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
             '        with:\n          python-version: "3.11"\n'
-            + PIP_RUNTIME_STEP
+            + PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
         )
         if name in PIP_MCP_FIXTURES:
             block += PIP_MCP_FIXTURES[name]
@@ -974,6 +975,11 @@ def test_uv_acquisition_rejects_inherited_execution_overrides():
         assert REAL_WORKFLOW.read_bytes() == before
 
 
+PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
+ '        shell: python -I -B {0}\n'
+ '        run: |\n'
+ '          import runpy\n'
+ '          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")\n')
 PIP_RUNTIME_STEP = (
     "      - name: actual pip runtime admission\n"
     "        shell: python -I -B {0}\n"
@@ -986,19 +992,56 @@ PIP_WINDOWS_MCP_GUARD = (
     '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
     '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }\n'
 )
-PIP_MCP_FIXTURES = {
-    "test": (
-        '      - name: MCP pip fixture\n        shell: bash\n        run: |\n'
-        '          mcp_python="$mcp_venv/bin/python"\n' + PIP_LINUX_MCP_GUARD
-        + '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'
-    ),
-    "governed-platform-proof": (
-        '      - name: MCP pip fixture\n        shell: pwsh\n        run: |\n'
-        '          $mcpPython = Join-Path $mcpScripts "python.exe"\n' + PIP_WINDOWS_MCP_GUARD
-        + '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
-        '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }\n'
-    ),
-}
+PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
+         '        shell: bash\n'
+         '        run: |\n'
+         '          python -m venv --without-pip "$smoke/venv"\n'
+         '          venv_python="$smoke/venv/bin/python"\n'
+         '          export PATH="$smoke/venv/bin:$PATH"\n'
+         '          unset PYTHONPATH\n'
+         '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
+         '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
+         '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary\n'
+         '      - name: fresh venv pip fixture\n'
+         '        shell: bash\n'
+         '        run: |\n'
+         '          python -m venv --without-pip "$mcp_venv"\n'
+         '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
+         '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
+         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+ 'governed-platform-proof': '      - name: fresh venv pip fixture\n'
+                            '        shell: pwsh\n'
+                            '        run: |\n'
+                            '          python -m venv --without-pip (Join-Path $smoke "venv")\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
+                            '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
+                            '          $python = Join-Path $scripts "python.exe"\n'
+                            '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
+                            '}\n'
+                            '          & $python -I -B scripts/check_pip_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
+                            'failed" }\n'
+                            '          & $python -I -m pip install --no-index --find-links '
+                            '$wheelhouse vivary\n'
+                            '      - name: fresh venv pip fixture\n'
+                            '        shell: pwsh\n'
+                            '        run: |\n'
+                            '          python -m venv --without-pip $mcpVenv\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" '
+                            '}\n'
+                            '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
+                            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
+                            'failed" }\n'
+                            '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
+                            'failed" }\n'
+                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
+                            'failed" }\n'}
 
 
 def test_actual_workflow_requires_pip_runtime_admission():
@@ -1009,8 +1052,14 @@ def test_actual_workflow_requires_pip_runtime_admission():
     for name in ("test", "workbench", "governed-platform-proof", "orientation-proof"):
         block = job_block(workflow, name)
         assert block.count(PIP_RUNTIME_STEP) == 1, name
+        assert block.count(PIP_BOOTSTRAP_STEP) == 1, (name, "verified pip provisioning missing")
         unchecked = '      - run: python -I -m pip install pip==26.2.2\n'
         cases = {
+            "setup_old_pip_network": block.replace('          python-version: "3.11"\n', '          python-version: "3.11"\n          pip-version: "26.2.2"\n', 1),
+            "missing_provisioning": block.replace(PIP_BOOTSTRAP_STEP, "", 1),
+            "provisioning_after_guard": block.replace(PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP, PIP_RUNTIME_STEP + PIP_BOOTSTRAP_STEP, 1),
+            "conditional_provisioning": block.replace(PIP_BOOTSTRAP_STEP, PIP_BOOTSTRAP_STEP.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_provisioning": block.replace(PIP_BOOTSTRAP_STEP, PIP_BOOTSTRAP_STEP.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
             "missing": block.replace(PIP_RUNTIME_STEP, "", 1),
             "after_network_bootstrap": block.replace(PIP_RUNTIME_STEP, unchecked + PIP_RUNTIME_STEP, 1),
             "conditional": block.replace(PIP_RUNTIME_STEP, PIP_RUNTIME_STEP.replace(
@@ -1075,6 +1124,38 @@ def test_actual_workflow_binds_mcp_pip_interpreters_and_later_isolation():
         message = _run(mutation)
         assert message and "pip" in message, (label, message)
     assert REAL_WORKFLOW.read_bytes() == before
+
+
+def test_all_fresh_venvs_provision_fixed_pip_before_actual_admission():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    assert _run(workflow) is None
+    for name, blocks in module.PIP_VENV_BLOCKS.items():
+        for index, required in enumerate(blocks):
+            guard = next(line for line in required.splitlines(keepends=True) if "scripts/check_pip_runtime.py" in line)
+            seed = next(line for line in required.splitlines(keepends=True) if "scripts/bootstrap_ci_pip.py" in line)
+            swapped = required.replace(seed, "<SEED>\n", 1).replace(guard, seed, 1).replace("<SEED>\n", guard, 1)
+            if "exit $?" in seed:
+                ignored = required.replace(seed, seed.replace("exit $?", "true"), 1)
+            else:
+                lines = required.splitlines(keepends=True)
+                failure = lines[lines.index(seed) + 1]
+                assert "$LASTEXITCODE -ne 0" in failure
+                ignored = required.replace(failure, failure.replace("$LASTEXITCODE -ne 0", "$false"), 1)
+            changes = {
+                "old_seeded_venv": required.replace(" --without-pip", "", 1),
+                "missing_seed": required.replace(seed, "", 1),
+                "missing_guard": required.replace(guard, "", 1),
+                "guard_before_seed": swapped,
+                "ignored_seed": ignored,
+                "wrong_seed_target": required.replace(seed, seed.replace('"$venv_python"', "python").replace('"$mcp_python"', "python").replace("& $mcpPython", "python").replace("& $python", "python"), 1),
+                "wrong_guard_target": required.replace(guard, guard.replace('"$venv_python"', "python").replace('"$mcp_python"', "python").replace("& $mcpPython", "python").replace("& $python", "python"), 1),
+            }
+            for label, mutation in changes.items():
+                assert mutation != required, (name, index, label)
+                message = _run(workflow.replace(required, mutation, 1))
+                assert message and "pip" in message, (name, index, label, message)
+
 
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]

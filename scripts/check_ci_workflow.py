@@ -663,6 +663,53 @@ def check_uv_acquisition(text: str) -> None:
 
 
 PIP_JOBS = ("test", "workbench", "governed-platform-proof", "orientation-proof")
+PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
+ '        shell: python -I -B {0}\n'
+ '        run: |\n'
+ '          import runpy\n'
+ '          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")\n')
+PIP_SETUP_STEP = ('      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
+ '        with:\n'
+ '          python-version: "3.11"\n')
+PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv"\n'
+          '          venv_python="$smoke/venv/bin/python"\n'
+          '          export PATH="$smoke/venv/bin:$PATH"\n'
+          '          unset PYTHONPATH\n'
+          '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
+          '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
+          '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" '
+          'vivary\n',
+          '          python -m venv --without-pip "$mcp_venv"\n'
+          '          mcp_python="$mcp_venv/bin/python"\n'
+          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
+          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
+          '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'),
+ 'governed-platform-proof': ('          python -m venv --without-pip (Join-Path $smoke "venv")\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
+                             '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
+                             '          $python = Join-Path $scripts "python.exe"\n'
+                             '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
+                             '}\n'
+                             '          & $python -I -B scripts/check_pip_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
+                             'failed" }\n'
+                             '          & $python -I -m pip install --no-index --find-links '
+                             '$wheelhouse vivary\n',
+                             '          python -m venv --without-pip $mcpVenv\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation '
+                             'failed" }\n'
+                             '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
+                             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
+                             'failed" }\n'
+                             '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime '
+                             'admission failed" }\n'
+                             '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
+                             'failed" }\n')}
 PIP_RUNTIME_STEP = (
     "      - name: actual pip runtime admission\n"
     "        shell: python -I -B {0}\n"
@@ -670,20 +717,20 @@ PIP_RUNTIME_STEP = (
     "          import runpy\n"
     '          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")\n'
 )
-PIP_MCP_BLOCKS = {
-    "test": (
-        '          mcp_python="$mcp_venv/bin/python"\n'
-        '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-        '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'
-    ),
-    "governed-platform-proof": (
-        '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
-        '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
-        '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }\n'
-        '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
-        '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }\n'
-    ),
-}
+PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
+         '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
+         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+ 'governed-platform-proof': '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
+                            'failed" }\n'
+                            '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
+                            'failed" }\n'
+                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
+                            'failed" }\n'}
 
 
 def check_pip_runtime(text: str) -> None:
@@ -700,10 +747,27 @@ def check_pip_runtime(text: str) -> None:
         require(len(setups) == len(guards) == 1,
                 f"{name} needs exactly one setup-python and actual pip runtime admission")
         setup, guard = setups[0], guards[0]
-        require(guard == setup + 1 and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
-                f"{name} pip runtime admission must immediately follow setup-python unconditionally")
-        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:guard])),
+        require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"),
+                f"{name} pip provisioning requires exact setup-python without old-pip options")
+        require(guard == setup + 2 and steps[setup + 1].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
+                and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
+                f"{name} verified pip provisioning and admission must immediately follow setup-python unconditionally")
+        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:setup + 1])),
                 f"{name} must admit the selected pip before package operations")
+        if name in PIP_VENV_BLOCKS:
+            expected_venvs = PIP_VENV_BLOCKS[name]
+            require(len(re.findall(r"(?m)^          python -m venv ", job)) == len(expected_venvs),
+                    f"{name} must bind every fresh venv to pip provisioning")
+            for required in expected_venvs:
+                require(job.count(required) == 1,
+                        f"{name} fresh venv requires --without-pip, exact-target provisioning and runtime admission before pip")
+                install = next(line.strip() for line in required.splitlines() if " -I -m pip install " in line)
+                prefix = install.split(" install ", 1)[0] + " "
+                require(not any(line.strip().startswith(prefix) for line in job[:job.index(required)].splitlines()),
+                        f"{name} fresh venv pip cannot run before its provisioning and admission")
+                owner = next(step for step in steps if required in step)
+                require(not re.search(r"(?m)^        (?:if|continue-on-error|working-directory|env):", owner),
+                        f"{name} fresh venv pip provisioning cannot be skipped, redirected or ignored")
         if name in PIP_MCP_BLOCKS:
             block = PIP_MCP_BLOCKS[name]
             require(job.count(block) == 1,
@@ -1031,6 +1095,8 @@ def main() -> None:
     check_pip_commands(text)
     require("python -I -B scripts/tests/test_pip_runtime.py" in test_job,
             "tests job must run pip runtime admission regressions")
+    require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
+            "tests job must run verified pip provisioning regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
             "tests job must run the runner action bootstrap regressions")

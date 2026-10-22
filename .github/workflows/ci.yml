@@ -422,6 +422,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
       - name: actual pip runtime admission
         shell: python -I -B {0}
         run: |
@@ -452,6 +457,8 @@ jobs:
         run: python scripts/check_ci_workflow.py
       - name: pip runtime admission tests
         run: python -I -B scripts/tests/test_pip_runtime.py
+      - name: verified pip provisioning tests
+        run: python -I -B scripts/tests/test_bootstrap_ci_pip.py
       - name: runner action Node bootstrap tests
         run: python -I -B scripts/tests/test_runner_action_node.py
       - name: CI workflow contract tests
@@ -543,10 +550,12 @@ jobs:
             ./packages/vivary \
             ./packages/memory-cognee \
             ./packages/mcp
-          python -m venv "$smoke/venv"
+          python -m venv --without-pip "$smoke/venv"
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
           unset PYTHONPATH
+          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
+          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?
           "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary
           "$venv_python" -I -m pip check
           "$venv_python" -I scripts/check_installed_workspace_roles.py
@@ -727,8 +736,9 @@ jobs:
           )
           PY
           mcp_venv="$smoke/mcp-venv"
-          python -m venv "$mcp_venv"
+          python -m venv --without-pip "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
+          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
           "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?
           "$mcp_python" -I -m pip install "mcp==2.2.0"
           "$mcp_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
@@ -1038,6 +1048,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
       - name: actual pip runtime admission
         shell: python -I -B {0}
         run: |
@@ -1102,6 +1117,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
       - name: actual pip runtime admission
         shell: python -I -B {0}
         run: |
@@ -1158,10 +1178,14 @@ jobs:
             ./packages/memory-cognee `
             ./packages/mcp
           if ($LASTEXITCODE -ne 0) { throw "wheel build failed" }
-          python -m venv (Join-Path $smoke "venv")
+          python -m venv --without-pip (Join-Path $smoke "venv")
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
           $scripts = Join-Path $smoke "venv\Scripts"
           $python = Join-Path $scripts "python.exe"
+          & $python -I -B scripts/bootstrap_ci_pip.py
+          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" }
+          & $python -I -B scripts/check_pip_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission failed" }
           & $python -I -m pip install --no-index --find-links $wheelhouse vivary
           if ($LASTEXITCODE -ne 0) { throw "vivary install failed" }
           & $python -I -m pip check
@@ -1208,10 +1232,12 @@ jobs:
           python scripts/check_installed_route_parity.py --characterize $scripts
           if ($LASTEXITCODE -ne 0) { throw "installed command surface failed" }
           $mcpVenv = Join-Path $smoke "mcp-venv"
-          python -m venv $mcpVenv
+          python -m venv --without-pip $mcpVenv
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
+          & $mcpPython -I -B scripts/bootstrap_ci_pip.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning failed" }
           & $mcpPython -I -B scripts/check_pip_runtime.py
           if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }
           & $mcpPython -I -m pip install "mcp==2.2.0"
@@ -1272,6 +1298,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
       - name: actual pip runtime admission
         shell: python -I -B {0}
         run: |

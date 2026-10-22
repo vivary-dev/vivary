@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Unreleased Vivary workbench shell and project application services.",
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=22.23.4"
   },
   "dependencies": {
     "@agent-native/core": "0.176.5",
