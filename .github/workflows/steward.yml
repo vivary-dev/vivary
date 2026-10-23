@@ -427,13 +427,30 @@ jobs:
                   refuse("native Windows x64 identity is required before repair")
 
 
-          def plain(path, directory=False):
-              info = path.lstat()
-              if (stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400
-                      or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
-                      or (not directory and info.st_nlink != 1)
-                      or os.path.normcase(str(path.resolve(strict=True))) != os.path.normcase(str(path))):
-                  refuse("plain canonical runner paths are required")
+          def plain(path, directory=False, role="artifact"):
+              # Report only owned role/reason names and numeric filesystem evidence. The
+              # unchanged admission also requires the interpreter's canonical spelling.
+              if role not in ("root", "externals", "node24", "bin", "interpreter", "worker", "artifact", "stage"):
+                  role = "artifact"
+              try:
+                  info = path.lstat()
+                  attributes = getattr(info, "st_file_attributes", 0)
+                  reason = None
+                  if stat.S_ISLNK(info.st_mode):
+                      reason = "symlink"
+                  elif attributes & 0x400:
+                      reason = "reparse-point"
+                  elif not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+                      reason = "unexpected-type"
+                  elif not directory and info.st_nlink != 1:
+                      reason = "nonexclusive-file-links"
+                  elif os.path.normcase(str(path.resolve(strict=True))) != os.path.normcase(str(path)):
+                      reason = "canonical-spelling-mismatch"
+              except OSError as error:
+                  refuse(filesystem_failure("path-" + role, error))
+              if reason:
+                  refuse(f"plain canonical runner paths are required (role={role}, reason={reason}, "
+                         f"mode={info.st_mode & 0xffff}, attributes={attributes & 0xffffffff}, links={min(info.st_nlink, 0x7fffffff)})")
               return info
 
 
@@ -452,13 +469,13 @@ jobs:
               interpreter = Path(selected)
               folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
               directories = []
-              for path in folders:
-                  info = plain(path, directory=True)
+              for role, path in zip(("root", "externals", "node24", "bin"), folders):
+                  info = plain(path, directory=True, role=role)
                   directories.append((path, (info.st_dev, info.st_ino)))
-              original = plain(interpreter)
+              original = plain(interpreter, role="interpreter")
               if original.st_mode & (stat.S_ISUID | stat.S_ISGID):
                   refuse("privileged interpreter modes are not admitted")
-              plain(Path(worker["exe"]))
+              plain(Path(worker["exe"]), role="worker")
               admission.binary_x64(worker["exe"], system)
               admission.binary_x64(interpreter, system)
               result = {"system": system, "worker": worker, "chain": chain, "root": root,
@@ -479,11 +496,11 @@ jobs:
                   refuse("runner layout changed")
               if admission.sha256(current["worker"]["exe"]) != current["workerSha256"]:
                   refuse("Worker bytes changed")
-              for path, expected in current["directories"]:
-                  info = plain(path, directory=True)
+              for role, (path, expected) in zip(("root", "externals", "node24", "bin"), current["directories"]):
+                  info = plain(path, directory=True, role=role)
                   if (info.st_dev, info.st_ino) != expected:
                       refuse("runner directory changed")
-              info = plain(current["interpreter"])
+              info = plain(current["interpreter"], role="interpreter")
               if expected_sha == current["oldSha256"] and identity(info) != current["original"]:
                   refuse("original interpreter identity changed")
               if expected_sha is not None and admission.sha256(current["interpreter"]) != expected_sha:
@@ -611,7 +628,7 @@ jobs:
                   if admission.sha256(staged) != artifact["node_sha256"]:
                       refuse("staged Node SHA256 mismatch")
                   admission.binary_x64(staged, sys.platform)
-                  plain(staged)
+                  plain(staged, role="stage")
                   return staged
               except BaseException:
                   staged.unlink(missing_ok=True)
@@ -653,10 +670,10 @@ jobs:
                           downloaded.chmod(0o600)
                           download(artifact, downloaded)
                           staged = stage_node(artifact, downloaded, current["interpreter"].parent, current["mode"])
-                          staged_identity = identity(plain(staged))
+                          staged_identity = identity(plain(staged, role="stage"))
                           verify_context(current, current["oldSha256"])
                           assert_quiescent(current)
-                          if identity(plain(staged)) != staged_identity or admission.sha256(staged) != artifact["node_sha256"]:
+                          if identity(plain(staged, role="stage")) != staged_identity or admission.sha256(staged) != artifact["node_sha256"]:
                               refuse("staged interpreter changed before replacement")
                           verify_context(current, current["oldSha256"])
                           try:

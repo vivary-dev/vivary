@@ -11,6 +11,7 @@ import io
 from pathlib import Path
 import re
 import ssl
+import sys
 import zipfile
 
 CERTIFI_VERSION = "2026.10.23"
@@ -38,6 +39,35 @@ def filtered_ca_bytes(source):
     if not kept:
         raise ValueError("CA bundle must retain certificates")
     return b"\n".join(kept) + b"\n"
+
+
+def host_ca_bytes(source=None):
+    """Export existing eligible host anchors with removal-only task policy.
+
+    Windows CA is an intermediate store, so it must not become a PEM anchor
+    source. ROOT eligibility follows the server-auth purpose returned by
+    enum_certificates, with explicit Disallowed entries taking precedence.
+    This function never changes a host store or writes a bundle.
+    """
+    if sys.platform != "win32":
+        path = Path(source) if source is not None else Path("/etc/ssl/certs/ca-certificates.crt")
+        return filtered_ca_bytes(path.read_bytes())
+    if source is not None:
+        raise ValueError("Windows trust anchors must come from the existing ROOT store")
+    denied = {hashlib.sha256(der).hexdigest()
+              for der, encoding, _ in ssl.enum_certificates("Disallowed") if encoding == "x509_asn"}
+    denied.update(EXCLUDED_CA_SHA256)
+    roots = {}
+    for der, encoding, trust in ssl.enum_certificates("ROOT"):
+        eligible = trust is True or (isinstance(trust, (set, frozenset)) and ssl.Purpose.SERVER_AUTH.oid in trust)
+        if encoding != "x509_asn" or not eligible:
+            continue
+        digest = hashlib.sha256(der).hexdigest()
+        if digest not in denied:
+            roots[digest] = ssl.DER_cert_to_PEM_cert(der).encode("ascii")
+    if not roots:
+        raise ValueError("Windows has no eligible server-auth trust anchors")
+    return b"".join(roots[key] for key in sorted(roots))
 
 
 def verify_certifi(data):

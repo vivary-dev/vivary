@@ -8957,13 +8957,24 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 CI runtime closure. Hosted jobs provision authenticated standalone
+CPython 3.12.15 with OpenSSL 3.5.9 after the native bootstrap interpreter; the
+loaded-runtime guard remains required before package use. The retained ensurepip
+seed receives the same narrow certifi overlay before the new runtime is exposed,
+so later default venvs cannot restore the older bundle. Build-client setup also
+owns Windows Node/package-client launchers and a task-local eligible-root bundle;
+Windows Go module acquisition uses the qualified Python HTTPS client and
+checksum-bound offline compilation because Go's native Windows trust path does
+not honor the PEM override. These are build prerequisites, not product release
+acceptance. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) owns provisioning details.
+
 2026-10-23 Action interpreter provisioning. The native first step now binds the
 owning Worker's selected Node path and can replace only authenticated known-old
 bytes with the qualified 24.22.1 executable before JavaScript actions. Same-user
 staging, atomic replacement and provenance checks preserve the existing full
 post-provisioning runner admission. Unknown binaries must pass that admission
 without replacement; failed checks never authorize a path override or rollback
-to affected bytes. The [build-tool contract](BUILD-TOOLS.md) distinguishes this
+to affected bytes. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) distinguishes this
 guarded runner-internal compatibility dependency from a vendor update API and
 keeps actual native job evidence separate from source and fixture review.
 
@@ -8984,7 +8995,7 @@ commands explicitly use the verified certifi store without adding host truststor
 roots, including Windows CryptoAPI, while retaining TLS verification. Private
 build-client bundles exclude C1/C3 alongside the existing G3 exclusion while
 preserving other roots, TLS verification and host-global trust. C1/C3 removal is
-not evidence of exploitation. The [build-tool contract](BUILD-TOOLS.md) owns the
+not evidence of exploitation. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) owns the
 artifact and migration details. Packaging, real fresh-venv and unchanged-member
 regressions cover the source change; existing public artifacts are not rewritten
 and Windows-native release acceptance remains separate.

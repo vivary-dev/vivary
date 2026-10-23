@@ -246,6 +246,29 @@ class RepairFixture(unittest.TestCase):
         self.downloader.assert_not_called()
         self.probe.assert_not_called()
 
+    def test_path_refusals_report_owned_role_reason_and_bits_without_paths(self):
+        alias = self.directory / "private-fixture-name"
+        alias.symlink_to(self.node)
+        with self.assertRaisesRegex(self.module.RepairRefusal, "role=interpreter, reason=symlink") as refusal:
+            self.module.plain(alias, role="interpreter")
+        message = str(refusal.exception)
+        self.assertIn("mode=", message)
+        self.assertIn("attributes=", message)
+        self.assertIn("links=", message)
+        self.assertNotIn(str(alias), message)
+        # Exercise Windows reparse diagnostics inertly; custody stays refused.
+        info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_file_attributes=0x410, st_nlink=1)
+        with mock.patch.object(Path, "lstat", return_value=info):
+            with self.assertRaisesRegex(self.module.RepairRefusal, "role=root, reason=reparse-point.*attributes=1040"):
+                self.module.plain(self.root, directory=True, role="root")
+
+    def test_canonical_spelling_refusal_retains_custody_and_identifies_the_role(self):
+        with mock.patch.object(Path, "resolve", return_value=self.directory / "different-canonical-name"):
+            with self.assertRaisesRegex(self.module.RepairRefusal, "role=root, reason=canonical-spelling-mismatch"):
+                self.module.context()
+        self.downloader.assert_not_called()
+        self.probe.assert_not_called()
+
     def test_authenticated_duplicate_or_nonregular_target_member_is_refused(self):
         for options in ({"duplicate": True}, {"symlink": True}):
             with self.subTest(member=options):

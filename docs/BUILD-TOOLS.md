@@ -1,6 +1,6 @@
 # Isolated build tools
 
-Vivary's Linux x64 build clients and Go compilers can be provisioned without
+Vivary's x64 build clients and Go compilers can be provisioned without
 running a package installation script or using the image's npm/pnpm launchers.
 This setup does not change Codex Cloud environment settings, system trust stores,
 credentials, or the GitHub runner's action interpreter.
@@ -14,9 +14,12 @@ is still a separate prerequisite**. This is not an end-to-end fresh-image setup.
 No pip or virtual environment is created here. New Python environments must
 retain pip 26.2.2 with the authenticated certifi 2026.10.23 overlay described below; an unchanged upstream pip wheel still vendors the older bundle.
 
-The tool setup is Linux x64 only. Hosted CI selects CPython 3.12.15 and must
-admit its actual CPython/OpenSSL versions before pip or build-tool use. A version
-selection alone does not qualify the hosted executable. Hosted jobs must also
+The tool setup supports native Linux and Windows x64. Hosted CI uses its initial
+Python only to provision an authenticated standalone CPython 3.12.15 build with
+OpenSSL 3.5.9 into the task directory. The runtime's retained ensurepip seed gets
+the verified certifi overlay before its directory is exported. Jobs must then
+admit the actual CPython/OpenSSL versions before pip or build-tool use. A version
+selection alone does not qualify an executable. Hosted jobs must also
 pass the unchanged pre-JavaScript runner interpreter guard; replacing Node on
 PATH cannot satisfy that guard. An unqualified hosted Python remains blocked.
 
@@ -43,6 +46,16 @@ its child processes the same Node and isolated certificate policy. The bundled
 npm/npx entry points remain blocked. The setup retains existing CA roots except
 the previously excluded G3 root and the C1/C3 roots removed by certifi 2026.10.23, writes a private bundle, and adds no roots. C1/C3 removal does not establish compromise or exploitation. Existing task directories containing an older bundle fail closed; provision a new task directory or explicitly migrate only a previously verified bundle. Host-global trust is never changed.
 No CA contents or machine-specific receipt belongs in source control.
+
+Windows launchers bind the physical Node executable separately from their
+command directory, clear inherited injection settings and select the private
+OpenSSL CA bundle. The bundle includes only eligible server-authentication ROOT
+entries, excludes certificates in Disallowed and the existing policy exclusions,
+and does not turn intermediate CA entries into trust anchors. Go on Windows
+does not honor the PEM override: its module inputs are fetched by the qualified
+Python HTTPS client, verified against the pinned module checksums and compiled
+offline. Native Windows execution remains a separate required verification;
+cross-platform fixtures do not establish it.
 
 ```sh
 /path/to/qualified/python -I -B scripts/check_site_dependencies.py

@@ -41,6 +41,29 @@ class BootstrapTests(unittest.TestCase):
                  mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")):
                 self.assertEqual(bootstrap.obtain_wheel(cache), wheel)
 
+    def test_exported_filtered_ca_is_explicit_and_cannot_union_or_change_host_anchors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "task-ca.pem"
+            bundle.write_bytes(b"inert eligible host anchor fixture")
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(bundle)), \
+                    mock.patch.dict(bootstrap.CA_POLICY, host_ca_bytes=lambda: bundle.read_bytes()), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                self.assertIs(bootstrap.download_context(), context.return_value)
+                context.assert_called_once_with(cafile=str(bundle))
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(bundle)), \
+                    mock.patch.dict(bootstrap.CA_POLICY, host_ca_bytes=lambda: b"other host anchors"), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                with self.assertRaisesRegex(ValueError, "eligible filtered host anchors"):
+                    bootstrap.download_context()
+                context.assert_not_called()
+            alias = Path(directory) / "alias.pem"
+            alias.symlink_to(bundle)
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(alias)), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                with self.assertRaises(ValueError):
+                    bootstrap.download_context()
+                context.assert_not_called()
+
     def test_download_has_fixed_origin_no_proxy_no_redirect_and_exact_byte_bound(self):
         with tempfile.TemporaryDirectory() as directory:
             for mode in ("fixed", "redirect", "status", "oversized", "truncated", "digest", "deadline"):
@@ -55,6 +78,7 @@ class BootstrapTests(unittest.TestCase):
                 opener = mock.Mock()
                 opener.open.return_value = Response(data)
                 with self.subTest(mode=mode), contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.dict(bootstrap.os.environ, {}, clear=True))
                     stack.enter_context(mock.patch.object(bootstrap, "SIZE", 7))
                     stack.enter_context(mock.patch.object(bootstrap, "SHA256", hashlib.sha256(b"fixture").hexdigest() if mode != "digest" else "0" * 64))
                     factory = stack.enter_context(mock.patch.object(bootstrap.urllib.request, "build_opener", return_value=opener))

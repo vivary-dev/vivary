@@ -84,5 +84,52 @@ class BundleTests(unittest.TestCase):
             with self.assertRaises(ValueError): policy['filtered_ca_bytes'](remove)
             with self.assertRaises(ValueError): policy['filtered_ca_bytes'](b'no certificates')
 
+    def test_windows_exports_only_eligible_root_anchors_minus_distrust_and_policy(self):
+        server_auth = g['ssl'].Purpose.SERVER_AUTH.oid
+        certificates = [
+            (b'all purposes', 'x509_asn', True),
+            (b'server only', 'x509_asn', frozenset({server_auth})),
+            (b'all purposes', 'x509_asn', True),
+            (b'client only', 'x509_asn', frozenset({'1.3.6.1.5.5.7.3.2'})),
+            (b'no purposes', 'x509_asn', frozenset()),
+            (b'false trust', 'x509_asn', False),
+            (b'not X509', 'pkcs_7_asn', True),
+            (b'explicitly distrusted', 'x509_asn', True),
+            (b'policy removed', 'x509_asn', True),
+        ]
+        def enumerate_store(name):
+            if name == 'Disallowed':
+                return [(b'explicitly distrusted', 'x509_asn', True)]
+            self.assertEqual(name, 'ROOT', 'intermediate CA entries must never become anchors')
+            return certificates
+        with mock.patch.object(g['sys'], 'platform', 'win32'), \
+                mock.patch.object(g['ssl'], 'enum_certificates', side_effect=enumerate_store, create=True) as stores, \
+                mock.patch.dict(g, EXCLUDED_CA_SHA256={hashlib.sha256(b'policy removed').hexdigest()}):
+            first = policy['host_ca_bytes']()
+            self.assertEqual(first, policy['host_ca_bytes']())
+        expected = sorted((b'all purposes', b'server only'), key=lambda value: hashlib.sha256(value).hexdigest())
+        self.assertEqual(first, b''.join(g['ssl'].DER_cert_to_PEM_cert(value).encode() for value in expected))
+        self.assertEqual(stores.call_args_list, [mock.call('Disallowed'), mock.call('ROOT')] * 2)
+
+    def test_windows_host_export_refuses_enumeration_failure_empty_roots_and_source_override(self):
+        with mock.patch.object(g['sys'], 'platform', 'win32'), \
+                mock.patch.object(g['ssl'], 'enum_certificates', create=True) as stores:
+            with self.assertRaises(ValueError): policy['host_ca_bytes'](Path('/caller/anchors.pem'))
+            stores.assert_not_called()
+            stores.side_effect = PermissionError('inert store failure')
+            with self.assertRaises(PermissionError): policy['host_ca_bytes']()
+            stores.side_effect = None
+            stores.return_value = []
+            with self.assertRaisesRegex(ValueError, 'eligible server-auth'): policy['host_ca_bytes']()
+
+    def test_linux_host_export_reuses_the_removal_only_filter(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / 'existing-ca.pem'
+            source.write_bytes(b'original host CA fixture')
+            with mock.patch.object(g['sys'], 'platform', 'linux'), \
+                    mock.patch.dict(g, filtered_ca_bytes=mock.Mock(return_value=b'filtered PEM')):
+                self.assertEqual(policy['host_ca_bytes'](source), b'filtered PEM')
+                g['filtered_ca_bytes'].assert_called_once_with(b'original host CA fixture')
+
 
 if __name__ == '__main__': unittest.main()

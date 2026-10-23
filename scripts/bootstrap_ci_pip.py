@@ -56,11 +56,23 @@ def obtain_wheel(cache):
     return obtain_artifact(cache, WHEEL, URL, SIZE, SHA256)
 
 
+def download_context():
+    if "SSL_CERT_FILE" not in os.environ:
+        return ssl.create_default_context()
+    bundle = Path(os.environ["SSL_CERT_FILE"])
+    plain(bundle)
+    if bundle.read_bytes() != CA_POLICY["host_ca_bytes"]():
+        raise ValueError("pip download CA differs from the eligible filtered host anchors")
+    # Supplying cafile prevents Windows load_default_certs from adding ROOT/CA
+    # stores to the already filtered, task-local trust anchors.
+    return ssl.create_default_context(cafile=str(bundle))
+
+
 def obtain_artifact(cache, filename, url, size, digest):
     wheel = cache / filename
     if not wheel.exists():
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
-                                            urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+                                            urllib.request.HTTPSHandler(context=download_context()))
         deadline = time.monotonic() + 30
         with opener.open(urllib.request.Request(url, headers={"User-Agent": "Vivary-CI-pip-bootstrap"}), timeout=10) as response:
             if response.status != 200 or response.geturl() != url:

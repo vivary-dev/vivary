@@ -124,7 +124,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
         + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
-        + "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        + "          \"$RUNNER_TEMP/vivary-build-tools/bin/npm\" pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
         "      - name: installed route parity contract tests\n"
         "        run: python scripts/tests/test_installed_route_parity.py\n"
@@ -210,6 +210,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         if name == "workbench":
             setup += '      - run: node --test packages/workbench/tests/runtime-security.test.mjs\n'
         if name == "test":
+            setup += module.TEST_CLIENTS_STEP
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
@@ -218,6 +219,14 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
             setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_python.py\n'
+        if name in ("workbench", "workbench-maintained", "governed-platform-proof"):
+            windows = name == "governed-platform-proof"
+            setup += (module.WINDOWS_WORKBENCH_TOOLS_STEP + module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+                      + module.WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (
+                          module.WORKBENCH_TOOLS_STEP + module.WORKBENCH_DEPENDENCY_STEP + module.WORKBENCH_INSTALL_STEP)
+            if name == "workbench":
+                setup += '      - name: fixture route and type check\n        run: |\n' + module.WORKBENCH_TYPECHECK
         if '    steps: []\n' in block:
             updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
         else:
@@ -228,6 +237,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         setup = (
             '      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
             '        with:\n          python-version: "3.12.15"\n'
+            + module.PYTHON_PROVISIONING_STEP
             + module.PYTHON_RUNTIME_STEP
         )
         if name in module.PIP_JOBS:
@@ -415,7 +425,7 @@ def test_release_artifact_contract_and_real_archives_must_run():
         UV_DIGEST_COMMANDS["test"],
         ARTIFACT_TEST_COMMAND,
         *RELEASE_BUILD_COMMANDS,
-        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
     ):
         message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
@@ -1326,6 +1336,13 @@ def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
             "old_python": block.replace('python-version: "3.12.15"', 'python-version: "3.11"', 1),
             "floating_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12"', 1),
             "future_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1),
+            "missing_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP, "", 1),
+            "conditional_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP,
+                                                     module.PYTHON_PROVISIONING_STEP.replace("        shell:", "        if: false\n        shell:"), 1),
+            "wrong_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP,
+                                               module.PYTHON_PROVISIONING_STEP.replace("bootstrap_ci_python.py", "bootstrap_ci_pip.py"), 1),
+            "provisioning_after_admission": block.replace(module.PYTHON_PROVISIONING_STEP + guard,
+                                                         guard + module.PYTHON_PROVISIONING_STEP, 1),
             "missing_guard": block.replace(guard, "", 1),
             "conditional_guard": block.replace(guard, guard.replace("        shell:", "        if: false\n        shell:"), 1),
             "ignored_guard": block.replace(guard, guard.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
@@ -1350,6 +1367,12 @@ def test_python_runtime_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_python_runtime.py", "echo skipped", 1))
     assert message and "Python runtime admission regressions" in message
+
+
+def test_python_provisioning_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_ci_python.py", "echo skipped", 1))
+    assert message and "verified Python provisioning regressions" in message
 
 
 def test_runner_node_repair_regressions_must_run():
@@ -1396,6 +1419,119 @@ def test_review_python_admission_remains_bound_to_the_helper_after_canonical_edi
             assert "Python" in str(error), error
         else:
             raise AssertionError("canonical edits bypassed the actual review Python admission")
+
+
+def test_review_python_provisioning_remains_bound_to_the_helper_and_ca_policy():
+    module = _load()
+    canonical = module.CANONICAL_REVIEW_WORKFLOW
+    step = module.python_provisioning_step(inline=True)
+    for mutation in (canonical.replace(step, "", 1),
+                     canonical.replace(step, step.replace('"size": 34479606', '"size": 34479607'), 1),
+                     canonical.replace(step, step.replace('CERTIFI_VERSION = "2026.10.23"',
+                                                         'CERTIFI_VERSION = "2026.10.19"'), 1)):
+        assert mutation != canonical
+        module.CANONICAL_REVIEW_WORKFLOW = mutation
+        try:
+            module.check_review_workflow(mutation)
+        except SystemExit as error:
+            assert "Python" in str(error), error
+        else:
+            raise AssertionError("canonical edits bypassed authenticated review Python provisioning")
+
+
+def test_linux_workbench_jobs_cannot_restore_unqualified_clients_or_compilers():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_workbench_build_tools(workflow)
+    for name in ("workbench", "workbench-maintained"):
+        block = module.job_block(workflow, name)
+        tools, install, dependencies = module.WORKBENCH_TOOLS_STEP, module.WORKBENCH_INSTALL_STEP, module.WORKBENCH_DEPENDENCY_STEP
+        mutations = {
+            "missing_tools": block.replace(tools, "", 1),
+            "conditional_tools": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_tools": block.replace(tools, tools.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "masked_failure": block.replace(tools, tools.replace("|| exit $?", "|| true", 1), 1),
+            "unrebuilt_typescript": block.replace(tools, tools.replace(" --typescript", ""), 1),
+            "late_tools": block.replace(tools + dependencies + install, dependencies + install + tools, 1),
+            "missing_dependency_admission": block.replace(dependencies, "", 1),
+            "late_dependency_admission": block.replace(dependencies + install, install + dependencies, 1),
+            "global_client": block.replace(install, install + "      - run: npm install --global pnpm@10.33.2\n", 1),
+            "lifecycle_install": block.replace(install, install.replace(" --ignore-scripts", ""), 1),
+            "floating_lock": block.replace(install, install.replace(" --frozen-lockfile", ""), 1),
+            "wrong_client": block.replace(install, install.replace('"$RUNNER_TEMP/vivary-build-tools/bin/pnpm"', "pnpm"), 1),
+        }
+        for label, mutation in mutations.items():
+            assert mutation != block, (name, label)
+            try:
+                module.check_workbench_build_tools(workflow.replace(block, mutation, 1))
+            except SystemExit as error:
+                assert name in str(error), (name, label, error)
+            else:
+                raise AssertionError((name, label, "bypassed Workbench client/compiler admission"))
+    for mutation in (
+        workflow.replace(module.WORKBENCH_TYPECHECK, "          pnpm --dir packages/workbench typecheck\n", 1),
+        workflow.replace('          pnpm --dir packages/workbench exec react-router typegen\n', '', 1),
+    ):
+        try:
+            module.check_workbench_build_tools(mutation)
+        except SystemExit as error:
+            assert "TypeScript" in str(error), error
+        else:
+            raise AssertionError("unqualified TypeScript bypassed Workbench compiler admission")
+
+
+def test_windows_workbench_rejects_unqualified_clients_and_compilers():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    block = module.job_block(workflow, "governed-platform-proof")
+    tools = module.WINDOWS_WORKBENCH_TOOLS_STEP
+    dependencies = module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+    install = module.WINDOWS_WORKBENCH_INSTALL_STEP
+    mutations = {
+        "missing_tools": block.replace(tools, "", 1),
+        "conditional_tools": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+        "ignored_tools": block.replace(tools, tools.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+        "missing_exit_check": block.replace('          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n', "", 1),
+        "unrebuilt_compiler": block.replace(tools, tools.replace(" --typescript", ""), 1),
+        "late_tools": block.replace(tools + dependencies + install, dependencies + install + tools, 1),
+        "missing_admission": block.replace(dependencies, "", 1),
+        "cmd_metacharacter_expansion": block.replace(" --% --test", " --test", 1),
+        "global_client": block.replace(install, install + "      - run: npm install --global pnpm@10.33.2\n", 1),
+        "lifecycle_install": block.replace(install, install.replace(" --ignore-scripts", ""), 1),
+        "unfrozen_install": block.replace(install, install.replace(" --frozen-lockfile", ""), 1),
+        "unqualified_client": block.replace('"$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd"', '"pnpm"', 1),
+        "wrong_platform_binary": block.replace("esbuild-0.28.2-go1.26.10.exe", "esbuild-0.28.2-go1.26.10", 1),
+    }
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_workbench_build_tools(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "governed-platform-proof" in str(error), (label, error)
+        else:
+            raise AssertionError((label, "bypassed Windows client/compiler admission"))
+
+
+def test_release_pack_cannot_use_the_unqualified_image_client():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    block = module.job_block(workflow, "test")
+    tools = module.TEST_CLIENTS_STEP
+    mutations = {
+        "missing_client_setup": block.replace(tools, "", 1),
+        "conditional_client_setup": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+        "ignored_failure": block.replace(tools, tools.replace("|| exit $?", "|| true"), 1),
+        "late_client_setup": block.replace(tools, "", 1) + tools,
+        "image_client": block.replace(module.TEST_PACK_COMMAND, 'npm pack packages/create-vivary/npm --pack-destination "$artifacts"', 1),
+    }
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_release_package_clients(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "package clients" in str(error), (label, error)
+        else:
+            raise AssertionError((label, "release packaging bypassed qualified clients"))
 
 
 if __name__ == "__main__":

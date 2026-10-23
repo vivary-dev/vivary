@@ -77,6 +77,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12.15"
+      - __PYTHON_PROVISIONING__
       - name: actual Python runtime admission
         shell: python -I -B {0}
         run: |
@@ -421,7 +422,7 @@ def check_uv_acquisition(text: str) -> None:
         )
 
 
-PIP_JOBS = ("test", "workbench", "governed-platform-proof", "orientation-proof")
+PIP_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof")
 PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '        shell: python -I -B {0}\n'
  '        run: |\n'
@@ -431,6 +432,36 @@ PIP_SETUP_STEP = ('      - uses: actions/setup-python@5fda3b95a4ea91299a34e89458
  '        with:\n'
  '          python-version: "3.12.15"\n')
 PYTHON_JOBS = (*PIP_JOBS, "review", "site")
+PYTHON_PROVISIONING_SOURCE = Path(__file__).resolve().with_name("bootstrap_ci_python.py")
+PYTHON_PROVISIONING_STEP = (
+    "      - name: verified Python runtime provisioning\n"
+    "        shell: python -I -B {0}\n"
+    "        run: |\n"
+    "          import runpy\n"
+    '          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")\n'
+)
+
+
+def python_provisioning_step(inline=False) -> str:
+    if not inline:
+        return PYTHON_PROVISIONING_STEP
+    policy = PYTHON_PROVISIONING_SOURCE.with_name("certifi_bundle.py").read_text(encoding="utf-8")
+    source = PYTHON_PROVISIONING_SOURCE.read_text(encoding="utf-8")
+    require(all(item.endswith("\n") and "\r" not in item for item in (policy, source))
+            and "'''" not in policy,
+            "canonical Python provisioning requires LF and a final newline")
+    body = ("CERTIFI_POLICY_SOURCE = r'''" + policy + "'''\n"
+            "CA_POLICY = {}\n"
+            "exec(compile(CERTIFI_POLICY_SOURCE, 'certifi-policy.py', 'exec'), CA_POLICY)\n\n" + source)
+    return ("      - name: verified Python runtime provisioning\n"
+            "        shell: python -I -B {0}\n"
+            "        run: |\n"
+            + "".join("          " + line + "\n" if line else "\n" for line in body.splitlines()))
+
+
+CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
+    "      - __PYTHON_PROVISIONING__\n", python_provisioning_step(inline=True), 1)
+
 PYTHON_RUNTIME_SOURCE = Path(__file__).resolve().with_name("check_python_runtime.py")
 PYTHON_RUNTIME_STEP = (
     "      - name: actual Python runtime admission\n"
@@ -464,7 +495,8 @@ def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
         require(len(setups) == len(guards) == 1, contract)
         setup, guard = setups[0], guards[0]
         require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"), contract)
-        require(guard == setup + 1
+        require(guard == setup + 2
+                and steps[setup + 1].rstrip("\n") == python_provisioning_step(inline).rstrip("\n")
                 and steps[guard].rstrip("\n") == python_runtime_step(inline).rstrip("\n"), contract)
         require(not re.search(r"scripts/(?:bootstrap_ci_pip|check_pip_runtime|bootstrap_build_tools|build_go_tools)\.py|\s-m\s+pip\b",
                               "".join(steps[:guard])), contract)
@@ -557,8 +589,9 @@ def check_pip_runtime(text: str) -> None:
         setup, guard = setups[0], guards[0]
         require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"),
                 f"{name} pip provisioning requires exact setup-python without old-pip options")
-        require(guard == setup + 3 and steps[setup + 1].rstrip("\n") == PYTHON_RUNTIME_STEP.rstrip("\n")
-                and steps[setup + 2].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
+        require(guard == setup + 4 and steps[setup + 1].rstrip("\n") == PYTHON_PROVISIONING_STEP.rstrip("\n")
+                and steps[setup + 2].rstrip("\n") == PYTHON_RUNTIME_STEP.rstrip("\n")
+                and steps[setup + 3].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
                 and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
                 f"{name} actual Python admission, verified pip provisioning and admission must immediately follow setup-python unconditionally")
         require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:setup + 1])),
@@ -692,6 +725,107 @@ def check_site_dependencies(text: str) -> None:
     require(steps[guard[1]].rstrip("\n") == SITE_INSTALLED_DEPENDENCY_STEP.rstrip("\n"), contract)
     require(guard[0] + 1 == installs[0] and installs[0] + 1 == guard[1] < audits[0] < builds[0], contract)
     require(steps[builds[0]].rstrip("\n") == SITE_BUILD_STEP.rstrip("\n"), contract)
+
+
+WORKBENCH_TOOLS_STEP = (
+    '      - name: qualified workbench build tools\n'
+    '        shell: bash\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" --typescript || exit $?\n'
+    '          printf \'%s/vivary-build-tools/bin\\n\' "$RUNNER_TEMP" >> "$GITHUB_PATH"\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
+
+WORKBENCH_INSTALL_STEP = (
+    '      - name: install workbench dependencies\n'
+    '        shell: bash\n'
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts\'\n'
+)
+
+WORKBENCH_DEPENDENCY_STEP = (
+    '      - name: known workbench dependency admission\n'
+    '        shell: bash\n'
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\'\n'
+)
+
+WINDOWS_WORKBENCH_TOOLS_STEP = (
+    '      - name: qualified workbench build tools\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }\n'
+    '          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n'
+    '          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append\n'
+    '          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append\n'
+)
+
+WINDOWS_WORKBENCH_INSTALL_STEP = (
+    '      - name: install workbench dependencies\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }\n'
+)
+
+WINDOWS_WORKBENCH_DEPENDENCY_STEP = (
+    '      - name: known workbench dependency admission\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }\n'
+)
+
+WORKBENCH_TYPECHECK = (
+    '          pnpm --dir packages/workbench exec react-router typegen\n'
+    '          "$RUNNER_TEMP/vivary-build-tools/typescript-7.0.2-go1.26.10/tsc" --noEmit --project packages/workbench/tsconfig.json\n'
+)
+
+
+TEST_CLIENTS_STEP = (
+    '      - name: qualified release package clients\n'
+    '        shell: bash\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'%s/vivary-build-tools/bin\\n\' "$RUNNER_TEMP" >> "$GITHUB_PATH"\n'
+)
+TEST_PACK_COMMAND = '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"'
+
+
+def check_release_package_clients(text: str) -> None:
+    job = job_block(text, "test")
+    steps = re.split(r"(?m)(?=^      - )", job)[1:]
+    tools = [i for i, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step]
+    node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
+    pack = [i for i, step in enumerate(steps) if TEST_PACK_COMMAND in step]
+    contract = "test must provision isolated package clients before packing release artifacts"
+    require(len(tools) == len(node) == len(pack) == 1 and node[0] < tools[0] < pack[0], contract)
+    require(steps[tools[0]].rstrip("\n") == TEST_CLIENTS_STEP.rstrip("\n"), contract)
+    require(not re.search(r"(?m)^\s*(?:run:\s*)?npm\s", job), contract)
+
+
+def check_workbench_build_tools(text: str) -> None:
+    for name in ("workbench", "workbench-maintained", "governed-platform-proof"):
+        job = job_block(text, name)
+        contract = f"{name} must provision isolated clients and rebuilt Go compilers before dependencies"
+        steps = re.split(r"(?m)(?=^      - )", job)[1:]
+        tools = [i for i, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step]
+        installs = [i for i, step in enumerate(steps) if "- name: install workbench dependencies" in step]
+        dependencies = [i for i, step in enumerate(steps) if "- name: known workbench dependency admission" in step]
+        node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
+        require(len(tools) == len(installs) == len(node) == len(dependencies) == 1, contract)
+        require(node[0] < tools[0] and tools[0] + 1 == dependencies[0] and dependencies[0] + 1 == installs[0], contract)
+        windows = name == "governed-platform-proof"
+        expected = (WINDOWS_WORKBENCH_TOOLS_STEP, WINDOWS_WORKBENCH_DEPENDENCY_STEP, WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
+        require(all(steps[index].rstrip("\n") == value.rstrip("\n") for index, value in zip((tools[0], dependencies[0], installs[0]), expected)), contract)
+        require(not re.search(r"(?m)^\s*(?:run:\s*)?(?:npm|pnpm|corepack)\s", "".join(steps[:tools[0]])), contract)
+        require("npm install --global" not in job, contract)
+    workbench = job_block(text, "workbench")
+    require(WORKBENCH_TYPECHECK in workbench,
+            "workbench must retain route type generation and use the rebuilt TypeScript compiler")
+    require("pnpm --dir packages/workbench typecheck" not in workbench,
+            "workbench cannot execute the package's unqualified TypeScript binary")
 
 
 def check_runtime_security(text: str) -> None:
@@ -905,7 +1039,7 @@ def main() -> None:
     for command in (
         artifact_test,
         *release_build_commands(),
-        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        TEST_PACK_COMMAND,
         artifact_check,
     ):
         require(command in test_job, f"tests job must run {command}")
@@ -962,10 +1096,14 @@ def main() -> None:
 
     check_site_dependencies(text)
     check_runtime_security(text)
+    check_workbench_build_tools(text)
+    check_release_package_clients(text)
     check_uv_acquisition(text)
     check_pip_commands(text)
     require("python -I -B scripts/tests/test_pip_runtime.py" in test_job,
             "tests job must run pip runtime admission regressions")
+    require("python -I -B scripts/tests/test_bootstrap_ci_python.py" in test_job,
+            "tests job must run verified Python provisioning regressions")
     require("python -I -B scripts/tests/test_python_runtime.py" in test_job,
             "tests job must run Python runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
