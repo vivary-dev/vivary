@@ -79,6 +79,24 @@ function parseReservation(row) {
   };
 }
 
+const WORKSPACE_KINDS = new Set(["coding", "personal"]);
+
+/**
+ * Saves the owner's Coding or Personal choice on one registered project. The
+ * caller has already admitted the owner and project scope. This preference is
+ * outside the registration decision engine, the portable record and the
+ * registry revision. Returns false when no such project exists.
+ */
+export async function updateProjectWorkspaceKind(projectId, kind) {
+  if (typeof projectId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(projectId)) {
+    throw new TypeError("workspace kind requires a registered project identifier");
+  }
+  if (!WORKSPACE_KINDS.has(kind)) throw new TypeError("workspace kind must be coding or personal");
+  const updated = await getDb().update(projects).set({ workspaceKind: kind })
+    .where(eq(projects.projectId, projectId)).returning({ projectId: projects.projectId });
+  return updated.length === 1;
+}
+
 /**
  * Trusted application code installs the resolver, allocator, and the existing
  * versioned decision engine. The resolver receives a store-selected binding

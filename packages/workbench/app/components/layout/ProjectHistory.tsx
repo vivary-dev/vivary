@@ -10,6 +10,8 @@ import type { VivaryCodeState } from "../../../server/local-code-agent";
 import type { ArchivedNativeChat } from "../../../server/native-archive";
 import { codeDraftSelectionKey } from "../../../shared/code-draft";
 import { useChatDraftList } from "@/lib/chat-draft";
+import { newConversationSurface } from "@/lib/conversation-surface";
+import { claimNativeConversationCreation } from "@/lib/native-conversation-creation";
 import { nativeHistoryRows } from "@/lib/native-history-rows";
 import type { VivaryChatIdentity } from "@/lib/chat-scope";
 import { useNativeActionCaller } from "@/lib/native-actions";
@@ -111,6 +113,8 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
   }
   async function newNative() {
     if (creatingNative.current) return;
+    const releaseCreation = claimNativeConversationCreation(identity.storageKey);
+    if (!releaseCreation) return;
     creatingNative.current = true;
     const generation = ++creationGeneration.current;
     const locationKey = location.key;
@@ -135,10 +139,15 @@ function SessionHistory({ identity }: { identity: VivaryChatIdentity }) {
       if (stillCurrent()) setError("The conversation could not be saved. Try again.");
     } finally {
       creatingNative.current = false;
+      releaseCreation();
     }
   }
   const history = useChatHistoryRailController({ items: sessions,
-    onNewChat: () => { if (isNative && params.get("history") !== "unassigned") void newNative(); else newCode(); },
+    onNewChat: () => {
+      const current = isNative && params.get("history") !== "unassigned" ? "native" : "code";
+      if (newConversationSurface(activeProject?.workspaceKind ?? null, current) === "native") void newNative();
+      else newCode();
+    },
     labels: { newChat: "New conversation", showMore: "More conversations", showLess: "Fewer conversations" },
   });
   const codeFailed = state.isError || code?.error || (state.data && !code);

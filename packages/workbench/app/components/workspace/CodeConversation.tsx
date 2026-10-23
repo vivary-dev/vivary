@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -7,12 +7,16 @@ import {
   removeAgentChatContextItem,
   ChatHistoryList,
   isCodeAgentRunActive,
+  useChatThreads,
   type AssistantChatHandle,
   type AssistantChatProps,
 } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import { useAppStateWriter } from "@/lib/native-state";
+import type { VivaryChatIdentity } from "@/lib/chat-scope";
+import { newConversationSurface } from "@/lib/conversation-surface";
+import { claimNativeConversationCreation } from "@/lib/native-conversation-creation";
 import { registerSelectionCloseFlush, trackSelectionWrite, useChatDraftList, useNativeChatDraft } from "@/lib/chat-draft";
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger, Skeleton } from "@agent-native/toolkit/ui";
 import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-react";
@@ -25,6 +29,7 @@ import { useOpenProjectFolder } from "../projects/open-project-folder";
 import { folderRunTargets, type FolderRun } from "../../lib/code-folder-runs";
 import { holdConversationRoute } from "../../lib/conversation-route-hold";
 import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
+import { useVivaryChatIdentity } from "../layout/use-vivary-chat-identity";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
@@ -182,6 +187,18 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
   </>;
 }
 
+type NativeThreadCreatorHandle = Pick<ReturnType<typeof useChatThreads>, "createThread">;
+
+// useChatThreads has no enabled option. Mount its owner only with a resolved project identity,
+// keeping an unavailable identity from loading unscoped history or remounting the Code composer.
+function NativeThreadCreator({ identity, creatorRef }: { identity: VivaryChatIdentity; creatorRef: RefObject<NativeThreadCreatorHandle | null> }) {
+  const { createThread } = useChatThreads(undefined, identity.storageKey, identity.scope, {
+    autoCreate: false, restoreActiveThread: false, isolateHistoryByScope: true, includeExternal: false,
+  });
+  useImperativeHandle(creatorRef, () => ({ createThread }), [createThread]);
+  return null;
+}
+
 function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel, workspaceAvailable, selection, setSelection, onOpenActive, previewScope, onPreviewChatTarget }: PreviewChatProps & {
   projectId: string | null;
   draftScopeKey: string;
@@ -193,7 +210,19 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   onOpenActive: (active: RunTarget) => Promise<boolean>;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { activeProject } = useProjects();
+  const chatIdentity = useVivaryChatIdentity();
+  const newSurface = newConversationSurface(activeProject?.projectId === projectId ? activeProject.workspaceKind : null, "code");
+  const identity = chatIdentity.identity?.kind === "project" && chatIdentity.identity.projectId === projectId
+    ? chatIdentity.identity : null;
+  const nativeCreator = useRef<NativeThreadCreatorHandle | null>(null);
+  const creatingNative = useRef(false);
+  const creationGeneration = useRef(0);
+  const latestLocationKey = useRef(location.key);
+  latestLocationKey.current = location.key;
+  useEffect(() => () => { creationGeneration.current++; }, [location.key, identity?.storageKey, newSurface, workspaceAvailable]);
   const requestedRun = searchParams.get("run");
   const requestedDraft = searchParams.get("draft");
   const unassigned = searchParams.get("history") === "unassigned";
@@ -251,6 +280,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const folderRuns = folderRunTargets(codeState?.folderRuns ?? [], activeRuns, selection?.runId, projectId);
   const folderIsolation = useOpenProjectFolder();
   const error = notice ?? codeState?.error
+    ?? (newSurface === "native" && chatIdentity.isError ? "Native chat identity could not be loaded. Try again." : undefined)
     ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
     ?? (state.data && !codeState ? "The project changed. Refresh this workspace before continuing." : undefined)
     ?? actionErrorMessage(state.error)
@@ -258,6 +288,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 
   const showInUrl = useCallback((next: ConversationSelection) => {
     if (!mounted.current) return;
+    creationGeneration.current++;
     handledRequest.current = next.runId ?? "new:" + next.key;
     setSearchParams(current => {
       const params = new URLSearchParams(current);
@@ -313,7 +344,38 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     setNotice(undefined);
     setHistoryOpen(false);
   };
-  const newConversation = () => {
+  const newConversation = async () => {
+    if (newSurface === "native") {
+      const creator = nativeCreator.current;
+      if (creatingNative.current || !identity || !creator || !workspaceAvailable) return;
+      const releaseCreation = claimNativeConversationCreation(identity.storageKey);
+      if (!releaseCreation) return;
+      creatingNative.current = true;
+      const generation = ++creationGeneration.current;
+      const locationKey = location.key;
+      const stillCurrent = () => mounted.current && generation === creationGeneration.current
+        && latestLocationKey.current === locationKey;
+      setNotice(undefined);
+      try {
+        const threadId = await creator.createThread();
+        if (!stillCurrent()) return;
+        if (!threadId) throw new Error("No conversation ID was created.");
+        // Match ProjectHistory: an optimistic Native ID has no thread row yet. Acknowledge its
+        // cleared draft through the existing owner before opening the route, keeping Code selected.
+        const initialized = await call<{ changed: boolean; record: { status: string } | null }>(
+          "vivary-chat-draft", { operation: "change", kind: identity.kind, projectId: identity.projectId, threadId,
+            expected: null, next: { status: "cleared", text: "", submitId: null } });
+        if (!stillCurrent()) return;
+        if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
+        navigate(`/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`);
+      } catch {
+        if (stillCurrent()) setNotice("The conversation could not be saved. Try again.");
+      } finally {
+        creatingNative.current = false;
+        releaseCreation();
+      }
+      return;
+    }
     const next = { key: crypto.randomUUID(), runId: null };
     setSelection(next);
     showInUrl(next);
@@ -375,11 +437,17 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   };
   const conversationNotices = <>
     {error && <div className="local-agent-notice" role="alert">
-      <span>{error}</span><Button variant="ghost" size="sm" onClick={() => { void state.refetch(); if (selection?.runId) void selectedState.refetch(); }}>Retry</Button>
+      <span>{error}</span><Button variant="ghost" size="sm" onClick={() => {
+        void state.refetch();
+        if (selection?.runId) void selectedState.refetch();
+        if (newSurface === "native" && !identity) void chatIdentity.refetch();
+      }}>Retry</Button>
     </div>}
   </>;
 
   return <section ref={matchContainer} className="local-agent-page" aria-label="Vivary agent">
+    {folderIsolation.kindDialog}
+    {newSurface === "native" && identity && <NativeThreadCreator key={identity.storageKey} identity={identity} creatorRef={nativeCreator} />}
     <ConversationMatch key={requestedRun + ":" + requestedEvent} container={matchContainer} messageId={matchMessageId} />
     <header className="local-agent-header">
       <div className="local-agent-heading">
@@ -406,7 +474,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
           </PopoverContent>
         </Popover>
         <Button variant="ghost" size="icon" aria-label="New conversation" onClick={newConversation}
-          disabled={!workspaceAvailable || !codeState || (streaming && !selection?.runId)}><IconPlus size={18} /></Button>
+          disabled={!workspaceAvailable || !codeState || (streaming && !selection?.runId) || (newSurface === "native" && !identity)}><IconPlus size={18} /></Button>
         <Button variant="ghost" size="icon" aria-label="Runtime settings" onClick={() => navigate("/settings/runtimes")}><IconSettings size={18} /></Button>
 
       </div>
@@ -418,6 +486,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
           notices={conversationNotices} folderRuns={folderRuns} folderIsolation={folderIsolation} onOpenRun={openRun}
           pendingApprovals={ownActiveRun?.pendingApprovals.length ?? 0}
           projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
+          onNewConversation={newConversation} newConversationAvailable={newSurface !== "native" || !!identity}
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
@@ -617,6 +686,8 @@ type LocalCodeConversationProps = PreviewChatProps & {
   onOpenRun: (target: RunTarget) => void;
   /** This conversation's pending Codex requests, answered from the host strip. */
   pendingApprovals: number;
+  onNewConversation?: () => void;
+  newConversationAvailable?: boolean;
   ownerKey: string;
   projectId: string | null;
   workspaceAvailable: boolean;
@@ -1044,6 +1115,10 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
         role="status" aria-label="Switch runtime or model">
         <span>Stopping the current request. This conversation then switches to {routeLabel(serverPending)}.</span>
       </div>}
+      {props.run && !props.viewingMatch && props.onNewConversation && <p className="local-agent-route-note">
+        <span>Start another conversation using this project's default.</span>
+        <Button variant="link" size="sm" disabled={!props.workspaceAvailable || props.newConversationAvailable === false} onClick={props.onNewConversation}>New conversation</Button>
+      </p>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
         ? selectedEngine.modelCatalog.message : runtime?.message ?? "Choose a local runtime in Settings."}</p></div>

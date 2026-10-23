@@ -64,7 +64,10 @@ const stubs = new Map([
       return useQuery({ queryKey: ["action", name, input], queryFn: () => ${fixture}.read(name, input),
         enabled: options.enabled !== false, retry: false, staleTime: Infinity });
     }`],
-  ["../projects/CreateProjectForm", `export const CreateProjectForm = () => null;`],
+  ["../projects/CreateProjectForm", `import { createElement } from "react";
+    export const CreateProjectForm = ({ workspaceKind, onClose, onChangeKind }) => createElement("div", { "data-create-kind": workspaceKind ?? "missing" },
+      createElement("button", { onClick: event => onChangeKind(event.currentTarget) }, "Change kind"),
+      createElement("button", { onClick: onClose }, "Close project form"));`],
   ["../projects/open-project-folder", `export const useOpenProjectFolder = () => ({ available: true, choosing: false,
     openFolder: async () => ${fixture}.calls.push({ name: "open-folder" }) });`],
   ["@agent-native/toolkit/chat-history", `import { createElement } from "react";
@@ -91,6 +94,9 @@ const stubs = new Map([
       return createElement("button", { type: "button", role: "menuitem", disabled,
         onClick: event => { menu.set(false); onSelect?.(event); } }, children);
     }
+    export const Dialog = ({ open, children }) => open ? createElement("div", { role: "dialog" }, children) : null;
+    export const DialogContent = ({ children }) => createElement("div", null, children);
+    export const DialogHeader = DialogContent, DialogFooter = DialogContent, DialogDescription = DialogContent, DialogTitle = DialogContent;
     export const Tooltip = ({ children }) => createElement(Fragment, null, children);
     export const TooltipProvider = Tooltip, TooltipTrigger = Tooltip;
     export const TooltipContent = ({ children }) => createElement("span", { role: "tooltip" }, children);`],
@@ -98,6 +104,7 @@ const stubs = new Map([
 const bundle = await build({ stdin: { contents: `
   import { createElement, useEffect, useState, useSyncExternalStore } from "react";
   import { MemoryRouter, useLocation, useSearchParams } from "react-router";
+  export { claimNativeConversationCreation } from "./app/lib/native-conversation-creation";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { ConversationInbox } from "./app/components/layout/ConversationInbox";
   import { Sidebar } from "./app/components/layout/Sidebar";
@@ -145,7 +152,7 @@ const bundle = await build({ stdin: { contents: `
       sidebar === 2 && createElement(Sidebar, { collapsible: false }),
       createElement(ProjectRouteReset), createElement(Location)));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
-  jsx: "automatic", loader: { ".css": "empty" }, external: ["react", "react/*", "react-dom/*", "react-router", "@tanstack/react-query"],
+  jsx: "automatic", loader: { ".css": "empty", ".png": "dataurl" }, external: ["react", "react/*", "react-dom/*", "react-router", "@tanstack/react-query"],
   plugins: [{ name: "host-services", setup(build) {
     build.onResolve({ filter: /.*/ }, args => stubs.has(args.path) ? { path: args.path, namespace: "host" } : undefined);
     build.onLoad({ filter: /.*/, namespace: "host" }, args => ({ contents: stubs.get(args.path), loader: "tsx", resolveDir: workbench }));
@@ -1294,4 +1301,61 @@ for (const restore of [false, true]) test(`a later ${restore ? "archived row" : 
   }
   assert.equal(inboxFixture.active, "alpha");
   assert.equal(new URLSearchParams(route()).get("thread"), restore ? "a5" : "new-native");
+});
+
+
+test("inbox New project asks for a kind before the form and resets it after close", async () => {
+  await render();
+  const start = async () => {
+    await act(async () => host.querySelector('[aria-label="Add project"]').click());
+    await act(async () => button("New project (creates a folder)").click());
+  };
+  await start();
+  assert.equal(!!host.querySelector("[data-create-kind]"), false, "no form before kind choice");
+  const choices = () => [...host.querySelectorAll(".workspace-kind-card")];
+  assert.equal(choices().length, 2);
+  await act(async () => choices()[1].click());
+  assert.equal(host.querySelector("[data-create-kind]").dataset.createKind, "personal");
+  await act(async () => button("Change kind").click());
+  assert.equal(choices()[1].getAttribute("aria-pressed"), "true");
+  await act(async () => choices()[0].click());
+  assert.equal(host.querySelector("[data-create-kind]").dataset.createKind, "coding");
+  await act(async () => button("Close project form").click());
+  await start();
+  assert.deepEqual(choices().map(choice => choice.getAttribute("aria-pressed")), ["false", "false"]);
+});
+
+for (const [kind, initial, expected] of [
+  ["personal", "/?run=a1", "native"], ["coding", "/?runtime=native&history=project&thread=a2", "code"],
+]) test("inbox New conversation follows the destination's saved " + kind + " kind", async () => {
+  inboxFixture.catalog = { ...catalog, projects: catalog.projects.map(project => ({ ...project,
+    workspaceKind: project.projectId === "beta" ? kind : null })) };
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render(initial);
+  await act(async () => button("New conversation").click());
+  await settle();
+  assert.equal(inboxFixture.active, "beta");
+  if (expected === "native") {
+    assert.equal(route(), "?runtime=native&history=project&thread=new-native");
+    assert.equal(inboxFixture.calls.find(call => call.name === "vivary-chat-draft").input.projectId, "beta");
+  } else assert.match(route(), /^\?run=new&draft=/);
+});
+
+
+test("inbox API creation shares the Code header's pending creation claim", async () => {
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render("/?runtime=native&history=project&thread=a2");
+  const release = module.exports.claimNativeConversationCreation("key-alpha");
+  try {
+    await act(async () => button("New conversation").click());
+    await settle();
+    assert.equal(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"), false);
+    assert.equal(route(), "?runtime=native&history=project&thread=a2");
+  } finally { release(); }
+  await act(async () => button("New conversation").click());
+  await settle();
+  assert.equal(route(), "?runtime=native&history=project&thread=new-native");
 });

@@ -177,6 +177,17 @@ button, a, input, summary { outline-offset: 3px; }
 .project-registration label { font-size: 12px; }
 .project-registration select { width: 100%; min-height: 36px; padding: 6px; border: 1px solid hsl(var(--input)); background: hsl(var(--background)); color: hsl(var(--foreground)); border-radius: var(--radius); font-size: 12px; }
 .project-form-actions { display: flex; gap: 4px; }
+.project-kind-summary { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.workspace-kind-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.workspace-kind-card { display: grid; gap: 6px; align-content: start; padding: 14px; text-align: left; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); color: hsl(var(--foreground)); cursor: pointer; }
+.workspace-kind-card:hover:not(:disabled) { background: hsl(var(--secondary)); }
+.workspace-kind-card:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.workspace-kind-card[aria-pressed="true"] { border-color: hsl(var(--primary)); background: hsl(var(--secondary)); }
+.workspace-kind-card:disabled { cursor: progress; opacity: 0.7; }
+.workspace-kind-card-title { font-size: 14px; font-weight: 600; }
+.workspace-kind-card-body { font-size: 12px; line-height: 1.5; color: hsl(var(--muted-foreground)); }
+.workspace-kind-note { margin: 0; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.workspace-kind-detail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .project-reconnection { margin: 4px 0 12px; }
 .project-reconnection-trigger { width: 100%; }
 .project-reconnection section { display: grid; gap: 10px; padding: 12px 10px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); }
@@ -199,7 +210,7 @@ button, a, input, summary { outline-offset: 3px; }
 .vivary-sidebar.is-collapsed { width: 56px; }
 .vivary-sidebar-brand { height: 60px; padding: 0 16px; display: flex; align-items: center; color: hsl(var(--sidebar-accent-foreground)); }
 .vivary-sidebar.is-collapsed .vivary-sidebar-brand { padding: 0; justify-content: center; }
-.vivary-mark { display: grid; place-items: center; width: 27px; height: 27px; flex-shrink: 0; border-radius: 7px; background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); font-size: 16px; font-weight: 700; letter-spacing: -.07em; }
+.vivary-mark { display: block; width: 27px; height: 27px; flex-shrink: 0; padding: 3px; border-radius: 7px; background: hsl(var(--sidebar-accent)); object-fit: contain; }
 .vivary-primary-navigation, .vivary-settings-navigation { display: grid; gap: 3px; padding: 4px 10px 10px; }
 .vivary-sidebar.is-collapsed .vivary-primary-navigation, .vivary-sidebar.is-collapsed .vivary-settings-navigation { padding-inline: 6px; }
 .vivary-nav-link { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-size: 13px; line-height: 20px; color: hsl(var(--sidebar-foreground)); transition: background-color 120ms, color 120ms; }

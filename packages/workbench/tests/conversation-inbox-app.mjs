@@ -61,6 +61,10 @@ try {
   });
   assert.ok(["registered", "already-registered"].includes(registration.code), JSON.stringify(registration));
   const projectId = registration.projectId;
+  await api.request("POST", "/_agent-native/actions/vivary-set-project-kind", { projectId, workspaceKind: "personal" });
+  const savedKind = async () => (await api.getAction("vivary-project-catalog")).projects
+    .find(project => project.projectId === projectId)?.workspaceKind;
+  assert.equal(await savedKind(), "personal", "the normal app catalog exposes its saved project default");
   const identity = await api.getAction("vivary-chat-identity", { kind: "project", projectId });
   const scopeParams = "?" + new URLSearchParams({ scopeType: identity.scope.type, scopeId: identity.scope.id });
   const thread = (id, text) => ({ headId: `${id}-reply`, messages: [
@@ -88,6 +92,8 @@ try {
   await server.stop();
   server = await startBuiltApp([], data);
   api = await signIn();
+  assert.equal(await savedKind(), "personal", "the project kind survives a server restart");
+  console.log("PASS: owner project-kind action and normal local catalog preserve Personal across restart.");
   assert.equal(await titleNow(), "Manual name", "the manual name survives a server restart");
   assert.equal(await inboxTitle(), "Manual name");
   console.log("PASS: A5, a manual API chat name survives a later generated title, before and after a restart.");

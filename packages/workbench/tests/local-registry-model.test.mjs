@@ -34,3 +34,13 @@ test("the existing held-custody registration input retains its exact record shap
   assert.equal(result.output.code, "registered");
   assert.equal(Object.hasOwn(result.recordChanges.insertBinding, "verificationKind"), false);
 });
+
+test("registration carries no project kind, so a registered folder stays Not set until the owner chooses", () => {
+  for (const input of [localInput(), structuredClone(fixtures.inputs.register)]) {
+    const result = evaluateRegistryOperation(input);
+    assert.equal(result.output.code, "registered");
+    assert.deepEqual(Object.keys(result.recordChanges.insertPortable).sort(),
+      ["contentIdentity", "displayName", "projectId", "schemaVersion"]);
+    assert.ok(!JSON.stringify(result).includes("workspaceKind"));
+  }
+});

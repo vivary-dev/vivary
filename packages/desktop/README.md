@@ -186,6 +186,14 @@ Both boundaries retain the authenticated bytes for the subsequent write.
 An unknown vendor, missing input, wrong size or wrong digest is refused.
 Electron Packager copies the staged Python tree with verbatim relative symlinks.
 
+The 2026-10-21 coordinator run against the prior packaging source returned raw
+exit 1 with 13 of 17 tests passing. The asset tuple and real backend validator
+disagreed with pip 26.2.2, altered license bytes reached the copy destination
+under fixture-only vendor normalization, and the real launcher/RECORD case
+rejected installed distlib 0.4.2. Exact-license and stub controls, unknown-vendor
+refusal and altered-stub refusal passed. At that checkpoint, post-repair tests and packaging were
+pending. Those historical results do not establish packaged Windows acceptance.
+
 The manifest records the target, source revision, interpreter and component
 versions, wheel hashes, launchers, bridge hash, and license paths. The package
 includes each component's MIT license, the repository MIT license for the
@@ -306,7 +314,9 @@ authorized by these source or artifact checks.
 `vivary.exe` carries the Vivary name and icon. The icon is
 `assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`
 (256 x 256) with PNG entries at 16, 20, 24, 32, 40, 48, 64, 96, 128 and 256
-pixels. Replace both together if the mark changes. Its file properties show
+pixels. The Workbench sidebar header shows a byte-identical copy,
+`packages/workbench/app/assets/vivary-mark.png`. Replace all three together if
+the mark changes. Its file properties show
 "Copyright (C) 2026 Jeff Kazzee", set through the packager's `appCopyright`.
 
 The folder must stay together: `vivary.exe` uses its sibling `resources` files.

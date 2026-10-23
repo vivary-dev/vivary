@@ -14,6 +14,7 @@ import * as tables from "../server/db/schema.mjs";
 import { createNativeRegistry, createNativeRegistryAuth } from "../server/native-registry.mjs";
 import { mountRegistryHttp } from "../server/registry-http.mjs";
 import { createProjectCatalog, mountProjectCatalog } from "../server/project-catalog.mjs";
+import { updateProjectWorkspaceKind } from "../server/registry-store.mjs";
 import { startRootProvider } from "../server/root-provider.mjs";
 import { parseStrictJson, evaluateRegistryOperation } from "../../../scripts/registry_contract_model.mjs";
 
@@ -72,6 +73,7 @@ test("real native catalog, scoped registry and non-enrolling custody compose", a
       const result = await call();
       assert.equal(result.status, 200); assert.equal(result.body.code, "catalog");
       assert.deepEqual(result.body.projects, []);
+      assert.equal(result.body.kindEditable, false, "a configured installation's catalog hides the kind controls");
       assert.deepEqual(result.body.locations, [ { locationRef: "a", displayName: "Documents", status: "available" },
         { locationRef: "b", displayName: "Research", status: "available" } ]);
       assert.deepEqual(await snapshot(), before);
@@ -94,9 +96,20 @@ test("real native catalog, scoped registry and non-enrolling custody compose", a
       const before = await snapshot(); const custody = await readFile(config.statePath, "utf8");
       const result = await call();
       assert.deepEqual(result.body.projects.map(row => [row.displayName, row.status]), [["Alpha", "available"], ["Beta", "available"]]);
+      assert.deepEqual(result.body.projects.map(row => row.workspaceKind), [null, null], "registration leaves the kind Not set");
       const serialized = JSON.stringify(result.body);
       for (const forbidden of ["root_", "actor_", "bindingId", "receipt", scope, email]) assert.ok(!serialized.includes(forbidden));
       assert.deepEqual(await snapshot(), before); assert.equal(await readFile(config.statePath, "utf8"), custody);
+    });
+    await suite.test("the catalog returns a saved kind without changing other records or files", async () => {
+      const [alpha] = (await call()).body.projects;
+      const before = await snapshot();
+      assert.equal(await updateProjectWorkspaceKind(alpha.projectId, "personal"), true);
+      const result = await call();
+      assert.deepEqual(result.body.projects.map(row => row.workspaceKind), ["personal", null]);
+      const after = await snapshot();
+      assert.deepEqual({ ...after, projects: after.projects.map(row => ({ ...row, workspaceKind: null })) }, before);
+      assert.deepEqual(await readdir(locations.a), ["note.txt"]);
     });
     await suite.test("same-scope read excludes foreign actor, collection, device and locator records", async () => {
       const first = (await snapshot()).bindings[0];

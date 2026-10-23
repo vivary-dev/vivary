@@ -4,7 +4,7 @@ import { ActionContractError } from "@agent-native/core/action";
 import { z } from "zod";
 import { redactCredentials } from "./credential-redaction.ts";
 import { ORIGINAL_RUN_FAILURES, runCreatorBridge } from "./original-runtime.ts";
-import { connectLocalProjectFolder, getLocalProjectAccess } from "./project-services.mjs";
+import { connectLocalProjectFolder, getLocalProjectAccess, setLocalProjectKind } from "./project-services.mjs";
 import { resolveOriginalRuntime } from "./original-runtime-location.mjs";
 
 const projectName = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
@@ -251,6 +251,17 @@ export async function createManagedProject(context, input, dependencies = {}) {
       target,
       input.displayName ?? childName,
     );
+    // The kind chosen before the form opened belongs to the registered project, not to its files.
+    // The files and registration already exist, so a failed kind save must not report the creation as failed.
+    // The project opens with kind Not set and the owner can set it in Project details.
+    if (input.workspaceKind && ["registered", "already-registered"].includes(registration.code)) {
+      try {
+        await (dependencies.setProjectKind ?? setLocalProjectKind)(context, registration.projectId, input.workspaceKind);
+      } catch {
+        return { ...result, registration, kindSaved: false };
+      }
+      return { ...result, registration, kindSaved: true };
+    }
     return { ...result, registration };
   } finally {
     activeTargets.delete(targetKey);

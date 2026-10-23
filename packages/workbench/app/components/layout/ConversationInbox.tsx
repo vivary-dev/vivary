@@ -22,6 +22,10 @@ import type { ChatSearchHit, ChatSearchPage } from "@/lib/chat-search-schema";
 import { focusAfterRemoval } from "@/lib/row-focus";
 import { hasWorkspaceRoute, holdConversationRoute } from "@/lib/conversation-route-hold";
 import { useAppStateWriter } from "@/lib/native-state";
+import { claimNativeConversationCreation } from "@/lib/native-conversation-creation";
+import { newConversationSurface } from "@/lib/conversation-surface";
+import { WorkspaceKindDialog } from "../projects/WorkspaceKindDialog";
+import type { WorkspaceKind } from "../../../shared/workspace-kind";
 import { CreateProjectForm } from "../projects/CreateProjectForm";
 import { useOpenProjectFolder } from "../projects/open-project-folder";
 import { useProjects } from "../projects/ProjectContext";
@@ -380,6 +384,11 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const navigate = useNavigate();
   const { call } = useNativeActionCaller();
   const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectKind, setNewProjectKind] = useState<WorkspaceKind | null>(null);
+  const [choosingProjectKind, setChoosingProjectKind] = useState(false);
+  const nameFocus = useRef(false);
+  const kindChosen = useRef(false);
+  const kindReturnFocus = useRef<HTMLButtonElement | null>(null);
   const folderPicker = useOpenProjectFolder();
   const folderInput = destinationId ? { projectId: destinationId } : {};
   // Binding and authorization changes must discard the old path without changing the action's strict parameters.
@@ -419,6 +428,8 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   async function newNative(afterProjectChange = false) {
     if (!afterProjectChange && elsewhere) return void shared.startIn(destinationId, "native");
     if (creatingNative.current || !scope) return;
+    const releaseCreation = claimNativeConversationCreation(scope.identity.storageKey);
+    if (!releaseCreation) return;
     const isCurrent = afterProjectChange ? shared.nativeStartIsCurrent : shared.claimNavigation();
     creatingNative.current = true;
     setNotice(undefined);
@@ -441,10 +452,12 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
       if (nativeScopeMounted.current && isCurrent()) setNotice("The conversation could not be saved. Try again.");
     } finally {
       creatingNative.current = false;
+      releaseCreation();
     }
   }
   const params = new URLSearchParams(location.search);
-  const prefersNative = params.get("runtime") === "native" && params.get("history") !== "unassigned";
+  const currentSurface = params.get("runtime") === "native" && params.get("history") !== "unassigned" ? "native" : "code";
+  const prefersNative = newConversationSurface(destinationProject?.workspaceKind, currentSurface) === "native";
   const personalWithoutFolder = destinationId === null && folder.isSuccess && folder.data === null;
   const startDefault = () => {
     if (!defaultReady) return;
@@ -489,7 +502,10 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
               <IconFolderPlus size={15} aria-hidden /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => setCreatingProject(true)}>New project (creates a folder)</DropdownMenuItem>
+            <DropdownMenuItem disabled={creatingProject} onSelect={() => {
+              kindReturnFocus.current = section.current?.querySelector<HTMLButtonElement>('[aria-label="Add project"]') ?? null;
+              kindChosen.current = false; setNewProjectKind(null); setChoosingProjectKind(true);
+            }}>New project (creates a folder)</DropdownMenuItem>
             {folderPicker.available && <DropdownMenuItem disabled={folderPicker.choosing}
               onSelect={() => void folderPicker.openFolder()}>Open existing folder</DropdownMenuItem>}
           </DropdownMenuContent>
@@ -514,8 +530,28 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
         <Button size="sm" variant="ghost" onClick={() => void folder.refetch()}>Retry folder</Button>
       </div>}
       {folderPicker.error && <p role="status">{folderPicker.error}</p>}
-      {creatingProject && <CreateProjectForm disabled={checking || selecting} onClose={() => setCreatingProject(false)}
-        onCreated={async projectId => { await refresh(); return selectProject(projectId); }} />}
+      {folderPicker.kindDialog}
+      <WorkspaceKindDialog open={choosingProjectKind} current={newProjectKind}
+        description="This sets the defaults for the new project. Name it and review its files next."
+        onChoose={kind => {
+          kindChosen.current = true; nameFocus.current = true;
+          setNewProjectKind(kind); setCreatingProject(true); setChoosingProjectKind(false);
+        }}
+        onCloseAutoFocus={event => {
+          event.preventDefault();
+          if (!kindChosen.current && kindReturnFocus.current?.isConnected) kindReturnFocus.current.focus();
+        }}
+        onCancel={() => setChoosingProjectKind(false)} />
+      {creatingProject && newProjectKind && <CreateProjectForm disabled={checking || selecting}
+        workspaceKind={newProjectKind} onChangeKind={trigger => { kindChosen.current = false; kindReturnFocus.current = trigger; setChoosingProjectKind(true); }}
+        onNameInputReady={input => {
+          if (nameFocus.current) { nameFocus.current = false; input.focus(); }
+        }}
+        onClose={() => { setCreatingProject(false); setNewProjectKind(null); nameFocus.current = false; }}
+        onCreated={async (projectId, kindSaved) => {
+          if (!kindSaved) setNotice("Project created. Its kind could not be saved. Set it in Project details.");
+          await refresh(); return selectProject(projectId);
+        }} />}
       <label className="conversation-inbox__filter">
         <span>Show</span>
         <select value={filter} disabled={!catalog} onChange={event => void shared.filter.setFilter(event.target.value)}>

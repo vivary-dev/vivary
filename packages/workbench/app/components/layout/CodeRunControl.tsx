@@ -84,10 +84,14 @@ export function CodeRunControl() {
     }
   }
 
-  if (!runs.length && !queued.length && !cleanup && !status.error) return null;
+  if (!runs.length && !queued.length && !cleanup && !status.error) return <>
+    {isolation.kindDialog}{isolation.error && <p role="alert">{isolation.error}</p>}
+  </>;
   const cleanupHeld = !ready || resolving !== null || cleanup?.checking === true;
   const cleanupRun = cleanup?.run;
   return <section aria-label="Agent work" className="shrink-0 border-b px-4 py-3 text-sm">
+    {isolation.kindDialog}
+    {isolation.error && <p role="alert">{isolation.error}</p>}
     {capacity && (runs.length > 0 || queued.length > 0) && <p className="mb-2 text-xs text-muted-foreground" role="status">
       {capacity.running} running, {capacity.queued} queued{capacity.held ? `, ${capacity.held} waiting for you` : ""} (limit {capacity.limit})
     </p>}
