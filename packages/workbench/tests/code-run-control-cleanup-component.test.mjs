@@ -24,6 +24,7 @@ const stubs = new Map([
     // The host strip reads the host state. Runtime settings reads other actions, which answer from byName.
     export const hostProof = { queries: [], byName: new Map(),
       set(data) { state = { data, error: null }; for (const listener of listeners) listener(); },
+      fail(error) { state = { data: undefined, error }; for (const listener of listeners) listener(); },
       answer(name, data) { this.byName.set(name, data); state = { ...state }; for (const listener of listeners) listener(); } };
     export function useActionQuery(name, params, options) {
       hostProof.queries.push({ name, options });
@@ -329,6 +330,26 @@ export async function queuedConversationsShowCountsAndTheirOwnChoices() {
   } finally { await dispose(); }
 }
 
+export async function queueOnlyStatusHasNoFalseLoadError() {
+  const item = { id: "run-held", title: "Write the changelog", projectId: null, workspaceLabel: "fixture",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z",
+    state: "held", position: null, reason: null };
+  const { host, dispose } = await mount(null, { queuedRuns: [item],
+    capacity: { limit: 1, whenFull: "queue", running: 0, queued: 0, held: 1 } });
+  try {
+    assert.ok(host.querySelector('[aria-label="Queued conversations"] > li'), "the successful query shows queued work");
+    assert.equal(host.textContent.includes("Agent status could not be loaded."), false,
+      "a successful queue-only response is not a load failure");
+    assert.equal(button(host, "Retry"), undefined, "a successful response needs no load retry");
+    assert.ok(button(host, "Cancel"), "queue controls remain available");
+
+    await act(async () => { hostProof.fail(new Error("The status request failed.")); });
+    assert.equal(host.textContent.includes("Agent status could not be loaded."), true,
+      "a real query failure still offers recovery");
+    assert.ok(button(host, "Retry"));
+  } finally { await dispose(); }
+}
+
 export async function useAnotherFolderOpensThePickerOnlyAfterTheCancel() {
   const item = { id: "run-check", title: "Fix the tests", projectId: null, workspaceLabel: "fixture", engineLabel: "Claude Code",
     model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z", state: "needs-confirmation", position: null,
@@ -466,6 +487,7 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
     ["queued conversations show the counts and their own Cancel, Start, and Proceed", proof.queuedConversationsShowCountsAndTheirOwnChoices],
+    ["queue-only status has no false load error and real errors still offer Retry", proof.queueOnlyStatusHasNoFalseLoadError],
     ["Runtime settings refreshes the run counts while it is open", proof.runtimeSettingsCountsRefreshWhileOpen],
     ["Use another folder opens the folder picker only after the cancel succeeds", proof.useAnotherFolderOpensThePickerOnlyAfterTheCancel],
   ]) await t.test(name, () => run());

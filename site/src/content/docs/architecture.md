@@ -345,7 +345,7 @@ guarantee. [`code-run-capacity.ts`](https://github.com/vivary-dev/vivary/blob/de
 stores one host-wide Core setting, `vivary-code-run-capacity-v1`: a limit from 1
 to 16, default 3, and When full, Queue (the default) or Refuse. The default has
 not been validated as safe for any computer. Runtime settings show both, with the
-running, queued, and held counts. API chat has no coding worker and does not
+running, queued, and held counts, refreshed every second while the page is open. API chat has no coding worker and does not
 count. Same-project, shared-folder, and mixed-runtime concurrency are unchanged
 below the limit.
 
@@ -353,43 +353,90 @@ below the limit.
 send starts only when a slot is free and no queued turn waits for one, so the
 queue stays first in, first out. With Refuse, a send beyond the limit fails with
 `vivary_code_capacity_full` (409), names the limit, and writes nothing. With
-Queue, the run record reads `queued` and keeps the message, runtime, model, draft
-IDs, the folder turns the sender acknowledged, and `queuedAt` in
-`metadata.queuedTurn`. A queued turn writes no transcript entry, so a pending
-draft stays pending. A second send into a running or queued conversation still
+Queue, the host first retains an immutable exact-message envelope in Native's
+existing application-state store. Its key and validated envelope bind the owner,
+organization, project, run and a unique turn revision. This applies to UI and API
+submissions, including sends without draft references. Run metadata keeps only
+that revision, runtime, model, draft IDs, acknowledged folder turns and `queuedAt`.
+Run records and transcripts retain credential redaction. Application state uses
+the existing authenticated-user SQL boundary, not a new credential vault or
+encryption scheme. The initial payload and metadata writes must finish before
+the host acknowledges a queued send or admits it. A failed write rejects the
+send and removes its queue claim after rollback, or keeps it held if rollback
+cannot be saved. It never starts from the failed in-memory input. A queued turn
+writes no transcript entry, so a pending draft stays pending. A second send into a running or queued conversation still
 refuses (`vivary_code_conversation_queued` for a queued one).
+A runtime switch, with or without Stop, refuses with `vivary_code_switch_queued`
+while the conversation has a queued message, because the queued turn keeps the
+route it queued with.
 
-When a run leaves, the host reserves the freed slot for the oldest queued turn
-before any await, then runs that turn's original send again with its closures,
-so ownership, the project grant and reconnection, the folder, the runtime and
-model, and the shared folder are checked fresh. The project context is the one
+When a run leaves, the host reserves a freed slot for the oldest queued turn
+before any await, then runs that turn's original send again with its closures.
+Only one queued turn performs these fresh admission checks at a time, so a later
+turn cannot claim first because its checks finish faster. After that turn claims
+or is held, the next queued turn can use another free slot. Running workers stay
+concurrent. Ownership, the project grant and reconnection, the folder, the runtime
+and model, and the shared folder are checked fresh. The project context is the one
 loaded with the original request. A shared-folder overlap that the turn's
 acknowledgement does not cover moves it to `needs-confirmation`, with the
-owner's warning. Any other refusal moves it to `held` with its reason, so the
-message is never lost. Approvals and Stop stay per run.
+owner's warning. Any other refusal moves it to `held` with its reason. Each
+admission reads the exact persisted payload again before fresh send checks.
+Approvals and Stop stay per run.
 
-A host start or shutdown never starts queued work. Every queued record becomes `held`
-(status `paused`, phase `held`), shown as Held after restart. The
-`vivary-code-queue` owner action starts a held turn, or with `proceed` accepts
-the agents working in its folder now. Both send the stored message again from
-the owner's request with fresh closures. Cancel removes a turn, starts nothing,
+A host start or shutdown never starts queued work. Shutdown waits for admitted
+initial queue saves and fails rather than authorize storage close while one is
+still pending at its timeout. Every queued record becomes `held` after restart
+(status `paused`, phase `held`). The `vivary-code-queue` owner action starts a
+held turn, or with `proceed` accepts the agents working in its folder now. Both
+load the exact payload only after owner, organization, project and run checks,
+then use the owner's request for fresh closures. Missing, malformed or mismatched
+payloads refuse Start and Proceed with `vivary_code_queue_payload_unavailable`.
+Legacy queue records without a verified exact-payload revision require Cancel
+and resubmission. Their metadata may already be redacted and is never executable
+input. Cancel may recover an existing matching pending draft, but never writes
+legacy placeholders over a good draft. Cancel removes a turn, starts nothing,
 and restores the run's earlier status. A conversation that never started is
-marked `discarded` and leaves history. [`code-queue-draft.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-queue-draft.ts)
+marked `discarded` and leaves history. A later send into it clears the mark, so
+it is listed again while queued or running, and Cancel before it ever started
+discards it again. [`code-queue-draft.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-queue-draft.ts)
 turns its pending draft back into a draft, fills an empty one, and leaves a draft
-the owner typed since. Stop on a queued conversation cancels it the same way.
+the owner typed since. The turn leaves the queue only after the draft update
+settles and cancellation is durable. If the draft write fails, the turn stays
+queued and listed, and it does not start meanwhile. If restoring the draft
+succeeds but the cancellation record cannot be saved, the turn is held with
+its executable input cleared. The host tries to persist that held state and
+retains the exact payload for an explicit Cancel retry or Start. Free capacity
+cannot automatically execute text already returned to the composer. A durable consume or cancel
+deletes only its matching exact-payload revision using compare-and-set. Cleanup
+failure does not relabel an already started or cancelled turn as unaccepted.
+A failed cleanup or a crash between the two stores can retain an unreferenced
+owner-scoped payload row. No broader purge is added by this change. Stop on a queued conversation cancels it the same way.
+Cancel or Stop on a turn that is starting marks it and waits for its start
+attempt. The claim refuses a marked turn with `vivary_code_queue_stopped`, so the
+turn is held and then cancelled, never started.
 
 Host state carries `capacity` (`limit`, `whenFull`, `running`, `queued`, `held`)
 and `queuedRuns`, each with its `state`, host-wide `position`, `reason`, and
-`queuedAt`. A run summary carries `queue`. The agent work strip in
+`queuedAt`. A run summary carries `queue`. `running` and `queued` count the whole host. `held`
+counts only the caller's held turns, shown as waiting for you. The agent work strip in
 [`CodeRunControl.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/CodeRunControl.tsx)
 shows the counts and each queued conversation with Cancel, Start for a held one,
 and lists a queued or held conversation there rather than as the recent run,
 and Proceed or Use another folder for one that needs confirmation. Use another
-folder cancels the message back into its draft and opens the folder picker.
+folder cancels the message back into its draft and opens the folder picker
+only after the cancel succeeds. A successful response containing only queued or
+held work does not show the status-load failure or its Retry button. A real
+status-query error still offers Retry.
 `tests/code-concurrency.test.ts` covers the queue with the IPC worker: first in,
 first out, Cancel and its draft, Refuse, a queued conversation's refusal and
 Stop, held after restart, a fresh shared-folder check, and mixed runtimes under
-the limit.
+the limit. Separate host processes over a disposable SQLite database and run
+store also cover a delayed initial payload save during shutdown, refusal after
+the save timeout and successful shutdown retry. After database close and process
+exit, a fresh host holds the saved turn until explicit Start, passes the exact
+bytes to the IPC worker, retains transcript redaction and removes the consumed
+payload. These are source-level process fixtures, not packaged application or
+live-provider acceptance.
 
 Memory evidence for the default, measured on the build server on 2026-10-20 with
 fake runtimes: the IPC test worker held about 48 MiB per run (143 MiB for three,
@@ -968,6 +1015,56 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 PR #265 queue reconciliation and cancellation review. The preserved
+FIFO, queue-only status and exact-payload changes were applied in their verified
+order, with the three concurrency test layers and deterministic Stop fixture.
+Independent worker IPC arrivals are compared by run identity; separate host
+admission assertions still require FIFO order. A new regression restores a real
+pending draft and fails the following atomic run-record write once. It reproduced
+the eligible queued message after failed cancellation; the host now holds that
+message and clears its automatic execution input before releasing cancellation.
+The focused cancellation cases pass. Two additional separate-process
+shutdown/restart cases cover a delayed initial payload write, its actual
+timeout/refusal and retry, and exact-byte resume in a new host after database
+close. All 48 affected concurrency and strip component tests and direct
+typechecking pass.
+These checks used Node 24.22.1,
+rebuilt esbuild and TypeScript with Go 1.26.10, and qualified dependencies from
+the advisory branch rather than this branch's frozen dependency graph. This does
+not establish live-provider behavior, abrupt-crash recovery or packaged Windows
+acceptance.
+
+2026-10-22 Exact queued input review on PR #265. Queue metadata previously held
+executable prompt text even though Core redacts metadata before persistence.
+Queued turns now retain exact input in the existing owner-scoped application
+state with a per-turn revision and explicit organization, project and run binding.
+Metadata and transcripts remain redacted. Admission, owner Start and Proceed
+read that verified payload. Initial-save failure cannot launch memory-only input,
+shutdown waits for the save, and durable consume or Cancel cleans only its own
+revision. Legacy or corrupt records refuse execution and require resubmission.
+Existing pending drafts remain useful for cancellation without overwriting newer
+text. Focused cases are added to the existing IPC, Core redactor and SQL fixtures.
+This preparation does not establish their pass results, a real process restart,
+live-provider behavior or Windows acceptance. Cross-store crash cleanup remains
+best effort and may retain unreferenced payload rows.
+
+2026-10-22 Queue status and admission review on PR #265. The strip now shows
+its load-error fallback only for a failed status query, so a successful queue-only
+response retains its controls without a false failure. The queue drains one
+fresh admission at a time, preserving FIFO claims when several slots become free
+without serializing running workers. The existing component test adds a queue-only
+response and real-error control. The existing concurrency suite adds gated
+separate-folder and shared-folder admissions. These are focused regression cases,
+not new Windows or live-provider acceptance. The separate stored-prompt redaction
+finding remains open. Prompt persistence and credential redaction are unchanged.
+
+2026-10-20 Typecheck fix on PR #265. The agent work strip's row callbacks for Stop,
+approvals, Cancel, Start and Use another folder now accept any promise, because
+the strip's action wrapper returns whether the action succeeded. Use another folder
+reads that result to open the folder picker only after a confirmed cancel. The
+section "Concurrent Code run limit" still holds: the rows, their actions and the
+counts are unchanged. Inspected `CodeRunControl.tsx` and the strip component test.
 
 2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
 another project selected the project without a route hold, so Workspace's route

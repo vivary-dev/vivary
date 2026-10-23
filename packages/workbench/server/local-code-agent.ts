@@ -9,6 +9,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { fail, type ActionRunContext } from "@agent-native/core/action";
+import { appStateCompareAndSet, appStateGet } from "@agent-native/core/application-state";
 import {
   appendCodeAgentTranscriptEvent,
   codeAgentRunTranscriptPath,
@@ -331,13 +332,28 @@ type CodeHostState = {
   reserved: number;
 };
 
-/** What a queued turn keeps on its run record, so a restart holds it instead of losing the message. */
+const queuedPayloadSchema = z.object({
+  version: z.literal(1), revision: z.string().uuid(), runId: z.string().min(1).max(128),
+  ownerEmail: z.string().min(1), orgId: z.string().nullable(), projectId: z.string().nullable(),
+  message: z.string().min(1).max(8_000),
+}).strict();
+const QUEUED_PAYLOAD_UNAVAILABLE = "The original queued message could not be verified. Cancel it and send it again.";
+
+/** Run records retain only a reference to exact input in the owner's application state. */
 type StoredQueuedTurn = {
-  message: string; engine: VivaryCodeEngine; model: string; draftSubmitId?: string; draftThreadId?: string;
+  payloadRevision?: string; engine: VivaryCodeEngine; model: string; draftSubmitId?: string; draftThreadId?: string;
   queuedAt: string; acknowledgedTurns: string[]; state: VivaryCodeQueueState; reason: string | null;
   /** The record's status before it queued, restored by Cancel. Null for a conversation that never started. */
   restore: { status: CodeAgentRunRecord["status"]; phase: string | null } | null;
 };
+const storedQueuedTurnSchema = z.object({
+  payloadRevision: z.string().uuid().optional(), engine: z.enum(VIVARY_CODE_ENGINES), model: z.string().min(1).max(128),
+  draftSubmitId: z.string().uuid().optional(), draftThreadId: z.string().regex(/^[A-Za-z0-9_:-]{1,200}$/).optional(),
+  queuedAt: z.string().datetime(), acknowledgedTurns: z.array(z.string()),
+  state: z.enum(["queued", "held", "needs-confirmation"]), reason: z.string().nullable(),
+  restore: z.object({ status: z.enum(["queued", "running", "paused", "needs-approval", "completed", "errored", "unknown"]),
+    phase: z.string().nullable() }).nullable(),
+});
 
 type QueuedTurn = Omit<StoredQueuedTurn, "state"> & {
   runId: string; ownerEmail: string; orgId?: string; workspaceLabel: string;
@@ -351,6 +367,8 @@ type QueuedTurn = Omit<StoredQueuedTurn, "state"> & {
   stopRequested?: boolean;
   /** Cancel is putting the message back in the draft. The turn stays queued but does not start meanwhile. */
   cancelling?: boolean;
+  /** Initial payload and metadata persistence must settle before admission, cancellation or storage shutdown. */
+  saving?: Promise<void>;
 };
 
 // Nitro bundles plugins while Native loads action source modules. Both must own
@@ -378,7 +396,10 @@ export async function initializeVivaryCodeAgent(): Promise<void> {
 }
 
 export function shutdownVivaryCodeAgent(): Promise<void> {
-  hostState.shutdown ??= stopActiveRunsForShutdown();
+  hostState.shutdown ??= stopActiveRunsForShutdown().catch(error => {
+    hostState.shutdown = null;
+    throw error;
+  });
   return hostState.shutdown;
 }
 
@@ -852,6 +873,12 @@ function cleanupView(refusal: CleanupRefusal, runs: readonly CodeAgentRunRecord[
 async function stopActiveRunsForShutdown(): Promise<void> {
   hostState.closing = true;
   const executions: Promise<void>[] = [];
+  const pendingSaves = new Set(hostState.queue.flatMap(item => item.saving ? [item.saving] : []));
+  for (const saving of pendingSaves) {
+    saving.then(() => pendingSaves.delete(saving), () => pendingSaves.delete(saving));
+    executions.push(saving);
+  }
+  executions.push(...hostState.queue.flatMap(item => item.starting ? [item.starting] : []));
   for (const [runId, activeRun] of activeRuns) {
     if (activeRun.stopReason === null) {
       activeRun.stopReason = "shutdown";
@@ -875,6 +902,7 @@ async function stopActiveRunsForShutdown(): Promise<void> {
   });
   try {
     await Promise.race([Promise.allSettled(executions), timeout]);
+    if (pendingSaves.size) throw new Error("Queued messages are still being saved. Keep Vivary open and retry closing.");
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -1243,12 +1271,16 @@ export async function sendVivaryCodeMessage(input: {
     recordProjectContextLoad(run, input.projectContext);
     input.recordProjectContext?.(input.projectContext);
   }
-  if (input.queued) takeQueuedSlot(input.queued);
-  updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
+  const admitted = updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
     metadata: { pendingLaunch: undefined, queuedTurn: undefined, discarded: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
+  if (!admitted) throw new Error("The coding conversation could not be saved.");
+  if (input.queued) takeQueuedSlot(input.queued);
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
+  // After the durable consume and synchronous slot claim, cleanup must not turn an accepted send into an error.
+  const consumed = input.queued;
+  if (consumed) await forgetQueuedPayload(consumed, admitted).catch(error => logQueuedPayloadFailure(consumed.runId, error));
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
 }
 
@@ -1990,7 +2022,7 @@ async function queueVivaryCodeTurn(input: VivaryCodeSendInput, record: () => Cod
   const run = record();
   const item: QueuedTurn = {
     runId: run.id, ownerEmail: input.ownerEmail, orgId: input.orgId, workspaceLabel: workspace.label,
-    message: input.message, engine: engineFromRun(run), model: modelFromRun(run),
+    payloadRevision: randomUUID(), engine: engineFromRun(run), model: modelFromRun(run),
     ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId, draftThreadId: input.draftThreadId } : {}),
     queuedAt: new Date().toISOString(), state: "queued", reason: null,
     // An acknowledgement covers the turns working in the folder now. A turn that starts while this one waits asks again.
@@ -2000,19 +2032,87 @@ async function queueVivaryCodeTurn(input: VivaryCodeSendInput, record: () => Cod
     restore: existing && !existing.metadata?.discarded ? { status: existing.status, phase: existing.phase ?? null } : null,
     input: { ...input, runId: run.id },
   };
+  // Publish the in-memory claim before the first await, so another send cannot use this conversation or overtake it.
+  // Drain and Cancel wait for the same save. No accepted queue entry depends only on process memory.
   hostState.queue.push(item);
-  persistQueuedTurn(item);
+  const saving = (async () => {
+    try {
+      const payload = queuedPayloadSchema.parse({ version: 1, revision: item.payloadRevision, runId: run.id,
+        ownerEmail: item.ownerEmail.toLowerCase(), orgId: item.orgId ?? null,
+        projectId: metadataString(run, "projectId"), message: input.message });
+      if (!await appStateCompareAndSet(item.ownerEmail, queuedPayloadKey(item, run), null, payload)) {
+        throw new Error("The queued message revision already exists.");
+      }
+      persistQueuedTurn(item);
+    } catch (error) {
+      item.state = "held";
+      item.input = null;
+      item.reason = "The queued message could not be saved. Cancel it and send it again.";
+      try {
+        const reverted = updateCodeAgentRunRecord(run.id, { status: item.restore?.status ?? "paused",
+          phase: item.restore?.phase ?? "paused", needsApproval: false,
+          metadata: { queuedTurn: undefined, ...(item.restore ? {} : { discarded: true }) } });
+        if (!reverted) throw new Error("The queued conversation could not be restored.");
+        const index = hostState.queue.indexOf(item);
+        if (index >= 0) hostState.queue.splice(index, 1);
+        await forgetQueuedPayload(item, reverted).catch(failure => logQueuedPayloadFailure(item.runId, failure));
+      } catch (failure) { logQueuedPayloadFailure(item.runId, failure); }
+      logQueuedPayloadFailure(item.runId, error);
+      fail("The queued message could not be saved. It has not started. Cancel it if listed, then send it again.", {
+        errorCode: "vivary_code_queue_save_failed", statusCode: 503,
+      });
+    }
+  })();
+  item.saving = saving;
+  try { await saving; }
+  finally { item.saving = undefined; drainCodeRunQueue(); }
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+}
+
+function queuedPayloadKey(item: QueuedTurn, run: CodeAgentRunRecord): string {
+  const binding = [item.ownerEmail.toLowerCase(), item.orgId ?? null, metadataString(run, "projectId"),
+    item.runId, item.payloadRevision];
+  return "vivary-code-queue-payload-v1:" + createHash("sha256").update(JSON.stringify(binding)).digest("hex");
+}
+
+async function readQueuedPayload(item: QueuedTurn, run: CodeAgentRunRecord) {
+  if (item.payloadRevision) {
+    const parsed = queuedPayloadSchema.safeParse(await appStateGet(item.ownerEmail, queuedPayloadKey(item, run)));
+    if (parsed.success && parsed.data.revision === item.payloadRevision && parsed.data.runId === run.id
+      && parsed.data.ownerEmail === item.ownerEmail.toLowerCase()
+      && parsed.data.orgId === (item.orgId ?? null) && parsed.data.projectId === metadataString(run, "projectId")
+      && isOwnedIdentity(run, item.ownerEmail, item.orgId)) return parsed.data;
+  }
+  fail(QUEUED_PAYLOAD_UNAVAILABLE, { errorCode: "vivary_code_queue_payload_unavailable", statusCode: 409 });
+}
+
+async function forgetQueuedPayload(item: QueuedTurn, run: CodeAgentRunRecord): Promise<void> {
+  if (!item.payloadRevision) return;
+  const key = queuedPayloadKey(item, run);
+  const current = await appStateGet(item.ownerEmail, key);
+  if (!current) return;
+  const parsed = queuedPayloadSchema.safeParse(current);
+  if (parsed.success && parsed.data.revision === item.payloadRevision && parsed.data.runId === run.id
+    && parsed.data.ownerEmail === item.ownerEmail.toLowerCase()
+    && parsed.data.orgId === (item.orgId ?? null) && parsed.data.projectId === metadataString(run, "projectId")
+    && isOwnedIdentity(run, item.ownerEmail, item.orgId)) {
+    await appStateCompareAndSet(item.ownerEmail, key, current, null);
+  }
+}
+
+function logQueuedPayloadFailure(runId: string, error: unknown): void {
+  console.error(`[vivary-code-host] queue-payload-write-failed run=${runId} ${error instanceof Error ? error.name : "unknown"}`);
 }
 
 /** Writes a queued turn to its run. A turn waiting for a slot reads as queued, and one waiting for the owner as paused. */
 function persistQueuedTurn(item: QueuedTurn): void {
   const waiting = item.state === "queued" || item.state === "starting";
-  const { message, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns, reason, restore } = item;
-  const stored: StoredQueuedTurn = { message, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns,
+  const { payloadRevision, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns, reason, restore } = item;
+  const stored: StoredQueuedTurn = { payloadRevision, engine, model, draftSubmitId, draftThreadId, queuedAt, acknowledgedTurns,
     state: waiting ? "queued" : item.state as VivaryCodeQueueState, reason, restore };
-  updateCodeAgentRunRecord(item.runId, { status: waiting ? "queued" : "paused", phase: waiting ? "queued" : item.state,
+  const saved = updateCodeAgentRunRecord(item.runId, { status: waiting ? "queued" : "paused", phase: waiting ? "queued" : item.state,
     needsApproval: false, metadata: { queuedTurn: stored, discarded: undefined } });
+  if (!saved) throw new Error("The queued conversation could not be saved.");
 }
 
 /** A queued turn passed its fresh checks and starts now, in the slot it reserved. */
@@ -2023,14 +2123,15 @@ function takeQueuedSlot(item: QueuedTurn): void {
 }
 
 /**
- * Starts queued turns, oldest first, while slots are free. A slot is reserved before the first await of the turn's
- * fresh checks, so a new send cannot take it meanwhile. Called when a run leaves, a turn is cancelled or started by the
- * owner, a start fails, or the limit changes. Never at host start or during shutdown, so neither starts queued work,
+ * Starts queued turns, oldest first, while slots are free. Only one turn runs its fresh admission checks at a time,
+ * so a later turn cannot claim first. Running workers remain concurrent. A slot is reserved before the first await,
+ * so a new send cannot take it meanwhile. Called when a run leaves, a turn is cancelled or started by the owner,
+ * a start fails, or the limit changes. Never at host start or during shutdown, so neither starts queued work,
  * and the next host start holds what is still queued.
  */
 function drainCodeRunQueue(): void {
-  if (hostState.closing) return;
-  while (freeCodeRunSlots() > 0) {
+  if (hostState.closing || hostState.queue.some(item => item.saving || item.state === "starting")) return;
+  if (freeCodeRunSlots() > 0) {
     const next = hostState.queue.find(item => item.state === "queued" && item.input && !item.cancelling);
     if (!next?.input) return;
     next.state = "starting";
@@ -2045,7 +2146,12 @@ function drainCodeRunQueue(): void {
  * the turn with its reason, so the message is never lost.
  */
 async function startQueuedTurn(item: QueuedTurn, input: VivaryCodeSendInput): Promise<void> {
-  try { await sendVivaryCodeMessage({ ...input, queued: item }); }
+  try {
+    const run = getCodeAgentRunRecord(item.runId);
+    if (!run) throw new Error(QUEUED_PAYLOAD_UNAVAILABLE);
+    const payload = await readQueuedPayload(item, run);
+    await sendVivaryCodeMessage({ ...input, message: payload.message, queued: item });
+  }
   catch (error) {
     if (hostState.queue.includes(item)) {
       if (item.state === "starting") hostState.reserved -= 1;
@@ -2066,11 +2172,17 @@ function restoreHeldQueue(): void {
   const held: QueuedTurn[] = [];
   for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
     if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER || hostState.queue.some(item => item.runId === run.id)) continue;
-    const stored = run.metadata?.queuedTurn as StoredQueuedTurn | undefined;
-    if (!stored || typeof stored.message !== "string") continue;
-    held.push({ ...stored, acknowledgedTurns: Array.isArray(stored.acknowledgedTurns) ? stored.acknowledgedTurns : [],
+    if (!run.metadata?.queuedTurn) continue;
+    const parsed = storedQueuedTurnSchema.safeParse(run.metadata.queuedTurn);
+    const stored: StoredQueuedTurn = parsed.success ? parsed.data : {
+      engine: engineFromRun(run), model: modelFromRun(run), queuedAt: run.updatedAt,
+      acknowledgedTurns: [], state: "held", reason: QUEUED_PAYLOAD_UNAVAILABLE, restore: null,
+    };
+    // Legacy metadata text may already contain credential placeholders. It is never executable input or a draft source.
+    held.push({ ...stored,
       runId: run.id, ownerEmail: metadataString(run, "ownerEmail") ?? "", orgId: metadataString(run, "orgId") ?? undefined,
-      workspaceLabel: path.basename(run.cwd), state: "held", reason: null, input: null });
+      workspaceLabel: path.basename(run.cwd), state: "held",
+      reason: stored.payloadRevision ? null : QUEUED_PAYLOAD_UNAVAILABLE, input: null });
   }
   held.sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
   for (const item of held) {
@@ -2080,7 +2192,7 @@ function restoreHeldQueue(): void {
 }
 
 /** What Cancel removed, so the action can put the message back in the conversation's draft. */
-export type CancelledQueuedTurn = { runId: string; projectId: string | null; message: string; draftThreadId?: string;
+export type CancelledQueuedTurn = { runId: string; projectId: string | null; message: string | null; draftThreadId?: string;
   draftSubmitId?: string };
 
 function requireOwnedQueuedTurn(input: { ownerEmail: string; orgId?: string; runId: string; projectId?: string }) {
@@ -2104,41 +2216,57 @@ export async function cancelQueuedVivaryCodeTurn(input: {
 }): Promise<CancelledQueuedTurn & { restored: boolean }> {
   await ensureVivaryCodeHostInitialized();
   const { item, run } = requireOwnedQueuedTurn(input);
-  if (item.state === "starting") {
-    item.stopRequested = true;
-    await item.starting;
-    if (!hostState.queue.includes(item)) {
-      fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
-    }
-  }
   if (item.cancelling) {
     fail("That queued message is already being cancelled.", { errorCode: "vivary_code_queue_cancelling", statusCode: 409 });
   }
-  const cancelled: CancelledQueuedTurn = { runId: item.runId, projectId: metadataString(run, "projectId"),
-    message: item.message, draftThreadId: item.draftThreadId, draftSubmitId: item.draftSubmitId };
   item.cancelling = true;
-  let restored = false;
-  try { restored = input.restore ? await input.restore(cancelled) : false; }
-  catch (error) {
+  item.stopRequested = true;
+  try {
+    if (item.saving) await item.saving.catch(() => undefined);
+    if (item.state === "starting") await item.starting;
+    if (!hostState.queue.includes(item)) {
+      fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
+    }
+    // Cancel can discard an irrecoverable legacy entry. Its unverified text must never replace a good draft.
+    const payload = await readQueuedPayload(item, run).catch(() => null);
+    const cancelled: CancelledQueuedTurn = { runId: item.runId, projectId: metadataString(run, "projectId"),
+      message: payload?.message ?? null, draftThreadId: item.draftThreadId, draftSubmitId: item.draftSubmitId };
+    const restored = input.restore ? await input.restore(cancelled) : false;
+    let cancelledRun: CodeAgentRunRecord;
+    try {
+      const saved = updateCodeAgentRunRecord(item.runId, { status: item.restore?.status ?? "paused",
+        phase: item.restore?.phase ?? "paused", needsApproval: false,
+        metadata: { queuedTurn: undefined, ...(item.restore ? {} : { discarded: true }) } });
+      if (!saved) throw new Error("The queued cancellation could not be saved.");
+      cancelledRun = saved;
+    } catch (error) {
+      // The draft may already contain this message. Do not execute it automatically after a failed cancellation.
+      item.state = "held";
+      item.input = null;
+      item.reason = "The cancellation could not be saved. Retry Cancel, or choose Start to send the queued message.";
+      try { persistQueuedTurn(item); }
+      catch (failure) { logQueuedPayloadFailure(item.runId, failure); }
+      throw error;
+    }
+    hostState.queue.splice(hostState.queue.indexOf(item), 1);
+    await forgetQueuedPayload(item, cancelledRun).catch(error => logQueuedPayloadFailure(item.runId, error));
+    return { ...cancelled, restored };
+  } finally {
     item.cancelling = false;
     item.stopRequested = false;
     drainCodeRunQueue();
-    throw error;
   }
-  hostState.queue.splice(hostState.queue.indexOf(item), 1);
-  updateCodeAgentRunRecord(item.runId, { status: item.restore?.status ?? "paused", phase: item.restore?.phase ?? "paused",
-    needsApproval: false, metadata: { queuedTurn: undefined, ...(item.restore ? {} : { discarded: true }) } });
-  drainCodeRunQueue();
-  return { ...cancelled, restored };
 }
 
 /** The stored message of a queued turn, which the action sends again with fresh project checks. */
 export async function readQueuedVivaryCodeTurn(input: {
   ownerEmail: string; orgId?: string; runId: string; projectId?: string;
-}): Promise<Pick<StoredQueuedTurn, "message" | "engine" | "model" | "draftSubmitId" | "draftThreadId">> {
+}): Promise<{ message: string } & Pick<StoredQueuedTurn, "engine" | "model" | "draftSubmitId" | "draftThreadId">> {
   await ensureVivaryCodeHostInitialized();
-  const { item } = requireOwnedQueuedTurn(input);
-  const { message, engine, model, draftSubmitId, draftThreadId } = item;
+  const { item, run } = requireOwnedQueuedTurn(input);
+  if (item.saving) await item.saving;
+  const { message } = await readQueuedPayload(item, run);
+  const { engine, model, draftSubmitId, draftThreadId } = item;
   return { message, engine, model, draftSubmitId, draftThreadId };
 }
 
@@ -2151,17 +2279,31 @@ export async function resumeQueuedVivaryCodeTurn(input: VivaryCodeSendInput & { 
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
   const canonicalRoot = await canonicalFolder(workspace.root);
-  const { item } = requireOwnedQueuedTurn({ ...input, projectId: workspace.projectId });
+  const { item, run } = requireOwnedQueuedTurn({ ...input, projectId: workspace.projectId });
   if (item.state === "queued" || item.state === "starting") {
+    fail("That message is already waiting for a slot.", { errorCode: "vivary_code_queue_waiting", statusCode: 409 });
+  }
+  const { message } = await readQueuedPayload(item, run);
+  const current = queuedTurnFor(input.runId);
+  if (current !== item || current.cancelling) {
+    fail("That queued message was not found.", { errorCode: "vivary_code_queue_not_found", statusCode: 404 });
+  }
+  if (current.state === "queued" || current.state === "starting") {
     fail("That message is already waiting for a slot.", { errorCode: "vivary_code_queue_waiting", statusCode: 409 });
   }
   const { proceed, ...send } = input;
   if (proceed) item.acknowledgedTurns = runsInFolder(canonicalRoot, input.ownerEmail, input.orgId).map(run => run.turnId);
   item.stopRequested = false;
-  item.input = { ...send, workspace, runId: item.runId };
+  item.input = { ...send, message, workspace, runId: item.runId };
   item.state = "queued";
   item.reason = null;
-  persistQueuedTurn(item);
+  try { persistQueuedTurn(item); }
+  catch (error) {
+    item.state = "held";
+    item.input = null;
+    item.reason = "The queued message could not be saved. Try Start again.";
+    throw error;
+  }
   drainCodeRunQueue();
   return getVivaryCodeState(input.ownerEmail, item.runId, workspace, input.orgId);
 }

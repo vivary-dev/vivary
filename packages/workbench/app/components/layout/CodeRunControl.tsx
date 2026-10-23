@@ -134,7 +134,7 @@ export function CodeRunControl() {
             ? "Agent work completed" : recent.status === "errored"
               ? "Agent work failed" : "Agent work stopped"} in {projectLabel(recent.projectId)}: {recent.title}</span>
       <Button variant="ghost" size="sm" onClick={() => void openConversation(recent)}>Open conversation</Button>
-    </div> : !runs.length && <div className="flex items-center gap-2">
+    </div> : !runs.length && status.error && <div className="flex items-center gap-2">
       <span role="status">Agent status could not be loaded.</span>
       <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>Retry</Button>
     </div>}

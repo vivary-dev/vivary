@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import fs, { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 // Concurrent Code conversations. Several conversations run at once, in one project or many, with Claude Code and
 // Codex side by side. One conversation runs one turn at a time. A send beside another agent in an overlapping folder
@@ -40,6 +42,9 @@ const { getVivaryRuntimeStatus } = await import("../server/local-runtime-setup.t
 const { SHARED_FOLDER_WARNING } = await import("../shared/code-concurrency.ts");
 const { getCodeAgentRunRecord, listCodeAgentRunRecords, listCodeAgentTranscriptEvents, updateCodeAgentRunRecord } =
   await import("@agent-native/core/code-agents");
+const { appStateGet, appStateList, appStateCompareAndSet } = await import("@agent-native/core/application-state");
+const { getDbExec } = await import("@agent-native/core/db");
+const QUEUE_PAYLOAD_PREFIX = "vivary-code-queue-payload-v1:";
 type Workspace = { root: string; label: string; projectId?: string; bindingId?: string; rootId?: string; bindingRevision?: number };
 const host = () => Reflect.get(globalThis, Symbol.for("vivary.workbench.code-host")) as {
   activeRuns: Map<string, { execution: Promise<void> | null }> };
@@ -202,8 +207,11 @@ test("Claude Code and Codex conversations run in one project with their own appr
 
     // Each worker received its own conversation's request, and each transcript holds only its own messages.
     const starts = (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    assert.deepEqual(starts.map(start => [start.runId, start.prompt, start.model]), [[claude, "Claude works here", "claude-sonnet-5-5"],
-      [first, "Ask from Codex first", "gpt-6-astra"], [second, "Ask from Codex second", "gpt-6-astra"]]);
+    const expectedStarts = [[claude, "Claude works here", "claude-sonnet-5-5"],
+      [first, "Ask from Codex first", "gpt-6-astra"], [second, "Ask from Codex second", "gpt-6-astra"]];
+    // Independent workers receive IPC in any order; host admission order is asserted above.
+    const byRunId = (left: string[], right: string[]) => left[0]!.localeCompare(right[0]!);
+    assert.deepEqual(starts.map(start => [start.runId, start.prompt, start.model]).sort(byRunId), expectedStarts.sort(byRunId));
     for (const [runId, message] of [[claude, "Claude works here"], [first, "Ask from Codex first"], [second, "Ask from Codex second"]]) {
       assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.message), [message]);
     }
@@ -230,11 +238,26 @@ test("two simultaneous sends into one conversation start one turn", { timeout: 6
       await waitFor(async () => await starts() >= 2, "the started turn's worker");
       await delay(250);
       assert.equal(await starts(), 2, "one worker started for the two sends");
-      // A stopping turn still holds its conversation.
-      await agent.stopVivaryCodeRun({ ...owner, runId, projectId: workspace.projectId });
-      if (host().activeRuns.has(runId)) {
+      // Hold signal delivery while checking the real Stop transition. The worker cannot exit between Stop and Send.
+      const running = host().activeRuns.get(runId);
+      assert.ok(running);
+      const controller: unknown = Reflect.get(running, "controller");
+      assert.ok(controller instanceof AbortController);
+      const abort = controller.abort;
+      let abortRequests = 0;
+      controller.abort = () => { abortRequests += 1; };
+      try {
+        await agent.stopVivaryCodeRun({ ...owner, runId, projectId: workspace.projectId });
+        assert.equal(abortRequests, 1, "Stop requests signal delivery once");
+        assert.equal(Reflect.get(running, "stopReason"), "user");
+        assert.equal(getCodeAgentRunRecord(runId)?.phase, "stopping");
+        assert.equal(host().activeRuns.get(runId), running, "the stopping worker still owns its conversation");
         await assert.rejects(send(workspace, "While stopping", { runId }),
           { errorCode: "vivary_code_conversation_active", message: /still stopping/ });
+      } finally {
+        controller.abort = abort;
+        controller.abort();
+        await running.execution;
       }
     } finally { await settle(runId); }
   });
@@ -376,6 +399,46 @@ const userMessages = (runId: string) => listCodeAgentTranscriptEvents(runId).fil
 const startedRuns = async (fixture: string) => (await readFile(path.join(fixture, "starts.jsonl"), "utf8").catch(() => ""))
   .trim().split("\n").filter(Boolean).map(line => JSON.parse(line).runId as string);
 
+async function withQueueRedaction(work: (secret: string) => Promise<void>) {
+  const redaction = await import("../server/credential-redaction.ts");
+  const { setTextRedactor } = await import("@agent-native/core/audit");
+  const previousToken = process.env.VIVARY_PROBE_TOKEN; // guard:allow-env-credential - Preserve the generated test-token slot.
+  const generated = randomBytes(24).toString("hex");
+  process.env.VIVARY_PROBE_TOKEN = generated; // guard:allow-env-credential - Synthetic credential proves the real redactor runs.
+  setTextRedactor(redaction.redactCredentials);
+  try {
+    await redaction.refreshHeldCredentials({ environment: () => ({ VIVARY_PROBE_TOKEN: generated }),
+      mcpConfig: () => null, storedSecrets: async () => [] });
+    await work(generated);
+  } finally {
+    // Keep the production redactor installed and restore the fixture's prior environment.
+    setTextRedactor(redaction.redactCredentials);
+    if (previousToken === undefined) delete process.env.VIVARY_PROBE_TOKEN; // guard:allow-env-credential - Restore the prior slot.
+    else process.env.VIVARY_PROBE_TOKEN = previousToken; // guard:allow-env-credential - Restore without printing a value.
+  }
+}
+
+for (const mode of ["save", "timeout"]) {
+  test(`shutdown ${mode === "timeout" ? "refuses a timed-out save and can retry" : "waits for the initial payload save"}; a new process resumes exact bytes`, {
+    timeout: 90_000, skip: process.platform === "win32",
+  }, async () => {
+    const { fixture } = await ipcFixture(`queue-lifecycle-${mode}`);
+    await folders(fixture, "running", "queued");
+    const token = randomBytes(24).toString("hex");
+    const database = `file:${path.join(fixture, "restart.sqlite")}`;
+    const child = promisify(execFile);
+    for (const stage of [mode, "resume"]) {
+      const { stdout } = await child(process.execPath, ["--import", import.meta.resolve("tsx"),
+        path.join(workbench, "tests", "fixtures", "code-queue-lifecycle.ts"), stage, fixture, token], {
+        cwd: fixture, timeout: 40_000, maxBuffer: 1024 * 1024,
+        env: { ...process.env, DATABASE_URL: database, DATABASE_URL_UNPOOLED: database, // guard:allow-env-credential - Disposable child database, never a user's store.
+          AGENT_NATIVE_CODE_AGENTS_HOME: path.join(fixture, "code-store") },
+      });
+      assert.match(stdout, new RegExp(`QUEUE_LIFECYCLE_OK ${stage}`));
+    }
+  });
+}
+
 test("a full host queues sends and starts them first in, first out as slots free", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { fixture } = await ipcFixture("capacity-fifo");
@@ -406,6 +469,75 @@ test("a full host queues sends and starts them first in, first out as slots free
     assert.deepEqual(userMessages(runC), ["Work in c"]);
   } finally { await endAll(runs); }
 });
+
+for (const sameFolder of [false, true]) {
+  test(`queued admission stays FIFO through asynchronous checks in ${sameFolder ? "one folder" : "separate folders"}`, {
+    timeout: 60_000, skip: process.platform === "win32",
+  }, async () => {
+    const label = sameFolder ? "async-fifo-shared" : "async-fifo-separate";
+    const { fixture } = await ipcFixture(label);
+    const [runningFolder, olderFolder, newerFolder] = await folders(fixture, "running", "older", "newer");
+    const olderWorkspace = project(olderFolder, `${label}_older`);
+    const newerWorkspace = sameFolder ? olderWorkspace : project(newerFolder, `${label}_newer`);
+    let holdOlder = false;
+    let olderEntered = false;
+    let releaseOlder = () => {};
+    const olderGate = new Promise<void>(resolve => { releaseOlder = resolve; });
+    const runs: string[] = [];
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    try {
+      const running = await send(project(runningFolder, `${label}_running`), "Keep working");
+      assert.ok(running.run);
+      runs.push(running.run.id);
+      const first = await send(olderWorkspace, "Older queued request", {
+        revalidateWorkspace: async () => {
+          if (holdOlder) {
+            olderEntered = true;
+            await olderGate;
+          }
+          return olderWorkspace;
+        },
+      });
+      assert.ok(first.run);
+      const older = first.run.id;
+      runs.push(older);
+      const second = await send(newerWorkspace, "Newer queued request");
+      assert.ok(second.run);
+      const newer = second.run.id;
+      runs.push(newer);
+
+      holdOlder = true;
+      await agent.setVivaryCodeRunCapacity({ limit: 3, whenFull: "queue" });
+      await waitFor(() => olderEntered, "the older queued turn to enter its fresh checks");
+      const later = capacityHost().queue.find(item => item !== null && typeof item === "object"
+        && "runId" in item && item.runId === newer);
+      assert.ok(later !== null && typeof later === "object" && "state" in later,
+        "the later turn remains in the queue while the older turn is admitted");
+      assert.equal(later.state, "queued", "later admission waits for the older turn to claim or be held");
+      assert.equal(capacityHost().activeRuns.has(newer), false);
+
+      releaseOlder();
+      await waitFor(() => capacityHost().activeRuns.has(older), "the older queued turn to claim first");
+      if (sameFolder) {
+        const waiting = await waitFor(async () =>
+          (await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns
+            .find(item => item.id === newer && item.state === "needs-confirmation"),
+        "the newer turn to confirm sharing the older turn's folder");
+        assert.equal(waiting.reason, SHARED_FOLDER_WARNING);
+        assert.equal(capacityHost().activeRuns.has(newer), false);
+        assert.equal(capacityHost().activeRuns.size, 2);
+      } else {
+        await waitFor(() => capacityHost().activeRuns.has(newer), "the newer queued turn to claim its slot");
+        assert.deepEqual([...capacityHost().activeRuns.keys()].filter(id => id === older || id === newer),
+          [older, newer], "fresh admission preserves queue order");
+        assert.equal(capacityHost().activeRuns.size, 3, "serial admission keeps running workers concurrent");
+      }
+    } finally {
+      releaseOlder();
+      await endAll(runs);
+    }
+  });
+}
 
 test("Cancel removes a queued message, starts nothing, and puts the message back in its draft", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
@@ -490,11 +622,308 @@ test("a restart holds the queue until the owner starts it", { timeout: 60_000, s
     await delay(250);
     assert.equal(capacityHost().activeRuns.has(queued), false, "a restart starts nothing on its own");
 
-    await agent.resumeQueuedVivaryCodeTurn({ ...owner, workspace, revalidateWorkspace: async () => workspace,
-      message: "Queued before the restart", engine: "claude-cli", model: "claude-sonnet-5-5", runId: queued, proceed: false });
+    const stored = await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+    await agent.resumeQueuedVivaryCodeTurn({ ...owner, ...stored, workspace, revalidateWorkspace: async () => workspace,
+      runId: queued, proceed: false });
     await waitFor(() => capacityHost().activeRuns.has(queued), "the owner's Start");
     assert.deepEqual(userMessages(queued), ["Queued before the restart"]);
   } finally { await endAll(runs); }
+});
+
+for (const source of ["api", "pending-draft"]) {
+  test(`a ${source} queue reload keeps exact private bytes while Core redacts its audit record`, { timeout: 60_000,
+    skip: process.platform === "win32" }, async () => {
+    await withQueueRedaction(async secret => {
+      const { fixture } = await ipcFixture(`capacity-exact-${source}`);
+      const [a, b] = await folders(fixture, "a", "b");
+      const workspace = project(b, `exact_${source}_b`);
+      const { runWithRequestContext } = await import("@agent-native/core/server");
+      const { changeIndexedChatDraft, createCodeDraftIdentity, readChatDraft } = await import("../server/chat-draft.ts");
+      const asOwner = <T>(work: () => Promise<T>) => runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, work);
+      const identity = createCodeDraftIdentity(owner.ownerEmail, owner.orgId, workspace.projectId ?? null);
+      const threadId = `vivary-code:project:${workspace.projectId}:exact-queued-draft`;
+      const submitId = "d6a615ac-26db-492b-8262-82ee357d4cb6";
+      const message = `Use ${secret}\r\nKeep  the tabs\tand trailing spaces.  `;
+      await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+      const runs: string[] = [];
+      try {
+        runs.push((await send(project(a, `exact_${source}_a`), "Work in a")).run!.id);
+        if (source === "pending-draft") {
+          await asOwner(() => changeIndexedChatDraft(identity, threadId, null, { text: message, status: "pending", submitId }));
+        }
+        const queued = (await send(workspace, message, source === "pending-draft"
+          ? { draftSubmitId: submitId, draftThreadId: threadId } : {})).run!.id;
+        runs.push(queued);
+        const record = getCodeAgentRunRecord(queued);
+        assert.ok(record);
+        assert.equal(JSON.stringify(record).includes(secret), false, "Core still redacts the queued run record");
+        capacityHost().queue.length = 0;
+        capacityHost().initialization = null;
+        const restarted = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+        assert.equal(restarted.queuedRuns.find(value => value.id === queued)?.state, "held");
+        await settle(runs[0]);
+        assert.equal(capacityHost().activeRuns.has(queued), false, "reload does not start the queued turn");
+        assert.equal((await startedRuns(fixture)).includes(queued), false);
+        const stored = await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+        assert.equal(stored.message === message, true, "the action reads the original private payload after reload");
+        const queuedMetadata = record?.metadata?.queuedTurn;
+        assert.ok(queuedMetadata && typeof queuedMetadata === "object" && !Array.isArray(queuedMetadata));
+        assert.equal("message" in queuedMetadata, false, "audit metadata stores no original prompt");
+        const revision = Reflect.get(queuedMetadata, "payloadRevision");
+        assert.ok(typeof revision === "string");
+        assert.match(revision, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+        const row = (await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX)).find(value => value.value.runId === queued);
+        assert.ok(row, "the queue acknowledgement has a durable private payload");
+        assert.deepEqual(Object.keys(row.value).sort(),
+          ["version", "revision", "runId", "ownerEmail", "orgId", "projectId", "message"].sort());
+        assert.deepEqual([row.value.version, row.value.revision, row.value.runId, row.value.ownerEmail,
+          row.value.orgId, row.value.projectId], [1, revision, queued, owner.ownerEmail.toLowerCase(), owner.orgId, workspace.projectId]);
+        assert.equal(row.value.message === message, true, "private storage preserves the submitted bytes");
+        if (source === "pending-draft") {
+          const pending = await asOwner(() => readChatDraft(identity, threadId));
+          assert.equal(pending?.text === message, true);
+          await asOwner(() => changeIndexedChatDraft(identity, threadId, pending,
+            { text: "A newer composer draft must not execute", status: "draft", submitId: null }));
+        }
+        await agent.resumeQueuedVivaryCodeTurn({ ...owner, ...stored, workspace,
+          revalidateWorkspace: async () => workspace, runId: queued, proceed: false });
+        await waitFor(async () => (await startedRuns(fixture)).includes(queued), "the exact payload to reach the worker");
+        const starts: unknown[] = (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n")
+          .map(line => JSON.parse(line));
+        const started = starts.find(value => value !== null && typeof value === "object" && "runId" in value && value.runId === queued);
+        assert.ok(started && typeof started === "object" && "prompt" in started);
+        assert.equal(started.prompt === message, true, "the worker receives the original exact bytes");
+        assert.equal(JSON.stringify(listCodeAgentTranscriptEvents(queued)).includes(secret), false,
+          "executing the private payload does not disable transcript redaction");
+        await waitFor(async () => await appStateGet(owner.ownerEmail, row.key) === null, "consumed exact payload cleanup");
+      } finally { await endAll(runs); }
+    });
+  });
+}
+
+test("Start uses the stored queued payload instead of replacement caller text", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-stored-source");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "stored_source_b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "stored_source_a"), "Work in a")).run!.id);
+    const message = "The original queued request\nKeep its final line.";
+    const queued = (await send(workspace, message)).run!.id;
+    runs.push(queued);
+    capacityHost().queue.length = 0;
+    capacityHost().initialization = null;
+    await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    await settle(runs[0]);
+    const stored = await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+    await agent.resumeQueuedVivaryCodeTurn({ ...owner, ...stored, workspace, revalidateWorkspace: async () => workspace,
+      message: "A stale or forged replacement request", runId: queued, proceed: false });
+    await waitFor(async () => (await startedRuns(fixture)).includes(queued), "the stored request to reach the worker");
+    const starts: unknown[] = (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    const started = starts.find(value => value !== null && typeof value === "object" && "runId" in value && value.runId === queued);
+    assert.ok(started && typeof started === "object" && "prompt" in started);
+    assert.equal(started.prompt, message);
+    assert.deepEqual(userMessages(queued), [message]);
+  } finally { await endAll(runs); }
+});
+
+test("missing, invalid, or differently scoped queued payloads cannot start a worker", { timeout: 120_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-unavailable-payload");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "unavailable_b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "unavailable_a"), "Work in a")).run!.id);
+    for (const mode of ["missing", "message", "ownerEmail", "orgId", "projectId", "revision", "runId"]) {
+      const queued = (await send(workspace, `Original request for ${mode}`)).run!.id;
+      runs.push(queued);
+      const row = (await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX)).find(value => value.value.runId === queued);
+      assert.ok(row, "the accepted queue has a private payload");
+      const damaged = mode === "missing" ? null : { ...row.value,
+        [mode]: mode === "message" ? 19 : `different-${mode}` };
+      assert.equal(await appStateCompareAndSet(owner.ownerEmail, row.key, row.value, damaged), true);
+      try {
+        capacityHost().queue.length = 0;
+        capacityHost().initialization = null;
+        await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+        await assert.rejects(agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId }),
+          { errorCode: "vivary_code_queue_payload_unavailable", statusCode: 409 }, mode);
+        await assert.rejects(agent.resumeQueuedVivaryCodeTurn({ ...owner, workspace,
+          revalidateWorkspace: async () => workspace, message: `Original request for ${mode}`,
+          engine: "claude-cli", model: "claude-sonnet-5-5", runId: queued, proceed: false }),
+        { errorCode: "vivary_code_queue_payload_unavailable", statusCode: 409 }, mode);
+        assert.equal(capacityHost().activeRuns.has(queued), false);
+        assert.equal((await startedRuns(fixture)).includes(queued), false, `${mode} starts no worker`);
+        assert.deepEqual(userMessages(queued), []);
+      } finally {
+        assert.equal(await appStateCompareAndSet(owner.ownerEmail, row.key, damaged, row.value), true);
+        await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+      }
+    }
+  } finally { await endAll(runs); }
+});
+
+test("queued payload reads and Start preserve request owner, organization, and project boundaries", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-payload-request-scope");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "payload_scope_b");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "payload_scope_a"), "Work in a")).run!.id);
+    const queued = (await send(workspace, "Private queued words")).run!.id;
+    runs.push(queued);
+    capacityHost().queue.length = 0;
+    capacityHost().initialization = null;
+    await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    const requests = [
+      { ...owner, ownerEmail: "other@example.test", projectId: workspace.projectId },
+      { ...owner, orgId: "other-org", projectId: workspace.projectId },
+      { ...owner, projectId: "other-project" },
+    ];
+    for (const request of requests) {
+      await assert.rejects(agent.readQueuedVivaryCodeTurn({ ...request, runId: queued }), { statusCode: 404 });
+      await assert.rejects(agent.resumeQueuedVivaryCodeTurn({ ...request,
+        workspace: { ...workspace, projectId: request.projectId }, revalidateWorkspace: async () => workspace,
+        message: "Private queued words", engine: "claude-cli", model: "claude-sonnet-5-5", runId: queued, proceed: false }),
+      { statusCode: 404 });
+    }
+    assert.equal(capacityHost().activeRuns.has(queued), false);
+    assert.equal((await startedRuns(fixture)).includes(queued), false);
+    assert.deepEqual(userMessages(queued), []);
+    const stored = await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+    assert.equal(stored.message, "Private queued words", "rejected requests leave the original payload intact");
+  } finally { await endAll(runs); }
+});
+
+test("Cancel and successful Start remove only their matching private payload rows", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-payload-cleanup");
+  const [a, b, c] = await folders(fixture, "a", "b", "c");
+  await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+  const runs: string[] = [];
+  try {
+    runs.push((await send(project(a, "payload_cleanup_a"), "Work in a")).run!.id);
+    const cancelled = (await send(project(b, "payload_cleanup_b"), "Cancel these words")).run!.id;
+    const started = (await send(project(c, "payload_cleanup_c"), "Start these words")).run!.id;
+    runs.push(cancelled, started);
+    const rows = await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX);
+    const cancelledRow = rows.find(value => value.value.runId === cancelled);
+    const startedRow = rows.find(value => value.value.runId === started);
+    assert.ok(cancelledRow);
+    assert.ok(startedRow);
+    const result = await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: cancelled, projectId: "payload_cleanup_b" });
+    assert.equal(result.message, "Cancel these words");
+    assert.equal(await appStateGet(owner.ownerEmail, cancelledRow.key), null);
+    assert.deepEqual(await appStateGet(owner.ownerEmail, startedRow.key), startedRow.value,
+      "Cancel preserves another queued turn's exact payload");
+    await settle(runs[0]);
+    await waitFor(async () => (await startedRuns(fixture)).includes(started), "the remaining turn to start");
+    await waitFor(async () => await appStateGet(owner.ownerEmail, startedRow.key) === null, "consumed payload cleanup");
+    assert.deepEqual(userMessages(started), ["Start these words"]);
+  } finally { await endAll(runs); }
+});
+
+test("a failed durable queue save rejects admission and preserves the pending draft", { timeout: 60_000,
+  skip: process.platform === "win32" }, async () => {
+  const { fixture } = await ipcFixture("capacity-payload-save-fails");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "durable_save_b");
+  const { runWithRequestContext } = await import("@agent-native/core/server");
+  const { changeIndexedChatDraft, createCodeDraftIdentity, readChatDraft } = await import("../server/chat-draft.ts");
+  const asOwner = <T>(work: () => Promise<T>) => runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, work);
+  const identity = createCodeDraftIdentity(owner.ownerEmail, owner.orgId, workspace.projectId ?? null);
+  const threadId = "vivary-code:project:durable_save_b:queued-draft";
+  const submitId = "126f8168-4d72-46e2-b447-c5a33c5e3d42";
+  const runs: string[] = [];
+  const databaseExecutor = getDbExec();
+  let triggerInstalled = false;
+  try {
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    runs.push((await send(project(a, "durable_save_a"), "Work in a")).run!.id);
+    await waitFor(async () => (await startedRuns(fixture)).includes(runs[0]), "the occupying worker to start");
+    await asOwner(() => changeIndexedChatDraft(identity, threadId, null,
+      { text: "Keep the pending draft if storage fails", status: "pending", submitId }));
+    const before = await asOwner(() => readChatDraft(identity, threadId));
+    const payloadsBefore = await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX);
+    await databaseExecutor.execute(`CREATE TRIGGER vivary_queue_payload_save_failure BEFORE INSERT ON application_state
+      WHEN NEW.key GLOB 'vivary-code-queue-payload-v1:*'
+      BEGIN SELECT RAISE(FAIL, 'fixture queue payload write refused'); END`);
+    triggerInstalled = true;
+    await assert.rejects(send(workspace, "Keep the pending draft if storage fails",
+      { draftSubmitId: submitId, draftThreadId: threadId }),
+    { errorCode: "vivary_code_queue_save_failed", statusCode: 503 });
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual(state.queuedRuns, [], "a failed durable write acknowledges no queued turn");
+    assert.equal(capacityHost().reserved, 0);
+    assert.deepEqual(await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX), payloadsBefore);
+    assert.deepEqual(await asOwner(() => readChatDraft(identity, threadId)), before);
+    assert.deepEqual(await startedRuns(fixture), [runs[0]], "the failed queued send starts no worker");
+    assert.equal(listCodeAgentRunRecords("vivary-local-code").some(run => run.metadata?.projectId === workspace.projectId
+      && run.metadata?.queuedTurn !== undefined), false, "no run record claims a durable queued payload");
+  } finally {
+    if (triggerInstalled) await databaseExecutor.execute("DROP TRIGGER vivary_queue_payload_save_failure");
+    await endAll(runs);
+  }
+});
+
+test("Cancel with a missing, corrupt, or legacy payload restores only the matching intact pending draft", { timeout: 120_000,
+  skip: process.platform === "win32" }, async () => {
+  await withQueueRedaction(async secret => {
+    const { fixture } = await ipcFixture("capacity-unavailable-draft-cancel");
+    const [a, b] = await folders(fixture, "a", "b");
+    const workspace = project(b, "safe_cancel_b");
+    const { runWithRequestContext } = await import("@agent-native/core/server");
+    const { changeIndexedChatDraft, createCodeDraftIdentity, readChatDraft } = await import("../server/chat-draft.ts");
+    const { restoreQueuedCodeDraft } = await import("../server/code-queue-draft.ts");
+    const asOwner = <T>(work: () => Promise<T>) => runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, work);
+    const identity = createCodeDraftIdentity(owner.ownerEmail, owner.orgId, workspace.projectId ?? null);
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    const runs: string[] = [];
+    try {
+      runs.push((await send(project(a, "safe_cancel_a"), "Work in a")).run!.id);
+      for (const mode of ["missing", "corrupt", "legacy"]) {
+        const message = `Keep ${secret} for ${mode}\nOriginal draft text.`;
+        const threadId = `vivary-code:project:safe_cancel_b:${mode}-queued-draft`;
+        const submitId = "a34d9825-7cef-43dc-988b-90bd5b8b1161";
+        await asOwner(() => changeIndexedChatDraft(identity, threadId, null, { text: message, status: "pending", submitId }));
+        const queued = (await send(workspace, message, { draftSubmitId: submitId, draftThreadId: threadId })).run!.id;
+        runs.push(queued);
+        const row = (await appStateList(owner.ownerEmail, QUEUE_PAYLOAD_PREFIX)).find(value => value.value.runId === queued);
+        assert.ok(row);
+        if (mode === "legacy") {
+          const queuedMetadata = getCodeAgentRunRecord(queued)?.metadata?.queuedTurn;
+          assert.ok(queuedMetadata && typeof queuedMetadata === "object" && !Array.isArray(queuedMetadata));
+          updateCodeAgentRunRecord(queued, { metadata: { queuedTurn: { ...queuedMetadata,
+            payloadRevision: undefined, message: "[redacted VIVARY_PROBE_TOKEN]" } } });
+        } else {
+          const damaged = mode === "missing" ? null : { ...row.value, message: 19 };
+          assert.equal(await appStateCompareAndSet(owner.ownerEmail, row.key, row.value, damaged), true);
+        }
+        capacityHost().queue.length = 0;
+        capacityHost().initialization = null;
+        const restarted = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+        assert.equal(restarted.queuedRuns.find(value => value.id === queued)?.state, "held");
+        await assert.rejects(agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId }),
+          { errorCode: "vivary_code_queue_payload_unavailable", statusCode: 409 }, mode);
+        const cancelled = await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId,
+          restore: value => asOwner(() => restoreQueuedCodeDraft(owner.ownerEmail, owner.orgId, value)) });
+        assert.equal(cancelled.restored, true);
+        const restored = await asOwner(() => readChatDraft(identity, threadId));
+        assert.deepEqual([restored?.status, restored?.submitId], ["draft", null]);
+        assert.equal(restored?.text === message, true, `${mode} never replaces the good draft with a placeholder`);
+        assert.equal(capacityHost().activeRuns.has(queued), false);
+        assert.equal((await startedRuns(fixture)).includes(queued), false);
+        assert.deepEqual(userMessages(queued), []);
+      }
+    } finally { await endAll(runs); }
+  });
 });
 
 test("a queued turn whose folder gained an agent since it queued waits for confirmation, then Proceed starts it",
@@ -555,6 +984,63 @@ test("Stop on a queued message that is starting stops it before it claims its sl
   } finally { open(); await endAll(runs); }
 });
 
+test("Cancel holds a restored message when the cancellation record cannot be saved", { timeout: 60_000,
+  skip: process.platform === "win32" }, async t => {
+  const { fixture } = await ipcFixture("capacity-cancel-save-fails");
+  const [a, b] = await folders(fixture, "a", "b");
+  const workspace = project(b, "cancel_save_b");
+  const { runWithRequestContext } = await import("@agent-native/core/server");
+  const { codeAgentRunsDir } = await import("@agent-native/core/code-agents");
+  const { changeIndexedChatDraft, createCodeDraftIdentity, readChatDraft } = await import("../server/chat-draft.ts");
+  const { restoreQueuedCodeDraft } = await import("../server/code-queue-draft.ts");
+  const asOwner = <T>(work: () => Promise<T>) => runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, work);
+  const identity = createCodeDraftIdentity(owner.ownerEmail, owner.orgId, workspace.projectId ?? null);
+  const threadId = "vivary-code:project:cancel_save_b:queued-draft";
+  const submitId = "520d14cd-c9a6-42ec-b368-1ac7880962b5";
+  const message = "Keep these words for an explicit retry";
+  const runs: string[] = [];
+  let refuseCancellation = false;
+  let refusedWrites = 0;
+  try {
+    await agent.setVivaryCodeRunCapacity({ limit: 1, whenFull: "queue" });
+    runs.push((await send(project(a, "cancel_save_a"), "Work in a")).run!.id);
+    await waitFor(async () => (await startedRuns(fixture)).includes(runs[0]), "the occupying worker to start");
+    await asOwner(() => changeIndexedChatDraft(identity, threadId, null, { text: message, status: "pending", submitId }));
+    const queued = (await send(workspace, message, { draftSubmitId: submitId, draftThreadId: threadId })).run!.id;
+    runs.push(queued);
+    const recordPath = path.join(codeAgentRunsDir(), `${queued}.json`);
+    const rename = fs.renameSync;
+    t.mock.method(fs, "renameSync", (from, to) => {
+      if (refuseCancellation && to === recordPath) {
+        refuseCancellation = false;
+        refusedWrites += 1;
+        throw new Error("Fixture cancellation record write refused");
+      }
+      return rename(from, to);
+    });
+    await assert.rejects(agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId,
+      restore: cancelled => asOwner(async () => {
+        const restored = await restoreQueuedCodeDraft(owner.ownerEmail, owner.orgId, cancelled);
+        assert.equal(restored, true);
+        refuseCancellation = true;
+        return restored;
+      }) }), /cancellation record write refused/);
+    assert.equal(refusedWrites, 1);
+    assert.equal((await asOwner(() => readChatDraft(identity, threadId)))?.status, "draft");
+    assert.equal((await asOwner(() => readChatDraft(identity, threadId)))?.text, message);
+    await settle(runs[0]);
+    const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+    assert.deepEqual(state.queuedRuns.map(run => [run.id, run.state]), [[queued, "held"]],
+      "a restored message waits for an explicit decision after cancellation fails");
+    assert.equal(capacityHost().activeRuns.has(queued), false);
+    assert.deepEqual(await startedRuns(fixture), [runs[0]], "free capacity cannot launch the restored message");
+    assert.equal((await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId })).message, message);
+    assert.equal((getCodeAgentRunRecord(queued)?.metadata?.queuedTurn as { state: string }).state, "held");
+    await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: workspace.projectId });
+    assert.deepEqual((await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId)).queuedRuns, []);
+  } finally { t.mock.restoreAll(); await endAll(runs); }
+});
+
 test("Cancel keeps a queued message queued when its draft cannot be restored", { timeout: 60_000,
   skip: process.platform === "win32" }, async () => {
   const { fixture } = await ipcFixture("capacity-restore-fails");
@@ -569,8 +1055,8 @@ test("Cancel keeps a queued message queued when its draft cannot be restored", {
       restore: async () => { throw new Error("The draft could not be saved."); } }), /draft could not be saved/);
     const state = await agent.getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
     assert.deepEqual(state.queuedRuns.map(run => [run.id, run.state]), [[queued, "queued"]], "the message is still queued");
-    const stored = getCodeAgentRunRecord(queued)?.metadata?.queuedTurn as { message?: string } | undefined;
-    assert.equal(stored?.message, "Keep these words", "the record still holds the message");
+    const stored = await agent.readQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "restore_b" });
+    assert.equal(stored.message, "Keep these words", "the exact queued payload remains available");
     assert.equal(agent.listOwnedVivaryCodeRuns(owner.ownerEmail, owner.orgId).some(run => run.id === queued), true);
     const cancelled = await agent.cancelQueuedVivaryCodeTurn({ ...owner, runId: queued, projectId: "restore_b",
       restore: async () => true });
