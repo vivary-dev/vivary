@@ -660,6 +660,23 @@ def check_pip_runtime(text: str) -> None:
             shell = "bash" if name == "test" else "pwsh"
             require(f"        shell: {shell}\n" in owner,
                     f"{name} MCP pip admission requires its explicit platform shell")
+            proof_start, proof_end = (
+                ('          "$mcp_python" - <<\'PY\'\n', '          PY\n')
+                if name == "test" else
+                ("          @'\n          from importlib.metadata import PackageNotFoundError, requires, version\n",
+                 "          '@ | & $mcpPython -\n")
+            )
+            proofs = re.findall(re.escape(proof_start) + r"(.*?)" + re.escape(proof_end), owner, re.S)
+            require(len(proofs) == 1,
+                    f"{name} MCP installed identity proof must use its admitted venv interpreter")
+            for assertion in (
+                'assert version("mcp") == "2.2.0"',
+                'assert version("mcp-types") == "2.2.0"',
+                'assert "mcp==2.2.0" in mcp_requirements',
+                'assert interop["sdk_version"] == "2.2.0"',
+            ):
+                require(proofs[0].count("          " + assertion + "\n") == 1,
+                        f"{name} MCP installed identity must prove the admitted SDK 2.2.0 tuple")
 
 
 def check_pip_commands(text: str) -> None:

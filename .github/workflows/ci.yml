@@ -1198,7 +1198,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")
@@ -1620,7 +1620,7 @@ jobs:
           )
           assert interop["installed"] is True
           assert interop["install_status"] == "installed"
-          assert interop["sdk_version"] == "2.0.0"
+          assert interop["sdk_version"] == "2.2.0"
           assert interop["conformance_status"] == "unproven"
           try:
               version("vivary")

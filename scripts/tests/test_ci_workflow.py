@@ -891,6 +891,28 @@ def test_actual_workflow_binds_mcp_pip_interpreters_and_later_isolation():
     assert REAL_WORKFLOW.read_bytes() == before
 
 
+def test_installed_mcp_proofs_require_the_admitted_sdk_identity_on_each_platform():
+    before = REAL_WORKFLOW.read_bytes()
+    workflow = before.decode("utf-8")
+    assert _run(workflow) is None
+    for name in ("test", "governed-platform-proof"):
+        block = _load().job_block(workflow, name)
+        expected = '          assert interop["sdk_version"] == "2.2.0"\n'
+        assert block.count(expected) == 1, name
+        for label, changed in {
+            "stale_doctor_sdk": block.replace(expected, expected.replace("2.2.0", "2.0.0"), 1),
+            "missing_doctor_sdk": block.replace(expected, "", 1),
+            "stale_sdk_module": block.replace('assert version("mcp") == "2.2.0"', 'assert version("mcp") == "2.0.0"', 1),
+            "stale_types_module": block.replace('assert version("mcp-types") == "2.2.0"', 'assert version("mcp-types") == "2.0.0"', 1),
+            "stale_dependency": block.replace('assert "mcp==2.2.0" in mcp_requirements', 'assert "mcp==2.0.0" in mcp_requirements', 1),
+            "doctor_assertion_outside_proof": block.replace(expected, "", 1) + expected,
+        }.items():
+            assert changed != block, (name, label)
+            message = _run(workflow.replace(block, changed, 1))
+            assert message and name in message and "MCP installed identity" in message, (name, label, message)
+    assert REAL_WORKFLOW.read_bytes() == before
+
+
 def test_all_fresh_venvs_provision_fixed_pip_before_actual_admission():
     module = _load()
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
