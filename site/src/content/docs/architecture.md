@@ -1481,7 +1481,10 @@ all path, hash and owning-Worker checks. This handles Windows temporary-director
 aliases without changing runner custody. Kernel lease tests select the explicit
 physical qualified Node binary, then authenticate its hash before execution;
 package-client wrappers cannot stand in for the fixture executable. The selected
-runner's complete admission guard remains unchanged.
+runner's complete admission guard remains unchanged. Live package-client probes
+also receive that executable and the provisioned tool root, so hosted CI runs
+their identity, child-certificate and lifecycle assertions rather than skipping
+those probes.
 
 2026-10-23 CI runtime closure. Hosted jobs provision authenticated standalone
 CPython 3.12.15 with OpenSSL 3.5.9 after the native bootstrap interpreter; the

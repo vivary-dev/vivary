@@ -797,6 +797,13 @@ REPAIR_TEST_STEP = (
     '          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n'
     '        run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
 )
+BUILD_TEST_STEP = (
+    '      - name: isolated build tool tests\n'
+    '        env:\n'
+    '          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n'
+    '          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools\n'
+    '        run: python -I -B scripts/tests/test_build_tools.py\n'
+)
 
 
 def check_release_package_clients(text: str) -> None:
@@ -1116,7 +1123,7 @@ def main() -> None:
             "tests job must run verified pip provisioning regressions")
     require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
             "tests job must run known site dependency admission regressions")
-    require("python -I -B scripts/tests/test_build_tools.py" in test_job,
+    require(test_job.count(BUILD_TEST_STEP) == 1,
             "tests job must run isolated build tool regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,

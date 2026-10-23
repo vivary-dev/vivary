@@ -217,7 +217,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
-            setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
+            setup += module.BUILD_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_python.py\n'
         if name in ("workbench", "workbench-maintained", "governed-platform-proof"):
@@ -502,9 +502,17 @@ def test_missing_site_audit_gate_fails():
 
 
 def test_isolated_build_tool_regressions_must_run():
-    workflow = REAL_WORKFLOW.read_text(encoding="utf-8").replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1)
-    message = _run(workflow)
-    assert message and "isolated build tool regressions" in message
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    step = module.BUILD_TEST_STEP
+    for mutation in (
+        step.replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1),
+        step.replace("/node/bin/node", "/bin/node", 1),
+        step.replace('          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools\n', "", 1),
+    ):
+        assert mutation != step
+        message = _run(workflow.replace(step, mutation, 1))
+        assert message and "isolated build tool regressions" in message
 
 
 def test_build_tool_changes_select_the_site_job():
