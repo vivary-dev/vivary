@@ -1012,6 +1012,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 PR #265 runtime admission reconciliation. The queue branch retained
+older workflows without the verified action-interpreter boundary. It now carries
+the existing reviewed runtime/CI and packaging guards from PR #263, preserving
+its own maintained-suite list and matching the admitted Node engine ranges.
+This does not qualify its older frozen dependency graph or turn unqualified
+hosted results into acceptance. Actual package-client and compiled dependencies
+still need the qualified integrated graph before hosted product execution.
+
 2026-10-23 PR #265 queue reconciliation and cancellation review. The preserved
 FIFO, queue-only status and exact-payload changes were applied in their verified
 order, with the three concurrency test layers and deterministic Stop fixture.
@@ -4061,3 +4069,27 @@ the owning Core, Exo, front-door, capability-status, and MCP contracts. Those
 references replace line ranges invalidated by this consolidation. The linked
 contracts and dispatch source confirm the same package boundaries. This reference
 repair changes no runtime behavior or acceptance claim.
+
+The October 23, 2026 review ports the already reviewed runtime admission baseline
+onto the Inbox branch before its first topic update. All five Actions workflows
+admit the actual runner Node interpreter before any JavaScript action. CI and
+protected npm jobs select the qualified Node 24.22.1 runtime and immediately admit
+the selected executable before package work. Source support still starts at Node
+22.23.4. The build, startup, desktop packaging, and installer entry points retain
+the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and SQLite
+12.11.1. Affected standalone Node and the held Electron runtime are refused.
+
+Python-bearing CI provisions the exact verified pip 26.2.2 wheel before admission,
+including the four new pipless environment paths. The existing verified uv
+0.13.5 wheels and actual native-runtime admission remain required at acquisition
+and use. The port preserves the Inbox code, its existing test commands, and the
+patched Native dependency. Updated mutation controls require each job to retain
+its selected fixed runtime, immediate guards, and failure propagation.
+
+The security source proposal reuses the recorded exact-byte runner, pip, uv,
+Windows runtime, and packaging evidence within their original scopes. This review
+does not establish new full Linux CI, hosted CI, browser, or Windows UI acceptance.
+Current Linux execution is blocked by storage admission. Focused Windows source
+and mutation checks, generated documentation mirrors, and immutable final-source
+review remain required before the topic update. Electron, merge, and artifact
+publication remain held.

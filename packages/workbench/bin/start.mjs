@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { assertCurrentNode } from "./runtime-security.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -84,6 +85,7 @@ async function authSecret(dataDir) {
 }
 
 export async function startVivary(options) {
+  await assertCurrentNode();
   const serverEntry = path.join(packageRoot, ".output", "server", "index.mjs");
   try { await access(serverEntry); }
   catch { throw new Error("Build Vivary first: pnpm --dir packages/workbench build"); }
