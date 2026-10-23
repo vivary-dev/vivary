@@ -510,7 +510,8 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
     const runId = "host-state-test";
     try {
       assert.deepEqual(await getVivaryCodeHostState("owner@example.com"), {
-        activeRuns: [], recentRun: null, busy: false, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null, queuedRuns: [],
+        capacity: { limit: 3, whenFull: "queue", running: 0, queued: 0, held: 0 },
       });
       createCodeAgentRunRecord({
         id: runId, goalId: "vivary-local-code", title: "Disconnected project", status: "running",
@@ -528,8 +529,10 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
       assert.deepEqual({ recentRun: shown.recentRun, busy: shown.busy, cleanup: shown.cleanup },
         { recentRun: null, busy: true, cleanup: null });
       // Busy and the run list are the caller's own. Another user's run never locks this user's conversations.
+      // The counts are host-wide, so another user sees the running turn counted but not listed.
       assert.deepEqual(await getVivaryCodeHostState("other@example.com"), {
-        activeRuns: [], recentRun: null, busy: false, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null, queuedRuns: [],
+        capacity: { limit: 3, whenFull: "queue", running: 1, queued: 0, held: 0 },
       });
     } finally {
       host.activeRuns.delete(runId);

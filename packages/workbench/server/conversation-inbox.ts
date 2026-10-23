@@ -13,6 +13,7 @@ import { withCodeConversationAdmission } from "./conversation-admission";
 import {
   engineLabelFromRun, getVivaryCodeHostState, isOwnedRun, linkedCodeDraftRuns, listOwnedVivaryCodeRuns, modelFromRun,
   type VivaryCodeActiveRun, type VivaryCodeProjectHistory, type VivaryCodeReadScope, type VivaryCodeWorkspace,
+  type VivaryCodeQueuedRun,
 } from "./local-code-agent";
 
 /**
@@ -21,7 +22,7 @@ import {
  * and Completed describe the last run for `RESULT_SHOWN_MS` after it ended, then the row reads idle, so the list stays
  * quiet without unread tracking.
  */
-export const INBOX_ATTENTION = ["needs-approval", "stopping", "running", "failed", "completed", "idle"] as const;
+export const INBOX_ATTENTION = ["needs-approval", "stopping", "running", "needs-confirmation", "held", "queued", "failed", "completed", "idle"] as const;
 export type InboxAttention = typeof INBOX_ATTENTION[number];
 
 export type InboxRow = {
@@ -103,8 +104,9 @@ export function compareInboxRows(left: InboxRow, right: InboxRow): number {
  * record has no end time, so its `updatedAt` stands for it. List changes keep `updatedAt`, so they never revive a label.
  */
 export function codeAttention(run: Pick<CodeAgentRunRecord, "status" | "updatedAt">, active: VivaryCodeActiveRun | undefined,
-  now = Date.now()): InboxAttention {
+  now = Date.now(), queued?: VivaryCodeQueuedRun): InboxAttention {
   if (active) return active.pendingApprovals.length ? "needs-approval" : active.stopping ? "stopping" : "running";
+  if (queued) return queued.state;
   if (run.status === "errored") return recentResult("failed", epochMilliseconds(run.updatedAt), now);
   if (run.status === "completed") return recentResult("completed", epochMilliseconds(run.updatedAt), now);
   return "idle";
@@ -134,8 +136,9 @@ export function epochMilliseconds(value: unknown): number {
  */
 export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; ownerEmail: string; orgId?: string;
   projects: readonly InboxProject[]; personal: VivaryCodeWorkspace | null;
-  activeRuns: readonly VivaryCodeActiveRun[]; now?: number }): InboxRow[] {
+  activeRuns: readonly VivaryCodeActiveRun[]; queuedRuns?: readonly VivaryCodeQueuedRun[]; now?: number }): InboxRow[] {
   const active = new Map(input.activeRuns.map(run => [run.id, run]));
+  const queued = new Map((input.queuedRuns ?? []).map(run => [run.id, run]));
   const projects = new Map(input.projects.map(project => [project.projectId, project]));
   return input.runs.flatMap(run => {
     const projectId = typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null;
@@ -147,7 +150,7 @@ export function buildCodeRows(input: { runs: readonly CodeAgentRunRecord[]; owne
       title: run.title || "Untitled conversation", createdAt: epochMilliseconds(run.createdAt), updatedAt: epochMilliseconds(run.updatedAt),
       runtime: engineLabelFromRun(run), model: modelFromRun(run),
       pinned: typeof run.metadata?.pinnedAt === "string", archived: typeof run.metadata?.archivedAt === "string",
-      attention: codeAttention(run, active.get(run.id), input.now), nativeScopeId: null, draft: null,
+      attention: codeAttention(run, active.get(run.id), input.now, queued.get(run.id)), nativeScopeId: null, draft: null,
     }];
   });
 }
@@ -209,7 +212,8 @@ export async function loadConversationInbox(input: { ownerEmail: string; orgId: 
   const now = input.now ?? Date.now();
   const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
   const code = buildCodeRows({ runs: listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId), ownerEmail: input.ownerEmail,
-    orgId: input.orgId, projects: input.projects, personal: input.personal, activeRuns: host.activeRuns, now });
+    orgId: input.orgId, projects: input.projects, personal: input.personal, activeRuns: host.activeRuns,
+    queuedRuns: host.queuedRuns, now });
   const scopes = new Map<string, { projectId: string | null; label: string }>([
     [projectChatScopeId(input.ownerEmail, input.orgId, null), { projectId: null, label: PERSONAL_LABEL }],
     ...input.projects.map(project => [projectChatScopeId(input.ownerEmail, input.orgId, project.projectId),
@@ -395,13 +399,14 @@ export async function changeCodeConversation(input: { ownerEmail: string; orgId?
   });
 }
 
-/** Why a Code conversation cannot be archived now: an approval, a working or stopping run, or a pending send. */
+/** Why a Code conversation cannot be archived now: an approval, working run, queued payload or pending send. */
 async function codeArchiveRefusal(input: { ownerEmail: string; orgId?: string; runId: string; projectId: string | null;
   scope: VivaryCodeReadScope }): Promise<string | null> {
   const host = await getVivaryCodeHostState(input.ownerEmail, input.orgId);
   const active = host.activeRuns.find(run => run.id === input.runId);
   if (active?.pendingApprovals.length) return ARCHIVE_REFUSALS.approval;
   if (active) return ARCHIVE_REFUSALS.working;
+  if (host.queuedRuns.some(run => run.id === input.runId && run.projectId === input.projectId)) return ARCHIVE_REFUSALS.queued;
   // A follow-up whose send is still pending is queued work for this conversation. `linkedCodeDraftRuns` links drafts
   // to runs the way the inbox marks a row Review send, including an older run whose draft ID is only in its transcript.
   if (input.orgId) {

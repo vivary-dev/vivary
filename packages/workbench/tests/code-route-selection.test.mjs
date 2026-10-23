@@ -84,6 +84,7 @@ function fixture() {
       // so a production catch cannot repair the boundary being inspected and conceal an unsafe intermediate state.
       try { afterRecordPersist?.(id, change, structuredClone(records.get(id))); }
       catch (error) { writeFault = error; throw error; }
+      return records.get(id);
     },
     startVivaryCodeRun: input => { allowWrite(); launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
@@ -103,6 +104,10 @@ function fixture() {
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
     // A stored refusal on the record, as cleanupRefusalFromRun reads it.
     cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
+    // A host with free slots. The capacity tests in code-concurrency cover queueing.
+    codeRunSlotFree: () => true, queueVivaryCodeTurn: () => { throw new Error("No queue expected"); }, takeQueuedSlot() {},
+    // No conversation here has a queued message, so the switch refusal for one does not apply.
+    queuedTurnFor: () => undefined,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));

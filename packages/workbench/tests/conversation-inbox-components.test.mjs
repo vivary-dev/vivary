@@ -497,6 +497,17 @@ test("each state is text with an icon, idle shows none, and no state is a live r
   assert.equal(host.querySelector("[aria-live]"), null, "row state changes are never announced on their own");
 });
 
+test("queued, held and confirmation states show readable labels without reordering the inbox", async () => {
+  inboxFixture.rows = [row("code:a1", "alpha", "Waiting for a slot", 50, { attention: "queued" }),
+    row("code:a2", "alpha", "Waiting for me", 40, { attention: "held" }),
+    row("code:a3", "alpha", "Confirm another worker", 30, { attention: "needs-confirmation" })];
+  await render();
+  assert.deepEqual([...host.querySelectorAll(".conversation-inbox__state")].map(state => [state.dataset.state, state.textContent]),
+    [["queued", "Queued"], ["held", "Held"], ["needs-confirmation", "Needs confirmation"]]);
+  assert.equal(host.querySelector("[aria-live]"), null);
+  assert.deepEqual(titles(), ["Waiting for a slot", "Waiting for me", "Confirm another worker"]);
+});
+
 test("rows keep their order while their state changes", async () => {
   await render();
   const before = titles();

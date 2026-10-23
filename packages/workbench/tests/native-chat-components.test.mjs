@@ -138,6 +138,46 @@ function fixtureRunSnapshot(run) {
       ?? run.events.findLast(event => event.kind === "note" && event.metadata?.source === "vivary-runtime-switch")?.id ?? null };
 }
 
+// The Code workspace that owns the conversation, rendered from the Code state the host returns. activeRuns lists the
+// caller's running conversations and folderRuns those in this conversation's folder, so the composer's lock comes
+// from the workspace's own rule rather than a prop the test sets.
+export async function renderCodeWorkspace({ selection, activeRuns = [], folderRuns = [] }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const version = "2.1.296";
+  const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
+    runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
+    models: claudeCodeModelChoices(version).map(model => model.id), claudeModels: claudeCodeModelChoices(version) };
+  const own = selection.runId ? { id: selection.runId, title: "This conversation", projectId: null, engine: "claude-cli",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", events: [], status: "running", phase: "running" } : null;
+  const state = { engines: [engine], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5", cleanup: null,
+    workspaceLabel: "Fixture project", projectId: null, runs: own ? [own] : [], run: own, recentRun: null,
+    busy: activeRuns.some(item => item.id === selection.runId), activeRuns, folderRuns };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/_agent-native/actions/vivary-code-state")) return Response.json(state);
+    return previousFetch(input, init);
+  };
+  const view = await mount(<QueryClientProvider client={client}><MemoryRouter><ProjectCodeWorkspace projectId={null}
+    draftScopeKey="fixture" ownerKey="fixture-owner" workspaceAvailable selection={selection} setSelection={() => {}}
+    onOpenActive={async () => false} previewScope="fixture" /></MemoryRouter></QueryClientProvider>);
+  try {
+    const control = label => view.host.querySelector('[aria-label="' + label + '"]');
+    await until(() => !!control("Conversation runtime"), "the conversation composer");
+    const shared = view.host.querySelector('[aria-label="Shared folder"]');
+    return {
+      disabled: ["Conversation runtime", "Conversation model"].map(label => control(label)?.disabled),
+      badges: [...view.host.querySelectorAll(".local-agent-header-actions [role=status]")].map(item => item.textContent),
+      sharedRuns: [...(shared?.querySelectorAll("li") ?? [])].map(item => item.textContent),
+      stop: !!control("Stop response"),
+      composerLocked: [...view.host.querySelectorAll("button")].find(button => button.textContent === "Try a file change")?.disabled,
+    };
+  } finally {
+    await view.unmount(); client.clear();
+    globalThis.fetch = previousFetch;
+  }
+}
+
 // A retained Code conversation with both runtimes ready, driven through its selectors and switch panel.
 const FOLDER_ISOLATION = { available: false, choosing: false, error: undefined, async openFolder() {} };
 
@@ -1812,14 +1852,32 @@ test("Native chat controls", async t => {
     });
   }
 
-  await t.test("another conversation's run elsewhere locks nothing in a new conversation", async () => {
+  await t.test("another conversation's run, in this folder or elsewhere, locks nothing in a new conversation", async () => {
     const server = installChatServer();
+    // The caller's runs as the Code state lists them: one in this folder, one in another project's folder.
+    const here = { id: "other-run", title: "Write the parser tests", status: "running", phase: "running", projectId: null,
+      workspaceLabel: "Fixture project", engineLabel: "Claude Code", model: "claude-sonnet-5-5", stopping: false, pendingApprovals: [] };
+    const elsewhere = { ...here, id: "far-run", title: "Tidy the docs", projectId: "project-far", workspaceLabel: "Far project" };
     try {
-      const snapshot = await proof.renderWorkbenchComposer({});
-      assert.deepEqual(snapshot.disabled.slice(0, 2), [false, false]);
-      assert.equal(snapshot.exampleDisabled, false);
-      assert.deepEqual(snapshot.describedBy, [null, null]);
-      assert.doesNotMatch(snapshot.text, /Other agents are working in this folder|another conversation/);
+      const fresh = await proof.renderCodeWorkspace({ selection: { key: "new-draft", runId: null },
+        activeRuns: [here, elsewhere], folderRuns: [OTHER_RUN] });
+      assert.deepEqual(fresh.disabled, [false, false], "the runtime and model stay open");
+      assert.equal(fresh.stop, false, "no Stop for another conversation's run");
+      assert.deepEqual(fresh.badges, ["2 other conversations working"]);
+      assert.deepEqual(fresh.sharedRuns, ["Write the parser testsOpen"], "the same-folder run shows the warning, not a lock");
+      const apart = await proof.renderCodeWorkspace({ selection: { key: "new-draft", runId: null }, activeRuns: [elsewhere] });
+      assert.deepEqual(apart.disabled, [false, false]);
+      assert.equal(apart.stop, false);
+      assert.equal(apart.composerLocked, false, "Send is open");
+      assert.deepEqual(apart.badges, ["1 other conversation working"]);
+      assert.deepEqual(apart.sharedRuns, []);
+      // The conversation's own run locks its composer, beside the same other runs.
+      const mine = { ...here, id: "own-run", title: "This conversation" };
+      const own = await proof.renderCodeWorkspace({ selection: { key: "own-draft", runId: "own-run" },
+        activeRuns: [here, mine, elsewhere], folderRuns: [OTHER_RUN, { id: "own-run", title: "This conversation", turnId: "turn-own-1" }] });
+      assert.equal(own.stop, true, "its own turn holds the composer behind its Stop");
+      assert.deepEqual(own.badges, ["Working"]);
+      assert.deepEqual(own.sharedRuns, [], "a working conversation shows no shared-folder warning");
     } finally { server(); }
   });
 

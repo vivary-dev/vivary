@@ -163,8 +163,24 @@ stateDiagram-v2
   state "Proceeded in this folder" as Proceeded
   state "Separate folder or worktree" as Elsewhere
   state "Awaiting tool approval" as AwaitingToolApproval
+  state "Queued for a slot" as Queued
+  state "Held for the owner" as Held
+  state "Needs confirmation" as NeedsConfirmation
   [*] --> Idle
   Idle --> Busy: send, no other agent in an overlapping folder
+  Idle --> Queued: send while every slot is in use, Queue setting
+  Idle --> Idle: send while every slot is in use, Refuse setting, limit named
+  Queued --> Busy: a slot frees, oldest first, fresh checks pass
+  Queued --> NeedsConfirmation: an agent started in its folder since it queued
+  Queued --> Held: another fresh check refused, reason shown
+  Queued --> Held: host restart
+  Held --> Queued: Start
+  NeedsConfirmation --> Queued: Proceed
+  NeedsConfirmation --> Elsewhere: Use another folder, message back in the draft
+  Queued --> Idle: Cancel or Stop, nothing started, message back in the draft
+  Held --> Idle: Cancel
+  NeedsConfirmation --> Idle: Cancel
+  Queued --> Queued: second send refused
   Idle --> Warning: another agent works in an overlapping folder
   Warning --> Proceeded: Proceed
   Warning --> Elsewhere: Use another folder
