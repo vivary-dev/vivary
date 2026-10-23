@@ -1,0 +1,8 @@
+{
+  "name": "@vivary/astro-no-cache-policy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.js",
+  "description": "Non-storing cache policy for the pinned Astro build-time image caller."
+}

@@ -2,8 +2,13 @@
 
 Optional Python 3.11+ read-only MCP adapter for Vivary context.
 
+The dependency and schema pin below describes this unpublished security source
+candidate. Published `vivary-mcp` 0.1.3 still contains the older SDK dependency;
+retaining the source component identity does not update that existing artifact or
+claim that an ordinary public-index install receives this fix.
+
 - Protocol: `2026-07-28`
-- SDK: exact `mcp==2.0.0`
+- SDK: exact `mcp==2.2.0`
 - Transport: local standard input/output only
 - Tools: `vivary_find`, `vivary_query`, `vivary_check`, `vivary_capsule`
 - Authority: operator-bound local roots; no writes, network calls, providers, or
