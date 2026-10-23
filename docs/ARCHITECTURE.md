@@ -1104,6 +1104,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Desktop Python build dependencies. The desktop pins the authenticated
+CPython 3.12.15 release archives and pip 26.2.2/setuptools 84.1.0 build wheels.
+The builder creates its temporary environment without ensurepip, rechecks exact
+wheel bytes, and invokes the verified pip wheel with isolated imports and pip
+configuration. Its later wheel build and installation also exclude inherited
+Python/pip overrides. Windows launcher and license writes retain the checked
+bytes and lengths from distlib 0.4.2. The README now describes SQLite 13 bundled
+Windows prebuild staging and separates authenticated assets from native evidence.
+Direct Linux verification extracted the pinned interpreter, built all seven owned
+wheels with hostile pip/Python settings ignored and ensurepip prohibited, and ran
+six installed CLI help commands. That proves this build path, not Windows, TLS,
+XML or database acceptance. The Windows Python candidate still contains Expat
+2.8.5; native/library applicability and target certificate evidence remain open.
+No existing Node, Electron or publication guard was relaxed.
+
 2026-10-23 Inbox creation and metadata review fixes. Personal folder lookup now distinguishes confirmed
 absence from pending or failed resolution, so New conversation cannot silently choose API billing while
 Code readiness is unknown. The explicit API choice remains available, and failed folder reads can retry.
