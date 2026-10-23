@@ -723,6 +723,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Workbench security dependency graph, part 1 of 2 of #273.
+Workbench's lock receives the reviewed security overrides, including MCP SDK
+1.32.0 and SQLite 13.0.3's N-API binding, while dev's Native patch and feature
+scripts stay unchanged. Its Node engine range moves to the October floors
+22.23.4, 24.22.1 and 26.12.1. Runtime admission, desktop packaging, the internal
+site and CI provisioning arrive in part 2, which replaces this entry with the full
+design record. Project and session owners are unchanged.
+
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff
 renderers and Claude reply-once recording. Both shared-renderer application
