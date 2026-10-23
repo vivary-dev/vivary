@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
+import runpy
 import shlex
 import shutil
 import ssl
@@ -32,7 +33,7 @@ NPM_PINS = (
     ("ip-address", "10.7.4", "DWBMKyeM25D70nrIiTkgQth59/G+naKOTep6huF9j+GmeK3DMD60Zvxg5d5qQnz+38AHgou6ean2LECX+lrKDg=="),
 )
 # Existing isolated CA policy: remove this revoked root, add no certificates.
-REVOKED_SHA = "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b"
+CA_POLICY = runpy.run_path(str(Path(__file__).with_name("certifi_bundle.py")))
 BLOCKER = '#!/bin/sh\necho "Bundled npm/npx are not admitted; use the isolated npm launcher." >&2\nexit 78\n'
 
 
@@ -67,12 +68,8 @@ def write_exact(path, content, mode=0o600):
 
 
 def certificates(root, source):
-    pems = re.findall(r"-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----", source.read_text())
-    require(bool(pems), "Existing system CA bundle is empty")
-    kept = [pem for pem in pems if hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest() != REVOKED_SHA]
-    require(bool(kept), "Filtered CA bundle is empty")
     ca = root / "ca.pem"
-    write_exact(ca, ("\n".join(kept) + "\n").encode())
+    write_exact(ca, CA_POLICY["filtered_ca_bytes"](source.read_bytes()))
     empty = root / "empty-ca"
     plain_directory(empty)
     require(not any(empty.iterdir()), "CA directory must remain empty")

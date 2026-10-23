@@ -96,7 +96,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "          python scripts/tests/test_hldd.py\n"
         "          python scripts/check_hldd.py --base \"$BASE_SHA\" --head \"$HEAD_SHA\"\n"
         "      - name: install Python test runner\n"
-        "        run: python -I -m pip install pytest packaging\n"
+        "        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging\n"
         "      - name: CI workflow contract\n"
         "        run: python scripts/check_ci_workflow.py\n"
         "      - name: CI workflow contract tests\n"
@@ -739,9 +739,9 @@ UV_ROOT_REMOVAL_ONLY_WHEELS = (
 )
 UV_DIGEST_PIP_CONFIG_FILE = "${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}"
 UV_DIGEST_COMMANDS = {
-    "test": 'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_DIGEST_LINUX_WHEEL + '"',
+    "test": 'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_DIGEST_LINUX_WHEEL + '"',
     "orientation-proof": (
-        'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
+        'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
         "runner.os == 'Linux' && '" + UV_DIGEST_LINUX_WHEEL
         + "' || runner.os == 'Windows' && '" + UV_DIGEST_WINDOWS_WHEEL + "' || '' }}\""
     ),
@@ -756,7 +756,7 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
     block = module.job_block(workflow, job_name)
     steps = re.split(r"(?m)(?=^      - )", block)[1:]
     installs = [step for step in steps if re.search(
-        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--isolated\s+)?install\b[^\n]*\buv\b", step
+        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--use-deprecated=legacy-certs\s+)?(?:--isolated\s+)?install\b[^\n]*\buv\b", step
     )]
     assert len(installs) == 1, (job_name, "expected one actual uv install step")
     step = installs[0]
@@ -767,11 +767,11 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
     fixed_env = "        env:\n          PIP_CONFIG_FILE: " + UV_DIGEST_PIP_CONFIG_FILE + "\n"
     fixed_step = name_line + "\n" + fixed_env + fixed_run
     cases = {
-        "affected": name_line + "\n        run: python -m pip install uv==0.11.21\n",
+        "affected": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.11.21\n",
         "missing": "",
-        "unpinned": name_line + "\n        run: python -m pip install uv\n",
-        "last_affected": name_line + "\n        run: python -m pip install uv==0.13.3\n",
-        "pin_only": name_line + "\n        run: python -m pip install uv==0.13.5\n",
+        "unpinned": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv\n",
+        "last_affected": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.13.3\n",
+        "pin_only": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.13.5\n",
         "conditional": fixed_step.replace(fixed_run, "        if: false\n" + fixed_run, 1),
         "ignored": fixed_step.replace(fixed_run, "        continue-on-error: true\n" + fixed_run, 1),
         "environment": fixed_step.replace(fixed_env, fixed_env + "          PIP_NO_VERIFY: 1\n", 1),
@@ -789,8 +789,8 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
         "without_force_reinstall": fixed_step.replace(" --force-reinstall", "", 1),
         "without_no_deps": fixed_step.replace(" --no-deps", "", 1),
         "without_wheel_only": fixed_step.replace(" --only-binary=:all:", "", 1),
-        "second_affected": fixed_step + "      - run: python -m pip install uv==0.11.21\n",
-        "second_isolated_affected": fixed_step + "      - run: python -I -m pip --isolated install uv==0.11.21\n",
+        "second_affected": fixed_step + "      - run: python -m pip --use-deprecated=legacy-certs install uv==0.11.21\n",
+        "second_isolated_affected": fixed_step + "      - run: python -I -m pip --use-deprecated=legacy-certs --isolated install uv==0.11.21\n",
         "duplicate_fixed": fixed_step + fixed_step,
     }
     wheels = (UV_DIGEST_LINUX_WHEEL,) if job_name == "test" else (
@@ -1050,7 +1050,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
          '          unset PYTHONPATH\n'
          '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary\n'
+         '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary\n'
          '      - name: fresh venv pip fixture\n'
          '        shell: bash\n'
          '        run: |\n'
@@ -1058,7 +1058,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
          '          mcp_python="$mcp_venv/bin/python"\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+         '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
  'governed-platform-proof': '      - name: fresh venv pip fixture\n'
                             '        shell: pwsh\n'
                             '        run: |\n'
@@ -1072,7 +1072,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '          & $python -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
                             'failed" }\n'
-                            '          & $python -I -m pip install --no-index --find-links '
+                            '          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links '
                             '$wheelhouse vivary\n'
                             '      - name: fresh venv pip fixture\n'
                             '        shell: pwsh\n'
@@ -1088,7 +1088,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
                             'failed" }\n'
-                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                             'failed" }\n'}
 
@@ -1102,7 +1102,7 @@ def test_actual_workflow_requires_pip_runtime_admission():
         block = job_block(workflow, name)
         assert block.count(PIP_RUNTIME_STEP) == 1, name
         assert block.count(PIP_BOOTSTRAP_STEP) == 1, (name, "verified pip provisioning missing")
-        unchecked = '      - run: python -I -m pip install pip==26.2.2\n'
+        unchecked = '      - run: python -I -m pip --use-deprecated=legacy-certs install pip==26.2.2\n'
         cases = {
             "setup_old_pip_network": block.replace('          python-version: "3.11"\n', '          python-version: "3.11"\n          pip-version: "26.2.2"\n', 1),
             "missing_provisioning": block.replace(PIP_BOOTSTRAP_STEP, "", 1),
@@ -1125,7 +1125,7 @@ def test_actual_workflow_requires_pip_runtime_admission():
     # This uses only the preexisting full-checker entrypoint. On old code the
     # missing-admission rejection assertion fails because the workflow is accepted.
     unsafe = workflow.replace(PIP_RUNTIME_STEP, "").replace(PIP_LINUX_MCP_GUARD, "").replace(PIP_WINDOWS_MCP_GUARD, "")
-    unsafe = unsafe.replace(" -I -m pip ", " -m pip ")
+    unsafe = unsafe.replace(" -I -m pip --use-deprecated=legacy-certs ", " -m pip --use-deprecated=legacy-certs ")
     unsafe = unsafe.replace('      - name: pip runtime admission tests\n        run: python -I -B scripts/tests/test_pip_runtime.py\n', "")
     message = _run(unsafe)
     assert message and "pip runtime admission" in message, ("pre-admission workflow must be refused", message)
@@ -1139,34 +1139,34 @@ def test_actual_workflow_binds_mcp_pip_interpreters_and_later_isolation():
     cases = {
         "early_linux_network": workflow.replace(
             '          mcp_python="$mcp_venv/bin/python"\n',
-            '          mcp_python="$mcp_venv/bin/python"\n          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'
+            '          mcp_python="$mcp_venv/bin/python"\n          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
             '          mcp_python="$mcp_venv/bin/python"\n', 1),
         "early_windows_network": workflow.replace(
             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n',
-            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n', 1),
         "reassigned_linux_network_after_admission": workflow.replace(
-            '          "$mcp_python" -I -m pip check\n',
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check\n',
             '          mcp_python="/path/to/old/python"\n'
-            '          "$mcp_python" -I -m pip install example\n'
-            '          "$mcp_python" -I -m pip check\n', 1),
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install example\n'
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check\n', 1),
         "reassigned_windows_network_after_admission": workflow.replace(
-            '          & $mcpPython -I -m pip check\n',
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs check\n',
             '          $mcpPython = "C:\\old\\python.exe"\n'
-            '          & $mcpPython -I -m pip install example\n'
-            '          & $mcpPython -I -m pip check\n', 1),
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install example\n'
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs check\n', 1),
         "missing_linux_venv_admission": workflow.replace(PIP_LINUX_MCP_GUARD, "", 1),
         "missing_windows_venv_admission": workflow.replace(PIP_WINDOWS_MCP_GUARD, "", 1),
         "linux_host_instead_of_venv": workflow.replace(PIP_LINUX_MCP_GUARD, PIP_LINUX_MCP_GUARD.replace('"$mcp_python"', "python", 1), 1),
         "windows_host_instead_of_venv": workflow.replace(PIP_WINDOWS_MCP_GUARD, PIP_WINDOWS_MCP_GUARD.replace("& $mcpPython", "python", 1), 1),
         "ignored_linux_venv": workflow.replace(PIP_LINUX_MCP_GUARD, PIP_LINUX_MCP_GUARD.replace("exit $?", "true", 1), 1),
         "ignored_windows_venv": workflow.replace(PIP_WINDOWS_MCP_GUARD, PIP_WINDOWS_MCP_GUARD.splitlines(keepends=True)[0], 1),
-        "nonisolated_linux_network": workflow.replace('"$mcp_python" -I -m pip install "mcp==2.2.0"', '"$mcp_python" -m pip install "mcp==2.2.0"', 1),
-        "nonisolated_windows_network": workflow.replace('& $mcpPython -I -m pip install "mcp==2.2.0"', '& $mcpPython -m pip install "mcp==2.2.0"', 1),
-        "nonisolated_later_linux_pip": workflow.replace('"$mcp_python" -I -m pip check', '"$mcp_python" -m pip check', 1),
-        "nonisolated_later_windows_pip": workflow.replace('& $mcpPython -I -m pip check', '& $mcpPython -m pip check', 1),
-        "different_linux_network_interpreter": workflow.replace('"$mcp_python" -I -m pip install "mcp==2.2.0"', 'python -I -m pip install "mcp==2.2.0"', 1),
-        "different_windows_network_interpreter": workflow.replace('& $mcpPython -I -m pip install "mcp==2.2.0"', 'python -I -m pip install "mcp==2.2.0"', 1),
+        "nonisolated_linux_network": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', '"$mcp_python" -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "nonisolated_windows_network": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', '& $mcpPython -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "nonisolated_later_linux_pip": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs check', '"$mcp_python" -m pip --use-deprecated=legacy-certs check', 1),
+        "nonisolated_later_windows_pip": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs check', '& $mcpPython -m pip --use-deprecated=legacy-certs check', 1),
+        "different_linux_network_interpreter": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 'python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "different_windows_network_interpreter": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 'python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
     }
     for label, mutation in cases.items():
         assert mutation != workflow, label
@@ -1289,6 +1289,17 @@ def test_site_lock_admission_precedes_install_and_build():
         else:
             raise AssertionError(label + " bypassed site dependency admission")
     assert REAL_WORKFLOW.read_text(encoding="utf-8") == workflow
+
+
+def test_pip_network_cannot_reintroduce_host_truststore_roots():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    assert _run(workflow) is None
+    for mutation in (workflow.replace(" --use-deprecated=legacy-certs", ""),
+                     workflow.replace("  PIP_USE_DEPRECATED: legacy-certs\n", ""),
+                     workflow.replace("  PIP_USE_DEPRECATED: legacy-certs", "  PIP_USE_DEPRECATED: other")):
+        assert mutation != workflow
+        message = _run(mutation)
+        assert message and "pip" in message, message
 
 
 if __name__ == "__main__":

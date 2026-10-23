@@ -8,6 +8,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rename,
   rm,
@@ -62,6 +63,15 @@ export const ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS = Object.freeze([
     size: 819_380,
   }),
 ]);
+export const ORIGINAL_RUNTIME_CERTIFI_ASSET = Object.freeze({
+  provider: "PyPI",
+  distribution: "certifi",
+  version: "2026.10.23",
+  fileName: "certifi-2026.10.23-py3-none-any.whl",
+  url: "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+  sha256: "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+  size: 135_082,
+});
 const windowsAsset = Object.freeze({
   provider: "astral-sh/python-build-standalone",
   release: PYTHON_RELEASE,
@@ -135,6 +145,7 @@ export async function prepareOriginalRuntime({
     for (const asset of ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS) {
       buildBackendWheels.push(await cacheVerifiedAsset(asset, { cacheDirectory }));
     }
+    const certifiWheel = await cacheVerifiedAsset(ORIGINAL_RUNTIME_CERTIFI_ASSET, { cacheDirectory });
     await runBuildHelper([
       "extract-runtime",
       "--archive", archive,
@@ -149,6 +160,7 @@ export async function prepareOriginalRuntime({
       "--repository", repository,
       "--wheelhouse", wheelhouse,
       ...buildBackendWheels.flatMap(wheel => ["--build-backend-wheel", wheel]),
+      "--certifi-wheel", certifiWheel,
       "--runtime-root", destination,
       "--site-packages", sitePackages,
       "--platform", platform,
@@ -169,6 +181,8 @@ export async function prepareOriginalRuntime({
     if (runtimeLicensePaths.length === 0) {
       throw new Error("The bundled Python distribution contains no discoverable license text.");
     }
+    const seedPath = platform === "win32" ? "python/Lib/ensurepip/_bundled/pip-26.2.2-py3-none-any.whl"
+      : "python/lib/python3.12/ensurepip/_bundled/pip-26.2.2-py3-none-any.whl";
     const manifest = createOriginalRuntimeManifest({
       target,
       sourceCommit: sourceCommit.trim(),
@@ -177,6 +191,13 @@ export async function prepareOriginalRuntime({
       managedProjectBridge,
       previewOwnerBridge,
       runtimeLicensePaths,
+      pipCertificateOverlay: {
+        kind: "vivary-certifi-overlay",
+        pipAsset: { ...ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS[0] },
+        certifiAsset: { ...ORIGINAL_RUNTIME_CERTIFI_ASSET },
+        seedPath,
+        seedSha256: createHash("sha256").update(await readFile(path.join(destination, ...seedPath.split("/")))).digest("hex"),
+      },
     });
     await writeFile(path.join(destination, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
     return manifest;
@@ -247,6 +268,7 @@ export function createOriginalRuntimeManifest({
   managedProjectBridge,
   previewOwnerBridge,
   runtimeLicensePaths,
+  pipCertificateOverlay,
 }) {
   return {
     schemaVersion: 1,
@@ -262,6 +284,7 @@ export function createOriginalRuntimeManifest({
     managedProjectBridge: { ...managedProjectBridge },
     previewOwnerBridge: { ...previewOwnerBridge },
     runtimeLicensePaths: [...runtimeLicensePaths],
+    ...(pipCertificateOverlay ? { pipCertificateOverlay } : {}),
   };
 }
 

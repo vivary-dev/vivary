@@ -175,8 +175,11 @@ assert.equal(process.env.NODE_TLS_REJECT_UNAUTHORIZED, undefined);
 assert.equal(tls.getCACertificates('default').length, 0);
 const pems = fs.readFileSync(process.env.SSL_CERT_FILE, 'utf8').match(/-----BEGIN CERTIFICATE-----[\\s\\S]*?-----END CERTIFICATE-----/g);
 assert.ok(pems.length > 0);
-assert.ok(pems.every(pem => crypto.createHash('sha256').update(new crypto.X509Certificate(pem).raw).digest('hex') !==
-  '86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b'));
+const excluded = new Set([
+  '86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b',
+  '125609aa301da0a249b97a8239cb6a34216f44dcac9f3954b14292f2e8c8608f',
+  'bc4d809b15189d78db3e1d8cf4f9726a795da1643ca5f1358e1ddb0edc0d7eb3']);
+assert.ok(pems.every(pem => !excluded.has(crypto.createHash('sha256').update(new crypto.X509Certificate(pem).raw).digest('hex'))));
 const raw = JSON.parse(execFileSync(process.execPath, ['-e',
   "console.log(JSON.stringify({path:process.execPath,options:process.env.NODE_OPTIONS,ca:process.env.SSL_CERT_FILE,defaults:require('node:tls').getCACertificates('default').length}))"], {encoding:'utf8'}));
 assert.equal(raw.path, process.execPath);

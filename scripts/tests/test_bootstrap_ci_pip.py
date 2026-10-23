@@ -85,6 +85,7 @@ class BootstrapTests(unittest.TestCase):
                            "HTTPS_PROXY": "PRIVATE", "PYTHONPATH": "PRIVATE", "SECRET_TOKEN": "PRIVATE"}
             with mock.patch.object(bootstrap.sys, "argv", [str(SOURCE)]), \
                  mock.patch.dict(bootstrap.os.environ, environment, clear=True), \
+                 mock.patch.object(bootstrap, "obtain_derived_pip", side_effect=lambda cache, upstream: upstream), \
                  mock.patch.object(bootstrap, "SIZE", fixture_size), \
                  mock.patch.object(bootstrap, "SHA256", fixture_sha), \
                  mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")), \
@@ -101,7 +102,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(child.call_args.kwargs["stdin"], subprocess.DEVNULL)
             self.assertTrue(child.call_args.kwargs["check"])
             self.assertEqual(child.call_args.kwargs["timeout"], 60)
-            self.assertEqual(verify.call_args_list, [mock.call(wheel), mock.call(wheel)])
+            self.assertEqual(verify.call_args_list, [mock.call(wheel, fixture_size, fixture_sha)])
 
     def test_failed_verification_or_installer_refuses_without_further_action(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -114,6 +115,7 @@ class BootstrapTests(unittest.TestCase):
                 wheel.write_bytes(b"PRIVATE old wheel" if failure == "artifact" else fixed)
                 with self.subTest(failure=failure), mock.patch.object(bootstrap.sys, "argv", [str(SOURCE)]), \
                      mock.patch.dict(bootstrap.os.environ, {"RUNNER_TEMP": str(temporary)}, clear=True), \
+                     mock.patch.object(bootstrap, "obtain_derived_pip", side_effect=lambda cache, upstream: upstream), \
                      mock.patch.object(bootstrap, "SIZE", len(fixed)), \
                      mock.patch.object(bootstrap, "SHA256", hashlib.sha256(fixed).hexdigest()), \
                      mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")), \
@@ -122,7 +124,7 @@ class BootstrapTests(unittest.TestCase):
                     self.assertEqual(bootstrap.main(), 1)
                 self.assertNotIn("PRIVATE", stderr.getvalue())
                 self.assertEqual(child.call_count, int(failure == "installer"))
-                self.assertEqual(verify.call_args_list, [mock.call(wheel)], "failed installation must not reach the post-install verification")
+                self.assertEqual(verify.call_args_list, [mock.call(wheel, len(fixed), hashlib.sha256(fixed).hexdigest())], "failed installation must not reach the post-install verification")
 
 
     def inert_pip_wheel(self, temporary):

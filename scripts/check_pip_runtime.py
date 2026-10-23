@@ -3,13 +3,16 @@
 import importlib
 import importlib.metadata
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import re
+import runpy
 import sys
 
 
 MINIMUM = (26, 2, 2)
+CA_POLICY = runpy.run_path(str(Path(__file__).with_name("certifi_bundle.py")))
 
 
 def refuse(message):
@@ -50,7 +53,17 @@ def assert_pip_runtime():
     expected_main = Path(distribution.locate_file("pip/__main__.py")).resolve(strict=True)
     if module != expected or main != expected_main or not module.is_file() or not main.is_file():
         refuse("loaded pip and its executable module do not match the distribution")
-    return {"python": str(executable), "pip": actual, "module": str(module), "main": str(main)}
+    certifi = importlib.import_module("pip._vendor.certifi")
+    certifi_module = Path(certifi.__file__).resolve(strict=True)
+    expected_certifi = Path(distribution.locate_file("pip/_vendor/certifi/__init__.py")).resolve(strict=True)
+    ca = Path(certifi.where()).resolve(strict=True)
+    expected_ca = Path(distribution.locate_file("pip/_vendor/certifi/cacert.pem")).resolve(strict=True)
+    if (certifi_module != expected_certifi or ca != expected_ca
+            or certifi.__version__ != CA_POLICY["CERTIFI_VERSION"]
+            or hashlib.sha256(ca.read_bytes()).hexdigest() != CA_POLICY["CERTIFI_CA_SHA256"]):
+        refuse("pip must load the qualified certifi 2026.10.23 bundle from its own distribution")
+    return {"python": str(executable), "pip": actual, "module": str(module), "main": str(main),
+            "certifi": certifi.__version__, "ca": str(ca)}
 
 
 def main():

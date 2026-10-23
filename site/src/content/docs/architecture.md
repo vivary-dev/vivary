@@ -1475,6 +1475,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Certificate bundle coherence. CI bootstrap and desktop packaging now
+share an authenticated certifi 2026.10.23 overlay for pip 26.2.2, retaining pip's
+vendored import rewrites and distlib. The same derived wheel supplies build pip
+and retained ensurepip seeds, so a new venv does not restore the older CA bundle.
+Actual pip admission binds the loaded vendor path, version and CA digest. CI pip
+commands explicitly use the verified certifi store without adding host truststore
+roots, including Windows CryptoAPI, while retaining TLS verification. Private
+build-client bundles exclude C1/C3 alongside the existing G3 exclusion while
+preserving other roots, TLS verification and host-global trust. C1/C3 removal is
+not evidence of exploitation. The [build-tool contract](BUILD-TOOLS.md) owns the
+artifact and migration details. Packaging, real fresh-venv and unchanged-member
+regressions cover the source change; existing public artifacts are not rewritten
+and Windows-native release acceptance remains separate.
+
 2026-10-23 Reproducible tool setup integration. The reviewed PR270 setup scripts,
 qualified site provisioning and changed-path selection compose with this merged
 application. PR260's project-creation shutdown test remains in CI. The tool

@@ -8,9 +8,11 @@ import base64
 import csv
 import email.parser
 import hashlib
+import importlib.util
 import os
 from pathlib import Path, PurePosixPath
 import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -210,6 +212,36 @@ def _venv_python(environment: Path) -> Path:
     return environment / "bin" / "python"
 
 
+def _certificate_overlay():
+    source = Path(__file__).resolve().parents[2] / "scripts" / "certifi_bundle.py"
+    spec = importlib.util.spec_from_file_location("vivary_certifi_bundle", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _replace_ensurepip_seed(runtime_root: Path, platform: str, pip_wheel: Path) -> None:
+    """Keep fresh venvs on the same reviewed pip bytes used by the offline builder."""
+    library = runtime_root / "python" / ("Lib" if platform == "win32" else "lib/python3.12")
+    bundled = library / "ensurepip" / "_bundled"
+    name = BUILD_BACKEND_WHEELS[0][2]
+    seed = bundled / name
+    if re.findall(r'^_PIP_VERSION = "([^"]+)"$', (library / "ensurepip" / "__init__.py").read_text(), re.MULTILINE) != ["26.2.2"]:
+        raise ValueError("ensurepip version must select the pinned pip seed")
+    if not bundled.resolve().is_relative_to(runtime_root.resolve()):
+        raise ValueError("ensurepip seed escapes the staged runtime")
+    if sorted(path.name for path in bundled.glob("*.whl")) != [name]:
+        raise ValueError("ensurepip requires exactly the pinned pip seed")
+    if seed.is_symlink() or not seed.is_file():
+        raise ValueError("ensurepip seed must be a regular file")
+    original = seed.read_bytes()
+    derived = pip_wheel.read_bytes()
+    if original != derived and hashlib.sha256(original).hexdigest() != BUILD_BACKEND_SHA256[name]:
+        raise ValueError("ensurepip seed differs from authenticated original or derived pip")
+    if original != derived:
+        seed.write_bytes(derived)
+
+
 def _validate_component_wheels(wheelhouse: Path) -> None:
     expected = {wheel for *_, wheel in COMPONENTS}
     actual = {wheel.name for wheel in wheelhouse.glob("*.whl")}
@@ -250,6 +282,7 @@ def build_wheels(
     runtime_root: Path,
     site_packages: Path,
     platform: str,
+    certifi_wheel: Path,
 ) -> None:
     wheelhouse.mkdir(parents=True, exist_ok=True)
     if any(wheelhouse.iterdir()):
@@ -266,6 +299,13 @@ def build_wheels(
         dir=wheelhouse.parent,
     ) as temporary:
         build_environment = Path(temporary)
+        overlay = _certificate_overlay()
+        derived_directory = build_environment / "qualified-backend"
+        derived_directory.mkdir()
+        derived_pip = overlay.prepare_pip(backend_wheels[0], certifi_wheel,
+                                          derived_directory / backend_wheels[0].name)
+        _replace_ensurepip_seed(runtime_root, platform, derived_pip)
+        backend_wheels = [derived_pip, *backend_wheels[1:]]
         # Never execute an older ensurepip seed from the host. Bootstrap exclusively
         # from the authenticated pip wheel, with no site or user configuration imports.
         builder = venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt")
@@ -301,9 +341,14 @@ def build_wheels(
                 (
                     "import importlib.metadata as metadata;"
                     "import pip._vendor.distlib as distlib;"
+                    "import pip._vendor.certifi as certifi;"
+                    "import hashlib;"
                     "assert metadata.version('pip') == '26.2.2';"
                     "assert metadata.version('setuptools') == '84.1.0';"
-                    "assert distlib.__version__ == '0.4.2'"
+                    "assert distlib.__version__ == '0.4.2';"
+                    "assert certifi.__version__ == '2026.10.23';"
+                    "assert hashlib.sha256(open(certifi.where(),'rb').read()).hexdigest() == "
+                    "'2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b'"
                 ),
             ],
             env=environment,
@@ -566,6 +611,7 @@ def main() -> None:
     build.add_argument("--runtime-root", type=Path, required=True)
     build.add_argument("--site-packages", type=Path, required=True)
     build.add_argument("--platform", choices=("linux", "win32"), required=True)
+    build.add_argument("--certifi-wheel", type=Path, required=True)
 
     install = commands.add_parser("install-wheels")
     install.add_argument("--wheelhouse", type=Path, required=True)
@@ -587,6 +633,7 @@ def main() -> None:
             args.runtime_root.resolve(),
             args.site_packages.resolve(),
             args.platform,
+            args.certifi_wheel.resolve(),
         )
     elif args.command == "install-wheels":
         install_wheels(args.wheelhouse.resolve(), args.site_packages.resolve())

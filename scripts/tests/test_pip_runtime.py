@@ -56,7 +56,16 @@ class PipRuntimeTests(unittest.TestCase):
         self.distribution = SimpleNamespace(
             version="26.2.2", locate_file=lambda name: self.root / name
         )
-        self.import_pip = mock.Mock(return_value=self.pip)
+        self.certifi_module = self.root / "pip/_vendor/certifi/__init__.py"
+        self.certifi_module.parent.mkdir(parents=True)
+        self.certifi_module.write_text("")
+        self.ca = self.certifi_module.with_name("cacert.pem")
+        self.ca.write_bytes(b"inert qualified CA fixture")
+        self.certifi = SimpleNamespace(__version__="2026.10.23", __file__=str(self.certifi_module), where=lambda: str(self.ca))
+        self.import_pip = mock.Mock(side_effect=lambda name: self.pip if name == "pip" else self.certifi)
+        policy = mock.patch.dict(guard.CA_POLICY, CERTIFI_CA_SHA256=guard.hashlib.sha256(self.ca.read_bytes()).hexdigest())
+        policy.start()
+        self.addCleanup(policy.stop)
         self.find_distribution = mock.Mock(return_value=self.distribution)
         self.main_spec = mock.Mock(return_value=SimpleNamespace(origin=str(self.main_module)))
         fake_importlib = SimpleNamespace(
@@ -78,10 +87,25 @@ class PipRuntimeTests(unittest.TestCase):
         self.assertEqual(result, {
             "python": str(self.executable.resolve()), "pip": "26.2.2",
             "module": str(self.module.resolve()), "main": str(self.main_module.resolve()),
+            "certifi": "2026.10.23", "ca": str(self.ca),
         })
-        self.import_pip.assert_called_once_with("pip")
+        self.assertEqual(self.import_pip.call_args_list, [mock.call("pip"), mock.call("pip._vendor.certifi")])
         self.find_distribution.assert_called_once_with("pip")
         self.main_spec.assert_called_once_with("pip.__main__")
+
+    def test_old_or_altered_vendored_certifi_is_refused(self):
+        for variant in ("old-version", "changed-ca", "foreign-path"):
+            with self.subTest(variant=variant):
+                if variant == "old-version":
+                    self.certifi.__version__ = "2026.10.19"
+                elif variant == "changed-ca":
+                    self.certifi.__version__ = "2026.10.23"
+                    self.ca.write_bytes(b"changed roots")
+                else:
+                    self.ca.write_bytes(b"inert qualified CA fixture")
+                    self.certifi.__file__ = str(self.module)
+                with self.assertRaisesRegex(RuntimeError, "qualified certifi"):
+                    guard.assert_pip_runtime()
 
     def test_equivalent_stable_two_component_versions_pass(self):
         self.pip.__version__ = "26.3"

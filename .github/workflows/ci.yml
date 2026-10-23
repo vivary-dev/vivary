@@ -24,6 +24,11 @@ permissions:
   contents: read
   pull-requests: read
 
+# Build-isolation pip children inherit this; isolated parent commands also pass
+# the explicit flag. Keep TLS verification while excluding host-store additions.
+env:
+  PIP_USE_DEPRECATED: legacy-certs
+
 jobs:
   changes:
     name: changed paths
@@ -399,7 +404,7 @@ jobs:
           fi
 
           if printf '%s\n' "$changed" | grep -Eq \
-            '^(site/|docs/|scripts/(bootstrap_build_tools|build_go_tools|check_site_dependencies)\.py$|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
+            '^(site/|docs/|scripts/(bootstrap_build_tools|build_go_tools|check_site_dependencies|certifi_bundle)\.py$|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
             echo "site=true" >> "$GITHUB_OUTPUT"
           else
             echo "site=false" >> "$GITHUB_OUTPUT"
@@ -445,12 +450,12 @@ jobs:
           python scripts/tests/test_hldd.py
           python scripts/check_hldd.py --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: install Python test runner
-        run: python -I -m pip install pytest packaging
+        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging
       - name: install release build frontend
         env:
           PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
         run: |
-          python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946"
+          python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946"
       - name: actual uv runtime admission
         run: python -I -B scripts/check_uv_runtime.py
       - name: CI workflow contract
@@ -459,6 +464,8 @@ jobs:
         run: python -I -B scripts/tests/test_pip_runtime.py
       - name: verified pip provisioning tests
         run: python -I -B scripts/tests/test_bootstrap_ci_pip.py
+      - name: certificate overlay preservation tests
+        run: python -I -B scripts/tests/test_certifi_bundle.py
       - name: known site dependency admission tests
         run: python -I -B scripts/tests/test_site_dependencies.py
       - name: isolated build tool tests
@@ -506,7 +513,7 @@ jobs:
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: mcp read-only adapter
         run: |
-          python -I -m pip install "mcp==2.2.0"
+          python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
@@ -544,7 +551,7 @@ jobs:
           smoke="$(mktemp -d)"
           wheelhouse="$smoke/wheels"
           mkdir -p "$wheelhouse"
-          python -I -m pip wheel --no-deps --wheel-dir "$wheelhouse" \
+          python -I -m pip --use-deprecated=legacy-certs wheel --no-deps --wheel-dir "$wheelhouse" \
             ./packages/core \
             ./packages/tropo \
             ./packages/strato \
@@ -560,8 +567,8 @@ jobs:
           unset PYTHONPATH
           "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
           "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?
-          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary
-          "$venv_python" -I -m pip check
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs check
           "$venv_python" -I scripts/check_installed_workspace_roles.py
           (
             cd "$smoke"
@@ -744,9 +751,9 @@ jobs:
           mcp_python="$mcp_venv/bin/python"
           "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
           "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?
-          "$mcp_python" -I -m pip install "mcp==2.2.0"
-          "$mcp_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
-          "$mcp_python" -I -m pip check
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
           "$mcp_python" - <<'PY'
           from importlib.metadata import PackageNotFoundError, requires, version
@@ -781,7 +788,7 @@ jobs:
           else:
               raise AssertionError("optional MCP install pulled the vivary meta-package")
           PY
-          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" --no-deps \
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
@@ -1136,7 +1143,7 @@ jobs:
       - name: source navigation contract tests on Windows
         run: python -B scripts/tests/test-source-navigation.py
       - name: install test runner
-        run: python -I -m pip install pytest packaging
+        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging
       - name: preview owner startup cancellation on Windows
         run: python -m pytest packages/workbench/tests/test_windows_preview_owner.py -q
       - name: thin init CLI on Windows
@@ -1171,7 +1178,7 @@ jobs:
           $smoke = Join-Path $env:RUNNER_TEMP "vivary-wheel-$([guid]::NewGuid())"
           $wheelhouse = Join-Path $smoke "wheels"
           New-Item -ItemType Directory -Path $wheelhouse -Force | Out-Null
-          python -I -m pip wheel --no-deps --wheel-dir $wheelhouse `
+          python -I -m pip --use-deprecated=legacy-certs wheel --no-deps --wheel-dir $wheelhouse `
             ./packages/core `
             ./packages/tropo `
             ./packages/strato `
@@ -1190,9 +1197,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" }
           & $python -I -B scripts/check_pip_runtime.py
           if ($LASTEXITCODE -ne 0) { throw "pip runtime admission failed" }
-          & $python -I -m pip install --no-index --find-links $wheelhouse vivary
+          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links $wheelhouse vivary
           if ($LASTEXITCODE -ne 0) { throw "vivary install failed" }
-          & $python -I -m pip check
+          & $python -I -m pip --use-deprecated=legacy-certs check
           if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
           & $python -I scripts/check_installed_workspace_roles.py
           if ($LASTEXITCODE -ne 0) { throw "installed role API failed" }
@@ -1244,11 +1251,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning failed" }
           & $mcpPython -I -B scripts/check_pip_runtime.py
           if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }
-          & $mcpPython -I -m pip install "mcp==2.2.0"
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
           if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
-          & $mcpPython -I -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
-          & $mcpPython -I -m pip check
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs check
           if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }
           & (Join-Path $mcpScripts "vivary-mcp.exe") --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "vivary-mcp entrypoint failed" }
@@ -1321,7 +1328,7 @@ jobs:
         env:
           PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
         run: |
-          python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ runner.os == 'Linux' && 'https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946' || runner.os == 'Windows' && 'https://files.pythonhosted.org/packages/32/ea/771744a784b16aa21d195cb5d5d5a2878d72fa00fc26f11ea3f9646994fe/uv-0.13.5-py3-none-win_amd64.whl#sha256=1fb29fc46ba12033e2ef95a95ac79d649e71bbb1358419bbbcbd19d86026ef2f' || '' }}"
+          python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ runner.os == 'Linux' && 'https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946' || runner.os == 'Windows' && 'https://files.pythonhosted.org/packages/32/ea/771744a784b16aa21d195cb5d5d5a2878d72fa00fc26f11ea3f9646994fe/uv-0.13.5-py3-none-win_amd64.whl#sha256=1fb29fc46ba12033e2ef95a95ac79d649e71bbb1358419bbbcbd19d86026ef2f' || '' }}"
       - name: actual uv runtime admission
         run: python -I -B scripts/check_uv_runtime.py
       - name: governed context adapter (Windows path contract)

@@ -556,9 +556,9 @@ UV_WINDOWS_WHEEL = (
 )
 UV_PIP_CONFIG_FILE = "${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}"
 UV_INSTALLS = {
-    "test": 'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_LINUX_WHEEL + '"',
+    "test": 'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_LINUX_WHEEL + '"',
     "orientation-proof": (
-        'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
+        'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
         "runner.os == 'Linux' && '" + UV_LINUX_WHEEL
         + "' || runner.os == 'Windows' && '" + UV_WINDOWS_WHEEL + "' || '' }}\""
     ),
@@ -603,7 +603,7 @@ def _check_uv_inherited_controls(header: str, pad: str, owner: str) -> None:
 def check_uv_acquisition(text: str) -> None:
     _check_uv_inherited_controls(text.split("\njobs:\n", 1)[0], "", "workflow")
     acquisition = re.compile(
-        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--isolated\s+)?install\b[^\n]*\buv\b"
+        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--use-deprecated=legacy-certs\s+)?(?:--isolated\s+)?install\b[^\n]*\buv\b"
     )
     for name in UV_JOBS:
         job = job_block(text, name)
@@ -677,13 +677,13 @@ PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv
           '          unset PYTHONPATH\n'
           '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-          '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" '
+          '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" '
           'vivary\n',
           '          python -m venv --without-pip "$mcp_venv"\n'
           '          mcp_python="$mcp_venv/bin/python"\n'
           '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-          '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'),
+          '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'),
  'governed-platform-proof': ('          python -m venv --without-pip (Join-Path $smoke "venv")\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
                              '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
@@ -694,7 +694,7 @@ PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv
                              '          & $python -I -B scripts/check_pip_runtime.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
                              'failed" }\n'
-                             '          & $python -I -m pip install --no-index --find-links '
+                             '          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links '
                              '$wheelhouse vivary\n',
                              '          python -m venv --without-pip $mcpVenv\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation '
@@ -707,7 +707,7 @@ PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv
                              '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime '
                              'admission failed" }\n'
-                             '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                             '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                              'failed" }\n')}
 PIP_RUNTIME_STEP = (
@@ -720,7 +720,7 @@ PIP_RUNTIME_STEP = (
 PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+         '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
  'governed-platform-proof': '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
@@ -728,7 +728,7 @@ PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
                             '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
                             'failed" }\n'
-                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                             'failed" }\n'}
 
@@ -761,7 +761,7 @@ def check_pip_runtime(text: str) -> None:
             for required in expected_venvs:
                 require(job.count(required) == 1,
                         f"{name} fresh venv requires --without-pip, exact-target provisioning and runtime admission before pip")
-                install = next(line.strip() for line in required.splitlines() if " -I -m pip install " in line)
+                install = next(line.strip() for line in required.splitlines() if " -I -m pip --use-deprecated=legacy-certs install " in line)
                 prefix = install.split(" install ", 1)[0] + " "
                 require(not any(line.strip().startswith(prefix) for line in job[:job.index(required)].splitlines()),
                         f"{name} fresh venv pip cannot run before its provisioning and admission")
@@ -775,7 +775,7 @@ def check_pip_runtime(text: str) -> None:
             require(not re.search(r'(?m)^\s*(?:"\$mcp_python"|& \$mcpPython)\s+(?:-I\s+)?-m\s+pip\b',
                                   job[:job.index(block)]),
                     f"{name} MCP pip cannot run before its venv admission")
-            network_install = next(line.strip() for line in block.splitlines() if " -I -m pip install " in line)
+            network_install = next(line.strip() for line in block.splitlines() if " -I -m pip --use-deprecated=legacy-certs install " in line)
             mcp_pip = network_install.split(" install ", 1)[0] + " "
             wheelhouse = '\"$wheelhouse\"' if name == "test" else "$wheelhouse"
             offline_install = mcp_pip + "install --no-index --find-links " + wheelhouse + " vivary-mcp create-vivary"
@@ -795,12 +795,15 @@ def check_pip_runtime(text: str) -> None:
 
 
 def check_pip_commands(text: str) -> None:
+    require(re.search(r"(?m)^  PIP_USE_DEPRECATED: legacy-certs$", text.split("\njobs:\n", 1)[0])
+            and text.count("PIP_USE_DEPRECATED") == 1,
+            "pip build-isolation children must inherit the qualified certifi-only trust policy")
     for name in PIP_JOBS:
-        prefixes = ("python -I -m pip ",)
+        prefixes = ("python -I -m pip --use-deprecated=legacy-certs ",)
         if name == "test":
-            prefixes += ('"$venv_python" -I -m pip ', '"$mcp_python" -I -m pip ')
+            prefixes += ('"$venv_python" -I -m pip --use-deprecated=legacy-certs ', '"$mcp_python" -I -m pip --use-deprecated=legacy-certs ')
         elif name == "governed-platform-proof":
-            prefixes += ("& $python -I -m pip ", "& $mcpPython -I -m pip ")
+            prefixes += ("& $python -I -m pip --use-deprecated=legacy-certs ", "& $mcpPython -I -m pip --use-deprecated=legacy-certs ")
         for step in re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]:
             run = re.search(r"(?m)^(?:      - |        )run: ([^\n]*)$", step)
             if run is None:
@@ -817,7 +820,7 @@ def check_pip_commands(text: str) -> None:
                 require(not re.search(r"\binstall\s+(?:-\S+\s+)*pip(?:[<=>!~\[]|\s|$)", command),
                         f"{name} cannot use a network pip self-upgrade to clear runtime admission")
                 if command.startswith(('"$venv_python"', "& $python ")):
-                    require(" -m pip check" in command or " install --no-index " in command,
+                    require(" -m pip --use-deprecated=legacy-certs check" in command or " install --no-index " in command,
                             f"{name} unadmitted offline venv pip cannot access the network")
             if pip_commands:
                 require(not re.search(r"(?m)^        (?:if|continue-on-error|working-directory):", step),
@@ -935,7 +938,7 @@ def main() -> None:
     require("HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}" in test_job,
             "HLDD review must use the actual PR head, not the synthetic merge")
 
-    runner_install = "python -I -m pip install pytest packaging"
+    runner_install = "python -I -m pip --use-deprecated=legacy-certs install pytest packaging"
     first_pytest = "python -m pytest"
     contract_tests = "python scripts/tests/test_ci_workflow.py"
     source_navigation_check = "python -B scripts/check-source-navigation.py --check"

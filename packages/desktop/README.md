@@ -77,8 +77,8 @@ pnpm --dir packages/workbench build
 npm --prefix packages/desktop ci
 ```
 
-Packaging the original runtime also requires host Python 3.12 with `venv` and
-`ensurepip`. It does not require global setuptools. The first package build
+Packaging the original runtime also requires qualified host Python 3.12 with `venv`.
+It does not execute the host's `ensurepip` or require global setuptools. The first package build
 needs outbound HTTPS for the hash-pinned runtime and build-tool wheels; verified
 downloads are reused from the desktop package's `.tmp` cache.
 
@@ -146,9 +146,15 @@ Each build then:
 
 1. Creates a temporary isolated build environment under the same `.tmp`
    directory without running the host's ensurepip seed. It authenticates the local
-   pip and setuptools wheel bytes again, bootstraps from that pip wheel with isolated
-   imports and package-client configuration, and
-   checks that pip vendors distlib 0.4.2.
+   pip, setuptools and certifi wheel bytes again. Before executing pip, the shared
+   certificate helper derives a local pip 26.2.2 wheel with certifi 2026.10.23.
+   It changes only certifi's version and CA data, its vendoring declaration and
+   wheel RECORD; the vendored import rewrites and distlib stay unchanged. Bootstrap
+   uses that derived wheel with isolated imports and package-client configuration,
+   then checks the actual vendored certifi bundle and distlib 0.4.2.
+   The same derived wheel replaces the staged interpreter's authenticated
+   ensurepip seed, so a later fresh venv cannot restore the older bundle. An
+   unknown or additional seed, or a mismatched ensurepip version, refuses packaging.
 2. Builds fresh pure-Python wheels from the owned `vivary`, `create-vivary`,
    `core`, `tropo`, `strato`, `ozone`, and `exo` sources without an
    index or build isolation.
@@ -160,10 +166,18 @@ Each build then:
 6. Copies and hashes the reviewed managed-project bridge.
 7. Writes the runtime manifest and license inventory.
 
-The build tools remain package-time inputs. The pip wheel is
+The authenticated upstream pip input is
 `pip-26.2.2-py3-none-any.whl`, with 1,819,850 authenticated bytes and the digest
-above. Setuptools moves to 84.1.0, which fixes the Windows legacy wheel-to-egg traversal advisory. These inputs do not add a first-launch
-installer or a new runtime dependency.
+above. The overlay input is the official certifi 2026.10.23 wheel, 135,082 bytes,
+SHA256 `e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1`.
+Its CA bundle removes emSign C1/C3 and preserves the other 118 roots. The derived
+pip wheel is a Vivary modification, not an upstream pip release; `manifest.json`
+records both upstream inputs and the derived seed's path and SHA256. Installed
+pip remains excluded from the shipped site-packages. Its standard ensurepip
+seed remains available with the same corrected vendored certifi bytes; standalone
+certifi is not added to the seven owned packages. No first-launch installation
+or TLS verification bypass is introduced. Setuptools remains 84.1.0, including
+the Windows legacy wheel-to-egg traversal fix.
 
 The distributed application needs no global Python, source checkout, or
 first-launch install. The existing `vivary_cli` router continues to own create,

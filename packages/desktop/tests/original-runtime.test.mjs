@@ -12,6 +12,7 @@ import {
   cacheVerifiedAsset,
   createOriginalRuntimeManifest,
   ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS,
+  ORIGINAL_RUNTIME_CERTIFI_ASSET,
   ORIGINAL_RUNTIME_COMPONENTS,
   ORIGINAL_RUNTIME_LICENSE_ASSET,
   originalRuntimeTarget,
@@ -67,6 +68,157 @@ test("build-only pip assets bind the authenticated 26.2.2 wheel tuple", () => {
     version: "26.2.2", fileName: "pip-26.2.2-py3-none-any.whl",
     sha256: "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70", size: 1_819_850,
   });
+});
+
+test("desktop certifi input matches the shared authenticated overlay pins", async () => {
+  const script = String.raw`
+import json, sys, types
+from pathlib import Path
+source = Path(sys.argv[1])
+module = types.ModuleType("fixture_original_wheels")
+module.__file__ = str(source)
+exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
+overlay = module._certificate_overlay()
+print(json.dumps({"version": overlay.CERTIFI_VERSION, "fileName": overlay.CERTIFI_WHEEL,
+    "url": overlay.CERTIFI_URL, "sha256": overlay.CERTIFI_SHA256, "size": overlay.CERTIFI_SIZE}))
+`;
+  const { stdout } = await execFile(python, ["-I", "-B", "-c", script, helper], { timeout: 5_000 });
+  const { provider, distribution, ...pins } = ORIGINAL_RUNTIME_CERTIFI_ASSET;
+  assert.equal(provider, "PyPI");
+  assert.equal(distribution, "certifi");
+  assert.equal(pins.version, "2026.10.23");
+  assert.deepEqual(JSON.parse(stdout), pins);
+});
+
+for (const platform of ["linux", "win32"]) {
+  test(`${platform} ensurepip keeps the derived seed and refuses unknown, additional or mismatched seeds`, async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-ensurepip-overlay-"));
+    try {
+      const script = String.raw`
+import hashlib, json, sys, types
+from pathlib import Path
+source, root, platform = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+module = types.ModuleType("fixture_original_wheels")
+module.__file__ = str(source)
+exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
+name = module.BUILD_BACKEND_WHEELS[0][2]
+original, derived = b"fixture original pip", b"fixture derived pip"
+# Only the seed-identity fixture substitutes the authenticated input digest.
+# The separate backend and shared-overlay tests retain their production pins.
+module.BUILD_BACKEND_SHA256 = {**module.BUILD_BACKEND_SHA256, name: hashlib.sha256(original).hexdigest()}
+wheel = root / name
+wheel.write_bytes(derived)
+runtime = root / "runtime"
+ensurepip = runtime / "python" / ("Lib" if platform == "win32" else "lib/python3.12") / "ensurepip"
+bundled = ensurepip / "_bundled"
+bundled.mkdir(parents=True)
+init = ensurepip / "__init__.py"
+init.write_text('_PIP_VERSION = "26.2.2"\n')
+seed = bundled / name
+seed.write_bytes(original)
+module._replace_ensurepip_seed(runtime, platform, wheel)
+assert seed.read_bytes() == derived
+stamp = seed.stat().st_mtime_ns
+module._replace_ensurepip_seed(runtime, platform, wheel)
+assert seed.read_bytes() == derived and seed.stat().st_mtime_ns == stamp
+def refuse(expected):
+    before = seed.read_bytes()
+    try:
+        module._replace_ensurepip_seed(runtime, platform, wheel)
+    except ValueError as error:
+        assert expected in str(error), str(error)
+    else:
+        raise AssertionError("unsafe seed accepted")
+    assert seed.read_bytes() == before
+seed.write_bytes(b"unknown pip")
+refuse("differs from authenticated")
+seed.write_bytes(derived)
+extra = bundled / "pip-25.0-py3-none-any.whl"
+extra.write_bytes(original)
+refuse("exactly the pinned")
+extra.unlink()
+init.write_text('_PIP_VERSION = "25.0"\n')
+refuse("version must select")
+print(json.dumps({"replaced": True, "idempotent": True, "unknownRefused": True,
+    "extraRefused": True, "versionRefused": True}))
+`;
+      const { stdout } = await execFile(python, ["-I", "-B", "-c", script, helper, directory, platform], { timeout: 5_000 });
+      assert.deepEqual(JSON.parse(stdout), { replaced: true, idempotent: true, unknownRefused: true,
+        extraRefused: true, versionRefused: true });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+}
+
+test("wheel bootstrap replaces the runtime seed before executing derived pip and never calls host ensurepip", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-bootstrap-order-"));
+  try {
+    const script = String.raw`
+import hashlib, json, sys, types
+from pathlib import Path
+source, root = Path(sys.argv[1]), Path(sys.argv[2])
+module = types.ModuleType("fixture_original_wheels")
+module.__file__ = str(source)
+exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
+repository = root / "repository"
+for component, *_ in module.COMPONENTS:
+    source_root = repository / "packages" / component
+    source_root.mkdir(parents=True)
+    (source_root / "pyproject.toml").write_text("fixture")
+original, derived = b"fixture original pip", b"fixture derived pip"
+pip = root / module.BUILD_BACKEND_WHEELS[0][2]
+pip.write_bytes(original)
+setuptools = root / module.BUILD_BACKEND_WHEELS[1][2]
+setuptools.write_bytes(b"fixture setuptools")
+certifi = root / "certifi.whl"
+certifi.write_bytes(b"fixture certifi")
+runtime = root / "runtime"
+bundled = runtime / "python/lib/python3.12/ensurepip/_bundled"
+bundled.mkdir(parents=True)
+(bundled.parent / "__init__.py").write_text('_PIP_VERSION = "26.2.2"\n')
+seed = bundled / pip.name
+seed.write_bytes(original)
+# Authentication is covered independently; this fixture isolates actual bootstrap ordering.
+module._validated_build_backend_wheels = lambda paths: [pip, setuptools]
+module.BUILD_BACKEND_SHA256 = {pip.name: hashlib.sha256(original).hexdigest()}
+calls = []
+def prepare_pip(pip_input, certifi_input, target):
+    assert pip_input == pip and certifi_input == certifi
+    target.write_bytes(derived)
+    calls.append("derived")
+    return target
+module._certificate_overlay = lambda: types.SimpleNamespace(prepare_pip=prepare_pip)
+class Builder:
+    def __init__(self, *, with_pip, symlinks):
+        assert with_pip is False, "host ensurepip must not execute"
+        assert seed.read_bytes() == derived, "seed must already be replaced"
+        calls.append("venv-without-pip")
+    def create(self, destination):
+        pass
+module.venv = types.SimpleNamespace(EnvBuilder=Builder)
+class ReachedBootstrap(Exception):
+    pass
+def run(command, **kwargs):
+    assert command[1:4] == ["-I", "-B", "-c"]
+    assert Path(command[5]).read_bytes() == derived
+    assert command[-1] == command[5], "first install must use the derived wheel too"
+    assert "--no-index" in command and "--isolated" in command
+    assert seed.read_bytes() == derived
+    calls.append("derived-pip-execution")
+    raise ReachedBootstrap()
+module.subprocess = types.SimpleNamespace(run=run)
+try:
+    module.build_wheels(repository, root / "wheels", [pip, setuptools], runtime,
+        runtime / "python/lib/python3.12/site-packages", "linux", certifi)
+except ReachedBootstrap:
+    pass
+else:
+    raise AssertionError("bootstrap was not reached")
+assert pip.read_bytes() == original, "authenticated upstream input must stay unchanged"
+print(json.dumps(calls))
+`;
+    const { stdout } = await execFile(python, ["-I", "-B", "-c", script, helper, directory], { timeout: 5_000 });
+    assert.deepEqual(JSON.parse(stdout), ["derived", "venv-without-pip", "derived-pip-execution"]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("the wheel backend validator refuses unauthenticated bytes even with the intended name and version", async () => {
