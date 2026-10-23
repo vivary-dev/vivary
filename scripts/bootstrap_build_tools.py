@@ -8,6 +8,7 @@ import argparse
 import base64
 import ctypes
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -105,23 +107,54 @@ def certificates(root, source=None):
     return ca
 
 
-def download(root, url, filename, algorithm, expected):
+def download(root, url, filename, algorithm, expected, size=None):
     """Authenticated inert bytes; existing cache is rehashed before every use."""
+    limit = 1024**3 if size is None else size
+    require(type(limit) is int and 0 < limit <= 1024**3, "Artifact byte bound is invalid")
+    def refuse_artifact(message, data=b"", status="unknown"):
+        digest = hashlib.new(algorithm, data)
+        code = str(status) if type(status) is int and 100 <= status <= 599 else "cache" if status == "cache" else "unknown"
+        raise RuntimeError(f"{message} (bytes={len(data)}, algorithm={digest.name}, digest={digest.hexdigest()}, status={code})") from None
     cache = root / "archives"
     plain_directory(cache)
     target = cache / filename
     require(target.name == filename and "/" not in filename and "\\" not in filename, "Archive name must be plain")
     if target.exists() or target.is_symlink():
         require(not reparse(target) and target.is_file(), "Archive cache must be a regular file")
-        data = target.read_bytes()
+        with target.open("rb") as source:
+            data = source.read(limit + 1)
+        status = "cache"
     else:
         context = ssl.create_default_context(cafile=str(root / "ca.pem"))
         opener = urllib.request.build_opener(HTTPSOnlyRedirect(), urllib.request.HTTPSHandler(context=context))
         require(url.startswith("https://"), "Non-HTTPS artifact URL")
-        with opener.open(url, timeout=90) as response:
-            data = response.read(1024**3 + 1)
-        require(len(data) <= 1024**3, "Artifact is too large")
-    require(hashlib.new(algorithm, data).digest() == expected, f"Checksum mismatch: {filename}")
+        request = urllib.request.Request(url, headers={"Accept-Encoding": "identity"})
+        status = "unknown"
+        try:
+            with opener.open(request, timeout=90) as response:
+                status = response.status
+                if type(status) is not int or status != 200:
+                    refuse_artifact("Artifact HTTP status refused", status=status)
+                if response.headers.get("Content-Range") is not None:
+                    refuse_artifact("Partial artifact response refused", status=status)
+                if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+                    refuse_artifact("Encoded artifact response refused", status=status)
+                length = response.headers.get("Content-Length")
+                if length is not None and not re.fullmatch(r"[0-9]{1,12}", length):
+                    refuse_artifact("Artifact response length is invalid", status=status)
+                data = response.read(limit + 1)
+                if length is not None and int(length) != len(data):
+                    refuse_artifact("Artifact response length mismatch", data, status)
+        except urllib.error.HTTPError as error:
+            refuse_artifact("Artifact HTTP status refused", status=error.code)
+        except http.client.IncompleteRead as error:
+            refuse_artifact("Incomplete artifact transfer", error.partial[:limit + 1], status)
+        except (OSError, urllib.error.URLError, http.client.HTTPException):
+            refuse_artifact("Artifact transfer failed", status=status)
+    if len(data) > limit or (size is not None and len(data) != size):
+        refuse_artifact("Artifact byte count mismatch", data, status)
+    if hashlib.new(algorithm, data).digest() != expected:
+        refuse_artifact("Checksum mismatch", data, status)
     write_exact(target, data)
     return target
 

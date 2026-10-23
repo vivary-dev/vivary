@@ -21,6 +21,8 @@ bootstrap = SimpleNamespace(**runpy.run_path(str(Path(__file__).with_name("boots
 
 GO_SHA = "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5"
 WINDOWS_GO_SHA = "7ecd2d7260e82c59bcbd7f1077a07cee2dea607295b858df67195a1e4e09629b"
+GO_SIZE = 66936659
+WINDOWS_GO_SIZE = 75004774
 ESBUILD_SUM = "h1:A2uETn4jrQTcXaT/shwTDTYBxDjl7fV7nXmUrJxfA2w="
 ESBUILD_MOD_SUM = "h1:D2vIQZqV/vIf/VRHtViaUtViZmG7o+kKmlBfVQuRi48="
 SYS_SUM = "h1:0A+M6Uqn+Eje4kHMK80dtF3JCXC4ykBgQG4Fe06QRhQ="
@@ -137,7 +139,8 @@ def build(root, typescript=False):
     suffix = ".exe" if windows else ""
     filename = "go1.26.10.windows-amd64.zip" if windows else "go1.26.10.linux-amd64.tar.gz"
     archive = bootstrap.download(root, "https://go.dev/dl/" + filename,
-                                 filename, "sha256", bytes.fromhex(WINDOWS_GO_SHA if windows else GO_SHA))
+                                 filename, "sha256", bytes.fromhex(WINDOWS_GO_SHA if windows else GO_SHA),
+                                 size=WINDOWS_GO_SIZE if windows else GO_SIZE)
     with tempfile.TemporaryDirectory(prefix="go-stage-", dir=root) as temporary:
         staged = bootstrap.unpack(archive, Path(temporary), "go")
         bootstrap.publish_tree(staged, root / "go")
