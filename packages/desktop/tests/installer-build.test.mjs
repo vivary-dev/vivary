@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { chmod, lstat, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  buildInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPaths,
+  buildInstaller as buildProductionInstaller, countAddedFiles, findMakensis, installFileList, isSameOrInside, longestPayloadPaths,
   maxFolderPath, maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 import { writePackageFileManifest } from "../package.mjs";
@@ -15,6 +16,18 @@ import { writePackageFileManifest } from "../package.mjs";
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const installerCommit = "1111111111111111111111111111111111111111";
 const buildScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build-installer.mjs");
+// Retain compiler/content coverage while every desktop publication is held for Electron.
+// This compiles the real private compiler body, never a production admission waiver.
+const installerSource = await readFile(buildScript, "utf8");
+const compilerSource = installerSource.slice(installerSource.indexOf("async function compileInstaller("), installerSource.indexOf("\nasync function main()"));
+const hashSource = installerSource.slice(installerSource.indexOf("async function sha256("), installerSource.indexOf("\n/** Checks that the payload"));
+const compilerDependencies = { spawnSync, createHash, createReadStream, outputFiles, mkdtemp, path, os, writeFile,
+  installFileList, countAddedFiles, stat, lstat, rm,
+  installerScript: path.resolve(path.dirname(buildScript), "installer/vivary.nsi"),
+  licenseFile: path.resolve(path.dirname(buildScript), "../../LICENSE"),
+  iconFile: path.resolve(path.dirname(buildScript), "assets/vivary.ico") };
+const compileFixtureInstaller = new Function(...Object.keys(compilerDependencies),
+  `${hashSource}\n${compilerSource}\nreturn compileInstaller;`)(...Object.values(compilerDependencies));
 // Case-sensitive names, trailing dots and device names exist only off Windows and macOS.
 const linuxOnly = process.platform !== "linux" && "needs a case-sensitive Linux file system";
 
@@ -253,6 +266,7 @@ test("the installer commit must hold every committed installer source", () => wi
   const sources = {
     "packages/desktop/installer/vivary.nsi": "; script\n",
     "packages/desktop/build-installer.mjs": "// build\n",
+    "packages/workbench/bin/runtime-security.mjs": "// policy\n",
     "packages/desktop/assets/vivary.ico": "icon\n",
     "LICENSE": "license\n",
     "README.md": "readme\n",
@@ -327,7 +341,7 @@ test("the build passes the payload's longest file and folder lengths to setup",
     const inputs = await resolveInstallerInputs({ payload, output, manifest });
     process.env.FAKE_FILES = "7";
     let built;
-    try { built = await buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }); }
+    try { built = await compileFixtureInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }); }
     finally { delete process.env.FAKE_FILES; }
     // resources\workbench\.output\server\index.mjs and resources\workbench\.output\server.
     assert.ok(built.log.includes("argument -DLONGEST_FILE=44\n"), built.log);
@@ -342,7 +356,7 @@ test("a failed build leaves no installer, checksum or receipt", { skip: process.
       const inputs = await resolveInstallerInputs({ payload, output, manifest });
       process.env.FAKE_FILES = "3";
       try {
-        await assert.rejects(buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /added 3 files/);
+        await assert.rejects(compileFixtureInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /added 3 files/);
       } finally { delete process.env.FAKE_FILES; }
       for (const file of outputFiles(output)) assert.equal(await lstat(file).catch(() => null), null, file);
     }));
@@ -352,7 +366,7 @@ test("a failed build leaves no installer, checksum or receipt", { skip: process.
       await mkdir(`${output}.receipt.json`);
       process.env.FAKE_FILES = "7";
       try {
-        await assert.rejects(buildInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /EEXIST/);
+        await assert.rejects(compileFixtureInstaller(inputs, await writeFakeMakensis(directory), { installerCommit }), /EEXIST/);
       } finally { delete process.env.FAKE_FILES; }
       assert.equal(await lstat(output).catch(() => null), null, "installer removed");
       assert.equal(await lstat(`${output}.sha256`).catch(() => null), null, "checksum removed");
@@ -362,11 +376,37 @@ test("a failed build leaves no installer, checksum or receipt", { skip: process.
 
 const makensis = (() => { try { return findMakensis(); } catch { return null; } })();
 
+test("production installer refuses unverified runtime payloads before invoking NSIS", () => withFixture(async ({ directory, payload, output, manifest }) => {
+  const marker = path.join(directory, "nsis-invoked");
+  // A Node script used as an executable is sufficient to detect any attempted invocation on Unix.
+  // On Windows a missing executable is also an error if the production boundary reaches NSIS.
+  const fake = path.join(directory, "makensis");
+  await writeFile(fake, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'called');\n`);
+  await chmod(fake, 0o700);
+  await writeFile(path.join(payload, "resources/workbench/build.json"), JSON.stringify({
+    product: "Vivary", platform: "win32", architecture: "x64", version: "0.0.0", sourceCommit: commit, sourceDirty: false,
+    node: "24.22.1", runtimeSecurity: { standalone: { sha256: "a".repeat(64), versions: { node: "24.22.1" } } },
+  }));
+  await writeManifest(payload, manifest);
+  const inputs = await resolveInstallerInputs({ payload, output, manifest });
+  await assert.rejects(buildProductionInstaller(inputs, fake, { installerCommit }), /Runtime security/);
+  assert.equal(await lstat(marker).catch(() => null), null, "runtime refusal precedes even makensis -VERSION");
+  assert.equal(await lstat(output).catch(() => null), null);
+}));
+
+test("production installer rechecks manifest bytes instead of trusting a previously resolved input", () => withFixture(async ({ directory, payload, output, manifest }) => {
+  const inputs = await resolveInstallerInputs({ payload, output, manifest });
+  await writeFile(path.join(payload, "vivary.exe"), "changed after input validation");
+  await assert.rejects(buildProductionInstaller(inputs, path.join(directory, "missing-nsis"), { installerCommit }),
+    /Runtime security|manifest/);
+  assert.equal(await lstat(output).catch(() => null), null);
+}));
+
 test("makensis builds an installer and receipt from a fixture payload", { skip: !makensis && "makensis is not installed" },
   () => withFixture(async ({ payload, output, manifest }) => {
     const inputs = await resolveInstallerInputs({ payload, output, manifest });
-    await assert.rejects(buildInstaller(inputs, makensis, { installerCommit: "abc" }), /full Git commit/);
-    const built = await buildInstaller(inputs, makensis, { installerCommit });
+    await assert.rejects(compileFixtureInstaller(inputs, makensis, { installerCommit: "abc" }), /full Git commit/);
+    const built = await compileFixtureInstaller(inputs, makensis, { installerCommit });
     assert.equal(built.filesAdded, 7, "every payload file, including the dot folder, extensionless and duplicate files, and the list");
     const bytes = await readFile(output);
     assert.equal(bytes.subarray(0, 2).toString("latin1"), "MZ");

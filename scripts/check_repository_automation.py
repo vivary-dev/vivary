@@ -1,5 +1,6 @@
 """Fail closed when repository stewardship automation loses its bounds."""
 
+import importlib.util
 from pathlib import Path
 
 
@@ -13,10 +14,23 @@ def require(condition: bool, path: Path, message: str) -> None:
         raise SystemExit(f"{path}: {message}")
 
 
+def check_action_bootstrap(text: str, name: str, path: Path) -> None:
+    checker = Path(__file__).resolve().with_name("check_ci_workflow.py")
+    spec = importlib.util.spec_from_file_location("owned_workflow_admission", checker)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        module.check_runner_action_bootstrap(text, (name,), auxiliary=True)
+    except SystemExit as error:
+        raise SystemExit(f"{path}: {error}") from None
+
+
 def main() -> None:
     track = TRACK_STATS.read_text(encoding="utf-8")
     steward = STEWARD.read_text(encoding="utf-8")
     dependabot = DEPENDABOT.read_text(encoding="utf-8")
+    check_action_bootstrap(track, "snapshot", TRACK_STATS)
+    check_action_bootstrap(steward, "daily-health-check", STEWARD)
 
     require("  actions: write" in track, TRACK_STATS, "stats must be able to dispatch CI")
     require(
