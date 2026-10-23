@@ -7873,8 +7873,10 @@ selects it. The destination folder query follows the catalog's owner scope, poli
 binding revision and availability; rebinding clears the old displayed path while
 the new folder loads, and an older response cannot replace it. An API chat there is created once that project's Native scope has
 mounted. Code creation in Personal workspace requires a resolved folder, whether Personal is already selected
-or is the filtered destination from another project. Without a folder, New conversation starts an API chat and
-the Code choice stays disabled. A row shows its title,
+or is the filtered destination from another project. Only confirmed absence of a configured Personal folder
+selects API chat by default. Pending or failed folder lookup blocks the Code-oriented default; a failed lookup
+offers Retry folder. The explicit API choice and an existing project API route remain available. A configured
+but inaccessible folder stays an error, not an absent-folder result. A row shows its title,
 one state as text with an icon, its project in All projects, and its runtime for
 Code. The selected row is `aria-current` and holds the list's one Tab stop.
 Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
@@ -8577,6 +8579,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Inbox creation and metadata review fixes. Personal folder lookup now distinguishes confirmed
+absence from pending or failed resolution, so New conversation cannot silently choose API billing while
+Code readiness is unknown. The explicit API choice remains available, and failed folder reads can retry.
+Code metadata changes resolve current project grants and binding again after admission, with an additional
+check after archive awaits host and draft state, immediately before the synchronous write. Regression
+cases cover delayed and failed folder reads, explicit API choice, action authentication and absent versus
+broken folders, plus revoke/rebind during admission and archive reads. These direct Linux checks do not
+establish hosted CI, browser acceptance or Windows acceptance.
 
 2026-10-23 Workbench dependency maintenance. MCP packages now resolve to the fixed
 SDK 1.32 / v2 2.3 lines, including the nested WebMCP server; inbound MCP remains

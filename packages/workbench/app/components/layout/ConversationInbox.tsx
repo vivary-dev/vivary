@@ -383,7 +383,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const folder = useQuery({
     queryKey: ["action", "vivary-project-location", folderInput, catalog?.scopeKey, catalog?.policyRevision,
       destinationProject?.bindingRevision, destinationProject?.status],
-    queryFn: ({ signal }) => callAction<{ folderName: string; path: string }>("vivary-project-location", folderInput,
+    queryFn: ({ signal }) => callAction<{ folderName: string; path: string } | null>("vivary-project-location", folderInput,
       { method: "GET", signal }),
     enabled: catalog !== null && (destinationId !== null ? destinationProject?.status === "available"
       : elsewhere || workspaceAvailable),
@@ -441,8 +441,13 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     }
   }
   const params = new URLSearchParams(location.search);
-  const startDefault = () => !codeReady || (params.get("runtime") === "native" && params.get("history") !== "unassigned")
-    ? void newNative() : newCode();
+  const prefersNative = params.get("runtime") === "native" && params.get("history") !== "unassigned";
+  const personalWithoutFolder = destinationId === null && folder.isSuccess && folder.data === null;
+  const startDefault = () => {
+    if (!defaultReady) return;
+    if (prefersNative || personalWithoutFolder) void newNative();
+    else newCode();
+  };
 
   const loading = checking || inbox.isPending;
   // The empty message speaks for the whole inbox, so it waits while drafts or archived rows match, and the load error
@@ -452,7 +457,8 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const unavailable = inbox.data?.unavailableProjects.length ?? 0;
   const canStart = elsewhere ? destinationId === null || destinationProject?.status === "available" : workspaceAvailable;
   // Code runs in a folder. Personal workspace may have none, and then only its API chats exist, as the server lists.
-  const codeReady = canStart && (destinationId !== null || folder.data !== undefined);
+  const codeReady = canStart && (destinationId !== null || (folder.isSuccess && folder.data != null));
+  const defaultReady = canStart && (prefersNative || personalWithoutFolder || codeReady);
   const section = useRef<HTMLElement>(null);
   const listProps = { selectedId, showProject: filter === ALL_PROJECTS,
     // A section that loses its last row hands focus to New conversation, as the project history does.
@@ -462,7 +468,7 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   return <section ref={section} className="conversation-inbox" aria-label="Conversations">
     <div className="conversation-inbox__header">
       <div className="conversation-inbox__new">
-        <Button size="sm" className="conversation-inbox__new-button" disabled={!canStart} onClick={startDefault}>
+        <Button size="sm" className="conversation-inbox__new-button" disabled={!defaultReady} onClick={startDefault}>
           <IconPlus size={14} aria-hidden />New conversation</Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -499,6 +505,11 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
           <TooltipContent>{folder.data.path}</TooltipContent>
         </Tooltip></TooltipProvider>}
       </p>
+      {destinationId === null && canStart && folder.isPending && <p role="status">Checking Personal workspace folder…</p>}
+      {destinationId === null && canStart && folder.isError && <div role="alert">
+        <p>Personal workspace folder could not be checked.</p>
+        <Button size="sm" variant="ghost" onClick={() => void folder.refetch()}>Retry folder</Button>
+      </div>}
       {folderPicker.error && <p role="status">{folderPicker.error}</p>}
       {creatingProject && <CreateProjectForm disabled={checking || selecting} onClose={() => setCreatingProject(false)}
         onCreated={async projectId => { await refresh(); return selectProject(projectId); }} />}

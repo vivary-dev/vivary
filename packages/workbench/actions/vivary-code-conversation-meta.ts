@@ -21,10 +21,10 @@ export default defineAction({
     const ownerEmail = requireVivaryCodeUser(ctx);
     // The project's current grant and binding decide, as they do when the conversation opens. A project whose history
     // cannot resolve refuses, and Personal workspace needs its configured folder.
-    const scope = input.projectId === null ? await resolveWorkspace()
+    const resolveScope = async () => input.projectId === null ? await resolveWorkspace()
       : (await resolveVivaryCodeProjectHistory(ctx, input.projectId))!;
     return changeCodeConversation({ ownerEmail, orgId: ctx?.orgId ?? undefined, runId: input.runId,
-      projectId: input.projectId, scope,
+      projectId: input.projectId, resolveScope,
       change: input.operation === "rename" ? { operation: "rename", title: input.title } : { operation: input.operation } });
   },
 });

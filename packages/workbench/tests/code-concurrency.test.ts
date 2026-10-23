@@ -146,7 +146,7 @@ const codex = { engine: "codex-cli" as const, model: "gpt-6-astra" };
 
 const changeArchive = (workspace: Workspace, runId: string, operation: "archive" | "restore") =>
   runWithRequestContext({ userEmail: owner.ownerEmail, orgId: owner.orgId }, () => changeCodeConversation({
-    ...owner, runId, projectId: workspace.projectId ?? null, scope: workspace, change: { operation } }));
+    ...owner, runId, projectId: workspace.projectId ?? null, resolveScope: async () => workspace, change: { operation } }));
 
 test("archive refuses a real Code send without draft IDs until Restore, and a working send refuses archive", {
   timeout: 60_000, skip: process.platform === "win32",

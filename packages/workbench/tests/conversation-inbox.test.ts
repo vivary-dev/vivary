@@ -36,7 +36,7 @@ const personal = { root: personalRoot, label: "personal" };
 const codeChange = (runId: string, projectId: string | null, change: Parameters<typeof inbox.changeCodeConversation>[0]["change"],
   input: Partial<Parameters<typeof inbox.changeCodeConversation>[0]> = {}) => asUser(owner, orgId,
   () => inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId, projectId,
-    scope: projectId === null ? personal : history(projectId), change, ...input }));
+    resolveScope: async () => projectId === null ? personal : history(projectId), change, ...input }));
 const { runWithRequestContext } = await import("@agent-native/core/server");
 // Drafts live in application state, which Native scopes to the request's user, as an action's request does.
 const asUser = <T>(userEmail: string, org: string, work: () => Promise<T>) => runWithRequestContext({ userEmail, orgId: org }, work);
@@ -245,12 +245,12 @@ test("rename, pin and archive keep the conversation's identity, updatedAt and or
 test("archive refuses a working conversation and never stops it", async () => {
   activate("beta-one");
   try {
-    await assert.rejects(inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
+    await assert.rejects(inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", resolveScope: async () => history("beta"),
       change: { operation: "archive" } }), (error: { statusCode?: number; message: string }) =>
       error.statusCode === 409 && /working\. Stop it or let it finish/.test(error.message));
     assert.ok(host.activeRuns.has("beta-one"), "the run is untouched");
     assert.equal(getCodeAgentRunRecord("beta-one")?.metadata?.archivedAt, undefined);
-    await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", scope: history("beta"),
+    await inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "beta-one", projectId: "beta", resolveScope: async () => history("beta"),
       change: { operation: "rename", title: "Renamed while working" } });
   } finally { host.activeRuns.clear(); }
   await codeChange("beta-one", "beta", { operation: "archive" });
@@ -259,7 +259,7 @@ test("archive refuses a working conversation and never stops it", async () => {
 
 test("changes refuse another owner's run, another project's run and invalid titles", async () => {
   const refuse = (input: Partial<Parameters<typeof inbox.changeCodeConversation>[0]>) => assert.rejects(
-    inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "alpha-failed", projectId: "alpha", scope: history("alpha"),
+    inbox.changeCodeConversation({ ownerEmail: owner, orgId, runId: "alpha-failed", projectId: "alpha", resolveScope: async () => history("alpha"),
       change: { operation: "pin" }, ...input }), (error: { statusCode?: number }) => error.statusCode === 404);
   await refuse({ runId: "foreign-owner" });
   await refuse({ runId: "foreign-org" });
@@ -306,7 +306,7 @@ test("API chat archive waits for a running turn, queued messages and a pending s
 
 test("Code archive also waits for an approval and a pending send", async () => {
   const change = () => asUser(owner, orgId, () => inbox.changeCodeConversation({ ownerEmail: owner, orgId,
-    runId: "alpha-failed", projectId: "alpha", scope: history("alpha"), change: { operation: "archive" } }));
+    runId: "alpha-failed", projectId: "alpha", resolveScope: async () => history("alpha"), change: { operation: "archive" } }));
   activate("alpha-failed", { requests: new Map([["r1", { request: { requestId: "r1", kind: "command" } }]]) });
   try {
     await assert.rejects(change(), (error: { statusCode?: number; message: string }) =>
@@ -351,7 +351,7 @@ test("a Code change follows the project's current binding, so a replaced binding
   await assert.rejects(codeChange("stale-binding", "alpha", { operation: "rename", title: "Kept" }), refused);
   assert.equal(getCodeAgentRunRecord("stale-binding")?.metadata?.archivedAt, undefined);
   await assert.rejects(codeChange("alpha-failed", "alpha", { operation: "pin" },
-    { scope: { ...history("alpha"), bindingId: "binding-replaced" } }), refused, "a rebound project refuses its old runs");
+    { resolveScope: async () => ({ ...history("alpha"), bindingId: "binding-replaced" }) }), refused, "a rebound project refuses its old runs");
   await codeChange("personal-one", null, { operation: "pin" });
   await codeChange("personal-one", null, { operation: "unpin" });
 });
@@ -415,6 +415,77 @@ function admissionGate() {
   const wait = new Promise<void>(resolve => { release = resolve; });
   return { wait, release };
 }
+
+for (const changedAccess of ["revoked", "rebound"] as const) {
+  for (const operation of ["rename", "archive", "restore", "pin", "unpin"] as const) {
+    test(`Code ${operation} refuses access ${changedAccess} while waiting for admission`, async () => {
+      const { withCodeConversationAdmission } = await import("../server/conversation-admission.ts");
+      const id = `admission-${changedAccess}-${operation}`;
+      codeRun(id, "alpha", { archivedAt: operation === "restore" ? "2026-01-01T00:00:00Z" : null,
+        pinnedAt: operation === "unpin" ? "2026-01-01T00:00:00Z" : null });
+      const before = getCodeAgentRunRecord(id);
+      const entered = admissionGate(), release = admissionGate();
+      const blocker = withCodeConversationAdmission(owner, orgId, "alpha", async () => {
+        entered.release(); await release.wait;
+      });
+      await entered.wait;
+      let changed = false;
+      const pending = codeChange(id, "alpha", operation === "rename" ? { operation, title: "Forbidden" } : { operation }, {
+        resolveScope: async () => {
+          if (changed && changedAccess === "revoked") throw Object.assign(new Error("Access revoked"), { statusCode: 403 });
+          return changed ? { ...history("alpha"), bindingId: "replaced" } : history("alpha");
+        },
+      });
+      const settled = observeSettlement(pending);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        assert.equal(settled(), false, "the mutation waits for admission");
+        changed = true;
+      } finally { release.release(); await blocker; }
+      await assert.rejects(pending, (error: { statusCode?: number }) =>
+        error.statusCode === (changedAccess === "revoked" ? 403 : 404));
+      assert.deepEqual(getCodeAgentRunRecord(id), before, "the complete run record is unchanged");
+    });
+  }
+}
+
+for (const changedAccess of ["revoked", "rebound"] as const) {
+  test(`Code archive refuses access ${changedAccess} during asynchronous draft checks`, { timeout: 10_000 }, async () => {
+    const id = `archive-read-${changedAccess}`, threadId = codeDraftThreadId("beta", id);
+    const identity = createCodeDraftIdentity(owner, orgId, "beta");
+    codeRun(id, "beta", { draftThreadId: threadId });
+    await saveDraft(identity, threadId, "Unsent follow-up");
+    const before = getCodeAgentRunRecord(id), pause = pauseDraftStore(chatDraftKey(identity, threadId), "read");
+    let changed = false;
+    const pending = codeChange(id, "beta", { operation: "archive" }, { resolveScope: async () => {
+      if (changed && changedAccess === "revoked") throw Object.assign(new Error("Access revoked"), { statusCode: 403 });
+      return changed ? { ...history("beta"), bindingId: "replaced" } : history("beta");
+    } });
+    observeSettlement(pending);
+    try { await pause.entered; changed = true; }
+    finally { pause.release(); pause.restore(); }
+    await assert.rejects(pending, (error: { statusCode?: number }) =>
+      error.statusCode === (changedAccess === "revoked" ? 403 : 404));
+    assert.deepEqual(getCodeAgentRunRecord(id), before);
+  });
+}
+
+test("Personal folder action distinguishes absent configuration from a broken folder and requires access", async () => {
+  const action = (await import("../actions/vivary-project-location.ts")).default;
+  const previous = process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Restore fixture configuration.
+  try {
+    delete process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Explicit unconfigured Personal fixture.
+    await assert.rejects(action.run({}, undefined), (error: { statusCode?: number }) => error.statusCode === 401);
+    assert.equal(await action.run({}, { userEmail: owner, orgId }), null);
+    process.env.VIVARY_LOCAL_AGENT_WORKSPACE = path.join(temporary, "missing-folder"); // guard:allow-env-credential - Inaccessible fixture folder.
+    await assert.rejects(action.run({}, { userEmail: owner, orgId }), (error: { statusCode?: number }) => error.statusCode === 503);
+    process.env.VIVARY_LOCAL_AGENT_WORKSPACE = temporary; // guard:allow-env-credential - Real fixture folder.
+    assert.equal((await action.run({}, { userEmail: owner, orgId }))?.path, temporary);
+  } finally {
+    if (previous === undefined) delete process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Restore fixture configuration.
+    else process.env.VIVARY_LOCAL_AGENT_WORKSPACE = previous; // guard:allow-env-credential - Restore fixture configuration.
+  }
+});
 
 function observeSettlement(promise: Promise<unknown>): () => boolean {
   let settled = false;
