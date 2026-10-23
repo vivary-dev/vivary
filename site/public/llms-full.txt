@@ -8578,6 +8578,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Workbench Node compatibility metadata. The package engine range now names only
+the admitted 22, 24 and 26 release lines at their existing runtime-security floors, so
+installation compatibility no longer advertises affected or unsupported Node versions.
+The actual executable guard and guarded build command remain unchanged; package metadata
+does not replace runtime or bundled-dependency evidence. No dependency version changed.
+
 2026-10-23 Inbox search and destination review fixes. Older Native title-only hits now survive
 search continuation when the bounded inbox does not contain their conversation; loaded rows
 still deduplicate title results. The folder read uses binding and authorization identity in
