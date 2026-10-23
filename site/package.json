@@ -8,7 +8,7 @@
     "dev": "astro dev",
     "start": "astro dev",
     "prebuild": "node scripts/sync-docs.mjs",
-    "build": "astro build",
+    "build": "node ../packages/workbench/bin/runtime-security.mjs run ./node_modules/astro/package.json astro build",
     "test:support": "node tests/support-modal.test.mjs",
     "test:site": "node --test tests/*.test.mjs",
     "test:links": "node scripts/check-built-links.mjs",

@@ -7808,6 +7808,206 @@ two sends, and a switch beside a running conversation.
 check. No live provider turn and no packaged Windows run has exercised
 concurrent conversations.
 
+### Conversation inbox
+
+The owner asked on 2026-10-19 for a session list modeled on T3 Code: one
+cross-project conversation inbox with a clear project filter, compact rows,
+useful activity states, a New conversation action that needs no scrolling, and
+the selected project's actual folder in view. Same-project mixed-runtime
+concurrency, existing history, identities and selection stay as they are.
+Worktree management, pull request links, unread tracking and drag ordering are
+out of scope.
+
+The read-only owner action
+[`vivary-conversation-inbox`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-conversation-inbox.ts)
+lists the caller's conversations in every catalog project and Personal
+workspace. [`conversation-inbox.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/conversation-inbox.ts)
+reads the Code run records once through `listOwnedVivaryCodeRuns`, keeps a run
+only when `isOwnedRun` admits it for the project it names (the same check that
+opens it), reads Native `chat_threads` once across the catalog's scope ids with
+the owner, organization, scope and source predicates of the content search, and
+reads the newest `agent_runs` row per thread through a join that repeats those
+predicates. Empty Native conversations have no row, as in `listThreads`, except
+an empty linked target. Native creates `agent_runs` with its first turn, so on a
+fresh database the read and the archive check skip run state until that table
+exists. It probes no runtime. A project whose registry binding
+cannot resolve keeps its API chats and is reported in `unavailableProjects`.
+Unassigned history stays in its own section. The same read lists the owner's saved
+drafts in every listed project from the application-state owner the composers write
+(`chat-draft.ts`). A draft whose conversation is listed marks that row. Any other
+draft is a new conversation, shown first in a Drafts block. The action reads the project catalog
+on every call as its access check, and caches each project's history scope by
+owner and catalog revision, so a two-second poll does not repeat one registry read
+per project. The list polls only while the window is visible. Measured on the
+build server on 2026-10-19 with 20 projects, 100 Code and 100 API chat
+conversations of 40 messages each: the read after the catalog took 8.9 ms and
+9.4 ms median over two runs of 50 calls (p90 10.0 ms). With one Code and one API chat
+draft in each project, the draft reads raise it to 67 ms and 71 ms median (p90 81 ms),
+most of it one application-state prefix read per scope.
+
+Each row has a stable identity, `code:<runId>` or `native:<threadId>`, the same
+identity the routes and saved selections use, plus its project, title, creation
+and update times, runtime and model for Code, pinned and archived flags, and one
+attention state chosen in this order: needs approval, stopping, running,
+failed, completed, idle. Code takes the first three from the host's
+`activeRuns`, so a record an ended host left `running` reads idle. Native has no
+approval or stopping state, and its pruned `agent_runs` rows read idle. Failed and
+Completed show for 24 hours after the run ended (`updatedAt` for Code, which has
+no end time, and `completed_at` for Native), then the row reads idle. This keeps
+both kinds consistent and the list quiet without unread tracking. Rows sort
+pinned first, then newest created, so background updates never move them.
+
+[`ConversationInbox.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/layout/ConversationInbox.tsx)
+renders the header (New conversation with its Code conversation or API chat
+choice, an Add project menu with "New project (creates a folder)" and "Open
+existing folder", the destination project with its folder name and full path on
+hover and focus, the filter, and title search), then compact rows, then a
+collapsed Archived section. The filter offers All projects (the default),
+Personal workspace and each project, and is saved in the
+`vivary-conversation-filter-v1` application state key. It only scopes the list:
+it never changes the open conversation or the selected project. New conversation
+starts in the filtered project, or with All projects in the open conversation's
+project, and the header names that destination and its folder before anything
+is created. New conversation for another project is the explicit action that
+selects it. The destination folder query follows the catalog's owner scope, policy,
+binding revision and availability; rebinding clears the old displayed path while
+the new folder loads, and an older response cannot replace it. An API chat there is created once that project's Native scope has
+mounted. Code creation in Personal workspace requires a resolved folder, whether Personal is already selected
+or is the filtered destination from another project. Only confirmed absence of a configured Personal folder
+selects API chat by default. Pending or failed folder lookup blocks the Code-oriented default; a failed lookup
+offers Retry folder. The explicit API choice and an existing project API route remain available. A configured
+but inaccessible folder stays an error, not an absent-folder result. A row shows its title,
+one state as text with an icon, its project in All projects, and its runtime for
+Code. The selected row is `aria-current` and holds the list's one Tab stop.
+Arrow keys, Home and End move between rows, Enter opens, and the Menu key,
+Shift+F10 or the row's button opens Rename, Pin or Unpin, and Archive or
+Restore. Rename commits on Enter and cancels on Escape. An empty title is refused
+with a message and the field stays open. No row state is a live region and no duration is shown. Drafts of every
+project in the filter scope are listed first, labeled Draft or Review send.
+Search filters titles at once. From two characters it also searches user messages
+and agent replies through the existing `vivary-chat-search` owner action and
+`chat-content-search.ts`. It searches the filtered project, or with All projects, Personal workspace and the
+projects with the newest conversations, at most six, with a note naming how many were searched. Each scope
+follows `continueChatSearch`, requesting at most 12 pages and stopping further requests once elapsed time
+reaches three seconds, enough hits arrive, or the end is reached. An in-flight page can take longer. Search more
+resumes scopes with a continuation and retries failed
+scopes. A failed scope stays reported until it answers. The results show the matched
+text and open the exact message, in another project through the route hold. Title-only
+hits outside the bounded inbox are retained as search results; a title already listed
+in the inbox is omitted from those results, including after a later inbox refresh. The
+list says when nothing matches, and separately when search is unavailable, and the
+selection stays while results load.
+
+Opening a row in the selected project navigates to its route. While another project selection is pending, the
+click also claims a newer hold and selection, so the older request cannot take over. It lands immediately,
+because an already selected project does not reset its route. A row in another
+project selects the project and holds the target route. `Workspace.tsx` clears
+the old conversation route when the project changes, and the new project then
+restores its saved conversation onto the bare route. The inbox navigates once the
+old route is gone, navigates again with replace if a restore lands after it, and
+releases the target once it has held for 750 ms or the owner presses a key or the
+pointer. This hold is `holdConversationRoute` in
+[`conversation-route-hold.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-route-hold.ts), which the Agent
+work strip also uses. `CodeRunControl` in the layout applies the page's one hold, so the inbox
+only calls it. New conversation in another project uses the same hold. An API chat's completion retains the
+identity of its creation request. A later inbox open or Code creation invalidates it, and leaving its Native scope
+suppresses late navigation and failure notices. Project route resets and saved-view restores keep the request current;
+its completed API chat is held on a bare route or replaces the route the new project already restored.
+Native rename, pin and archive go through the owner
+action `vivary-conversation-archive`, never Native's thread routes, because a private-proxy
+browser can authenticate a POST only to an owner action. Restore goes through the same action,
+because `vivary-native-archive` needs the project's Code history and the inbox lists API chats
+of projects whose Code history is unavailable.
+Archiving the open conversation closes its route for Code too, and opening an archived
+Code row restores it before presenting an editable conversation. A later send to an archived conversation
+refuses until Restore. Archive, restore before opening, and API chat creation in the selected project
+change the route after an await only while it still matches the starting route. Cross-project API chat creation
+uses its request identity and Native scope lifetime instead, allowing project reset and restore to finish while
+newer inbox opens still win. A deferred API chat whose creation has not started is dropped after its requested
+project was reached and the owner selects a different project.
+
+Code rename, archive and pin go through the owner action
+[`vivary-code-conversation-meta`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-code-conversation-meta.ts).
+Rename writes the record's `title`, which the Code header, Agent work and search
+read, and keeps the first generated title as `metadata.generatedTitle`. Archive
+and pin write `metadata.archivedAt` and `metadata.pinnedAt`. Every change runs on
+the owner's run record in the named project, under Core's file lock, and keeps
+`updatedAt`, so no list reorders. The action resolves the project's current history
+(or Personal workspace's folder) and the run must pass `isOwnedRun` against it, so a
+revoked grant or a replaced binding leaves its old conversations unchangeable. An API
+chat change instead needs the project in the owner's current catalog, because its
+scope follows from the project ID alone and a project whose Code history cannot
+resolve still lists its API chats. Every change is reversible and no migration runs.
+
+Archive waits for unresolved work, for Code and API chat alike, and refuses with
+`vivary_conversation_archive_pending` (409) and a message naming what to resolve:
+a pending approval or a working or stopping run for Code, a running turn or queued
+messages in the thread for API chat, and for both a send from the draft that is
+still pending. The inbox's owner archive actions, pending draft CAS and final send admission
+share locks in Vivary's single server process. Native uses one admission key per thread,
+also shared by queued-message persistence. Code uses the same owner/organization/project
+identity as its draft store, so a retained run and its legacy draft aliases share admission.
+Core's mutex map is process-global across bundled copies. Native keeps admission through
+durable run insertion and user-message preparation. Its `onRunPrepared` callback takes the
+separate thread-data JSON lock. The SQL run-slot probe alone is not a lease.
+
+If a pending draft CAS succeeds or an admitted send is still active, archive returns its existing
+409. If archive wins first, later pending writes and sends return 409 before transcript
+append or worker launch and preserve the saved draft text. They remain refused until Restore. Code resolves
+the live project grant, binding and policy again after waiting for admission. Runtime
+discovery stays outside the lock, and no await follows that final validation through the
+host claim. These locks coordinate only one server process.
+
+A Code run's pending draft is found the way the inbox marks its row
+Review send, through `linkedCodeDraftRuns`, which also reads a draft ID kept only in
+an older run's transcript. Archive never stops, approves, sends or discards anything. The inbox
+archives, renames and pins an API chat only through the owner action
+[`vivary-conversation-archive`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-conversation-archive.ts),
+which runs the archive checks on the server before `setThreadArchived`. Its rename makes the
+same write as Core's rename route: the title and `_titleOverride`, with the saved messages, under
+Core's revision check. `VIVARY_OWNER_ACTIONS` in
+[`owner-actions.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/shared/owner-actions.ts) names this action and
+`vivary-code-conversation-meta`, so both accept the private proxy session on a POST. Restore uses
+`vivary-conversation-archive` and returns the row to its place, since rows sort by
+creation time. The Unassigned conversations list (`ChatHistory.tsx`) and the
+project history this inbox replaces still call Core's archive route directly; those legacy
+generic routes retain their existing archive policy and are outside the inbox admission contract.
+
+Rename keeps a manual API chat title against later generated titles on the server.
+Core's `renameThread` (`dist/chat-threads/store.js`, about line 750) stores
+`_titleOverride` in thread_data, `updateThreadData` keeps that key when a client
+save omits it, and the thread PUT handler (`dist/server/agent-chat-plugin.js`,
+about line 4705, `preserveTitleOverride`) replaces any incoming title with the
+override.
+
+The owner action [`vivary-project-location`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/actions/vivary-project-location.ts)
+returns a project's folder, or Personal workspace's, for the owner's
+own screen. The shared project catalog stays without paths, because Remote
+access browsers also read it.
+
+Offline evidence: `tests/conversation-inbox.test.ts` covers rows across two
+projects and Personal workspace for Code and Native, owner and organization
+isolation, state precedence, the 24-hour result window, stable order, rename,
+pin, archive and restore keeping identity and `updatedAt`, and the archive
+refusal while running. `tests/conversation-inbox-components.test.mjs` renders
+the filter keeping the open conversation, its saved choice, the destination and
+New conversation in another project for Code and API chat, search, selection, keyboard movement, the row menu, rename, state
+labels, drafts, the folder, and a cross-project open that lands on the clicked
+row with and without a restored saved conversation.
+`tests/conversation-inbox-app.mjs` runs against the built app with a fresh data
+folder: a manual API chat name survives a later PUT carrying a generated title,
+before and after a server restart, and the archive action refuses queued messages.
+The production `Sidebar` mounts `ConversationInbox` in place of `ProjectHistory`, retaining
+project navigation, the separately scoped Unassigned conversations section and the footer controls.
+The desktop sidebar and narrow drawer share pending project-selection tracking and serialize filter saves
+through the same query-client owner. A later row open or filter choice in either surface wins over an older
+pending operation in the other. Identity failures retain Retry history while the Code list stays usable.
+Shared navigation intent also prevents a delayed API-chat creation or archived-thread restore from replacing
+a later conversation choice, even while that choice is still waiting for its project selection.
+The component suite also renders the real Sidebar to check inbox row navigation, delayed operations across
+both mounted sidebars, identity retry and those retained surfaces. Project navigation and legacy-history services remain fixtures in that test; browser layout,
+real dropdown focus, final database integration and Windows acceptance remain separate gates.
+
 ### Linked runtime conversations
 
 The saved Code and Native conversation surfaces can open a linked inactive target
@@ -8175,7 +8375,7 @@ keeps schema support and the existing one-second autosave owner unchanged.
 3. **Approve, deny, or stop.** Native owns an action request and its execution lifecycle. Workbench checks the owner, project, run, and exact request before relaying a decision. Stop targets the owned running work. During a Windows Code run, the host periodically records descendant PIDs and creation times while parent links are still visible. Every Windows stop checks those recorded identities after tree termination, including when `taskkill` reports success. When a stop cannot confirm that a run's coding processes ended, Code refuses new sends and the host strip names what is left, by process name and PID. End them ends only listed processes that Vivary traced to the run, each after it checks the process's PID and start time at the moment it acts. Continue anyway lifts the refusal on the owner's word once End them has run or cannot act, and only for processes the owner was shown. A later check lifts it on its own when nothing is left. Client closure does not itself approve or replay an action. The [coding permission decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#native-coding-permissions-and-activity-2026-09-16) and [authority module](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/modules.md#m05-authority-and-approvals) own the rules.
 4. **Read and change project files.** Scoped file actions list and read bounded content. Explicit Save and Rename check the selected project and file revision. Project memory is the only caller of the file service's exclusive Create and version-checked Remove, which reuse the same link refusal, per-project mutation queue, and conflicts. The Memory section in Project details calls two owner actions, `vivary-project-memory` and `vivary-project-memory-write`. It shows the memory folder and why it applies, the role assignments, when changes apply, each fact with its source and file, the exact block the next message receives, and the last load in this app session. Remember, correct, and forget write the owning file, and forget states what it cannot erase. Neither action is an agent tool. The Search panel walks one authorized project with caps, private-file exclusions, and continuation. It does not use a persistent index or a shell search process. [`project-files.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-files.ts), [`project-search.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-search.ts), and the [write-back map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-writeback/index.md) own the behavior and limits.
 5. **Call the original engine.** The bundled Python runtime receives a bounded command and a selected project root. The seven project read reports, Doctor, Check, Find, Capabilities, Receipts, Review, and Impact, share one server module for the Details panel and the Native tool. Review findings carry a rule code that the app renders from a closed sentence table, so an unknown rule makes the report unreadable instead of passing text through. The agent tool gets its project from the chat's pinned scope, not model-supplied input. Public Doctor, Find, and Check use the privacy-filtered CLI path. For issue #20, the CLI's public Review and Impact build their graph only from the documents in Tropo's privacy-filtered snapshot, before any rule runs. A link to a private note therefore reads exactly like a link to a missing id, findings carry no free-text message, and a private, missing, or unknown Impact target gets one `target_unavailable` refusal. Only the Structure and Editorial packs have a public form, because Context budget reads routing files from disk. Ozone loads one Tropo engine per process on first use, so the plain and public paths share its facade errors, and public note ids longer than 256 characters are left out and counted. Decide and control run through a separate server module, shown to the owner in the Evaluate section of Project details, where the owner picks whether to evaluate as themself or as the project's agent and every result states it was not saved and shows a refusal from Strato, Exo, or Vivary as an alert, including a refusal Core reports inside an ordinary result, [`project-evaluate.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-evaluate.ts), behind the `vivary-project-evaluate` agent tool and an owner action. The runner, not the caller, binds the actor: a tool call is always this project's agent, an opaque id hashed from the owner's actor id and the project id, and the owner chooses to evaluate as themself or as that agent. [`governed-request.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/governed-request.ts) is the only writer of the actor, contributor authority, project scope, and clocks, and the clocks are taken after the project lock is held. Input that names a server-owned field is refused by name, never overwritten. The agent may run decide, claim, release, expire_leases, and dependencies only, and may not submit a receipt, a verdict, or an execution log, because Native cannot verify them. Results carry `persisted: false` and are never saved. Host paths cross that boundary only as `.` and `./` project paths, and only at the absolute-path positions Core, Strato, and Exo declare. Each position names Core's capsule or claim spelling, so decoding restores claim ids and capsule fingerprints, and any other string is text that is redacted on the way out and never rewritten on the way in. An agent's scope and capsule paths are checked by their text alone, never on disk, so a claim cannot reveal whether a private file exists. A Windows device-namespace root is refused. Native has no capsule producer, so an agent decide without an owner-supplied capsule ends in Strato's own refusal. Governed writes retain their own plan, authority, and receipt rules. The creator bridge starts Python through the same runner. It previews and creates a managed project, lists the installed guidance patterns, and reads a project's memory settings, with the runner's environment allowlist, reader-writer gate, 30-second limit, receipts, and shutdown. A settings read takes its project's read lock, so it waits for a write to that project. Any queued write to that project likewise waits for the settings reads already holding its gate, and behind a slow one it can fail its own 30-second queue wait. A plan and an apply share a gate on their target folder, and the catalog shares one gate with no project. An apply records a required receipt and a plan an optional one. Catalog and settings reads record nothing, because project memory reads settings whenever its memo misses, for example after a change to the settings file or to a memory folder's listing. The creator may print 512 KiB, counting stdout and stderr together, and its stderr is then discarded. Its answer is parsed exactly as printed, and only its refusal message and an invalid settings message are redacted. Every bundled child, an original command or a creator call, compiles its bytecode once into `python-cache/<build>` in the data folder rather than on every launch, where `build` is the first 8 hex digits of the bundle manifest's sha256. The first launch that prepares the cache removes other builds' folders. A child keeps `-B` when the cache would sit in the install folder or the call's project, when the call's project sits in the cache folder, when the data folder is missing, when a cache folder is not a plain directory or cannot be created, and for any Python outside the bundle. [`python-bytecode.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/python-bytecode.ts) makes that decision, and `runGated` requires it. [`original-runtime.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/original-runtime.ts), [`project-read.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-read.ts), and the [issue #19 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/09b-original-read-tools.md) record the delivered slice.
-6. **Find a past conversation.** Project and unassigned history offer title/message search through the owner-only, read-only GET action `vivary-chat-search`. Authorized Native repositories are parsed once per session page; Code metadata establishes scope before transcript access or session counts. Bounded scans use recency cursors, skip malformed records, and retain Native results when Personal Code history is unavailable. The client continues automatically toward a page of hits, shows progress/Cancel, highlights excerpt terms and preserves matches/cursors on Retry. Clear/Escape restores the ordinary list. Search and Native match reads use the owner transport's session rejection registry and invalidation hook on 401. Opening a result imports the Native path through the match to its retained head/leaf, or a checked Code window with preceding context and normal deduplication. A normally hidden Code event gets a transient row in saved event order with the parent chain preserved. Focus, theme-aware marking and scroll settling reveal the match. Replay refuses execution and server saves; the standalone Native import is cleared from session storage on exit. The Native match read reports authoritative archive state; Return stays disabled while loading and for archived matches. Project and Personal archived matches explain restoration through Archived conversations and reopening; Unassigned matches say they are archived and read-only here because that history has no restore control. A failed read explains recovery; Return removes the unread thread and match anchors, then uses the existing saved-selection restore, which refuses archived threads. Read-only replay preserves that saved selection. Malformed or missing Native match data returns the same stale-result 404. Project switching clears message and event anchors before admitting the new conversation. The normal twenty-run list and latest-400-event Code view stay unchanged. No index or new transcript owner is created. Forgotten or removed active-memory facts can remain findable in chat history. [The workspace contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/unified-workspace.md#conversation-content-search) owns interaction, ordering and scan limits.
+6. **Find a past conversation.** Project and unassigned history offer title/message search through the owner-only, read-only GET action `vivary-chat-search`. Authorized Native repositories are parsed once per session page; Code metadata establishes scope before transcript access or session counts. Bounded scans use recency cursors, skip malformed records, and retain Native results when Personal Code history, or a cataloged project's Code history, is unavailable (the page reports `codeUnavailable`). The client continues automatically toward a page of hits, shows progress/Cancel, highlights excerpt terms and preserves matches/cursors on Retry. Clear/Escape restores the ordinary list. Search and Native match reads use the owner transport's session rejection registry and invalidation hook on 401. Opening a result imports the Native path through the match to its retained head/leaf, or a checked Code window with preceding context and normal deduplication. A normally hidden Code event gets a transient row in saved event order with the parent chain preserved. Focus, theme-aware marking and scroll settling reveal the match. Replay refuses execution and server saves; the standalone Native import is cleared from session storage on exit. The Native match read reports authoritative archive state; Return stays disabled while loading and for archived matches. Project and Personal archived matches explain restoration through Archived conversations and reopening; Unassigned matches say they are archived and read-only here because that history has no restore control. A failed read explains recovery; Return removes the unread thread and match anchors, then uses the existing saved-selection restore, which refuses archived threads. Read-only replay preserves that saved selection. Malformed or missing Native match data returns the same stale-result 404. Project switching clears message and event anchors before admitting the new conversation. The normal twenty-run list and latest-400-event Code view stay unchanged. No index or new transcript owner is created. Forgotten or removed active-memory facts can remain findable in chat history. [The workspace contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/unified-workspace.md#conversation-content-search) owns interaction, ordering and scan limits.
 7. **Preview a project.** A reviewed local command starts a project process. The app presents its page in an isolated frame and supports Stop. The selected coding runtime can inspect and repair the project through its supported browser tools. The [preview receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/11e-live-project-preview.md) states what passed on Zo and what still needs packaged or platform proof.
 
 8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
@@ -8192,7 +8392,7 @@ authority. Existing manager startup and tool-call ownership remain unchanged.
 | Project files and authored memory | Stay in the user's authorized folder. Workspace roles identify authored knowledge. Authored facts are one Markdown file per fact in `.vivary/knowledge/` or the folders the `memory` role names. In a thin workspace Tropo types them as `vivary_fact`, which requires a source and a confirmed date, at both its private and public compose paths. `.vivary/memory/` is disposable semantic-provider state, not an authored note store, and provider forget never touches authored facts. Memory folders, law files, and the state file never use `.git`, `.vivary/memory`, the engine's declared private, runtime, and capability storage paths, or boundary role paths, compared without regard to case. Paths with a part Windows cannot use (a trailing dot or space, a device name, a colon, a backslash, or a control character) are refused. A memory folder, law file, state file, or fact file that the workspace's `.gitignore` files ignore is not loaded or changed. Neither is a fact file the engine did not check. Both sides list a memory folder the same way: the first 200 `.md` names of regular files and links, secret-looking names left out, in UTF-16 order, from at most 4,000 scanned entries. The engine checks the regular files among them whose paths the Workbench answer schema accepts, at most 3,000 paths and 96 KiB of JSON in all. The Workbench skips a link as linked, a name the engine can never report as unsupported, and a file created after the check as not checked, and Correct and Forget refuse each. Remember checks the exact new file name, so no fact is saved where the rules would ignore it. For memory the engine matches fail-closed: memory treats a path as private when any positive rule could match it and ignores negations, so it may refuse a file Git would re-include. The owner can choose a memory folder that no rule matches. A rule matches in exact case or without regard to case, a run of two or more stars reads the same whatever its length, as in Git, and a run not bounded by slashes crosses `/`, a rule and a path match as code points or as UTF-8 bytes, and a trailing `/` also matches a file. Each `.gitignore` is read as bytes: a UTF-8 byte order mark is skipped, lines split only on a newline, with one carriage return before it dropped, and an entry ends at its first NUL. Memory reads a bracket body itself only when it holds plain members and ranges, such as `[._]` or `[a-v]`, with an optional leading `!` or `^`. A body that holds a backslash, starts with `]`, `!]`, or `^]`, or holds a POSIX class, an equivalence class, or a collating symbol, a negated body holding an ASCII capital letter outside a range, such as `[!B]`, an unescaped `[` that never closes, a set Python cannot compile, and a rule longer than 256 characters make the rule match everything under its folder. Matching tracks reachable positions without backtracking, and each context read spends from a fixed matching budget. When the budget runs out, every path not yet decided counts as private, the answer sets `privacy_limited`, and the context block and the panel say the ignore rules were too costly to check in full. The budget is 20 million units: each positive rule and path pair costs its rule length plus 64 (a negated rule is skipped without a charge), and each match step costs the path positions it visits. A read that loads more than 2,000 rules from the `.gitignore` files it consults stops the same way. The budget bounds the work a read does, not its time on every machine. On Zo the slowest case measured, 1,999 rules against 200 files, stopped at the budget in about 1.7 seconds. Outside brackets a backslash escapes the next character. A differential test checks this against `git check-ignore`. The engine checks `.gitignore` files only. It does not read `.git/info/exclude` or global Git excludes, so a rule kept only there does not make memory private. Agents receive facts as labeled information in the per-message project block, never as instructions. Project chats do not get Native's owner-wide `resources`, `save-memory`, `delete-memory`, or `chat-history` actions, or its database tools `db-schema`, `db-query`, `db-exec`, and `db-patch`, because those stores have no project column and SQL could read the owner-scoped resources table. Native drops the framework prompt lines that name the tools, but its resources context note stays in the prompt, so the Full chat project block says the tools are unavailable. Personal and legacy chats keep them. |
 | Project identities and bindings | Workbench registry tables in private Native-backed application data. The server checks actor, collection, device, policy, and observed root before effects. |
 | Raw database tools | Owner chats expose `db-schema` and `db-query`. Project chats remove database tools. The maintained Core patch shares token inspection across query, exec, patch, and extensions SQL checks. Quoted values remain data, protected and qualified table references remain visible in joins, comma lists, and parenthesized groups, and write scoping uses parsed targets and clauses. Unsupported write forms, replacement conflicts, caller-supplied organization ownership, and unsupported dialect quoting return an error before execution. Extensions keep their separate table policy and delegate execution to the same Core scripts. Tests use production scoping and require a returned owner row before asserting a refusal. Each PostgreSQL transaction pins standard string escaping before scoped-view setup and user SQL. Its transaction-order tests use a mocked connection with synthetic rows. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#raw-sql-inspection) list each inspection and its limits. |
-| Conversations, runs, and approvals | Native records in private application data. Workbench stores references and project scope rather than copying full transcripts into a second store. Archive only sets a chat's archive time. A project's Archived conversations list and Restore go through the `vivary-native-archive` owner action, which clears that time only for the owner's chat in the same organization or with none and in the exact project scope, so a restored chat keeps its transcript and scope. |
+| Conversations, runs, and approvals | Native records in private application data. Workbench stores references and project scope rather than copying full transcripts into a second store. Archive only sets a chat's archive time. A project's Archived conversations list and Restore go through the `vivary-native-archive` owner action, which clears that time only for the owner's chat in the same organization or with none and in the exact project scope, so a restored chat keeps its transcript and scope. The conversation inbox lists the owner's Code and Native rows across projects with the same owner, organization and scope predicates. Code rename, archive and pin write only list metadata on the owner's run record and keep its `updatedAt`, and archive refuses a working run. |
 | Unattended automation runs | Scheduled, event, webhook, and Run now runs execute in the Vivary server process. The owner decided on 2026-09-26 that their default surface is local-only. Issue #108 adds durable owner approval for each explicitly declared configured MCP call. A run keeps 12 default Native tools: `resources`, `save-memory`, `delete-memory`, `chat-history`, `manage-progress`, `manage-notifications`, `manage-jobs`, `manage-automations`, and four lookups over files bundled with Core. These default tools cannot send email or messages, reach the web or other agents, change settings, jobs, or automations, or read or change agent profiles, remote agent manifests, or MCP configuration. Only exact configured MCP declarations can add a capability and every call requires exact owner approval without persistent allowance. It cannot pass an argument its tool does not declare. Since issue #111, chats get the same argument rules: Core's CLI bridge passes each value as one `--name=value` token, and each tool behind the CLI bridge refuses a name its schema does not declare ([patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#cli-bridge-arguments)). Notifications from a run reach the in-app inbox only. An unavailable or hidden MCP declaration fails before any model call. Approval is checked against the current definition, exact Native ask and current restricted tool fingerprint before claim, consumption and invocation. A changed endpoint under the same name fails closed. A run can still read resources and change its owner's personal resources, memory, chat history, and progress. Every write a run makes records the run. A proposed instruction or memory change waits for the owner's review in Settings > Automation files. Chats and later runs keep loading the saved accepted version until the owner accepts the proposal. Discard restores the saved version or removes a proposal with no saved predecessor. Settings keeps an unconfirmed decision notice for each affected file until that file has a confirmed decision. A run's `LEARNINGS.md` write goes to the app default unless it names the personal scope, so it is refused. A chat's prompt says only how many files wait, though a chat can still list their paths, and Core's raw database tools refuse the `resources` table. A run writes and deletes only its owner's personal files, and writes only under a plain path, because app default, organization, and workspace files load for other people and the loaders match a path as it was stored. The store refuses run deletion of instruction and memory paths. Its trusted review metadata keeps one accepted predecessor, conditional writes retry after a competing change, and pending proposals cannot hide that predecessor with scratch visibility or expiry. Legacy pending rows have no recoverable predecessor. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#automation-written-instruction-files) own the path rules, loader coverage and inheritance limit. Three outward paths stay. The owner sets two of them from a chat or the app: reply delivery to the automation's delivery platform and dispatch to a paired execution host. The third is a declared configured MCP call, and each such call waits for the owner's exact approval. Interactive chats keep their tools. A webhook call starts a run too. On the desktop its URL names the loopback address, so only programs on the same computer can call it while Vivary runs. In self-hosted mode with an app URL, anyone who has the URL can. The URL token is a stored secret, so redaction hides it, and the request body reaches the run fenced as untrusted data. A webhook or event automation with a condition sends the request body or the event's data to Anthropic's API to check it, and needs an Anthropic key for that. For an automation created through the service, only a run that a schedule, Run now, or a webhook call started, or a refused, failed, or expired webhook call, emits `automation.run.finished`. That includes a scheduled run on a paired execution host. A run that an event started finishes silently, so event automations inside Vivary cannot keep starting themselves or each other through that event. An automation also never starts from its own run, so running an automation subscribed to that event with Run now does not start it again. An automation with 20 calls waiting refuses more, and a call that waited 24 hours is expired unrun. A normal quit ends active work as interrupted and releases its lease if held. Ordinary interrupted webhook work returns to the queue. A webhook waiting for approval stays waiting, and a consumed approval with an unconfirmed outcome is never automatically retried. The scheduler lease covers one scan. Each scheduled run or Run now holds a lease of its own until its outcome is written, or until it is queued on a paired host, so a long run does not delay other automations. Event and webhook runs take none ([issue #139](https://github.com/vivary-dev/vivary/issues/139)). After a hard kill the run reads running for up to 15 minutes after it started, the lease of a scheduled run or Run now holds until 10 minutes after its last renewal and blocks only that automation, and an interrupted webhook call runs again about 15 minutes after its claim. During that wait Settings shows when scheduling resumes instead of a next run that passes with no run ([issue #140](https://github.com/vivary-dev/vivary/issues/140)). An automation whose next run falls after the wait keeps that time. The [patch notes](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#local-only-automation-runs) own the allowlist and the refusals. The [packaged Windows follow-up](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/windows-runtime-followups-2026-10-02.md) checks accepted projection through the shipped store and actual Settings decisions with a synthetic automation context, separate from owner-chat and scheduler execution. |
 | Automation approval storage | Native `automation_runs` retains the pending ask ID, exact server binding and input, definition and restricted registry fingerprints, readiness and conditional decision claim. Native `agent_tool_approvals` atomically consumes the exact owner/org/thread/turn/tool/input ask with expiry. MCP configuration and credentials are not copied into continuation storage. The same Native thread and logical turn retain tools through the existing fold and journal. Each execution chunk has a fresh ID so event sequences cannot conflict. Unresolved rows are retained. Resource waiting publication compares history ID, current chunk, ready waiting state and unfinished history in the same SQL statement as the resource version check. Terminal history or a newer chunk refuses a late writer. PostgreSQL holds the matched history row lock through the write, serializing with its decision claim. SQLite serializes writes. A webhook also keeps its original pending-task row in waiting. A terminal Native chunk with a still-pending ask permits recovery of an unfinished save or claim. A consumed ask after an unconfirmed crash ends interrupted without replay. Ask creation and wait persistence share the exact resource custody transaction. Deletion rechecks persisted history in that transaction before token, secret or definition mutation. PostgreSQL locks the resource row and SQLite uses the existing immediate transaction. A missing or replaced resource refuses custody. Durable storage failure at a gate aborts. There is no exactly-once external-effect guarantee. The source fixtures cover these boundaries but runtime and built acceptance remain pending under #108. Native run and event retention exempts unresolved approval chunk references. The existing history reconciliation marker protects incomplete terminal bookkeeping from history pruning. Task settlement and resource CAS use the retained identities, with newer history excluded. Local SQLite queues public statements behind connection-owned transactions, whose callbacks use the supplied executor. Webhook deletion prepares token and app-secret schema memos before custody without deleting their data. Public SQLite cleanup also waits behind transaction ownership before clearing the singleton. This prevents an unrelated admission from becoming part of a custody rollback. PostgreSQL retains its connection-bound transaction contract. |
 | CLI credentials and logs | Stay in each provider's supported location. Vivary references native sessions. A coding runtime runs commands its agent chooses. [`local-runtime-setup.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/local-runtime-setup.ts) builds the Codex launch and the CLI status checks from the host environment without any credential-shaped name, in any letter case. A name is withheld when it contains PASSWORD, PASSWD, SECRET, TOKEN, APIKEY, CREDENTIAL, CONNECTION_STRING, CONNECTIONSTRING, COOKIE, or WEBHOOK, when one of its `_`-separated words is KEY, KEYS, PASS, PAT, or DSN, when its last word is AUTH, or when a URL or URI word follows a word that ends in DB or starts with DATABASE, DATASOURCE, POSTGRES, PG, MYSQL, MARIADB, MONGO, REDIS, KV, BROKER, AMQP, or CLOUDAMQP. It is also withheld when it is `MCP_SERVERS`, `MYSQL_PWD`, `DOCKER_AUTH_CONFIG`, `GIT_CONFIG_PARAMETERS`, or `BW_SESSION`, when it starts with `OP_SESSION_`, or when it belongs to Git's `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n` group, which is withheld whole because Git needs complete pairs. Five names that match stay, because tools need them and they hold no secret: `GCM_CREDENTIAL_STORE`, `GCM_AZREPOS_CREDENTIALTYPE`, `NUGET_CREDENTIALPROVIDERS_PATH`, `COOKIECUTTER_CONFIG`, and `TIKTOKEN_CACHE_DIR`. That covers Native provider keys, the sign-in secret, secret-store keys, and the conventional names of integration secrets. A credential under an unconventional name still passes. Proxies, locale, and most toolchain paths pass through, including a proxy URL that carries a user name and password. A path whose name matches the rule, such as `PASSWORD_STORE_DIR`, is withheld. A user's own token variables, such as `GITHUB_TOKEN`, are withheld too, so each CLI uses its own login. Claude Code turns receive only Agent-Native's short allowlist. Issue #98 applies the same filter to the coding worker that starts Codex and Claude Code, so the process above a runtime starts without a credential-shaped name as well. The worker needs none. Claude Code gets `--strict-mcp-config` with no MCP configuration, native Codex uses its own configuration and never reaches Core's merged MCP settings, and runs are stored in files under the code-runs folder, not the database. The worker starts without database settings, so a future Core call that queried the database from the worker would open an empty default database in its working folder, and a Workbench test that runs the Claude Code path fails if that happens. [`code-execution-host.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/code-execution-host.ts) builds that environment and still removes the desktop and standalone host markers. The filter controls what a runtime inherits, not what it can reach. The runtime runs as the same operating-system user, so a determined command can still read the private data folder, including the sign-in secret file and the database. Every credential in Vivary's launch environment, such as provider keys and a user's own token variables, stays in the start environment of the server and of the desktop process that starts it, and a same-user command can read it there. Where the operating system allows it, a same-user process can also read another's memory. Windows allows it between one user's processes at one integrity level, which Vivary's are, and Linux allows it when Yama `ptrace_scope` is 0 or Yama is absent. On Windows, the settings that `bin/start.mjs` assigns at startup, including the sign-in secret, also sit in the server process's environment block. The [#98 packaged Windows check](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/98-coding-worker-environment.md) ran a command in a Codex run before and after the fix, and both times it read their names from the server's environment, five processes above it. App-invoked original command receipts go to private application data. Every Python child the original runner starts, the original commands and the creator bridge, gets only the Windows system, home, temp, locale, `TZ`, and `PATH` names, `PYTHONNOUSERSITE`, and, for an original command that receives a receipt path, `VIVARY_RECEIPT_LOG`, so a provider key or the sign-in secret in the server environment does not reach it (issue #156). On Windows, Node's process launcher also adds the account names `HOMEDRIVE`, `HOMEPATH`, `LOGONSERVER`, `SYSTEMDRIVE`, `USERDOMAIN`, and `USERNAME` from the server's environment, none of them a credential. The child's `PATH` keeps only absolute entries not spelled inside the call's project folder, and a creator catalog call has no project, so it keeps every absolute entry. The filter compares spellings, not the folders they reach, so an entry that reaches the project through a symlink, a junction, a `subst` drive, or an 8.3 short name stays. Node's process launcher finds a bare `VIVARY_PYTHON` or `python3` for the creator on that filtered `PATH`, and on Windows it first looks in the child's working folder, which is the bridge's folder. A project's own Python therefore never runs for that project through a `PATH` entry spelled inside the project's folder. A relative `VIVARY_PYTHON` path resolves against the server's working folder. |
@@ -8380,6 +8580,231 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Inbox creation and metadata review fixes. Personal folder lookup now distinguishes confirmed
+absence from pending or failed resolution, so New conversation cannot silently choose API billing while
+Code readiness is unknown. The explicit API choice remains available, and failed folder reads can retry.
+Code metadata changes resolve current project grants and binding again after admission, with an additional
+check after archive awaits host and draft state, immediately before the synchronous write. Regression
+cases cover delayed and failed folder reads, explicit API choice, action authentication and absent versus
+broken folders, plus revoke/rebind during admission and archive reads. These direct Linux checks do not
+establish hosted CI, browser acceptance or Windows acceptance.
+
+
+2026-10-23 Workbench Node compatibility metadata. The package engine range now names only
+the admitted 22, 24 and 26 release lines at their existing runtime-security floors, so
+installation compatibility no longer advertises affected or unsupported Node versions.
+The actual executable guard and guarded build command remain unchanged; package metadata
+does not replace runtime or bundled-dependency evidence. No dependency version changed.
+
+2026-10-23 Inbox search and destination review fixes. Older Native title-only hits now survive
+search continuation when the bounded inbox does not contain their conversation; loaded rows
+still deduplicate title results. The folder read uses binding and authorization identity in
+its query key without extending the action's strict parameters. Regression controls cover
+continuation, opening an older title, later row deduplication, same-ID rebinding, unavailable
+bindings and late old-path responses. These are component checks with transport fixtures,
+not browser or packaged acceptance. Existing archive and send admission contracts are unchanged.
+
+2026-10-23 Production Sidebar inbox integration. The Conversation inbox section now records its
+production mount and the preserved project navigation, unassigned-history identity and footer controls.
+The regressions exercise the real Sidebar and inbox together, including a cross-project row open,
+competing selections and filter saves from both responsive sidebars, and recovery from an identity failure
+through API-chat creation. Delayed API creation and archive restoration cannot overtake a newer open in the
+other sidebar. Each new race/error regression failed before its fix. Query-client-scoped
+coordination keeps separate app instances independent. Explicit fixture and platform limits remain.
+Current published archive/admission contracts
+and their historical receipts remain unchanged.
+
+2026-10-22 Inbox archive and send admission (review threads 4324883731 and 4325071865). The Conversation inbox
+section now describes the shared Native thread and Code owner/organization/project locks, the separate Native
+JSON lock, archive/send ordering, draft preservation and live project validation after the admission wait. Both
+live-project controls failed on source v1 at the intended missing-409 assertion. Source v2 then passed the strengthened
+inbox suite, 28/28, and Code concurrency suite, 12/12. Each run loaded all four candidate Core modules
+(`chat-threads/store.js`, `server/index.js`, `agent/run-store.js` and `agent/production-agent.js`) through a process-local
+loader, leaving installed Core unchanged. Evidence inspected: the source, test files, staged test hashes and collected
+run receipts/logs. Removing either archive lock made its named race test fail, then each temporary mutation was
+restored. Four genuine Native handler controls passed: run INSERT failure, duplicate-row ownership, preparation
+failure cleanup and durable Stop before worker launch. They use the real H3 request, sharing registration and stores
+with a custom engine whose stream is never called. The earlier Native fixture registration failure is retained as a
+setup failure. Installed patch and lockfile reconciliation, type checking, full CI and Windows acceptance remain
+unverified. Background dispatch and private plugin persistence are outside these handler controls.
+
+2026-10-22 Inbox API chat completion keeps newer navigation. Cross-project creation checks its request identity
+before using the existing route hold, and a Native scope that unmounts cannot navigate or report a late failure. The
+existing slow-creation component control now covers Alpha and Beta, plus an external project switch after draft
+initialization starts. The selection fixture's refusal is before its active-project commit; it does not represent a
+durable-save failure after ProjectContext has exposed its pending target. Source/test inspection only; runtime
+checks and actual browser/Windows acceptance remain pending.
+
+2026-10-22 Inbox same-project landing during a pending open (review thread 4324883747). The selected-project
+row now lands before the selection await while retaining the newer hold and selection. The component fixture
+refuses stale selections before changing the active project, matching ProjectContext instead of manufacturing
+a project reset. Its original route assertion and failure/later-click controls cover this boundary. The cross-project
+restore path remains unchanged. Real browser and Windows acceptance remain pending.
+
+2026-10-22 Inbox Personal Code folder readiness (review thread 4326853909). Personal Code creation now requires
+resolved folder data even when Personal is already selected. API chat remains available without a folder.
+The existing component harness covers missing and present folders in active Personal, alongside the existing
+cross-project case. The canonical inbox description also now names bounded search continuation and retry,
+and the current restore action, matching the existing implementation and its component tests. Actual Windows
+acceptance and the sidebar swap after PR260 integration remain pending.
+
+2026-10-20 Inbox failed search scopes across Search more (W5b, review thread 4325272339). Message search keeps
+the projects whose request failed, retries them on Search more, and keeps reporting them until they answer.
+Evidence inspected: the new component test with one failing and one paged project.
+
+2026-10-20 Inbox same-project open during a pending selection (W5b, review thread 4324883747). While a project
+selection the inbox started is still running, an open in the selected project also goes through the route hold and
+a selection, so it supersedes the pending open instead of losing to its later hold. Evidence inspected: the new
+component test that clicks a Beta row and then an Alpha row before Beta opens.
+
+2026-10-20 Inbox Code creation needs a folder (W5b, review thread 4324883739). With Personal workspace as the
+destination from another project, Code conversation is offered only when Personal's folder resolves. Otherwise New
+conversation starts an API chat, matching the server, which lists only Personal API chats without a folder.
+Evidence inspected: the new component test.
+
+2026-10-20 Inbox archive rechecks after its write (W5b, review threads 4324883731 and 4325071865). Code and API
+chat archive run their refusal checks again after the write and undo the archive when work was admitted in
+between. The Conversation inbox section says so and names the remaining gap: sends do not read archive. Evidence
+inspected: two server tests that admit work right after the archive write.
+
+2026-10-20 Inbox API chat restore without Code history (W5b, review thread 4324883723). The inbox restores an
+archived API chat through `vivary-conversation-archive`, gated by the current catalog, instead of
+`vivary-native-archive`, which refuses when the project's Code history is unavailable. The Conversation inbox
+section says so. Evidence inspected: the new component and server restore tests.
+
+2026-10-20 Chat search with unavailable project Code history (W5b, review thread 4321225655, ownership of
+`vivary-chat-search.ts` granted by the orchestrator). A project whose Code history cannot resolve still searches its
+API chats once the project is in the owner's current catalog, and the page reports Code as unavailable. Access
+denials still refuse. Runtime flow 6 says so. Evidence inspected: the new server test of `chatSearchScope` and the
+chat search suites.
+
+2026-10-20 Inbox focus fallback (W5b, review thread 4319908326). When Archive or Restore empties a section,
+focus moves to New conversation instead of the page body, as the project history does. Evidence inspected: the new
+component test that archives the only row.
+
+2026-10-20 Inbox empty message (W5b, review thread 4319908314). The empty message now waits while a draft or
+archived row matches, and never follows the load error. Evidence inspected: the new component test with only an
+archived match and with a failed inbox read.
+
+2026-10-20 Inbox message search follows project access (W5b, review thread 4319908334). The search key now
+holds the catalog scope, its policy revision and each project's binding revision, so a rebinding or grant change
+starts message search again and drops hits from the old binding. Evidence inspected: the new component test.
+
+2026-10-20 Inbox message search pages (W5b, review thread 4318949371). Message search reads each scope through
+`continueChatSearch`, as the project history search does, and offers Search more while a scope stopped with a
+cursor. The count says so far until nothing remains. Evidence inspected: the new component test with three
+one-hit pages, and `chat-search-client.ts`.
+
+2026-10-20 Inbox truncated API chat history (W5b, review thread 4317586786). When the inbox read returns
+`limited`, the inbox says only the newest API chats are listed and that message search, which reads the server,
+still finds older ones. Paging the list is not added. Evidence inspected: the new component test.
+
+2026-10-20 Inbox message search and Code archive (W5b, review thread 4321225646). `chat-content-search.ts`
+ignores `metadata.archivedAt`, which this PR adds, so the inbox leaves out a hit whose Code row it lists as archived.
+The search server itself still returns archived Code hits to other callers, and the root fix there needs an owner.
+Evidence inspected: the new component test and the Code branch of `searchChatContent`.
+
+2026-10-20 Inbox Messages holds message matches only (W5b, review thread 4318543019). A title match from the
+search action is already a row in the title-filtered list, so Messages no longer repeats it as a matching message.
+Evidence inspected: the new component test with one title and one content hit.
+
+2026-10-20 Inbox filter ordering (W5b, review thread 4317666060). A filter chosen while the saved one loads
+cancels the load, and filter saves run one after another, so the newest choice is the one restored. No section
+changes, since the section already says the filter is saved. Evidence inspected: the new component test with a
+slow read and a slow first save.
+
+2026-10-20 Inbox Code archive closes the open conversation (W5b, review thread 4317586797). Archiving the open
+Code conversation closes its route, and opening an archived Code row restores it before it opens. The Conversation
+inbox section says so. Evidence inspected: the new component test.
+
+2026-10-20 Inbox stale continuations (W5b, review threads 4318543030, 4318949381, 4319908304 and 4317586821).
+Archive, restore before opening and API chat creation no longer replace a conversation the owner opened while
+they ran, and a deferred API chat is dropped after a later project change. The Conversation inbox section says so.
+Evidence inspected: four component tests that hold the server answer until the owner has moved on.
+
+2026-10-20 Inbox timestamps from numeric strings (W5b, review thread 4317666066). The inbox reads a numeric
+string time, as a Postgres driver returns a `BIGINT`, as epoch milliseconds instead of a date string. No section
+changes, since the section already describes epoch ordering. Evidence inspected: the new server test.
+
+2026-10-20 Inbox Code archive and legacy drafts (W5b, review thread 4321225650). Code archive finds a pending
+send through `linkedCodeDraftRuns`, the same link that marks the row Review send, so an older run whose draft ID
+is only in its transcript is not archived. Evidence inspected: the new server test with a transcript-only draft ID.
+
+2026-10-20 Inbox changes follow current project access (W5b, review threads 4317586775 and 4319908290).
+Code rename, archive and pin check the run against the project's current history scope, and API chat changes
+check the project against the owner's current catalog. The Conversation inbox section says so. Evidence
+inspected: the server tests for a stale and a replaced binding and for the catalog check, and the built-app test
+that refuses a project outside the catalog.
+
+2026-10-20 Inbox API chat changes through the owner action (W5b, review thread 4317586764). Rename and pin
+of an API chat no longer post to Native's thread routes, which a private-proxy browser cannot authenticate.
+`vivary-conversation-archive` now carries archive, rename, pin and unpin, and the Conversation inbox section
+says so. Evidence inspected: the component test that fails on any raw POST, the server rename and pin test, and
+Core's rename route and `updateThreadData` merge.
+
+2026-10-19 Inbox on the page-wide route hold (W5). The inbox calls
+`holdConversationRoute` and no longer mounts the hook, which `CodeRunControl` applies
+once for the page. Evidence inspected: the inbox component and route-hold tests.
+
+2026-10-19 Inbox owner actions (W5). Merging #261's review fixes moved
+`vivary-code-conversation-meta` and `vivary-conversation-archive` out of #261's
+allowlist. This PR, which adds both actions, lists them in `VIVARY_OWNER_ACTIONS`
+again, and the Conversation inbox section says so. The inbox releases a failed open
+through the release its own hold returns. Evidence inspected: `local-access` and
+`native-actions` tests, and the inbox component tests.
+
+2026-10-19 Inbox tests in CI (W5). `test:conversation-inbox` runs the inbox server and
+component tests, and `test:maintained` now includes it, so the maintained workbench
+job covers the inbox. The Conversation inbox section already names both test files.
+Evidence inspected: the new script run, 35 of 35 passing.
+
+2026-10-19 Inbox on a fresh database (W5). The built-app test found that the inbox
+read failed with no `agent_runs` table, which Native creates with its first turn.
+The Conversation inbox section now says run state is skipped until the table exists,
+and names the built-app test. Evidence inspected: the built-app test run before and
+after the fix, and the server tests.
+
+2026-10-19 Inbox archive guards (W5). The Conversation inbox section now describes
+the server-side archive checks for Code and API chat, the new
+`vivary-conversation-archive` action, the remaining direct archive call sites, and
+how Core keeps a manual API chat title. Evidence inspected: the archive server and
+component tests and the installed Core store and PUT handler.
+
+2026-10-19 Inbox rename validation (W5). The Conversation inbox section now says an
+empty title is refused. Evidence inspected: the component rename test.
+
+2026-10-19 Inbox message search (W5). The Conversation inbox section now describes
+message search through the existing search action, its six-scope cap, and its
+states. No second search engine was added. Evidence inspected: the component
+search tests and `chat-content-search.ts`.
+
+2026-10-19 Inbox drafts (W5). The inbox read lists saved drafts in every listed
+project, and the Conversation inbox section says so, with the measured read cost.
+Evidence inspected: the server and component draft tests and the 20-project
+measurement with 40 drafts.
+
+2026-10-19 Conversation inbox on the shared route hold (W5). The inbox now imports
+`useConversationRouteHold` from #261 instead of its own copy. The Conversation
+inbox section names the hook and how an API chat created after a project change
+opens. Evidence inspected: the inbox component tests, including an API chat over a
+restored saved conversation, and `tests/conversation-route-hold.test.mjs`.
+
+2026-10-19 Conversation inbox follow-up (W5). The Conversation inbox section now
+says the filter only scopes the list and names the New conversation destination,
+rename writes the record's `title` and keeps `metadata.generatedTitle`, Failed and
+Completed show for 24 hours, and the action caches project history scopes by
+catalog revision, with a measured read cost. Evidence inspected: the updated
+server and component tests and the 20-project, 200-conversation measurement.
+
+2026-10-19 Conversation inbox (W5, stacked on PR #261). New section
+Conversation inbox under System structure, and the Conversations row under Data
+and trust boundaries. `server/conversation-inbox.ts` and three owner actions add a
+cross-project list, Code rename, archive and pin as list metadata, and the selected
+project's folder for the owner's screen. `ConversationInbox.tsx` renders it but is
+not mounted yet, so the existing project history, Native archive and concurrency
+sections still describe the running sidebar. Evidence inspected: the new server
+and component tests, `isOwnedRun`, `listOwnedVivaryCodeRuns`, the content search
+predicates, and the route reset in `Workspace.tsx`.
 2026-10-20 Review fix on PR #261. Open on the shared-folder warning for a run in
 another project selected the project without a route hold, so Workspace's route
 reset and the new project's saved view could open another conversation or Native
@@ -11367,6 +11792,30 @@ the owning Core, Exo, front-door, capability-status, and MCP contracts. Those
 references replace line ranges invalidated by this consolidation. The linked
 contracts and dispatch source confirm the same package boundaries. This reference
 repair changes no runtime behavior or acceptance claim.
+
+The October 23, 2026 review ports the already reviewed runtime admission baseline
+onto the Inbox branch before its first topic update. All five Actions workflows
+admit the actual runner Node interpreter before any JavaScript action. CI and
+protected npm jobs select the qualified Node 24.22.1 runtime and immediately admit
+the selected executable before package work. Source support still starts at Node
+22.23.4. The build, startup, desktop packaging, and installer entry points retain
+the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and SQLite
+12.11.1. Affected standalone Node and the held Electron runtime are refused.
+
+Python-bearing CI provisions the exact verified pip 26.2.2 wheel before admission,
+including the four new pipless environment paths. The existing verified uv
+0.13.5 wheels and actual native-runtime admission remain required at acquisition
+and use. The port preserves the Inbox code, its existing test commands, and the
+patched Native dependency. Updated mutation controls require each job to retain
+its selected fixed runtime, immediate guards, and failure propagation.
+
+The security source proposal reuses the recorded exact-byte runner, pip, uv,
+Windows runtime, and packaging evidence within their original scopes. This review
+does not establish new full Linux CI, hosted CI, browser, or Windows UI acceptance.
+Current Linux execution is blocked by storage admission. Focused Windows source
+and mutation checks, generated documentation mirrors, and immutable final-source
+review remain required before the topic update. Electron, merge, and artifact
+publication remain held.
 
 
 ---

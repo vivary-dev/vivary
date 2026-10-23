@@ -18049,3 +18049,454 @@ diff --git a/dist/client/chat/repo-helpers.js b/dist/client/chat/repo-helpers.js
          if (drop)
              changed = true;
          return !drop;
+diff --git a/dist/chat-threads/store.js b/dist/chat-threads/store.js
+index e440953..40736e4 100644
+--- a/dist/chat-threads/store.js
++++ b/dist/chat-threads/store.js
+@@ -26,7 +26,10 @@ let _initPromise;
+  * compare-and-swap on `updated_at`, rereads the latest row on conflict, and
+  * remerges message history before retrying.
+  */
+-const _threadDataLocks = new Map();
++// Bundled server routes and actions can load separate copies of Core in one
++// process. They must serialize against the same mutexes.
++const threadDataLocksKey = Symbol.for("agent-native.chat-threads.thread-data-locks");
++const _threadDataLocks = globalThis[threadDataLocksKey] ??= new Map();
+ const DEFAULT_THREAD_DATA_UPDATE_ATTEMPTS = 12;
+ const THREAD_DATA_CONFLICT_BACKOFF_MS = 25;
+ const getChatThreadsDb = createGetDb({ chatThreads, chatThreadShares });
+@@ -46,6 +49,10 @@ export function withThreadDataLock(threadId, fn) {
+     next.then(cleanup, cleanup);
+     return next;
+ }
++/** Admission is separate from the thread's JSON lock, which callbacks may take. */
++export function withThreadAdmissionLock(threadId, fn) {
++    return withThreadDataLock(JSON.stringify(["agent-native.thread-admission", threadId]), fn);
++}
+ async function ensureTable() {
+     if (!_initPromise) {
+         _initPromise = (async () => {
+@@ -948,13 +955,20 @@ export async function setThreadEngineMeta(threadId, meta) {
+  * thread_data blob is a real per-keystroke cost.
+  */
+ export async function setThreadQueuedMessages(threadId, queuedMessages, options = {}) {
+-    return withThreadDataLock(threadId, async () => {
++    return withThreadAdmissionLock(threadId, () => withThreadDataLock(threadId, async () => {
+         const thread = await getThread(threadId);
+         if (!thread)
+             return false;
+         if (options.ownerEmail && thread.ownerEmail !== options.ownerEmail) {
+             return false;
+         }
++        if (thread.archivedAt != null && queuedMessages.length > 0) {
++            throw Object.assign(new Error("Restore this conversation before sending or queuing a message."), {
++                statusCode: 409,
++                statusMessage: "Restore this conversation before sending or queuing a message.",
++                data: { errorCode: "thread_archived" },
++            });
++        }
+         let data = {};
+         try {
+             data = JSON.parse(thread.threadData);
+@@ -966,7 +980,7 @@ export async function setThreadQueuedMessages(threadId, queuedMessages, options
+         data.queuedMessages = queuedMessages;
+         await updateThreadData(threadId, JSON.stringify(data), thread.title, thread.preview, thread.messageCount, { preserveExistingQueuedMessages: false });
+         return true;
+-    });
++    }));
+ }
+ const THREAD_SHARE_DATA_KEY = "_share";
+ function generateShareToken() {
+diff --git a/dist/chat-threads/store.d.ts b/dist/chat-threads/store.d.ts
+index 211316c..edd0f45 100644
+--- a/dist/chat-threads/store.d.ts
++++ b/dist/chat-threads/store.d.ts
+@@ -1,6 +1,8 @@
+ import { type AccessContext } from "../sharing/access.js";
+ import { type ShareRole } from "../sharing/schema.js";
+ export declare function withThreadDataLock<T>(threadId: string, fn: () => Promise<T>): Promise<T>;
++/** Serialize thread admission separately from read-modify-write of thread data. Single process only. */
++export declare function withThreadAdmissionLock<T>(threadId: string, fn: () => Promise<T>): Promise<T>;
+ /**
+  * Explicitly repair `message_count` for legacy rows written before the count
+  * was maintained. This must never run from table/bootstrap initialization:
+diff --git a/dist/server/index.js b/dist/server/index.js
+index 82dd9d4..79d97bf 100644
+--- a/dist/server/index.js
++++ b/dist/server/index.js
+@@ -40,7 +40,7 @@ export { createGoogleAuthPlugin, } from "./google-auth-plugin.js";
+ export { createAgentChatPlugin, defaultAgentChatPlugin, refreshGlobalMcpManager, } from "./agent-chat-plugin.js";
+ export { AGENT_CHAT_STREAM_PATH, AGENT_CHAT_STREAM_TOKEN_SUFFIX, AGENT_CHAT_STREAM_TOKEN_TTL_SECONDS, createAgentChatStreamToken, isAgentChatStreamingRuntime, readAgentChatStreamBearerToken, verifyAgentChatStreamToken, } from "./agent-chat-stream.js";
+ export { configureAgentNativeEmbeddedEnvironment, createAgentNativeEmbeddedAuthOptions, createAgentNativeEmbeddedPlugin, mountAgentNativeEmbedded, normalizeAgentNativeEmbeddedSession, } from "./embedded.js";
+-export { createThread, getThread, listThreads, updateThreadData, deleteThread, setThreadArchived, setThreadPinned, setThreadScope, } from "../chat-threads/store.js";
++export { createThread, getThread, listThreads, updateThreadData, deleteThread, setThreadArchived, setThreadPinned, setThreadScope, withThreadDataLock, withThreadAdmissionLock, } from "../chat-threads/store.js";
+ export { createResourcesPlugin, defaultResourcesPlugin, } from "./resources-plugin.js";
+ export { createCoreRoutesPlugin, defaultCoreRoutesPlugin, FRAMEWORK_ROUTE_PREFIX, } from "./core-routes-plugin.js";
+ export { builderOffersEnabled, setBuilderOffersEnabled, } from "../shared/builder-offers.js";
+diff --git a/dist/server/index.d.ts b/dist/server/index.d.ts
+index 8bf22a8..fa24b81 100644
+--- a/dist/server/index.d.ts
++++ b/dist/server/index.d.ts
+@@ -39,7 +39,7 @@ export { createAgentChatPlugin, defaultAgentChatPlugin, refreshGlobalMcpManager,
+ export { AGENT_CHAT_STREAM_PATH, AGENT_CHAT_STREAM_TOKEN_SUFFIX, AGENT_CHAT_STREAM_TOKEN_TTL_SECONDS, createAgentChatStreamToken, isAgentChatStreamingRuntime, readAgentChatStreamBearerToken, verifyAgentChatStreamToken, type AgentChatStreamPrincipal, } from "./agent-chat-stream.js";
+ export type { AgentChatMcpIcon, AgentChatMcpOptions, } from "./agent-chat/mcp-options.js";
+ export { configureAgentNativeEmbeddedEnvironment, createAgentNativeEmbeddedAuthOptions, createAgentNativeEmbeddedPlugin, mountAgentNativeEmbedded, normalizeAgentNativeEmbeddedSession, type AgentNativeEmbeddedAuthOptions, type AgentNativeEmbeddedGetSession, type AgentNativeEmbeddedHostSession, type AgentNativeEmbeddedPluginOptions, } from "./embedded.js";
+-export { createThread, getThread, listThreads, updateThreadData, deleteThread, setThreadArchived, setThreadPinned, setThreadScope, type ChatThread, type ChatThreadScope, type ChatThreadSummary, type ListThreadsOptions, } from "../chat-threads/store.js";
++export { createThread, getThread, listThreads, updateThreadData, deleteThread, setThreadArchived, setThreadPinned, setThreadScope, withThreadDataLock, withThreadAdmissionLock, type ChatThread, type ChatThreadScope, type ChatThreadSummary, type ListThreadsOptions, } from "../chat-threads/store.js";
+ export { createResourcesPlugin, defaultResourcesPlugin, } from "./resources-plugin.js";
+ export { createCoreRoutesPlugin, defaultCoreRoutesPlugin, FRAMEWORK_ROUTE_PREFIX, type CoreRoutesPluginOptions, } from "./core-routes-plugin.js";
+ export type { CoreRoutesMcpOptions } from "./core-routes/mcp-connect-options.js";
+diff --git a/dist/agent/run-store.js b/dist/agent/run-store.js
+index b53fcf5..1130171 100644
+--- a/dist/agent/run-store.js
++++ b/dist/agent/run-store.js
+@@ -716,7 +716,7 @@ export async function insertRun(id, threadId, turnId, options) {
+     await ensureRunTables();
+     const client = getDbExec();
+     const now = Date.now();
+-    await client.execute({
++    const result = await client.execute({
+         sql: `INSERT INTO agent_runs (id, thread_id, status, started_at, heartbeat_at, last_progress_at, turn_id, dispatch_mode, dispatch_payload) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+         args: [
+             id,
+@@ -729,6 +729,7 @@ export async function insertRun(id, threadId, turnId, options) {
+             options?.dispatchPayload ?? null,
+         ],
+     });
++    return (result.rowsAffected ?? 0) > 0;
+ }
+ /**
+  * SQL fragment that resolves the per-row stale cutoff. Background-dispatched
+@@ -1089,14 +1090,11 @@ export async function getRunOwnerEmail(runId) {
+     return row?.owner_email ?? null;
+ }
+ /**
+- * Atomically acquire a run lease for a thread. Succeeds (returns true) only
+- * when no other run for the same thread is currently status='running' with a
+- * fresh heartbeat. Works for both Postgres and SQLite: the stale-cutoff
+- * comparison lets a dead producer's run be replaced without waiting for the
+- * reaper, mirroring the logic in `reapIfStale`.
+- *
+- * Callers that win the claim then insert the run row normally; callers that
+- * lose skip the run and return the existing active runId to the caller.
++ * Probe for a fresh running row on a thread. This SELECT does not reserve a
++ * slot. A single-process caller must serialize the probe and its INSERT,
++ * as foreground chat admission does with withThreadAdmissionLock.
++ * The stale cutoff permits replacing a dead producer without awaiting the
++ * reaper. Separate processes still need their own coordination.
+  */
+ export async function tryClaimRunSlot(threadId, maxStaleMs) {
+     await ensureRunTables();
+diff --git a/dist/agent/run-store.d.ts b/dist/agent/run-store.d.ts
+index 91ddcbc..02270b5 100644
+--- a/dist/agent/run-store.d.ts
++++ b/dist/agent/run-store.d.ts
+@@ -262,6 +262,7 @@ export declare function readLedgerEntry(threadId: string, toolKey: string): Prom
+  * Best-effort — never throws.
+  */
+ export declare function clearLedgerForThread(threadId: string): Promise<void>;
++/** Returns false when ON CONFLICT(id) left an existing row unchanged. */
+ export declare function insertRun(id: string, threadId: string, turnId?: string, options?: {
+     dispatchMode?: "foreground" | "foreground-self-chain" | "background";
+     /**
+@@ -271,7 +272,7 @@ export declare function insertRun(id: string, threadId: string, turnId?: string,
+      * bodies at 256KB); the worker rehydrates the body from this column.
+      */
+     dispatchPayload?: string;
+-}): Promise<void>;
++}): Promise<boolean>;
+ /**
+  * Which stale window the reaper applied to a row, in ms.
+  *
+@@ -427,14 +428,11 @@ export declare function countRunsForTurn(threadId: string, turnId: string): Prom
+  */
+ export declare function getRunOwnerEmail(runId: string): Promise<string | null>;
+ /**
+- * Atomically acquire a run lease for a thread. Succeeds (returns true) only
+- * when no other run for the same thread is currently status='running' with a
+- * fresh heartbeat. Works for both Postgres and SQLite: the stale-cutoff
+- * comparison lets a dead producer's run be replaced without waiting for the
+- * reaper, mirroring the logic in `reapIfStale`.
+- *
+- * Callers that win the claim then insert the run row normally; callers that
+- * lose skip the run and return the existing active runId to the caller.
++ * Probe for a fresh running row on a thread. This SELECT does not reserve a
++ * slot. A single-process caller must serialize the probe and its INSERT,
++ * as foreground chat admission does with withThreadAdmissionLock.
++ * The stale cutoff permits replacing a dead producer without awaiting the
++ * reaper. Separate processes still need their own coordination.
+  */
+ export declare function tryClaimRunSlot(threadId: string, maxStaleMs?: number): Promise<{
+     claimed: boolean;
+diff --git a/dist/agent/production-agent.js b/dist/agent/production-agent.js
+index 2ae9427..bb22b13 100644
+--- a/dist/agent/production-agent.js
++++ b/dist/agent/production-agent.js
+@@ -1,6 +1,7 @@
+ import { ANTHROPIC_API_MODELS } from "./model-config.js";
+ import { estimateUsageCost } from "../usage/store.js";
+ import { randomUUID } from "node:crypto";
++import { getThread, resolveThreadAccess, threadScopeMismatch, withThreadAdmissionLock } from "../chat-threads/store.js";
+ import Ajv from "ajv";
+ import { defineEventHandler, getHeader, setResponseHeader, setResponseStatus, getMethod, } from "h3";
+ import { parseA2AAgentActivityPart } from "../a2a/activity.js";
+@@ -7603,30 +7604,6 @@ export function createProductionAgentHandler(options) {
+             tools: requestTools,
+             availableToolCount: availableRequestTools.length,
+         });
+-        // Atomically claim the run slot for this thread. The claim checks SQL for
+-        // a live (non-stale) running row so two near-simultaneous POSTs on
+-        // different serverless isolates both see the correct state — a plain
+-        // read-then-act check races on multi-isolate deployments because both
+-        // reads see no running row before either insert commits.
+-        //
+-        // The background worker SKIPS this: the foreground POST already claimed the
+-        // slot and inserted the run row before dispatching, so re-claiming here
+-        // would falsely 409 against the row the foreground holds.
+-        if (threadId && !isBackgroundWorker) {
+-            if (typeof requestTurnId === "string" &&
+-                requestTurnId &&
+-                (await isTurnAborted(threadId, requestTurnId))) {
+-                return { ok: true, stopped: true };
+-            }
+-            const slot = await tryClaimRunSlot(threadId);
+-            if (!slot.claimed) {
+-                setResponseStatus(event, 409);
+-                return {
+-                    error: "Run already in progress for this thread",
+-                    activeRunId: slot.activeRunId,
+-                };
+-            }
+-        }
+         // Start agent loop in background via run-manager. The background worker
+         // reuses the runId carried in the marker (signed into the dispatch token):
+         //  - First background chunk (count 0): the foreground generated + INSERTED
+@@ -7780,50 +7757,92 @@ export function createProductionAgentHandler(options) {
+         // DIAGNOSTIC-ONLY: owner/thread resolution + runId/effectiveThreadId +
+         // chained-continuation thread fetch finished.
+         workerStep("owner_thread");
+-        // Persist the user's turn exactly once. The foreground POST does this
+-        // before dispatching; the background worker must NOT repeat it (it re-enters
+-        // with the same body, which would double-persist the user message).
+-        if (options.onRunPrepared && !internalContinuation && !isBackgroundWorker) {
+-            await options.onRunPrepared({
+-                runId,
+-                threadId,
+-                message: messageToPersist,
+-                attachments: requestAttachments,
+-                ...(typeof queuedMessageId === "string" && queuedMessageId.trim()
+-                    ? { queuedMessageId: queuedMessageId.trim() }
+-                    : {}),
++        // Foreground self-chain remains opt-in and excludes durable background
++        // runs. A persistent thread is needed for successor discovery and resume.
++        const foregroundSelfChainEligible = !isBackgroundWorker &&
++            !dispatchToBackground &&
++            typeof threadId === "string" &&
++            threadId.trim().length > 0 &&
++            isAgentChatForegroundSelfChainEnabled();
++        let foregroundRunInserted = false;
++        if (!isBackgroundWorker) {
++            // The SQL probe alone is not a lease. In Vivary's single server
++            // process, archive, queue writes and foreground admission share this
++            // mutex until the run is visible in SQL. onRunPrepared takes the
++            // separate raw-thread JSON mutex while persisting the user message.
++            const refused = await withThreadAdmissionLock(effectiveThreadId, async () => {
++                if (threadId) {
++                    const thread = await getThread(threadId);
++                    if (thread && (!ownerEmail ||
++                        threadScopeMismatch(thread.scope, getRequestRunContext()?.chatScope) ||
++                        !await resolveThreadAccess(ownerEmail, threadId, "editor", { orgId: getRequestOrgId() }))) {
++                        setResponseStatus(event, 404);
++                        return { error: "Thread not found" };
++                    }
++                    if (thread?.archivedAt != null) {
++                        setResponseStatus(event, 409);
++                        return { error: "Restore this conversation before sending a message.", errorCode: "thread_archived" };
++                    }
++                    if (await isTurnAborted(threadId, effectiveTurnId)) return { ok: true, stopped: true };
++                    const slot = await tryClaimRunSlot(threadId);
++                    if (!slot.claimed) {
++                        setResponseStatus(event, 409);
++                        return { error: "Run already in progress for this thread", activeRunId: slot.activeRunId };
++                    }
++                }
++                foregroundRunInserted = await insertRun(runId, effectiveThreadId, effectiveTurnId, dispatchToBackground
++                    ? { dispatchMode: "background", dispatchPayload: JSON.stringify(body) }
++                    : { dispatchMode: foregroundSelfChainEligible ? "foreground-self-chain" : "foreground" });
++                if (!foregroundRunInserted) {
++                    // ON CONFLICT is a no-op. This request owns neither the row
++                    // nor its cleanup, and must not append another user message.
++                    setResponseStatus(event, 409);
++                    return { error: "Run already exists", activeRunId: runId };
++                }
++                try {
++                    if (await isTurnAborted(effectiveThreadId, effectiveTurnId)) {
++                        await markRunAborted(runId, "user");
++                        return { ok: true, stopped: true };
++                    }
++                    // Persist exactly once, after durable admission and before
++                    // dispatch. A background worker reuses this row and message.
++                    if (options.onRunPrepared && !internalContinuation) {
++                        await options.onRunPrepared({
++                            runId, threadId, message: messageToPersist, attachments: requestAttachments,
++                            ...(typeof queuedMessageId === "string" && queuedMessageId.trim()
++                                ? { queuedMessageId: queuedMessageId.trim() } : {}),
++                        });
++                    }
++                    if (await isTurnAborted(effectiveThreadId, effectiveTurnId)) {
++                        await markRunAborted(runId, "user");
++                        return { ok: true, stopped: true };
++                    }
++                }
++                catch (error) {
++                    // Only an INSERT that changed a row reaches this cleanup.
++                    const failed = await updateRunStatusIfRunning(runId, "errored").catch(() => false);
++                    if (failed) {
++                        await setRunTerminalReason(runId, "error:run_preparation_failed").catch(() => { });
++                        await setRunError(runId, "run_preparation_failed", "The user message could not be prepared.").catch(() => { });
++                    }
++                    throw error;
++                }
++                return null;
+             });
++            if (refused) return refused;
+         }
+         // ─── Durable-background dispatch decision ──────────────────────────────
+         // Flag active (hosted + A2A_SECRET + AGENT_CHAT_DURABLE_BACKGROUND) and we
+-        // are the FOREGROUND POST: insert the run row (marked background), fire an
++        // are the FOREGROUND POST: use the admitted background row, fire an
+         // HMAC-signed self-dispatch into the Netlify background function (15-min
+         // budget), and return the SSE subscription immediately. The client streams
+         // the same events via the cross-isolate SQL-poll path with no client
+-        // change. With the flag OFF this whole branch is skipped and the inline
+-        // `startRun` path below runs exactly as before (byte-for-byte).
++        // change. With the flag OFF this branch is skipped and the inline
++        // `startRun` path below reuses the admitted foreground row.
+         if (dispatchToBackground) {
+-            let backgroundRowInserted = false;
+-            try {
+-                // Insert the run row up front so /runs/active sees it immediately and
+-                // the slot stays held while the background function cold-starts. Mark
+-                // it background-dispatched so the stale reaper uses the wider window.
+-                // The full request body is persisted ON the row (dispatch_payload) so
+-                // the self-POST below can carry only the tiny marker — Netlify caps
+-                // background-function request bodies at 256KB, and a large chat
+-                // history (inline attachments especially) silently exceeded that.
+-                await insertRun(runId, effectiveThreadId, effectiveTurnId, {
+-                    dispatchMode: "background",
+-                    dispatchPayload: JSON.stringify(body),
+-                });
+-                backgroundRowInserted = true;
+-            }
+-            catch (err) {
+-                // A duplicate-PK collision means the row already exists (ret­ried POST);
+-                // any other failure means we can't safely hand off — fall back to the
+-                // inline path rather than dropping the turn.
+-                console.error("[agent-chat] background insertRun failed; falling back to inline:", err instanceof Error ? err.message : err);
+-            }
++            // Admission already persisted the original background mode and full
++            // payload. Do not replace them with inline startRun's insert options.
++            const backgroundRowInserted = foregroundRunInserted;
+             // Stop may land after the pre-claim check but before the durable row was
+             // inserted. Terminalize that row before it can be handed to a worker.
+             if (backgroundRowInserted &&
+@@ -7859,29 +7878,18 @@ export function createProductionAgentHandler(options) {
+                     ...(expectsNetlifyBackgroundFunction
+                         ? { awaitResponse: true, responseTimeoutMs: 5_000 }
+                         : {}),
+-                    // When the row (and its persisted payload) landed, send only the
++                    // Admission persisted the full payload. Send only the
+                     // marker — the worker rehydrates the body from dispatch_payload
+                     // (`payloadRef`), keeping the self-POST far under Netlify's 256KB
+-                    // background-function body cap. If the insert failed we fall back to
+-                    // carrying the full body inline, exactly as before.
+-                    body: backgroundRowInserted
+-                        ? {
+-                            [AGENT_CHAT_BACKGROUND_RUN_FIELD]: {
+-                                runId,
+-                                turnId: effectiveTurnId,
+-                                backgroundFunctionRuntimeExpected: expectsNetlifyBackgroundFunction,
+-                                payloadRef: true,
+-                            },
+-                        }
+-                        : {
+-                            ...body,
+-                            // Carry the pre-claimed identity so the worker reuses this run.
+-                            [AGENT_CHAT_BACKGROUND_RUN_FIELD]: {
+-                                runId,
+-                                turnId: effectiveTurnId,
+-                                backgroundFunctionRuntimeExpected: expectsNetlifyBackgroundFunction,
+-                            },
++                    // background-function body cap.
++                    body: {
++                        [AGENT_CHAT_BACKGROUND_RUN_FIELD]: {
++                            runId,
++                            turnId: effectiveTurnId,
++                            backgroundFunctionRuntimeExpected: expectsNetlifyBackgroundFunction,
++                            payloadRef: true,
+                         },
++                    },
+                 });
+                 dispatched = true;
+             }
+@@ -7943,11 +7951,9 @@ export function createProductionAgentHandler(options) {
+                         : "Failed to dispatch background run",
+                 };
+             }
+-            // backgroundOutcome.action === "inline": we atomically own the run (or
+-            // there was no row to reconcile), so falling through to the inline
+-            // `startRun` path below cannot double-execute. `startRun` calls `insertRun`
+-            // again, but its duplicate-PK collision is swallowed, so an existing
+-            // `background-processing` row is reused — no double row.
++            // backgroundOutcome.action === "inline": we atomically own the run.
++            // startRun's duplicate INSERT is a no-op, preserving the claimed
++            // row's background mode and dispatch payload.
+             if (backgroundOutcome.reason === "worker-never-claimed") {
+                 // The async 202 landed but no worker claimed within grace. PRESERVE the
+                 // bg-fn's last-recorded diag_stage (route_entered / auth_failed / ... or
+@@ -7974,23 +7980,6 @@ export function createProductionAgentHandler(options) {
+                 turnId: effectiveTurnId,
+             }
+             : null;
+-        // Foreground self-chain: opt-in only — requires the app/deploy to
+-        // explicitly set AGENT_CHAT_FOREGROUND_SELF_CHAIN truthy (unset/false
+-        // means disabled), on top of the hosted runtime + A2A_SECRET gates, AND
+-        // this specific run never having been routed to the durable background
+-        // worker. A run that WAS dispatched to background
+-        // (`dispatchToBackground`) already has its recovery owned by the background
+-        // circuit-breaker / `isBackgroundWorker` chain above — this flag must never
+-        // double up with that path, only stand in for it on plain foreground turns. A persistent
+-        // threadId is required: the client discovers the pre-inserted successor
+-        // via `/runs/active?threadId` and the successor chunk resumes from the
+-        // thread's persisted thread_data — without a thread there is neither a
+-        // discovery channel nor durable progress to resume from.
+-        const foregroundSelfChainEligible = !isBackgroundWorker &&
+-            !dispatchToBackground &&
+-            typeof threadId === "string" &&
+-            threadId.trim().length > 0 &&
+-            isAgentChatForegroundSelfChainEnabled();
+         const noProgressRepeatForRun = (run) => resolveBackgroundNoProgressRepeat({
+             run,
+             priorErrorCode: priorNoProgressErrorCode,
+@@ -8220,9 +8209,8 @@ export function createProductionAgentHandler(options) {
+             }
+         }
+         // DIAGNOSTIC-ONLY: build the pre-startRun setup-timing breakdown now (so the
+-        // marks reflect the work done BEFORE the loop), but EMIT it from inside
+-        // startRun's callback below — the run row does not exist until startRun
+-        // inserts it, so a pre-startRun write would no-op on the inline path.
++        // marks reflect the work done BEFORE the loop), and emit it when the
++        // loop starts so worker setup and execution remain distinct diagnostics.
+         setupMark("preStart");
+         // DIAGNOSTIC-ONLY: last stage before startRun fires. A worker that reaches
+         // prestart but never workerStarted is hanging inside startRun itself.
+@@ -8292,8 +8280,7 @@ export function createProductionAgentHandler(options) {
+             // DIAGNOSTIC: the agent loop body actually started running. For a
+             // background worker, a run that is claimed but never reaches this stage
+             // died between claiming and loop start. The pre-startRun setup-timing
+-            // breakdown rides along here so it persists now that the run row exists
+-            // (startRun inserted it), WITHOUT adding a separate DB hop to the
++            // breakdown rides along here using the admitted run row, WITHOUT adding a separate DB hop to the
+             // run-start path: on the worker it is folded into this same
+             // already-awaited worker_started write (one hop, correctly ordered, no
+             // clobber); on the inline path there is no later diag stage to overwrite,

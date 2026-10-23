@@ -31,6 +31,7 @@ import { codexSessionLogLifecycle } from "./codex-session-process";
 import { canonicalFolder, foldersOverlap } from "./folder-overlap";
 import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
 import { SHARED_FOLDER_WARNING } from "../shared/code-concurrency";
+import { withCodeConversationAdmission } from "./conversation-admission";
 
 import {
   WINDOWS_SCAN_FAILURES, type WindowsScanFailure,
@@ -917,6 +918,21 @@ export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: Vi
   return linked;
 }
 
+function assertCodeConversationOpen(run: CodeAgentRunRecord | null): void {
+  if (typeof run?.metadata?.archivedAt === "string") {
+    fail("Restore this conversation before sending a message.", {
+      errorCode: "vivary_conversation_archived", statusCode: 409,
+    });
+  }
+}
+
+/** The same owned legacy-draft association that the inbox and archive use. Call under scope admission. */
+export function assertCodeDraftConversationOpen(ownerEmail: string, orgId: string, scope: VivaryCodeReadScope | undefined,
+  draftThreadId: string): void {
+  const linked = linkedCodeDraftRuns(ownerEmail, orgId, scope, [draftThreadId]).get(draftThreadId);
+  if (linked) assertCodeConversationOpen(getCodeAgentRunRecord(linked.id));
+}
+
 export function hasOwnedVivaryCodeSubmit(
   ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope | undefined,
   draftThreadId: string, submitId: string,
@@ -1107,75 +1123,83 @@ export async function sendVivaryCodeMessage(input: {
       errorCode: "vivary_linked_history_unavailable", statusCode: 409,
     });
   }
-  if (input.revalidateWorkspace) {
-    const current = await input.revalidateWorkspace();
-    if (!current || !sameWorkspace(current, workspace)) {
-      fail("The selected project changed while its runtime was checked. Select it again.", {
-        errorCode: "vivary_code_project_changed", statusCode: 409,
+  const admittedRunId = await withCodeConversationAdmission(input.ownerEmail, input.orgId, workspace.projectId ?? null, async () => {
+    // Admission may wait behind a draft CAS or archive. Resolve the live grant,
+    // binding and policy again after that wait, before any transcript or worker mutation.
+    if (input.revalidateWorkspace) {
+      const current = await input.revalidateWorkspace();
+      if (!current || !sameWorkspace(current, workspace)) {
+        fail("The selected project changed while its runtime was checked. Select it again.", {
+          errorCode: "vivary_code_project_changed", statusCode: 409,
+        });
+      }
+    }
+    // Runtime discovery stays outside admission. Archive and pending-draft CAS share this scope lock; no await
+    // separates these final checks from the transcript append and activeRuns.set in startVivaryCodeRun.
+    assertCodeHostAvailable();
+    assertConversationCanStart(input, canonicalRoot);
+    // A switch can land while this send awaits its checks. Launch only the route the record still names, and build the
+    // prompt from the record as it is now. A switch away and back keeps the route but clears the provider sessions, so
+    // the new session must get the quoted conversation.
+    const latest = existing ? requireOwnedRun(existing.id, input.ownerEmail, input.orgId, workspace) : null;
+    assertCodeConversationOpen(latest);
+    if (input.draftThreadId && input.orgId) {
+      assertCodeDraftConversationOpen(input.ownerEmail, input.orgId, workspace, input.draftThreadId);
+    }
+    if (existing && (!latest || metadataString(latest, "engine") !== metadataString(existing, "engine")
+      || modelFromRun(latest) !== modelFromRun(existing))) {
+      fail("This conversation's runtime or model changed. Check the selectors and send again.", {
+        errorCode: "vivary_code_engine_changed", statusCode: 409,
       });
     }
-  }
-
-  // Claim this conversation's slot synchronously after all runtime and project checks. No await separates these checks
-  // from `activeRuns.set` in startVivaryCodeRun, so of two simultaneous sends into one conversation only one starts.
-  assertCodeHostAvailable();
-  assertConversationCanStart(input, canonicalRoot);
-  // A switch can land while this send awaits its checks. Launch only the route the record still names, and build the
-  // prompt from the record as it is now. A switch away and back keeps the route but clears the provider sessions, so
-  // the new session must get the quoted conversation.
-  const latest = existing ? getCodeAgentRunRecord(existing.id) : null;
-  if (existing && (!latest || metadataString(latest, "engine") !== metadataString(existing, "engine")
-    || modelFromRun(latest) !== modelFromRun(existing))) {
-    fail("This conversation's runtime or model changed. Check the selectors and send again.", {
-      errorCode: "vivary_code_engine_changed", statusCode: 409,
+    const run = latest ?? createCodeAgentRunRecord({
+      goalId: VIVARY_CODE_GOAL_ID,
+      title: titleFromMessage(input.message),
+      status: "queued",
+      phase: "queued",
+      needsApproval: false,
+      permissionMode: "auto-edit",
+      cwd: workspace.root,
+      metadata: {
+        app: VIVARY_CODE_APP_MARKER,
+        engine: selectedEngine,
+        model: selectedModel === "default" ? null : selectedModel,
+        ownerEmail: input.ownerEmail,
+        orgId: input.orgId,
+        workspaceRoot: workspace.root,
+        ...(workspace.projectId ? {
+          projectId: workspace.projectId,
+          bindingId: workspace.bindingId,
+          rootId: workspace.rootId,
+          bindingRevision: workspace.bindingRevision,
+        } : {}),
+        codexPermissionMode: permissionMode,
+        ...(input.draftThreadId ? { draftThreadId: input.draftThreadId } : {}),
+      },
     });
-  }
-  const run = latest ?? createCodeAgentRunRecord({
-    goalId: VIVARY_CODE_GOAL_ID,
-    title: titleFromMessage(input.message),
-    status: "queued",
-    phase: "queued",
-    needsApproval: false,
-    permissionMode: "auto-edit",
-    cwd: workspace.root,
-    metadata: {
-      app: VIVARY_CODE_APP_MARKER,
-      engine: selectedEngine,
-      model: selectedModel === "default" ? null : selectedModel,
-      ownerEmail: input.ownerEmail,
-      orgId: input.orgId,
-      workspaceRoot: workspace.root,
-      ...(workspace.projectId ? {
-        projectId: workspace.projectId,
-        bindingId: workspace.bindingId,
-        rootId: workspace.rootId,
-        bindingRevision: workspace.bindingRevision,
-      } : {}),
-      codexPermissionMode: permissionMode,
-      ...(input.draftThreadId ? { draftThreadId: input.draftThreadId } : {}),
-    },
-  });
 
-  const executionMessage = buildVivaryCodeExecutionPrompt(latest, selectedEngine,
-    linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
-    input.projectContext?.block);
-  appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
-    metadata: { source: "vivary-workbench", permissionMode,
-      // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
-      // An unavailable source supplies no block and no portion, so nothing claims linked context.
-      ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
-      ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
-        draftThreadId: input.draftThreadId } : {}) } });
-  if (input.projectContext) {
-    recordProjectContextLoad(run, input.projectContext);
-    input.recordProjectContext?.(input.projectContext);
-  }
-  updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
-    metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
-      ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
-  startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
-    ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
-  return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
+    const executionMessage = buildVivaryCodeExecutionPrompt(latest, selectedEngine,
+      linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
+      input.projectContext?.block);
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
+      metadata: { source: "vivary-workbench", permissionMode,
+        // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
+        // An unavailable source supplies no block and no portion, so nothing claims linked context.
+        ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
+        ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
+          draftThreadId: input.draftThreadId } : {}) } });
+    if (input.projectContext) {
+      recordProjectContextLoad(run, input.projectContext);
+      input.recordProjectContext?.(input.projectContext);
+    }
+    updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
+      metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
+        ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
+    startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
+      ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, canonicalRoot, permissionMode });
+    return run.id;
+  });
+  return getVivaryCodeState(input.ownerEmail, admittedRunId, workspace, input.orgId);
 }
 
 export type VivaryCodeSessionDetails = {

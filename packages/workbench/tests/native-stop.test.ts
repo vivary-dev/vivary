@@ -8,6 +8,9 @@ import path from "node:path";
 import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { H3Event, getResponseStatus } from "h3";
+import type { AgentEngine } from "@agent-native/core/agent/engine";
+import type { ProductionAgentOptions } from "@agent-native/core/server";
 
 // Issue #106. Stop ends the model request and a tool step that honors its signal at once, and the
 // saved reply says the owner stopped it. The provider is a loopback fake that speaks OpenRouter's
@@ -33,7 +36,7 @@ const load = (relative: string) => import(pathToFileURL(path.join(coreRoot, "dis
 const [runs, threads] = await Promise.all([load("agent/run-manager.js"), load("agent/thread-data-builder.js")]);
 const { defineAction } = await import("@agent-native/core/action");
 const { createAISDKEngine } = await import("@agent-native/core/agent/engine");
-const { actionsToEngineTools, loadActionsFromStaticRegistry, runAgentLoop, runWithRequestContext } =
+const { actionsToEngineTools, createProductionAgentHandler, loadActionsFromStaticRegistry, runAgentLoop, runWithRequestContext } =
   await import("@agent-native/core/server");
 
 // Upper bounds from Stop to each outcome. In 13 runs on Zo the run ended 68 to 206 ms and the model
@@ -315,4 +318,191 @@ test("a run that a newer turn displaces is not labeled as stopped", RUN_TEST, as
   } finally {
     await provider.close();
   }
+});
+
+// Admission controls call the actual production handler with a real H3 Request and SQLite stores.
+// The custom engine is the public provider seam; none of these pre-launch outcomes may call its stream.
+const nativeStore = await load("chat-threads/store.js"), runStore = await load("agent/run-store.js");
+const sharingRegistry = await load("sharing/registry.js");
+// The registry skips test-file registrations outside a supported test runtime. Keep this synchronous window narrow;
+// the handler and the existing Stop controls continue to use their original production environment.
+const registrationNodeEnv = process.env.NODE_ENV;
+try {
+  process.env.NODE_ENV = "test";
+  nativeStore.registerChatThreadsShareable();
+} finally {
+  if (registrationNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = registrationNodeEnv;
+}
+assert.equal(process.env.NODE_ENV, "production");
+const chatThreadResource = sharingRegistry.getShareableResource("chat_thread");
+assert.ok(chatThreadResource, "Native admission setup must register the real chat_thread resource");
+assert.equal(chatThreadResource.type, "chat_thread");
+assert.equal(sharingRegistry.requireShareableResource("chat_thread"), chatThreadResource);
+const { isAgentChatForegroundSelfChainEnabled } = await load("agent/durable-background.js");
+const { getDbExec, withMigrationRuntime } = await import("@agent-native/core/db");
+type PreparedNativeRun = Parameters<NonNullable<ProductionAgentOptions["onRunPrepared"]>>[0];
+const admissionOwner = "native-admission@example.test", admissionOrg = "native-admission-org";
+
+async function nativeAdmissionFixture(prepare?: (details: PreparedNativeRun) => Promise<void>) {
+  await withMigrationRuntime(async () => { await nativeStore.ensureChatThreadTables(); await runStore.ensureRunTables(); });
+  const threadId = `native-admission-${randomUUID()}`, turnId = `turn-${randomUUID()}`;
+  const scope = { type: "workspace-app", id: `scope-${randomUUID()}` };
+  await nativeStore.createThread(admissionOwner, { id: threadId, orgId: admissionOrg, scope });
+  const saved = { headId: "existing", messages: [{ message: { id: "existing", role: "user",
+    content: [{ type: "text", text: "Keep the saved history" }] }, parentId: null }] };
+  await nativeStore.updateThreadData(threadId, JSON.stringify(saved), "Admission fixture", "Keep the saved history", 1);
+  const before = await nativeStore.getThread(threadId);
+  const prepared: PreparedNativeRun[] = [];
+  let streams = 0;
+  const engine: AgentEngine = { name: "native-admission-fixture", label: "Admission fixture", defaultModel: "fixture-model",
+    supportedModels: ["fixture-model"], capabilities: { thinking: false, promptCaching: false, vision: false,
+      computerUse: false, parallelToolCalls: false },
+    async *stream() { streams++; yield { type: "assistant-content", parts: [] }; yield { type: "stop", reason: "end_turn" }; } };
+  const handler = createProductionAgentHandler({ engine, model: "fixture-model", actions: {}, systemPrompt: "",
+    skipFilesContext: true, durableBackgroundRuns: false,
+    onRunPrepared: async details => { prepared.push(details); await prepare?.(details); } });
+  const request = async () => {
+    const event = new H3Event(new Request("http://localhost/_agent-native/agent-chat", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, turnId, scope, message: "A new admitted question" }) }));
+    const result = await runWithRequestContext({ userEmail: admissionOwner, orgId: admissionOrg, run: { chatScope: scope } },
+      () => handler(event));
+    return { result, status: getResponseStatus(event) };
+  };
+  const initialMode = isAgentChatForegroundSelfChainEnabled() ? "foreground-self-chain" : "foreground";
+  return { threadId, turnId, scope, saved, before, prepared, request, initialMode, streams: () => streams };
+}
+
+async function nativeAdmissionRow(runId: string) {
+  const result = await getDbExec().execute({ sql: "SELECT * FROM agent_runs WHERE id = ?", args: [runId] });
+  return result.rows.at(0);
+}
+
+async function nativeAdmissionReleased(threadId: string) {
+  let entered = false;
+  await nativeStore.withThreadAdmissionLock(threadId, async () => { entered = true; });
+  assert.equal(entered, true, "the completed refusal or failure releases thread admission");
+}
+
+test("Native admission insert failure precedes preparation and leaves saved history intact", RUN_TEST, async () => {
+  const fixture = await nativeAdmissionFixture();
+  const db = getDbExec(), execute = db.execute, failure = new Error("fixture run INSERT failure");
+  let failedRunId: string | undefined;
+  db.execute = async statement => {
+    if (typeof statement !== "string" && /^INSERT INTO agent_runs \(id, thread_id, status, started_at,/i.test(statement.sql)) {
+      const args = Array.isArray(statement.args) ? statement.args : [];
+      if (args[1] === fixture.threadId) {
+        const runId = args[0];
+        assert.ok(typeof runId === "string");
+        failedRunId = runId;
+        throw failure;
+      }
+    }
+    return execute.call(db, statement);
+  };
+  try { await assert.rejects(fixture.request(), failure); }
+  finally { db.execute = execute; }
+  assert.ok(failedRunId, "the real handler reached its durable INSERT");
+  assert.equal(await nativeAdmissionRow(failedRunId), undefined);
+  assert.equal(fixture.prepared.length, 0, "the user's message is not prepared before a successful durable INSERT");
+  assert.equal((await nativeStore.getThread(fixture.threadId)).threadData, fixture.before.threadData);
+  assert.equal(fixture.streams(), 0);
+  assert.equal(runs.getRun(failedRunId), null, "no in-memory worker was started");
+  await nativeAdmissionReleased(fixture.threadId);
+});
+
+test("Native admission duplicate run ID neither prepares a message nor cleans up another row", RUN_TEST, async () => {
+  const fixture = await nativeAdmissionFixture();
+  const otherThreadId = `other-${fixture.threadId}`;
+  await nativeStore.createThread("another-native-owner@example.test", { id: otherThreadId, orgId: admissionOrg });
+  const db = getDbExec(), execute = db.execute;
+  let collidedRunId: string | undefined, competingRow: Awaited<ReturnType<typeof nativeAdmissionRow>>;
+  db.execute = async statement => {
+    if (!collidedRunId && typeof statement !== "string"
+      && /^INSERT INTO agent_runs \(id, thread_id, status, started_at,/i.test(statement.sql)) {
+      const args = Array.isArray(statement.args) ? statement.args : [];
+      if (args[1] === fixture.threadId) {
+        const runId = args[0];
+        assert.ok(typeof runId === "string");
+        collidedRunId = runId;
+        // A valid competing row already owns this generated ID. Use Core's real store, not a fake INSERT result.
+        assert.equal(await runStore.insertRun(runId, otherThreadId, "other-turn", { dispatchMode: "background",
+          dispatchPayload: JSON.stringify({ threadId: otherThreadId, turnId: "other-turn", message: "The other request's payload" }) }), true);
+        competingRow = await nativeAdmissionRow(runId);
+      }
+    }
+    return execute.call(db, statement);
+  };
+  let response: Awaited<ReturnType<typeof fixture.request>>;
+  try { response = await fixture.request(); }
+  finally { db.execute = execute; }
+  assert.ok(collidedRunId);
+  assert.deepEqual(response, { status: 409, result: { error: "Run already exists", activeRunId: collidedRunId } });
+  assert.deepEqual(await nativeAdmissionRow(collidedRunId), competingRow, "the losing request owns neither cleanup nor payload changes");
+  assert.equal(fixture.prepared.length, 0);
+  assert.equal((await nativeStore.getThread(fixture.threadId)).threadData, fixture.before.threadData);
+  assert.equal(fixture.streams(), 0);
+  assert.equal(runs.getRun(collidedRunId), null);
+  await nativeAdmissionReleased(fixture.threadId);
+});
+
+test("Native admission preparation failure terminalizes only its inserted row and releases admission", RUN_TEST, async () => {
+  const failure = new Error("fixture message preparation failure");
+  const fixture = await nativeAdmissionFixture(async details => {
+    const row = await nativeAdmissionRow(details.runId);
+    assert.equal(row?.status, "running", "preparation sees its already durable row");
+    assert.equal(row?.thread_id, details.threadId);
+    assert.equal(row?.turn_id, fixture.turnId);
+    assert.equal(row?.dispatch_mode, fixture.initialMode, "the actual foreground INSERT uses its initial dispatch mode");
+    assert.equal(row?.dispatch_payload, null);
+    throw failure;
+  });
+  await assert.rejects(fixture.request(), failure);
+  assert.equal(fixture.prepared.length, 1);
+  const runId = fixture.prepared[0].runId, row = await nativeAdmissionRow(runId);
+  assert.equal(row?.status, "errored");
+  assert.equal(row?.terminal_reason, "error:run_preparation_failed");
+  assert.equal(row?.error_code, "run_preparation_failed");
+  assert.equal((await nativeStore.getThread(fixture.threadId)).threadData, fixture.before.threadData);
+  assert.equal(fixture.streams(), 0);
+  assert.equal(runs.getRun(runId), null);
+  await nativeAdmissionReleased(fixture.threadId);
+});
+
+test("Native admission honors durable Stop while onRunPrepared waits, before worker launch", RUN_TEST, async () => {
+  let entered = () => {}, release = () => {};
+  const preparing = new Promise<void>(resolve => { entered = resolve; });
+  const proceed = new Promise<void>(resolve => { release = resolve; });
+  const fixture = await nativeAdmissionFixture(async details => {
+    const message = { message: { id: details.runId, role: "user", content: [{ type: "text", text: details.message }] },
+      parentId: fixture.saved.headId };
+    await nativeStore.withThreadDataLock(fixture.threadId, () => nativeStore.updateThreadData(fixture.threadId,
+      JSON.stringify({ headId: details.runId, messages: [...fixture.saved.messages, message] }), "Admission fixture", details.message, 2));
+    entered();
+    await proceed;
+  });
+  const request = fixture.request();
+  try {
+    const endedBeforePreparation = await Promise.race([preparing.then(() => null), request]);
+    assert.equal(endedBeforePreparation, null, "the handler terminated before onRunPrepared was reached");
+    const runId = fixture.prepared[0].runId;
+    assert.equal((await nativeAdmissionRow(runId))?.dispatch_mode, fixture.initialMode);
+    assert.equal(runs.getRun(runId), null, "preparation holds admission before in-memory startRun");
+    await runs.abortTurnDurably(runId, "user");
+    assert.equal(await runStore.isTurnAborted(fixture.threadId, fixture.turnId), true);
+    release();
+    assert.deepEqual(await request, { status: 200, result: { ok: true, stopped: true } });
+    const row = await nativeAdmissionRow(runId);
+    assert.equal(row?.status, "aborted");
+    assert.equal(row?.terminal_reason, "aborted:user");
+    assert.equal(row?.dispatch_mode, fixture.initialMode);
+    assert.equal(row?.dispatch_payload, null);
+    assert.equal(fixture.prepared.length, 1);
+    const saved = JSON.parse((await nativeStore.getThread(fixture.threadId)).threadData);
+    assert.deepEqual(saved.messages.map((entry: { message: { content: Array<{ text: string }> } }) => entry.message.content),
+      [[{ type: "text", text: "Keep the saved history" }], [{ type: "text", text: "A new admitted question" }]]);
+    assert.equal(fixture.streams(), 0, "Stop prevents the provider loop from starting");
+    assert.equal(runs.getRun(runId), null);
+    await nativeAdmissionReleased(fixture.threadId);
+  } finally { release(); await request.catch(() => undefined); }
 });

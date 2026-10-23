@@ -1,0 +1,54 @@
+/* Cross-project conversation list in the sidebar. Rows stay one compact line plus one quiet detail line. */
+.conversation-inbox { display: flex; min-height: 0; flex-direction: column; gap: 6px; }
+.conversation-inbox__header { display: flex; flex-direction: column; gap: 6px; padding: 0 2px; }
+.conversation-inbox__new { display: flex; align-items: center; gap: 2px; }
+.conversation-inbox__new-button { flex: 1; justify-content: flex-start; gap: 6px; }
+.conversation-inbox__destination { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 2px 8px;
+  font-size: 12px; line-height: 18px; color: hsl(var(--sidebar-foreground)); }
+.conversation-inbox__project { min-width: 0; overflow-wrap: anywhere; font-weight: 500;
+  color: hsl(var(--sidebar-accent-foreground)); }
+.conversation-inbox__folder { display: inline-flex; min-width: 0; align-items: center; gap: 4px; border-radius: 4px;
+  overflow-wrap: anywhere; }
+.conversation-inbox__folder:focus-visible { outline: 2px solid hsl(var(--sidebar-ring)); outline-offset: 1px; }
+.conversation-inbox__filter { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.conversation-inbox__filter select, .conversation-inbox__search { min-width: 0; flex: 1; height: 30px; padding: 0 8px;
+  border: 1px solid hsl(var(--sidebar-border)); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; }
+.conversation-inbox__notice, .conversation-inbox__empty { padding: 0 4px; font-size: 12px; line-height: 18px; }
+.conversation-inbox__list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.conversation-inbox__row { position: relative; display: flex; align-items: center; border-radius: 6px; }
+.conversation-inbox__row:hover, .conversation-inbox__row:focus-within { background: hsl(var(--sidebar-accent) / .6); }
+.conversation-inbox__row[data-selected] { background: hsl(var(--sidebar-accent));
+  box-shadow: inset 2px 0 0 hsl(var(--sidebar-primary)); }
+.conversation-inbox__row-button { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px;
+  padding: 5px 8px; border-radius: 6px; text-align: left; color: hsl(var(--sidebar-accent-foreground)); }
+.conversation-inbox__row-button:focus-visible { outline: 2px solid hsl(var(--sidebar-ring)); outline-offset: -2px; }
+.conversation-inbox__row[data-selected] .conversation-inbox__title { font-weight: 600; }
+.conversation-inbox__title { display: flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden;
+  font-size: 13px; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
+.conversation-inbox__meta { display: flex; min-width: 0; flex-wrap: wrap; gap: 0 8px; font-size: 11px; line-height: 16px;
+  color: hsl(var(--sidebar-foreground)); }
+.conversation-inbox__meta:empty { display: none; }
+.conversation-inbox__state { display: inline-flex; align-items: center; gap: 3px; font-weight: 500; }
+.conversation-inbox__state[data-state="needs-approval"], .conversation-inbox__state[data-state="failed"] {
+  color: hsl(var(--destructive)); }
+.conversation-inbox__state[data-state="running"] svg, .conversation-inbox__state[data-state="stopping"] svg {
+  animation: conversation-inbox-spin 1.2s linear infinite; }
+.conversation-inbox__detail { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.conversation-inbox__menu-trigger { display: grid; place-items: center; width: 26px; height: 26px; margin-right: 4px;
+  border-radius: 5px; opacity: 0; color: hsl(var(--sidebar-foreground)); }
+.conversation-inbox__row:hover .conversation-inbox__menu-trigger, .conversation-inbox__row:focus-within .conversation-inbox__menu-trigger,
+.conversation-inbox__menu-trigger[data-state="open"], .conversation-inbox__menu-trigger:focus-visible { opacity: 1; }
+.conversation-inbox__rename { flex: 1; min-width: 0; height: 30px; margin: 2px 4px; padding: 0 6px; border-radius: 5px;
+  border: 1px solid hsl(var(--sidebar-ring)); background: transparent; color: inherit; font-size: 13px; }
+.conversation-inbox__archived > summary { padding: 4px; font-size: 12px; cursor: pointer; }
+@keyframes conversation-inbox-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .conversation-inbox__state svg { animation: none !important; }
+}
+@media (hover: none) { .conversation-inbox__menu-trigger { opacity: 1; } }
+.conversation-inbox__drafts h3, .conversation-inbox__messages h3 { margin: 4px 4px 2px; font-size: 11px; font-weight: 600;
+  letter-spacing: .02em; text-transform: uppercase; color: hsl(var(--sidebar-foreground)); }
+.conversation-inbox__excerpt { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  font-size: 12px; line-height: 16px; overflow-wrap: anywhere; color: hsl(var(--sidebar-foreground)); }
+.conversation-inbox__excerpt mark { border-radius: 2px; background: hsl(var(--sidebar-accent)); color: inherit; font-weight: 600; }
+.conversation-inbox__rename-field { display: flex; min-width: 0; flex: 1; flex-direction: column; }

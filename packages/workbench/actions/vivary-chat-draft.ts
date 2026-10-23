@@ -1,7 +1,9 @@
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
+import { withThreadAdmissionLock } from "@agent-native/core/server";
 import { createVivaryChatIdentity } from "../server/chat-identity";
-import { linkedCodeDraftRuns, requireVivaryCodeUser } from "../server/local-code-agent";
+import { assertCodeDraftConversationOpen, linkedCodeDraftRuns, requireVivaryCodeUser } from "../server/local-code-agent";
+import { withCodeConversationAdmission } from "../server/conversation-admission";
 import { resolveVivaryCodeProjectHistory } from "../server/code-project";
 import { assertChatDraftThread, changeIndexedChatDraft, chatDraftNextSchema, chatDraftRecordSchema,
   createCodeDraftIdentity, listChatDrafts, listNativeChatDrafts, readIndexedChatDraft, reconcileChatDraft, reconcileCodeDraft } from "../server/chat-draft";
@@ -36,6 +38,12 @@ export default defineAction({
       }
       if (input.operation === "read") return { record: await readIndexedChatDraft(identity, input.threadId) };
       if (input.operation === "reconcile") return reconcileCodeDraft(identity, input.threadId, owner, orgId, project);
+      if (input.next.status === "pending") {
+        return withCodeConversationAdmission(owner, orgId, project?.projectId ?? null, async () => {
+          assertCodeDraftConversationOpen(owner, orgId, project, input.threadId);
+          return changeIndexedChatDraft(identity, input.threadId, input.expected, input.next);
+        });
+      }
       return changeIndexedChatDraft(identity, input.threadId, input.expected, input.next);
     }
     const target = input.kind === "unassigned"
@@ -46,6 +54,15 @@ export default defineAction({
     const identity = createVivaryChatIdentity(owner, orgId, target);
     if (input.operation === "list") return { drafts: await listNativeChatDrafts(identity, owner, orgId) };
     if (input.operation === "reconcile") return reconcileChatDraft(identity, input.threadId, owner, orgId);
+    if (input.operation === "change" && input.next.status === "pending") {
+      return withThreadAdmissionLock(input.threadId, async () => {
+        const thread = await assertChatDraftThread(identity, input.threadId, owner, orgId);
+        if (thread?.archivedAt != null) fail("Restore this conversation before sending a message.", {
+          errorCode: "vivary_conversation_archived", statusCode: 409,
+        });
+        return changeIndexedChatDraft(identity, input.threadId, input.expected, input.next);
+      });
+    }
     await assertChatDraftThread(identity, input.threadId, owner, orgId);
     if (input.operation === "read") return { record: await readIndexedChatDraft(identity, input.threadId) };
     return changeIndexedChatDraft(identity, input.threadId, input.expected, input.next);

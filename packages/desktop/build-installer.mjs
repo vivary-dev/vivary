@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { assertCurrentNode, assertDesktopPayload } from "../workbench/bin/runtime-security.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(root, "../..");
@@ -17,6 +18,7 @@ const iconFile = path.join(root, "assets", "vivary.ico");
 const installerSources = [
   "packages/desktop/installer", "packages/desktop/build-installer.mjs",
   "packages/desktop/assets/vivary.ico", "LICENSE",
+  "packages/workbench/bin/runtime-security.mjs",
 ];
 const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<commit>.exe> --manifest <package-file-manifest.json>";
 // Windows reserves these device names in any path part, with or without an extension.
@@ -195,6 +197,7 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   const manifestCheck = await verifyPayloadManifest(payloadDir, files, path.resolve(manifest));
   return Object.freeze({
     payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck, longestPaths,
+    manifestFile: path.resolve(manifest),
     version: build.version, payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
   });
 }
@@ -252,6 +255,15 @@ export function countAddedFiles(log) {
  * finished build. The makensis log is returned, or attached to the error as `log`.
  */
 export async function buildInstaller(inputs, makensis, { installerCommit }) {
+  await assertCurrentNode();
+  // Re-read the payload and its manifest here, including callers that bypass the CLI.
+  const checked = await resolveInstallerInputs({ payload: inputs.payloadDir, output: inputs.outputFile, manifest: inputs.manifestFile });
+  await assertDesktopPayload(checked.payloadDir);
+  return compileInstaller(checked, makensis, { installerCommit });
+}
+
+// Content/compiler tests exercise this private boundary without admitting a desktop release.
+async function compileInstaller(inputs, makensis, { installerCommit }) {
   if (!/^[0-9a-f]{40}$/.test(installerCommit ?? "")) throw new Error("The installer commit must be a full Git commit.");
   const version = spawnSync(makensis, ["-VERSION"], { encoding: "utf8" });
   if (version.error || version.status !== 0) throw new Error("makensis -VERSION failed.");
