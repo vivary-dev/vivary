@@ -13,8 +13,8 @@ export function initialize({ corePackageJson }) {
     throw new Error("test requires the inspected @agent-native/core 0.176.5 package");
   }
   requireCore = createRequire(manifestPath);
-  if (requireCore("zod/package.json").version !== "4.5.4") {
-    throw new Error("test requires the inspected Zod 4.5.4 package");
+  if (requireCore("zod/package.json").version !== "4.6.7") {
+    throw new Error("test requires the inspected Zod 4.6.7 package");
   }
 }
 
