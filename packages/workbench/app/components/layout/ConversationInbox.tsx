@@ -1,5 +1,5 @@
 import { useChatThreads } from "@agent-native/core/client/agent-chat";
-import { actionErrorMessage, readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
+import { actionErrorMessage, callAction, readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { ChatHistoryMenuItem } from "@agent-native/toolkit/chat-history";
 import {
   Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -378,10 +378,17 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
   const { call } = useNativeActionCaller();
   const [creatingProject, setCreatingProject] = useState(false);
   const folderPicker = useOpenProjectFolder();
-  const folder = useActionQuery<{ folderName: string; path: string }>("vivary-project-location",
-    destinationId ? { projectId: destinationId } : {}, {
-      enabled: elsewhere ? destinationProject?.status === "available" || destinationId === null : workspaceAvailable,
-      retry: false, staleTime: 30_000 });
+  const folderInput = destinationId ? { projectId: destinationId } : {};
+  // Binding and authorization changes must discard the old path without changing the action's strict parameters.
+  const folder = useQuery({
+    queryKey: ["action", "vivary-project-location", folderInput, catalog?.scopeKey, catalog?.policyRevision,
+      destinationProject?.bindingRevision, destinationProject?.status],
+    queryFn: ({ signal }) => callAction<{ folderName: string; path: string }>("vivary-project-location", folderInput,
+      { method: "GET", signal }),
+    enabled: catalog !== null && (destinationId !== null ? destinationProject?.status === "available"
+      : elsewhere || workspaceAvailable),
+    retry: false, staleTime: 30_000,
+  });
   const visible = visibleInboxRows(inbox.data?.rows ?? [], filter, search);
   const drafts = visibleInboxRows(inboxDraftRows(inbox.data?.drafts ?? []), filter, search).active;
   const selectedId = selectedInboxRowId(location.search);
@@ -619,8 +626,7 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
           return await response.json() as ChatSearchPage;
         },
         onPage: page => {
-          // A title match is already a row in the list above, so Messages holds message matches only.
-          hits.push(...page.results.filter(hit => hit.match === "content"));
+          hits.push(...page.results);
           next = page.continueAfter ?? undefined;
         } });
       return { scope, hits, after: next };
@@ -653,13 +659,17 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
   // The search action does not know Code archive, so a Code conversation the list holds as archived is left out here,
   // as the search leaves out archived API chats.
   const archived = new Set(rows.filter(row => row.archived).map(row => row.id));
-  const hits = (current?.hits ?? []).filter(hit => !archived.has(`${hit.runtime}:${hit.sessionId}`));
+  const listed = new Set(rows.map(row => row.id));
+  // Native history is bounded. Keep an older title hit unless the inbox already lists that conversation.
+  const hits = (current?.hits ?? []).filter(hit => !archived.has(`${hit.runtime}:${hit.sessionId}`)
+    && (hit.match !== "title" || !listed.has(`${hit.runtime}:${hit.sessionId}`)));
+  const includesTitles = hits.some(hit => hit.match === "title");
   return <section className="conversation-inbox__messages" aria-labelledby={headingId}>
-    <h3 id={headingId}>Messages</h3>
+    <h3 id={headingId}>{includesTitles ? "Search results" : "Messages"}</h3>
     <p role="status" className="conversation-inbox__notice">
       {status === "loading" ? "Searching messages…"
         : status === "unavailable" ? "Message search is unavailable. Titles are still filtered."
-          : `${hits.length ? `${hits.length} matching message${hits.length === 1 ? "" : "s"}` : "No messages match"}${
+          : `${hits.length ? `${hits.length} matching ${includesTitles ? "result" : "message"}${hits.length === 1 ? "" : "s"}` : "No messages match"}${
             current?.more.length || current?.failed.length ? " so far" : ""}.`}
     </p>
     {current?.status === "ready" && current.more.length + current.failed.length > 0 && <Button size="sm" variant="ghost"
@@ -677,6 +687,7 @@ function InboxMessageSearch({ term, scopes, total, rows, access, onOpen }: { ter
           <span className="conversation-inbox__meta">
             <span className="conversation-inbox__detail">{hit.projectLabel}</span>
             <span className="conversation-inbox__detail">{hit.runtime === "native" ? "API chat" : "Code"}</span>
+            {hit.match === "title" && <span className="conversation-inbox__detail">Title match</span>}
           </span>
         </button>
       </li>)}</ul>}

@@ -7869,7 +7869,9 @@ it never changes the open conversation or the selected project. New conversation
 starts in the filtered project, or with All projects in the open conversation's
 project, and the header names that destination and its folder before anything
 is created. New conversation for another project is the explicit action that
-selects it. An API chat there is created once that project's Native scope has
+selects it. The destination folder query follows the catalog's owner scope, policy,
+binding revision and availability; rebinding clears the old displayed path while
+the new folder loads, and an older response cannot replace it. An API chat there is created once that project's Native scope has
 mounted. Code creation in Personal workspace requires a resolved folder, whether Personal is already selected
 or is the filtered destination from another project. Without a folder, New conversation starts an API chat and
 the Code choice stays disabled. A row shows its title,
@@ -7888,7 +7890,9 @@ follows `continueChatSearch`, requesting at most 12 pages and stopping further r
 reaches three seconds, enough hits arrive, or the end is reached. An in-flight page can take longer. Search more
 resumes scopes with a continuation and retries failed
 scopes. A failed scope stays reported until it answers. The results show the matched
-text and open the exact message, in another project through the route hold. The
+text and open the exact message, in another project through the route hold. Title-only
+hits outside the bounded inbox are retained as search results; a title already listed
+in the inbox is omitted from those results, including after a later inbox refresh. The
 list says when nothing matches, and separately when search is unavailable, and the
 selection stays while results load.
 
@@ -8573,6 +8577,14 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Inbox search and destination review fixes. Older Native title-only hits now survive
+search continuation when the bounded inbox does not contain their conversation; loaded rows
+still deduplicate title results. The folder read uses binding and authorization identity in
+its query key without extending the action's strict parameters. Regression controls cover
+continuation, opening an older title, later row deduplication, same-ID rebinding, unavailable
+bindings and late old-path responses. These are component checks with transport fixtures,
+not browser or packaged acceptance. Existing archive and send admission contracts are unchanged.
 
 2026-10-23 Production Sidebar inbox integration. The Conversation inbox section now records its
 production mount and the preserved project navigation, unassigned-history identity and footer controls.

@@ -54,6 +54,10 @@ const stubs = new Map([
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
   ["@agent-native/core/client/hooks", `import { useQuery } from "@tanstack/react-query";
     export const actionErrorMessage = failure => failure?.message;
+    export const callAction = (name, input, options) => {
+      if (options?.method !== "GET") throw new Error("Expected an action read");
+      return ${fixture}.read(name, input);
+    };
     export const readClientAppState = async key => { const value = ${fixture}.state.get(key) ?? null;
       await ${fixture}.readDelay; return value; };
     export function useActionQuery(name, input, options = {}) {
@@ -863,6 +867,79 @@ test("a title match is not repeated as a message, since the title filter already
   await searchFor("table");
   assert.deepEqual(hitTitles(), ["Session a3"]);
   assert.match(host.querySelector(".conversation-inbox__messages").textContent, /1 matching message\./);
+});
+
+test("truncated Native history keeps older title-only hits through continuation and opens them", async () => {
+  inboxFixture.limited = true;
+  const older = { ...hit("alpha", "older-native", "Older table notes", "native"),
+    title: "Older table notes", match: "title" };
+  inboxFixture.pages = { "": { results: [{ ...hit("alpha", "a1", "Fix table wrapping"), match: "title" }], continueAfter: "older" },
+    older: { results: [older], continueAfter: null } };
+  await render("/?run=a1");
+  await searchFor("table");
+  assert.deepEqual(hitTitles(), [], "an already-listed title is not duplicated");
+  await act(async () => button("Search more").click());
+  await settle();
+  assert.deepEqual(hitTitles(), ["Older table notes"]);
+  await act(async () => host.querySelector(".conversation-inbox__hit").click());
+  await settle();
+  assert.match(host.querySelector("#route").textContent, /thread=older-native/);
+  await act(async () => {
+    inboxFixture.rows.push(row("native:older-native", "alpha", "Older table notes", 1));
+    inboxFixture.client.setQueryData(["action", "vivary-conversation-inbox", {}],
+      { rows: [...inboxFixture.rows], drafts: [], unavailableProjects: [], limited: true });
+  });
+  await settle();
+  assert.deepEqual(hitTitles(), [], "a later inbox refresh deduplicates the retained title hit");
+});
+
+test("destination folder follows a same-ID rebind and hides unavailable bindings", async () => {
+  const originalRead = inboxFixture.read;
+  const requests = [];
+  let releaseLocation;
+  inboxFixture.read = async (name, input) => {
+    if (name !== "vivary-project-location") return originalRead(name, input);
+    requests.push(input);
+    if (requests.length === 1) return { folderName: "old-folder", path: "/work/old-folder" };
+    return new Promise(resolve => { releaseLocation = resolve; });
+  };
+  await render();
+  assert.match(host.querySelector(".conversation-inbox__destination").textContent, /old-folder/);
+  inboxFixture.catalog = { ...catalog, projects: catalog.projects.map(project => project.projectId === "alpha"
+    ? { ...project, bindingRevision: 2 } : project) };
+  await act(async () => inboxFixture.notify());
+  await settle();
+  assert.equal(requests.length, 2, "same ID with a new binding fetches its folder");
+  assert.doesNotMatch(host.querySelector(".conversation-inbox__destination").textContent, /old-folder/);
+  await act(async () => releaseLocation({ folderName: "new-folder", path: "/work/new-folder" }));
+  await settle();
+  assert.match(host.querySelector(".conversation-inbox__destination").textContent, /new-folder/);
+  assert.deepEqual(requests, [{ projectId: "alpha" }, { projectId: "alpha" }], "binding identity is not an action parameter");
+  inboxFixture.catalog = { ...inboxFixture.catalog, projects: inboxFixture.catalog.projects.map(project => project.projectId === "alpha"
+    ? { ...project, status: "unavailable" } : project) };
+  await act(async () => inboxFixture.notify());
+  assert.equal(host.querySelector(".conversation-inbox__folder"), null);
+  assert.equal(requests.length, 2, "an unavailable binding is not queried");
+});
+
+test("a delayed folder response from an old binding cannot replace the new destination", async () => {
+  const originalRead = inboxFixture.read;
+  let finishOld;
+  let reads = 0;
+  inboxFixture.read = async (name, input) => {
+    if (name !== "vivary-project-location") return originalRead(name, input);
+    if (++reads === 1) return new Promise(resolve => { finishOld = resolve; });
+    return { folderName: "rebound-folder", path: "/work/rebound-folder" };
+  };
+  await render();
+  inboxFixture.catalog = { ...catalog, projects: catalog.projects.map(project => project.projectId === "alpha"
+    ? { ...project, bindingRevision: 2 } : project) };
+  await act(async () => inboxFixture.notify());
+  await settle();
+  assert.match(host.querySelector(".conversation-inbox__destination").textContent, /rebound-folder/);
+  await act(async () => finishOld({ folderName: "old-folder", path: "/work/old-folder" }));
+  await settle();
+  assert.doesNotMatch(host.querySelector(".conversation-inbox__destination").textContent, /old-folder/);
 });
 
 test("a list cut at the newest API chats says so and points to message search", async () => {
