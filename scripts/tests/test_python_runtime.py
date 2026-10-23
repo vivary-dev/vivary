@@ -89,6 +89,42 @@ class PythonRuntimeTests(unittest.TestCase):
             self.assertEqual(guard.main(), 0)
         self.assertEqual(json.loads(output.getvalue()), guard.assert_python_runtime())
 
+    def test_python_refusal_reports_actual_implementation_and_numeric_release(self):
+        self.runtime.implementation.name = "pypy"
+        self.runtime.version_info = (3, 12, 14, "candidate", 2)
+        self.assertEqual(guard.main(), 1)
+        message = self.runtime.stderr.getvalue()
+        for value in ("qualified CPython 3.12.15 final", "observedImplementation=pypy",
+                      "observedPython=3.12.14", "observedRelease=candidate", "observedSerial=2"):
+            self.assertIn(value, message)
+
+    def test_openssl_refusal_reports_only_the_actual_library_and_release_tokens(self):
+        self.ssl.OPENSSL_VERSION = "OpenSSL 3.0.19 PRIVATE_BUILD_PATH=/private/openssl secret=value"
+        self.assertEqual(guard.main(), 1)
+        message = self.runtime.stderr.getvalue()
+        self.assertIn("observedImplementation=cpython", message)
+        self.assertIn("observedPython=3.12.15", message)
+        self.assertIn("observedOpenSSL=OpenSSL 3.0.19", message)
+        self.assertNotIn("PRIVATE_BUILD_PATH", message)
+        self.assertNotIn("/private", message)
+        self.assertNotIn("secret", message)
+
+    def test_malformed_runtime_facts_and_foreign_errors_cannot_leak_private_text(self):
+        self.runtime.implementation.name = "PRIVATE_IMPLEMENTATION"
+        self.runtime.version_info = ("PRIVATE_VERSION", -1, 10**10, "PRIVATE_RELEASE", "PRIVATE_SERIAL")
+        self.ssl.OPENSSL_VERSION = "OpenSSL PRIVATE_OPENSSL"
+        with mock.patch.object(guard, "assert_python_runtime", side_effect=RuntimeError("PRIVATE_EXCEPTION /private/path ENV=secret")):
+            self.assertEqual(guard.main(), 1)
+        message = self.runtime.stderr.getvalue()
+        self.assertIn("observedImplementation=unknown", message)
+        self.assertIn("observedPython=unknown.unknown.unknown", message)
+        self.assertIn("observedRelease=unknown", message)
+        self.assertIn("observedSerial=unknown", message)
+        self.assertIn("observedOpenSSL=unknown", message)
+        self.assertNotIn("PRIVATE", message)
+        self.assertNotIn("/private/path", message)
+        self.assertNotIn("secret", message)
+
 
 if __name__ == "__main__":
     unittest.main()

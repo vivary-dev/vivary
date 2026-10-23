@@ -1475,6 +1475,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Action interpreter provisioning. The native first step now binds the
+owning Worker's selected Node path and can replace only authenticated known-old
+bytes with the qualified 24.22.1 executable before JavaScript actions. Same-user
+staging, atomic replacement and provenance checks preserve the existing full
+post-provisioning runner admission. Unknown binaries must pass that admission
+without replacement; failed checks never authorize a path override or rollback
+to affected bytes. The [build-tool contract](BUILD-TOOLS.md) distinguishes this
+guarded runner-internal compatibility dependency from a vendor update API and
+keeps actual native job evidence separate from source and fixture review.
+
 2026-10-23 Hosted Python prerequisite. CI selects CPython 3.12.15 and checks
 the executing interpreter and OpenSSL 3.5.9 before pip or build-tool use,
 including fresh environments. This closes the mismatch between a floating

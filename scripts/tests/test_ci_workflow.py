@@ -212,6 +212,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         if name == "test":
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
@@ -1349,6 +1350,12 @@ def test_python_runtime_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_python_runtime.py", "echo skipped", 1))
     assert message and "Python runtime admission regressions" in message
+
+
+def test_runner_node_repair_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_runner_action_node.py", "echo skipped", 1))
+    assert message and "runner action repair regressions" in message
 
 
 def test_fresh_venvs_admit_their_actual_python_before_pip_provisioning():

@@ -1,6 +1,7 @@
 """Offline tests of the canonical and actual inline runner bootstrap sources."""
 
 import contextlib
+import ast
 import ctypes
 import importlib.util
 import io
@@ -50,13 +51,24 @@ def inline_source(text):
 
 
 def sources():
-    return [("canonical", CANONICAL.read_text())] + [(path.name, inline_source(path.read_text())) for path in WORKFLOWS]
+    return [("canonical", CANONICAL.read_text())] + [(path.name, admission_source(inline_source(path.read_text()))) for path in WORKFLOWS]
+
+
+def admission_source(source):
+    """Read the complete unchanged guard embedded by the repair wrapper."""
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "RUNNER_ADMISSION_SOURCE" for target in node.targets):
+            value = ast.literal_eval(node.value)
+            if not isinstance(value, str):
+                raise AssertionError("literal runner admission source is required")
+            return value
+    raise AssertionError("complete runner admission source is missing")
 
 
 def load_source(source):
     module = types.ModuleType("fixture_runner_bootstrap")
     exec(compile(source, "fixture-runner-bootstrap.py", "exec"), module.__dict__)
-    return module
+    return getattr(module, "admission", module)
 
 
 def contract():
@@ -160,6 +172,21 @@ class RunnerBootstrapTests(unittest.TestCase):
                 self.assertEqual(candidate, source)
                 module = load_source(candidate)
                 self.assertTrue(callable(module.check_runner_action_node))
+
+    def test_all_workflows_bind_the_complete_guard_and_repair_sources(self):
+        repair = (ROOT / "scripts/bootstrap_runner_action_node.py").read_text()
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            if "runner_action_node_bootstrap" not in path.read_text():
+                continue
+            source = inline_source(path.read_text())
+            with self.subTest(workflow=path.name):
+                self.assertEqual(admission_source(source), CANONICAL.read_text())
+                self.assertTrue(source.endswith(repair))
+                module = types.ModuleType("fixture_runner_repair")
+                with mock.patch("subprocess.run", side_effect=AssertionError("import cannot run a downloader or Node")):
+                    exec(compile(source, "fixture-inline-repair.py", "exec"), module.__dict__)
+                self.assertTrue(callable(module.repair_runner_action_node))
+                self.assertTrue(callable(module.admission.check_runner_action_node))
 
     def test_policy_boundaries_and_node24_selection_for_every_actual_source(self):
         for name, source in sources():
@@ -347,7 +374,7 @@ class RunnerBootstrapTests(unittest.TestCase):
 class RunnerDiagnosticTests(unittest.TestCase):
     def all_sources(self):
         auxiliary = (ROOT / ".github/workflows" / name for name in ("review-gate.yml", "steward.yml", "track-stats.yml"))
-        return sources() + [(path.name, inline_source(path.read_text())) for path in auxiliary]
+        return sources() + [(path.name, admission_source(inline_source(path.read_text()))) for path in auxiliary]
 
     def test_supported_errors_report_only_phase_and_exception_class(self):
         errors = (RuntimeError("private policy value"), PermissionError("private path"),

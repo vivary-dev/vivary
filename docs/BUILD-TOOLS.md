@@ -83,6 +83,32 @@ can invoke npm before provisioning. Its client paths and compiler override are
 explicit. None of these local setup or build results substitutes for hosted CI,
 browser acceptance, native Windows acceptance, or release authorization.
 
+## Hosted action interpreter
+
+The first native workflow step can repair the owning GitHub Worker's known
+Node 24.21.0 binary before any JavaScript action. It derives the selected path
+from the actual Worker ancestry, authenticates official Node 24.22.1 bytes that
+match the published runner 2.338.1 binaries, and replaces only that file. It uses
+the current user's permissions, an exclusive staged file and an atomic rename;
+it adds no runner registration, privilege escalation, credentials or trust root.
+The complete existing runner admission then checks the actual selected binary.
+
+The repair is limited to authenticated old binary hashes. Already qualified
+binaries need no download; other binaries must pass the existing admission
+unchanged and are never blindly downgraded. On Linux, a non-truncating write
+descriptor refuses an executing old inode and prevents new execution of that
+inode throughout replacement. Windows checks native x64 identity and potential
+Node processes; a file lock or denied replacement stops the job. Changed ancestry,
+unexpected paths, incomplete downloads and permission failures also stop it.
+After a replacement, a failed final check leaves the patched bytes in place and
+blocks actions rather than restoring an affected interpreter.
+
+Runner `externals` is a guarded internal layout, not a stable vendor update API.
+Native shell steps and per-job hosted machines allow this bounded setup, but
+actual hosted write access and Windows locks still require job evidence. Source
+and fixture tests do not establish a hosted pass. This changes the actual action
+interpreter; selecting another Node on `PATH` cannot provide the same result.
+
 ## Python certificate bundles
 
 [`certifi_bundle.py`](../scripts/certifi_bundle.py) pins the official certifi
