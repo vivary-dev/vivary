@@ -686,7 +686,9 @@ jobs:
                           lease = current["lease"] = acquire_write_lease(current)
                       assert_quiescent(current)
                       with tempfile.TemporaryDirectory(prefix="vivary-runner-node-") as directory:
-                          downloaded = Path(directory) / "artifact"
+                          # Windows TEMP may use a short alias. Resolve only this newly
+                          # owned temporary root; runner paths retain their custody checks.
+                          downloaded = Path(directory).resolve(strict=True) / "artifact"
                           with downloaded.open("xb"):
                               pass
                           downloaded.chmod(0o600)
@@ -866,6 +868,8 @@ jobs:
       - name: runner action Node bootstrap tests
         run: python -I -B scripts/tests/test_runner_action_node.py
       - name: runner action Node repair tests
+        env:
+          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node
         run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py
       - name: CI workflow contract tests
         run: python scripts/tests/test_ci_workflow.py

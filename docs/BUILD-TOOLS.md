@@ -57,6 +57,11 @@ Python HTTPS client, verified against the pinned module checksums and compiled
 offline. Native Windows execution remains a separate required verification;
 cross-platform fixtures do not establish it.
 
+The command examples below use Linux paths. On Windows, use the generated
+`bin\node.cmd`, `bin\npm.cmd` and `bin\pnpm.cmd` launchers. The rebuilt compiler
+outputs have `.exe` suffixes; call the rebuilt TypeScript executable explicitly
+instead of the package's compiler binary.
+
 ```sh
 /path/to/qualified/python -I -B scripts/check_site_dependencies.py
 cd site

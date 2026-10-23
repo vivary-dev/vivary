@@ -157,6 +157,35 @@ class RepairFixture(unittest.TestCase):
         self.probe.assert_called_once()
         self.assertEqual(self.node.read_bytes(), self.patched)
 
+    def test_owned_temporary_root_alias_is_canonicalized_before_artifact_creation(self):
+        owned = self.directory / "owned-download-directory"
+        owned.mkdir()
+        alias = self.directory / "temporary-short-alias"
+        alias.symlink_to(owned, target_is_directory=True)
+        outside = self.directory / "outside-download-directory"
+        outside.mkdir()
+        sentinel = outside / "untouched"
+        sentinel.write_bytes(b"unrelated fixture")
+        observed = []
+        def download(artifact, destination):
+            observed.append(destination)
+            self.assertEqual(destination, owned.resolve(strict=True) / "artifact")
+            self.assertTrue(destination.is_relative_to(owned.resolve(strict=True)))
+            self.assertEqual(destination.read_bytes(), b"")
+            self.module.plain(destination)
+            destination.write_bytes(self.payload)
+        with mock.patch.object(self.module.tempfile, "TemporaryDirectory",
+                               return_value=contextlib.nullcontext(str(alias))), \
+                mock.patch.object(self.module, "download", side_effect=download):
+            result = self.repair()
+        self.assertEqual(result["repair"]["outcome"], "repaired")
+        self.assertEqual(observed, [owned.resolve(strict=True) / "artifact"])
+        self.assertEqual(list(owned.iterdir()), observed)
+        self.assertEqual(list(outside.iterdir()), [sentinel])
+        self.assertEqual(sentinel.read_bytes(), b"unrelated fixture")
+        self.assertEqual(self.node.read_bytes(), self.patched)
+        self.probe.assert_called_once()
+
     def test_unknown_safe_future_node_is_admitted_without_downgrade_or_download(self):
         unknown = elf(b"fixture unknown future Node; never executed")
         self.node.write_bytes(unknown)
@@ -431,9 +460,8 @@ class RepairFixture(unittest.TestCase):
 
     def copy_qualified_node(self, destination):
         digest = "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb"
-        selected = shutil.which("node")
+        selected = os.environ.get("VIVARY_TEST_NODE") or shutil.which("node")
         candidates = [Path(selected)] if selected else []
-        candidates.append(Path("/workspace/.vivary-toolchains/node-v24.22.1-linux-x64/bin/node"))
         source = None
         for candidate in candidates:
             try:
@@ -443,7 +471,7 @@ class RepairFixture(unittest.TestCase):
                     break
             except OSError:
                 continue
-        self.assertIsNotNone(source, "kernel lease fixtures require the qualified Linux x64 Node 24.22.1 binary on PATH or in the local toolchain")
+        self.assertIsNotNone(source, "kernel lease fixtures require the hash-qualified Linux x64 Node 24.22.1 executable via VIVARY_TEST_NODE or PATH")
         shutil.copyfile(source, destination)
         destination.chmod(0o751)
         self.assertEqual(self.admission.sha256(destination), digest)

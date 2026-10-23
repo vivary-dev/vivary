@@ -312,7 +312,9 @@ def repair_runner_action_node():
                 lease = current["lease"] = acquire_write_lease(current)
             assert_quiescent(current)
             with tempfile.TemporaryDirectory(prefix="vivary-runner-node-") as directory:
-                downloaded = Path(directory) / "artifact"
+                # Windows TEMP may use a short alias. Resolve only this newly
+                # owned temporary root; runner paths retain their custody checks.
+                downloaded = Path(directory).resolve(strict=True) / "artifact"
                 with downloaded.open("xb"):
                     pass
                 downloaded.chmod(0o600)

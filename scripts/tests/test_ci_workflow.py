@@ -213,7 +213,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += module.TEST_CLIENTS_STEP
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
-            setup += '      - run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
+            setup += module.REPAIR_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
@@ -1376,9 +1376,17 @@ def test_python_provisioning_regressions_must_run():
 
 
 def test_runner_node_repair_regressions_must_run():
+    module = _load()
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
-    message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_runner_action_node.py", "echo skipped", 1))
-    assert message and "runner action repair regressions" in message
+    step = module.REPAIR_TEST_STEP
+    for mutation in (
+        step.replace("python -I -B scripts/tests/test_bootstrap_runner_action_node.py", "echo skipped", 1),
+        step.replace("/node/bin/node", "/bin/node", 1),
+        step.replace('        env:\n          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n', "", 1),
+    ):
+        assert mutation != step
+        message = _run(workflow.replace(step, mutation, 1))
+        assert message and "runner action repair regressions" in message
 
 
 def test_fresh_venvs_admit_their_actual_python_before_pip_provisioning():

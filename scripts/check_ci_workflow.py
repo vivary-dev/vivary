@@ -791,6 +791,12 @@ TEST_CLIENTS_STEP = (
     '          printf \'%s/vivary-build-tools/bin\\n\' "$RUNNER_TEMP" >> "$GITHUB_PATH"\n'
 )
 TEST_PACK_COMMAND = '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"'
+REPAIR_TEST_STEP = (
+    '      - name: runner action Node repair tests\n'
+    '        env:\n'
+    '          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n'
+    '        run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
+)
 
 
 def check_release_package_clients(text: str) -> None:
@@ -1115,7 +1121,7 @@ def main() -> None:
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
             "tests job must run the runner action bootstrap regressions")
-    require("python -I -B scripts/tests/test_bootstrap_runner_action_node.py" in test_job,
+    require(test_job.count(REPAIR_TEST_STEP) == 1,
             "tests job must run the runner action repair regressions")
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
