@@ -58,10 +58,10 @@ async function save(key, credentials) { await oauth.saveMcpOAuthCredentials({ ..
 test("Native resolves the fixed MCP SDK and one aligned client, core and server set", async () => {
   const require = createRequire(path.join(core, "package.json"));
   for (const [name, entry, version] of [
-    ["sdk", "@modelcontextprotocol/sdk/client/index.js", "1.31.0"],
-    ["client", "@modelcontextprotocol/client", "2.2.0"],
-    ["core", "@modelcontextprotocol/core", "2.2.0"],
-    ["server", "@modelcontextprotocol/server", "2.2.0"],
+    ["sdk", "@modelcontextprotocol/sdk/client/index.js", "1.32.0"],
+    ["client", "@modelcontextprotocol/client", "2.3.0"],
+    ["core", "@modelcontextprotocol/core", "2.3.0"],
+    ["server", "@modelcontextprotocol/server", "2.3.0"],
   ]) {
     let directory = path.dirname(require.resolve(entry));
     for (;;) {
