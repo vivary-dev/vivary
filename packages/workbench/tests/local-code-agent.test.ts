@@ -5,6 +5,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { compileFunction } from "node:vm";
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
+import { transform } from "esbuild";
+import { defineAction } from "@agent-native/core/action";
+import { z } from "zod";
 import {
   appendCodeAgentTranscriptEvent,
   codeAgentRunsDir,
@@ -19,6 +22,9 @@ import codeStateAction from "../actions/vivary-code-state.ts";
 import codeApproveAction from "../actions/vivary-code-approve.ts";
 import codeDenyAction from "../actions/vivary-code-deny.ts";
 import codeCleanupAction from "../actions/vivary-code-cleanup.ts";
+import codeSwitchAction from "../actions/vivary-code-switch.ts";
+import { resolveVivaryCodeProject } from "../server/code-project.ts";
+import { codeSwitchIdentitySchema } from "../shared/code-switch-observation.ts";
 
 import {
   approveVivaryCodeMessage,
@@ -33,6 +39,7 @@ import {
   linkedCodeDraftRuns,
   requireVivaryCodeUser,
   VIVARY_CODE_DEFAULT_MODEL,
+  VIVARY_CODE_ENGINES,
   VIVARY_CODE_MODELS,
   resolveVivaryCodeModel,
   isVivaryAppRun,
@@ -60,6 +67,22 @@ async function coreTranscriptBuilder(): Promise<(events: CodeAgentTranscriptEven
   return compileFunction(`${source}\nreturn buildRepositoryFromCodeAgentTranscript;`,
     ["normalizeCodeAgentTranscript", "isCredentialGapCodeAgentEvent"], { filename: file })(
     normalizeCodeAgentTranscript, isCredentialGapCodeAgentEvent);
+}
+
+// Execute the real action module with Native's validation and Vivary's auth/project owners intact. Only the backend
+// call boundary is injected, so forwarding can be inspected without runtime discovery, worker launch or provider work.
+async function switchActionBoundary() {
+  const file = fileURLToPath(new URL("../actions/vivary-code-switch.ts", import.meta.url));
+  const source = (await readFile(file, "utf8")).replace(/^import [\s\S]*?;\n/gm, "")
+    .replace("export default", "const action =");
+  const { code } = await transform(source, { loader: "ts" });
+  const calls: Record<string, unknown>[] = [];
+  const response = { projectId: null, run: null };
+  const action = compileFunction(code + "\nreturn action;", ["defineAction", "z", "resolveVivaryCodeProject",
+    "requireVivaryCodeUser", "VIVARY_CODE_ENGINES", "codeSwitchIdentitySchema", "switchVivaryCodeRuntime"], { filename: file })(
+    defineAction, z, resolveVivaryCodeProject, requireVivaryCodeUser, VIVARY_CODE_ENGINES, codeSwitchIdentitySchema,
+    async (input: Record<string, unknown>) => { calls.push(input); return response; });
+  return { action, calls, response };
 }
 
 const stateRoot = await mkdtemp(path.join(os.tmpdir(), "vivary-code-test-state-"));
@@ -373,6 +396,88 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
     assert.equal(codeDenyAction.agentTool, false);
   });
 
+  for (const observation of [null, "opaque-recorded-generation"]) {
+    it(`PR258 4331141822 action schema: accepts and retains ${observation === null ? "explicit null" : "a bounded nonempty observation"}`, () => {
+      const input = { runId: "observed-run", engine: "codex-cli", model: "gpt-fixture", expectedSwitchGeneration: observation };
+      const parsed = codeSwitchAction.schema.parse(input);
+      assert.deepEqual(parsed, input, "the real schema must retain the observation, including explicit null");
+    });
+  }
+
+  it("PR258 4331141822 action schema: rejects a missing observation without an omitted-field wildcard", () => {
+    assert.equal(codeSwitchAction.schema.safeParse({ runId: "observed-run", engine: "codex-cli", model: "gpt-fixture" }).success,
+      false, "every action must name the route generation its owner observed");
+  });
+
+  it("PR258 4331141822 action schema: rejects malformed observations and unexpected fields", () => {
+    const base = { runId: "observed-run", engine: "codex-cli", model: "gpt-fixture" };
+    for (const value of [undefined, "", "   ", 0, false, [], {}, "x".repeat(10_000)]) {
+      assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedSwitchGeneration: value }).success, false,
+        "malformed or unbounded observation of type " + typeof value);
+    }
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedSwitchGeneration: null, unexpected: true }).success, false);
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedSwitchGeneration: null, stop: "yes" }).success, false);
+  });
+
+  for (const observation of [null, "opaque-recorded-generation"]) {
+    it(`PR258 4331141822 action forwarding: parsed ${observation === null ? "null" : "opaque generation"} reaches the backend boundary`, async () => {
+      const input = { runId: "observed-run", engine: "codex-cli", model: "gpt-fixture", stop: true,
+        expectedSwitchGeneration: observation, expectedTurnId: null };
+      // Parse through the imported production schema. If it refuses on old source, report that as a contract
+      // failure, not as evidence that a live backend accepted a stale action. No duplicate schema or bypass is used.
+      const parsed = codeSwitchAction.schema.parse(input);
+      const fixture = await switchActionBoundary();
+      const result = await fixture.action.run(parsed, { caller: "frontend", userEmail: "OWNER@Example.com", orgId: "fixture-org" });
+      assert.equal(result, fixture.response);
+      assert.equal(fixture.calls.length, 1);
+      assert.equal(Object.hasOwn(fixture.calls[0], "expectedSwitchGeneration"), true);
+      assert.equal(fixture.calls[0].expectedSwitchGeneration, observation);
+      assert.equal(Object.hasOwn(fixture.calls[0], "expectedTurnId"), true);
+      assert.equal(fixture.calls[0].expectedTurnId, null);
+      assert.deepEqual({ ownerEmail: fixture.calls[0].ownerEmail, orgId: fixture.calls[0].orgId, runId: fixture.calls[0].runId,
+        engine: fixture.calls[0].engine, model: fixture.calls[0].model, stop: fixture.calls[0].stop },
+      { ownerEmail: "owner@example.com", orgId: "fixture-org", runId: "observed-run", engine: "codex-cli", model: "gpt-fixture", stop: true });
+    });
+  }
+
+  it("PR258 4331141822 action control: switch admission remains owner-only and unavailable as an agent tool", () => {
+    assert.equal(codeSwitchAction.requiresAuth, true);
+    assert.equal(codeSwitchAction.agentTool, false);
+    assert.equal(codeSwitchAction.mcpTool, false);
+    assert.equal(codeSwitchAction.toolCallable, false);
+    assert.throws(() => requireVivaryCodeUser(), { errorCode: "vivary_code_auth_required", statusCode: 401 });
+    assert.equal(requireVivaryCodeUser({ caller: "frontend", userEmail: " OWNER@Example.com " }), "owner@example.com");
+  });
+
+  it("Stop switch schema requires an explicit bounded turn observation while plain switches need none", () => {
+    const base = { runId: "observed-run", engine: "codex-cli", model: "gpt-fixture", expectedSwitchGeneration: null };
+    assert.deepEqual(codeSwitchAction.schema.parse(base), base);
+    for (const expectedTurnId of [null, "accepted-user-event", "x".repeat(128)]) {
+      const input = { ...base, stop: true, expectedTurnId };
+      assert.deepEqual(codeSwitchAction.schema.parse(input), input);
+    }
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, stop: true }).success, false);
+    for (const expectedTurnId of [undefined, "", "   ", 0, false, [], {}, "x".repeat(129)]) {
+      assert.equal(codeSwitchAction.schema.safeParse({ ...base, stop: true, expectedTurnId }).success, false,
+        "invalid Stop consent of type " + typeof expectedTurnId);
+    }
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedTurnId: null }).success, false);
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedSwitchGeneration: "x".repeat(129) }).success, false);
+    assert.equal(codeSwitchAction.schema.safeParse({ ...base, expectedSwitchGeneration: "x".repeat(128) }).success, true);
+  });
+
+  it("switch action forwards canonical Stop turn consent and does not invent it for a plain switch", async () => {
+    const fixture = await switchActionBoundary();
+    const base = { runId: "observed-run", engine: "codex-cli", model: "gpt-fixture", expectedSwitchGeneration: "displayed-generation" };
+    const context = { caller: "frontend", userEmail: "owner@example.com" };
+    await fixture.action.run(codeSwitchAction.schema.parse({ ...base, stop: true, expectedTurnId: "confirmed-user-event" }), context);
+    assert.equal(fixture.calls[0].expectedTurnId, "confirmed-user-event");
+    assert.equal(fixture.calls[0].expectedSwitchGeneration, "displayed-generation");
+    await fixture.action.run(codeSwitchAction.schema.parse(base), context);
+    assert.equal(Object.hasOwn(fixture.calls[1], "expectedTurnId"), false);
+    assert.equal(fixture.calls[1].expectedSwitchGeneration, "displayed-generation");
+  });
+
   // Issue #121. No agent or tool may lift the refusal that its own run's leftover processes caused.
   it("keeps the cleanup decision to a signed-in person with a strict decision on a named list", () => {
     const version = "0123456789abcdef";
@@ -405,7 +510,8 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
     const runId = "host-state-test";
     try {
       assert.deepEqual(await getVivaryCodeHostState("owner@example.com"), {
-        activeRuns: [], recentRun: null, busy: false, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null, queuedRuns: [],
+        capacity: { limit: 3, whenFull: "queue", running: 0, queued: 0, held: 0 },
       });
       createCodeAgentRunRecord({
         id: runId, goalId: "vivary-local-code", title: "Disconnected project", status: "running",
@@ -423,8 +529,10 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
       assert.deepEqual({ recentRun: shown.recentRun, busy: shown.busy, cleanup: shown.cleanup },
         { recentRun: null, busy: true, cleanup: null });
       // Busy and the run list are the caller's own. Another user's run never locks this user's conversations.
+      // The counts are host-wide, so another user sees the running turn counted but not listed.
       assert.deepEqual(await getVivaryCodeHostState("other@example.com"), {
-        activeRuns: [], recentRun: null, busy: false, cleanup: null,
+        activeRuns: [], recentRun: null, busy: false, cleanup: null, queuedRuns: [],
+        capacity: { limit: 3, whenFull: "queue", running: 1, queued: 0, held: 0 },
       });
     } finally {
       host.activeRuns.delete(runId);
@@ -599,7 +707,7 @@ process.send({type:"vivary:code-worker:ready"});
         await delay(20);
       }
       const target = { ...owner, runId, engine: "claude-cli" as const, model: "claude-opus-5-5", workspace,
-        revalidateWorkspace: async () => workspace };
+        revalidateWorkspace: async () => workspace, expectedSwitchGeneration: started.run!.switchGeneration };
       await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_active", statusCode: 409 });
 
       // A stale ID for each runtime, as a conversation that already moved between them could hold.
@@ -607,7 +715,7 @@ process.send({type:"vivary:code-worker:ready"});
         codexSessionId: "stale-thread", providerSessionMode: "native-resume" } });
       // Stop and switch is one request. The host records the target, stops the run, and applies it when the run leaves,
       // so no open window has to finish the switch.
-      const stopping = await switchVivaryCodeRuntime({ ...target, stop: true });
+      const stopping = await switchVivaryCodeRuntime({ ...target, stop: true, expectedTurnId: started.run!.turnId });
       assert.deepEqual(stopping.run?.pendingSwitch, { engine: "claude-cli", model: "claude-opus-5-5" });
       assert.equal(stopping.run?.model, "claude-sonnet-5-5", "the route changes only after the run stops");
       await assert.rejects(switchVivaryCodeRuntime(target), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
@@ -620,11 +728,16 @@ process.send({type:"vivary:code-worker:ready"});
       const stored = JSON.parse(await readFile(path.join(codeAgentRunsDir(), `${runId}.json`), "utf8")).metadata;
       assert.equal("claudeSessionId" in stored || "codexSessionId" in stored || "providerSessionMode" in stored, false);
       assert.equal(stored.previousProviderSessions.length, 1);
+      assert.equal(typeof stored.switchGeneration, "string", "the real Native store persists the route generation");
+      assert.equal(switched.run?.switchGeneration, stored.switchGeneration);
       const details = await getVivaryCodeSessionDetails(owner.ownerEmail, runId, workspace, owner.orgId);
       assert.deepEqual([details.sessionId, details.continuity, details.nextTurn], [null, "not-recorded", "reconstructed-context"]);
       assert.match(details.log.excerpt, /note: Switched from Claude Code Sonnet 5\.5 to Claude Code Opus 5\.5\./);
       const transcript = listCodeAgentTranscriptEvents(runId);
       assert.deepEqual(transcript.filter(event => event.kind === "user").map(event => event.message), ["Keep working"]);
+      assert.equal(switched.run?.turnId, transcript.findLast(event => event.kind === "user")?.id);
+      assert.equal(transcript.findLast(event => event.metadata?.source === "vivary-runtime-switch")?.metadata?.switchGeneration,
+        stored.switchGeneration, "the later note carries the committed generation");
       assert.equal(transcript.at(-1)?.metadata?.source, "vivary-runtime-switch");
 
       // A send that names the earlier model, without a switch, still refuses before any write.
@@ -671,6 +784,21 @@ process.send({type:"vivary:code-worker:ready"});
       assert.deepEqual([restarted?.status, restarted?.phase, restarted?.metadata?.model, restarted?.metadata?.pendingSwitch],
         ["paused", "interrupted", "claude-opus-5-5", undefined]);
       assert.equal(listCodeAgentTranscriptEvents(interrupted.id).at(-1)?.metadata?.source, "vivary-runtime-switch");
+
+      // A host that ended after it saved the stopped state, but before it applied the switch, leaves a paused record
+      // that still names the target. The next host start applies it, so the selectors and composer unlock.
+      const saved = createCodeAgentRunRecord({ goalId: "vivary-local-code", title: "Stopped switch", status: "paused",
+        phase: "paused", needsApproval: false, permissionMode: "auto-edit", cwd: fixture,
+        metadata: { app: "vivary-workbench-local-code", engine: "claude-cli", model: "claude-sonnet-5-5", ...owner,
+          workspaceRoot: fixture, projectId: workspace.projectId, bindingId: workspace.bindingId, rootId: workspace.rootId,
+          bindingRevision: workspace.bindingRevision,
+          pendingSwitch: { engine: "claude-cli", model: "claude-opus-5-5", label: "Opus 5.5", requestedAt: "2026-10-20T00:00:00.000Z" } } });
+      Reflect.set(host(), "initialization", undefined);
+      await getVivaryCodeHostState(owner.ownerEmail, owner.orgId);
+      const resumed = getCodeAgentRunRecord(saved.id);
+      assert.deepEqual([resumed?.status, resumed?.phase, resumed?.metadata?.model, resumed?.metadata?.pendingSwitch],
+        ["paused", "paused", "claude-opus-5-5", undefined]);
+      assert.equal(listCodeAgentTranscriptEvents(saved.id).at(-1)?.metadata?.source, "vivary-runtime-switch");
     } finally {
       if (runId) {
         const execution = host().activeRuns.get(runId)?.execution;

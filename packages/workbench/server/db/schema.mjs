@@ -22,6 +22,8 @@ export const projects = table("vivary_registry_projects", {
   displayName: text("display_name").notNull(),
   contentAlgorithm: text("content_algorithm"),
   contentManifestDigest: text("content_manifest_digest"),
+  // Owner preference, null until chosen. Values and meaning: shared/workspace-kind.ts.
+  workspaceKind: text("workspace_kind"),
 });
 
 export const bindings = table("vivary_registry_bindings", {

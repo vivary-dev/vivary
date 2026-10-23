@@ -4,12 +4,19 @@
 @import "@agent-native/toolkit/styles.css";
 @source "./**/*.{ts,tsx}";
 
-/* Chat replies: Core sizes a Markdown table to max-content, so every cell stays on one line and the
-   table scrolls. Auto width wraps cell text at spaces and keeps the table within the reply. The
-   longest word or code span still sets a column's minimum, so a table that cannot fit scrolls in
-   Core's wrapper. break-word replaces any inherited overflow-wrap:anywhere, which would let a column
-   shrink below its longest word. Code stays on one line, so a wide path or command scrolls whole. */
+/* Chat replies. Core sizes a Markdown table to max-content inside a wrapper that scrolls sideways.
+   - The table rule sets auto width, so cell text wraps at spaces and the table fits the reply.
+     break-word replaces any inherited overflow-wrap:anywhere, so an ordinary word still sets its
+     column's minimum and is never split.
+   - The long-token rule lets a run of 20 or more characters without a space break anywhere. The
+     maintained Core patch wraps each such run in a table cell or link in
+     .agent-markdown-long-token, so a long URL or hash no longer forces the table wider than the
+     reply. Only the display wraps: the href and the text are unchanged. Links are not in the
+     selector, so short link text such as "Authentication guide" still breaks only at spaces.
+   - The code rule keeps inline code on one line, so a table of wide paths or commands still
+     scrolls in Core's wrapper instead of breaking the code. */
 .agent-markdown-table-wrap > table { width: auto; overflow-wrap: break-word; }
+.agent-markdown-table-wrap .agent-markdown-long-token { overflow-wrap: anywhere; }
 .agent-markdown-table-wrap code { white-space: nowrap; }
 
 /* Unmount closing menus before a sibling overlay takes focus. */
@@ -170,6 +177,17 @@ button, a, input, summary { outline-offset: 3px; }
 .project-registration label { font-size: 12px; }
 .project-registration select { width: 100%; min-height: 36px; padding: 6px; border: 1px solid hsl(var(--input)); background: hsl(var(--background)); color: hsl(var(--foreground)); border-radius: var(--radius); font-size: 12px; }
 .project-form-actions { display: flex; gap: 4px; }
+.project-kind-summary { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.workspace-kind-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.workspace-kind-card { display: grid; gap: 6px; align-content: start; padding: 14px; text-align: left; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); color: hsl(var(--foreground)); cursor: pointer; }
+.workspace-kind-card:hover:not(:disabled) { background: hsl(var(--secondary)); }
+.workspace-kind-card:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.workspace-kind-card[aria-pressed="true"] { border-color: hsl(var(--primary)); background: hsl(var(--secondary)); }
+.workspace-kind-card:disabled { cursor: progress; opacity: 0.7; }
+.workspace-kind-card-title { font-size: 14px; font-weight: 600; }
+.workspace-kind-card-body { font-size: 12px; line-height: 1.5; color: hsl(var(--muted-foreground)); }
+.workspace-kind-note { margin: 0; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.workspace-kind-detail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .project-reconnection { margin: 4px 0 12px; }
 .project-reconnection-trigger { width: 100%; }
 .project-reconnection section { display: grid; gap: 10px; padding: 12px 10px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--background)); }
@@ -192,7 +210,7 @@ button, a, input, summary { outline-offset: 3px; }
 .vivary-sidebar.is-collapsed { width: 56px; }
 .vivary-sidebar-brand { height: 60px; padding: 0 16px; display: flex; align-items: center; color: hsl(var(--sidebar-accent-foreground)); }
 .vivary-sidebar.is-collapsed .vivary-sidebar-brand { padding: 0; justify-content: center; }
-.vivary-mark { display: grid; place-items: center; width: 27px; height: 27px; flex-shrink: 0; border-radius: 7px; background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); font-size: 16px; font-weight: 700; letter-spacing: -.07em; }
+.vivary-mark { display: block; width: 27px; height: 27px; flex-shrink: 0; padding: 3px; border-radius: 7px; background: hsl(var(--sidebar-accent)); object-fit: contain; }
 .vivary-primary-navigation, .vivary-settings-navigation { display: grid; gap: 3px; padding: 4px 10px 10px; }
 .vivary-sidebar.is-collapsed .vivary-primary-navigation, .vivary-sidebar.is-collapsed .vivary-settings-navigation { padding-inline: 6px; }
 .vivary-nav-link { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-size: 13px; line-height: 20px; color: hsl(var(--sidebar-foreground)); transition: background-color 120ms, color 120ms; }
@@ -218,3 +236,19 @@ button, a, input, summary { outline-offset: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .22); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .34); }
+
+/* Handoff request line and reply preview in chat (HandoffDisplay.tsx). */
+.vivary-handoff-preview {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+}
+.vivary-handoff-status {
+  font-weight: 500;
+}
+.vivary-handoff-preview details pre,
+.vivary-handoff-request details > div {
+  max-height: 20rem;
+  overflow: auto;
+}

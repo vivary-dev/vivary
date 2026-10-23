@@ -24,7 +24,10 @@ const ui = `import { createElement } from "react";
   export const Skeleton = () => null;
   export const ResizablePanel = ({ children }) => children;
   export const ResizablePanelGroup = ResizablePanel;
-  export const ResizableHandle = () => null;`;
+  export const ResizableHandle = () => null;
+  export const DropdownMenu = ({ children }) => children;
+  export const DropdownMenuTrigger = DropdownMenu, DropdownMenuContent = DropdownMenu, DropdownMenuLabel = DropdownMenu,
+    DropdownMenuItem = DropdownMenu;`;
 const stubs = new Map([
   ["@agent-native/core/client/hooks", `export const useSession = () => globalThis.searchFixture.session;
     export const notifySessionInvalidated = () => { globalThis.searchFixture.invalidations++; };
@@ -36,8 +39,15 @@ const stubs = new Map([
     export const useActionQuery = () => ({ data: undefined });
     export const tryCallActionKeepalive = () => ({ accepted: false });`],
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
+  ["@agent-native/core/client/chat", `export const registerMarkdownFenceRenderer = () => () => {};
+    export const registerUserMessageTextRenderer = () => () => {};`],
   ["@agent-native/core/client/agent-chat", `import { createElement, useEffect } from "react";
     export const clearChatStorage = () => {};
+    const refreshThreads = () => {};
+    // These host history rows keep title reads separate from the deferred transcript/archive reads below.
+    // Direct title fallback has its own NativeConversationHeader suite.
+    export const useChatThreads = () => ({ threads: ["active", "archived", "first", "second", "old", "unknown", "unread", "saved", "saved-stale"]
+      .map(id => ({ id, title: "Fixture " + id, preview: "" })), refreshThreads });
     export const sendToAgentChatAndConfirm = async () => { throw new Error("No handoff submit expected"); };
     export function AssistantChat(props) {
       useEffect(() => {
@@ -51,6 +61,9 @@ const stubs = new Map([
   ["@agent-native/toolkit/ui", ui], ["@/components/ui/button", ui],
   ["@/components/layout/use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: globalThis.searchFixture.identity });`],
   ["../projects/ProjectContext", `export const useProjects = () => globalThis.searchFixture.projects;`],
+  // The Coding or Personal dialog stays closed in these proofs. Its own test renders it.
+  ["../projects/WorkspaceKindDialog", `export const WorkspaceKindDialog = () => null;
+    export const ProjectKindDetail = () => null; export const useSaveProjectKind = () => async () => {};`],
   ["@/lib/chat-draft", `export const registerSelectionCloseFlush = () => () => {};
     export const trackSelectionWrite = promise => promise;
     export const useOrphanedDrafts = () => [];
@@ -59,7 +72,7 @@ const stubs = new Map([
     export const savePanelWidth = () => {}; export const useNarrowLayout = () => false;`],
   ["@tabler/icons-react", `export const IconArrowsMaximize = () => null;
     export const IconArrowsMinimize = IconArrowsMaximize, IconFiles = IconArrowsMaximize, IconInfoCircle = IconArrowsMaximize,
-      IconSearch = IconArrowsMaximize, IconWorld = IconArrowsMaximize, IconX = IconArrowsMaximize;`],
+      IconSearch = IconArrowsMaximize, IconWorld = IconArrowsMaximize, IconX = IconArrowsMaximize, IconDots = IconArrowsMaximize;`],
 ]);
 for (const [path, name] of [["../projects/ProjectFiles", "ProjectFiles"], ["../projects/ProjectSearch", "ProjectSearch"],
   ["../projects/ProjectAdoption", "ProjectAdoption"], ["../projects/ProjectMemoryPanel", "ProjectMemoryPanel"],

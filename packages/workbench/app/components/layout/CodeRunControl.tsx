@@ -6,7 +6,9 @@ import { Button } from "@agent-native/toolkit/ui";
 import { useConversationRouteHold } from "../../lib/conversation-route-hold";
 import { useNativeActionCaller } from "../../lib/native-actions";
 import { useProjects } from "../projects/ProjectContext";
-import type { VivaryCodeActiveRun, VivaryCodeHostState, VivaryCodePendingApproval } from "../../../server/local-code-agent";
+import { useOpenProjectFolder } from "../projects/open-project-folder";
+import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
+import type { VivaryCodeActiveRun, VivaryCodeHostState, VivaryCodePendingApproval, VivaryCodeQueuedRun } from "../../../server/local-code-agent";
 
 function failureMessage(failure: unknown): string {
   return actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The request could not finish. Try again.");
@@ -30,16 +32,22 @@ export function CodeRunControl() {
   // Issue #121. A run stays active while its failed stop's own check runs. The strip shows that check in its place.
   const runs = (status.data?.activeRuns ?? []).filter(run => !(cleanup?.checking && cleanup.run?.id === run.id));
   const recent = status.data?.recentRun;
+  const queued = status.data?.queuedRuns ?? [];
+  const capacity = status.data?.capacity;
+  const isolation = useOpenProjectFolder();
+  const queueCall = (operation: "cancel" | "start" | "proceed", item: VivaryCodeQueuedRun) =>
+    settle(call("vivary-code-queue", { operation, runId: item.id, projectId: item.projectId ?? undefined }));
   // Issue #121. Which cleanup choice is running.
   const [resolving, setResolving] = useState<"end" | "continue" | null>(null);
   const projectLabel = (projectId: string | null) => projectId
     ? catalog?.projects.find(project => project.projectId === projectId)?.displayName ?? "Unavailable project"
     : "Personal workspace";
 
-  async function settle(action: Promise<unknown>) {
+  /** Runs an owner action and refreshes the strip. True when the action succeeded. */
+  async function settle(action: Promise<unknown>): Promise<boolean> {
     setError(undefined);
-    try { await action; }
-    catch (failure) { setError(failureMessage(failure)); }
+    try { await action; return true; }
+    catch (failure) { setError(failureMessage(failure)); return false; }
     finally { await status.refetch(); }
   }
 
@@ -76,10 +84,17 @@ export function CodeRunControl() {
     }
   }
 
-  if (!runs.length && !cleanup && !status.error) return null;
+  if (!runs.length && !queued.length && !cleanup && !status.error) return <>
+    {isolation.kindDialog}{isolation.error && <p role="alert">{isolation.error}</p>}
+  </>;
   const cleanupHeld = !ready || resolving !== null || cleanup?.checking === true;
   const cleanupRun = cleanup?.run;
   return <section aria-label="Agent work" className="shrink-0 border-b px-4 py-3 text-sm">
+    {isolation.kindDialog}
+    {isolation.error && <p role="alert">{isolation.error}</p>}
+    {capacity && (runs.length > 0 || queued.length > 0) && <p className="mb-2 text-xs text-muted-foreground" role="status">
+      {capacity.running} running, {capacity.queued} queued{capacity.held ? `, ${capacity.held} waiting for you` : ""} (limit {capacity.limit})
+    </p>}
     {runs.length > 0 && <ul className="flex max-h-[60vh] flex-col gap-2 overflow-auto" aria-label="Running conversations">
       {runs.map(run => <ActiveRunItem key={run.id} run={run} projectLabel={projectLabel(run.projectId)} ready={ready}
         onOpen={() => void openConversation(run)}
@@ -88,6 +103,15 @@ export function CodeRunControl() {
           runId: request.runId, requestId: request.requestId, projectId: request.projectId ?? undefined,
           ...(decision.allow ? { answers: decision.answers, content: decision.content } : {}),
         }))} />)}
+    </ul>}
+    {queued.length > 0 && <ul className={`flex max-h-[40vh] flex-col gap-2 overflow-auto${runs.length ? " mt-3" : ""}`}
+      aria-label="Queued conversations">
+      {queued.map(item => <QueuedRunItem key={item.id} item={item} projectLabel={projectLabel(item.projectId)} ready={ready}
+        otherFolder={isolation.available}
+        onOpen={() => void openConversation(item)}
+        onCancel={() => queueCall("cancel", item)}
+        onStart={proceed => queueCall(proceed ? "proceed" : "start", item)}
+        onOtherFolder={async () => { if (await queueCall("cancel", item)) await isolation.openFolder(); }} />)}
     </ul>}
     {cleanup ? <div className={`flex flex-col gap-2${runs.length ? " mt-3" : ""}`} role="region" aria-label="Leftover coding processes">
       <h2 className="font-semibold">{cleanup.heading}</h2>
@@ -114,13 +138,56 @@ export function CodeRunControl() {
             ? "Agent work completed" : recent.status === "errored"
               ? "Agent work failed" : "Agent work stopped"} in {projectLabel(recent.projectId)}: {recent.title}</span>
       <Button variant="ghost" size="sm" onClick={() => void openConversation(recent)}>Open conversation</Button>
-    </div> : !runs.length && <div className="flex items-center gap-2">
+    </div> : !runs.length && status.error && <div className="flex items-center gap-2">
       <span role="status">Agent status could not be loaded.</span>
       <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>Retry</Button>
     </div>}
     {!ready && <Button size="sm" variant="outline" onClick={retrySession}>Retry session</Button>}
     {error && <p className="mt-2 text-destructive" role="alert">{error}</p>}
   </section>;
+}
+
+/**
+ * A queued conversation: its place, Cancel, Start for a held one, and the shared-folder choice for one that found new
+ * agents in its folder. Use another folder cancels the message back into its draft, then opens the folder picker.
+ */
+function QueuedRunItem({ item, projectLabel, ready, otherFolder, onOpen, onCancel, onStart, onOtherFolder }: {
+  item: VivaryCodeQueuedRun;
+  projectLabel: string;
+  ready: boolean;
+  otherFolder: boolean;
+  onOpen: () => void;
+  onCancel: () => Promise<unknown>;
+  onStart: (proceed: boolean) => Promise<unknown>;
+  onOtherFolder: () => Promise<unknown>;
+}) {
+  const [working, setWorking] = useState(false);
+  const run = (action: () => Promise<unknown>) => {
+    if (working) return;
+    setWorking(true);
+    void action().finally(() => setWorking(false));
+  };
+  const place = item.state === "queued" ? `Queued, position ${item.position}`
+    : item.state === "needs-confirmation" ? "Needs confirmation"
+      : item.reason ? `Held: ${item.reason}` : "Held after restart";
+  return <li className="flex flex-col gap-2" aria-label={`Queued: ${item.title}`}>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-0 flex-1" role="status">{place} in {projectLabel} ({item.engineLabel}): {item.title}</span>
+      <Button variant="ghost" size="sm" onClick={onOpen}>Open conversation</Button>
+      {item.state === "held" && <Button variant="outline" size="sm" disabled={!ready || working}
+        onClick={() => run(() => onStart(false))}>Start</Button>}
+      <Button variant="outline" size="sm" disabled={!ready || working} aria-label={`Cancel ${item.title}`}
+        onClick={() => run(onCancel)}>Cancel</Button>
+    </div>
+    {item.state === "needs-confirmation" && <div className="flex flex-col gap-2" role="group" aria-label="Shared folder">
+      <p>{SHARED_FOLDER_WARNING}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={!ready || working} onClick={() => run(() => onStart(true))}>Proceed</Button>
+        {otherFolder && <Button size="sm" variant="outline" disabled={!ready || working}
+          onClick={() => run(onOtherFolder)}>Use another folder</Button>}
+      </div>
+    </div>}
+  </li>;
 }
 
 type ApprovalDecision = { allow: false } | { allow: true; answers: Record<string, string[]>; content: Record<string, unknown> };
@@ -131,8 +198,8 @@ function ActiveRunItem({ run, projectLabel, ready, onOpen, onStop, onDecide }: {
   projectLabel: string;
   ready: boolean;
   onOpen: () => void;
-  onStop: () => Promise<void>;
-  onDecide: (request: VivaryCodePendingApproval, decision: ApprovalDecision) => Promise<void>;
+  onStop: () => Promise<unknown>;
+  onDecide: (request: VivaryCodePendingApproval, decision: ApprovalDecision) => Promise<unknown>;
 }) {
   const [stopping, setStopping] = useState(false);
   return <li className="flex flex-col gap-2" aria-label={run.title}>
@@ -154,7 +221,7 @@ function ActiveRunItem({ run, projectLabel, ready, onOpen, onStop, onDecide }: {
 function ApprovalCard({ request, ready, onDecide }: {
   request: VivaryCodePendingApproval;
   ready: boolean;
-  onDecide: (decision: ApprovalDecision) => Promise<void>;
+  onDecide: (decision: ApprovalDecision) => Promise<unknown>;
 }) {
   const [working, setWorking] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -7,12 +7,16 @@ import {
   removeAgentChatContextItem,
   ChatHistoryList,
   isCodeAgentRunActive,
+  useChatThreads,
   type AssistantChatHandle,
   type AssistantChatProps,
 } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, readClientAppState, useActionQuery } from "@agent-native/core/client/hooks";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import { useAppStateWriter } from "@/lib/native-state";
+import type { VivaryChatIdentity } from "@/lib/chat-scope";
+import { newConversationSurface } from "@/lib/conversation-surface";
+import { claimNativeConversationCreation } from "@/lib/native-conversation-creation";
 import { registerSelectionCloseFlush, trackSelectionWrite, useChatDraftList, useNativeChatDraft } from "@/lib/chat-draft";
 import { Badge, Button, Popover, PopoverContent, PopoverTrigger, Skeleton } from "@agent-native/toolkit/ui";
 import { IconHistory, IconPlus, IconSettings, IconSquare } from "@tabler/icons-react";
@@ -25,12 +29,16 @@ import { useOpenProjectFolder } from "../projects/open-project-folder";
 import { folderRunTargets, type FolderRun } from "../../lib/code-folder-runs";
 import { holdConversationRoute } from "../../lib/conversation-route-hold";
 import { SHARED_FOLDER_WARNING } from "../../../shared/code-concurrency";
+import { useVivaryChatIdentity } from "../layout/use-vivary-chat-identity";
 import "@agent-native/toolkit/chat-history.css";
 import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
-import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
+import { CodeLinkActions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
 import { HandoffControl } from "./HandoffControl";
+import "./HandoffDisplay";
+import { HandoffStatusContext, createHandoffStatusHub } from "./handoff-status";
+import { CodeModelPicker, type CodeRuntimeGroup } from "./CodeModelPicker";
 import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { codeMatchRepository, codeMatchMessageId } from "@/lib/code-match-repository";
 import "../../chat-search.css";
@@ -180,6 +188,18 @@ export default function CodeConversation({ previewScope, onPreviewChatTarget }: 
   </>;
 }
 
+type NativeThreadCreatorHandle = Pick<ReturnType<typeof useChatThreads>, "createThread">;
+
+// useChatThreads has no enabled option. Mount its owner only with a resolved project identity,
+// keeping an unavailable identity from loading unscoped history or remounting the Code composer.
+function NativeThreadCreator({ identity, creatorRef }: { identity: VivaryChatIdentity; creatorRef: RefObject<NativeThreadCreatorHandle | null> }) {
+  const { createThread } = useChatThreads(undefined, identity.storageKey, identity.scope, {
+    autoCreate: false, restoreActiveThread: false, isolateHistoryByScope: true, includeExternal: false,
+  });
+  useImperativeHandle(creatorRef, () => ({ createThread }), [createThread]);
+  return null;
+}
+
 function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel, workspaceAvailable, selection, setSelection, onOpenActive, previewScope, onPreviewChatTarget }: PreviewChatProps & {
   projectId: string | null;
   draftScopeKey: string;
@@ -191,7 +211,19 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   onOpenActive: (active: RunTarget) => Promise<boolean>;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { activeProject } = useProjects();
+  const chatIdentity = useVivaryChatIdentity();
+  const newSurface = newConversationSurface(activeProject?.projectId === projectId ? activeProject.workspaceKind : null, "code");
+  const identity = chatIdentity.identity?.kind === "project" && chatIdentity.identity.projectId === projectId
+    ? chatIdentity.identity : null;
+  const nativeCreator = useRef<NativeThreadCreatorHandle | null>(null);
+  const creatingNative = useRef(false);
+  const creationGeneration = useRef(0);
+  const latestLocationKey = useRef(location.key);
+  latestLocationKey.current = location.key;
+  useEffect(() => () => { creationGeneration.current++; }, [location.key, identity?.storageKey, newSurface, workspaceAvailable]);
   const requestedRun = searchParams.get("run");
   const requestedDraft = searchParams.get("draft");
   const unassigned = searchParams.get("history") === "unassigned";
@@ -206,6 +238,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const [historySearch, setHistorySearch] = useState("");
   const [notice, setNotice] = useState<string>();
   const [streaming, setStreaming] = useState(false);
+  // The header's conversation actions menu. The conversation below renders its linked-conversation actions into it.
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
   const mounted = useRef(false);
   const currentSelection = useRef(selection);
   currentSelection.current = selection;
@@ -249,6 +283,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   const folderRuns = folderRunTargets(codeState?.folderRuns ?? [], activeRuns, selection?.runId, projectId);
   const folderIsolation = useOpenProjectFolder();
   const error = notice ?? codeState?.error
+    ?? (newSurface === "native" && chatIdentity.isError ? "Native chat identity could not be loaded. Try again." : undefined)
     ?? (selectedState.isError && (anchor || selection?.runId !== codeState?.run?.id) ? "This conversation could not be loaded. Choose a conversation from history or retry." : undefined)
     ?? (state.data && !codeState ? "The project changed. Refresh this workspace before continuing." : undefined)
     ?? actionErrorMessage(state.error)
@@ -256,6 +291,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 
   const showInUrl = useCallback((next: ConversationSelection) => {
     if (!mounted.current) return;
+    creationGeneration.current++;
     handledRequest.current = next.runId ?? "new:" + next.key;
     setSearchParams(current => {
       const params = new URLSearchParams(current);
@@ -311,7 +347,38 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     setNotice(undefined);
     setHistoryOpen(false);
   };
-  const newConversation = () => {
+  const newConversation = async () => {
+    if (newSurface === "native") {
+      const creator = nativeCreator.current;
+      if (creatingNative.current || !identity || !creator || !workspaceAvailable) return;
+      const releaseCreation = claimNativeConversationCreation(identity.storageKey);
+      if (!releaseCreation) return;
+      creatingNative.current = true;
+      const generation = ++creationGeneration.current;
+      const locationKey = location.key;
+      const stillCurrent = () => mounted.current && generation === creationGeneration.current
+        && latestLocationKey.current === locationKey;
+      setNotice(undefined);
+      try {
+        const threadId = await creator.createThread();
+        if (!stillCurrent()) return;
+        if (!threadId) throw new Error("No conversation ID was created.");
+        // Match ProjectHistory: an optimistic Native ID has no thread row yet. Acknowledge its
+        // cleared draft through the existing owner before opening the route, keeping Code selected.
+        const initialized = await call<{ changed: boolean; record: { status: string } | null }>(
+          "vivary-chat-draft", { operation: "change", kind: identity.kind, projectId: identity.projectId, threadId,
+            expected: null, next: { status: "cleared", text: "", submitId: null } });
+        if (!stillCurrent()) return;
+        if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
+        navigate(`/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`);
+      } catch {
+        if (stillCurrent()) setNotice("The conversation could not be saved. Try again.");
+      } finally {
+        creatingNative.current = false;
+        releaseCreation();
+      }
+      return;
+    }
     const next = { key: crypto.randomUUID(), runId: null };
     setSelection(next);
     showInUrl(next);
@@ -373,19 +440,26 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   };
   const conversationNotices = <>
     {error && <div className="local-agent-notice" role="alert">
-      <span>{error}</span><Button variant="ghost" size="sm" onClick={() => { void state.refetch(); if (selection?.runId) void selectedState.refetch(); }}>Retry</Button>
+      <span>{error}</span><Button variant="ghost" size="sm" onClick={() => {
+        void state.refetch();
+        if (selection?.runId) void selectedState.refetch();
+        if (newSurface === "native" && !identity) void chatIdentity.refetch();
+      }}>Retry</Button>
     </div>}
   </>;
 
   return <section ref={matchContainer} className="local-agent-page" aria-label="Vivary agent">
+    {folderIsolation.kindDialog}
+    {newSurface === "native" && identity && <NativeThreadCreator key={identity.storageKey} identity={identity} creatorRef={nativeCreator} />}
     <ConversationMatch key={requestedRun + ":" + requestedEvent} container={matchContainer} messageId={matchMessageId} />
     <header className="local-agent-header">
       <div className="local-agent-heading">
-        <h2>{run?.title ?? "New conversation"}</h2>
+        <h2 title={run?.title ?? "New conversation"} tabIndex={0}>{run?.title ?? "New conversation"}</h2>
         <p>{run ? run.engineLabel + " / " + run.model : projectLabel ?? "Personal workspace"}</p>
       </div>
       <div className="local-agent-header-actions">
-        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} active={isCodeAgentRunActive(run)} />}
+        {run && !unassigned && <CodeSessionDetails key={run.id} runId={run.id} projectId={projectId} engine={run.engine} model={run.model} switchGeneration={run.switchGeneration} active={isCodeAgentRunActive(run)} />}
+        <span ref={setActionsSlot} className="contents" />
         {ownActiveRun ? <Badge variant="secondary" role="status">Working</Badge>
           : otherWorking > 0 && <Badge variant="secondary" role="status">
             {otherWorking === 1 ? "1 other conversation working" : `${otherWorking} other conversations working`}</Badge>}
@@ -404,7 +478,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
           </PopoverContent>
         </Popover>
         <Button variant="ghost" size="icon" aria-label="New conversation" onClick={newConversation}
-          disabled={!workspaceAvailable || !codeState || (streaming && !selection?.runId)}><IconPlus size={18} /></Button>
+          disabled={!workspaceAvailable || !codeState || (streaming && !selection?.runId) || (newSurface === "native" && !identity)}><IconPlus size={18} /></Button>
         <Button variant="ghost" size="icon" aria-label="Runtime settings" onClick={() => navigate("/settings/runtimes")}><IconSettings size={18} /></Button>
 
       </div>
@@ -413,9 +487,10 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     <div className="local-agent-layout">
       <div className="local-agent-chat">
         {selection && codeState && !openingSavedRun ? <LocalCodeConversation key={selection.key}
-          notices={conversationNotices} folderRuns={folderRuns} folderIsolation={folderIsolation} onOpenRun={openRun}
+          notices={conversationNotices} actionsSlot={actionsSlot} folderRuns={folderRuns} folderIsolation={folderIsolation} onOpenRun={openRun}
           pendingApprovals={ownActiveRun?.pendingApprovals.length ?? 0}
           projectId={projectId} ownerKey={ownerKey} selection={selection} run={run ?? null} previewScope={previewScope} onPreviewChatTarget={onPreviewChatTarget}
+          onNewConversation={newConversation} newConversationAvailable={newSurface !== "native" || !!identity}
           state={run && selectedState.data?.projectId === projectId && selectedState.data.run?.id === run.id
             ? { ...codeState, engines: selectedState.data.engines } : codeState}
           workspaceAvailable={workspaceAvailable}
@@ -445,19 +520,25 @@ const continuityLabels: Record<VivaryCodeSessionDetails["continuity"], string> =
   "not-recorded": "Continuity for the last turn was not recorded.",
 };
 
-function CodeSessionDetails({ runId, projectId, engine, active }: { runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; active: boolean }) {
+function CodeSessionDetails({ runId, projectId, engine, model, switchGeneration, active }: {
+  runId: string; projectId: string | null; engine: VivaryCodeRunState["engine"]; model: string;
+  switchGeneration?: string | null; active: boolean;
+}) {
   const [open, setOpen] = useState(false);
   // Completed output may arrive while closed; reopening must revalidate the cached snapshot.
   const details = useActionQuery<VivaryCodeSessionDetails>("vivary-code-state", {
     projectId: projectId ?? undefined, runId, details: true,
   }, { enabled: open, retry: false, staleTime: 0, refetchInterval: open && active && engine === "claude-cli" ? 2_000 : false });
-  const finalRefresh = useRef({ runId, projectId, wasActive: active, pending: false });
+  const route = JSON.stringify([engine, model, switchGeneration ?? null]);
+  const finalRefresh = useRef({ runId, projectId, route, wasActive: active, pending: false });
   useEffect(() => {
     const refresh = finalRefresh.current;
     const scopeChanged = refresh.runId !== runId || refresh.projectId !== projectId;
-    const settled = !scopeChanged && refresh.wasActive && !active;
+    // A committed switch clears the provider session even when two switches return to the same route between polls.
+    const settled = !scopeChanged && ((refresh.wasActive && !active) || refresh.route !== route);
     refresh.runId = runId;
     refresh.projectId = projectId;
+    refresh.route = route;
     refresh.wasActive = active;
     if (!open || scopeChanged || active) refresh.pending = false;
     else if (settled) refresh.pending = true;
@@ -467,7 +548,7 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
       refresh.pending = false;
       void details.refetch();
     }
-  }, [active, open, runId, projectId, details.isFetching, details.refetch]);
+  }, [active, open, runId, projectId, route, details.isFetching, details.refetch]);
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button variant="ghost" size="sm">Session details</Button></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto space-y-3 text-sm"
@@ -521,6 +602,19 @@ function CodeSessionDetails({ runId, projectId, engine, active }: { runId: strin
 function worktreeCommand(folderLabel: string): string {
   const name = folderLabel.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "") || "project";
   return `git worktree add ../${name}-worktree`;
+}
+
+/**
+ * A notice that keeps one line in a short window (local-agent.css), with Show more to read all of it. Focus inside
+ * the notice also shows all of it. In a taller window the notice shows in full and the control is hidden.
+ */
+function OneLineNotice({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  return <div className="local-agent-one-line" data-expanded={expanded || undefined}>
+    {children}
+    <button type="button" className="local-agent-one-line-toggle" aria-expanded={expanded}
+      onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Show more"}</button>
+  </div>;
 }
 
 /**
@@ -582,22 +676,31 @@ function modelLabel(engine: VivaryCodeState["engines"][number] | undefined, mode
 }
 
 /** A runtime or model the owner chose for a retained conversation, waiting on a confirm or on its run to stop. */
-type PendingSwitch = ModelChoice & { step: "confirm" | "working" | "confirm-stop" | "stopping" | "switching" };
+type PendingSwitch = ModelChoice & {
+  step: "confirm" | "confirm-stop" | "stopping" | "switching";
+  expectedSwitchGeneration: string | null;
+  turnId?: string | null;
+};
 
 const SWITCH_TRANSFER = "The new session gets the visible conversation text, up to the last 24 messages. "
   + "Tool output and the previous runtime's private session do not transfer.";
 
-function defaultModelFor(engine: VivaryCodeState["engines"][number]): string {
-  return engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
-    : engine.engine === "claude-cli"
-      ? engine.claudeModels?.find(model => model.support === "supported")?.id ?? engine.models[0] ?? "sonnet"
-      : "default";
+/** Why a runtime cannot take a new choice now, in the picker's group heading. */
+function runtimeUnavailableLabel(engine: VivaryCodeState["engines"][number]): string | undefined {
+  if (engine.configured) return undefined;
+  if (engine.runtime.status !== "ready") {
+    const status = engine.runtime.status.replaceAll("-", " ");
+    return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+  return "Models unavailable";
 }
 
 type LocalCodeConversationProps = PreviewChatProps & {
   viewingMatch?: boolean;
   matchedEventId?: string | null;
   notices: ReactNode;
+  /** The header's conversation actions menu, which receives the linked-conversation actions. */
+  actionsSlot?: HTMLElement | null;
   /** Other conversations working in this folder. Sending beside them needs the shared-folder warning's Proceed. */
   folderRuns: FolderRun[];
   /** Open folder, offered by the warning for a separate folder or a Git worktree. */
@@ -605,6 +708,8 @@ type LocalCodeConversationProps = PreviewChatProps & {
   onOpenRun: (target: RunTarget) => void;
   /** This conversation's pending Codex requests, answered from the host strip. */
   pendingApprovals: number;
+  onNewConversation?: () => void;
+  newConversationAvailable?: boolean;
   ownerKey: string;
   projectId: string | null;
   workspaceAvailable: boolean;
@@ -623,8 +728,28 @@ type LocalCodeConversationProps = PreviewChatProps & {
   onSettings: () => void;
 };
 
-function LocalCodeConversation(props: LocalCodeConversationProps) {
+function LocalCodeConversation(observed: LocalCodeConversationProps) {
+  const queryClient = useQueryClient();
+  const [acceptedRun, setAcceptedRun] = useState<VivaryCodeRunState | null>(null);
+  const stateQueryKeys = [
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined }],
+    ["action", "vivary-code-state", { projectId: observed.projectId ?? undefined, runId: observed.selection.runId ?? undefined }],
+  ];
+  // After acceptance, both caches contain the reply and all earlier requests have been cancelled. A later snapshot
+  // read from those caches is fresh even if another switch happened before the parent could render our generation.
+  const observedFromCache = stateQueryKeys.some(queryKey =>
+    queryClient.getQueryData<VivaryCodeState>(queryKey)?.run === observed.run);
+  const caughtUp = !!acceptedRun && observed.run?.id === acceptedRun.id
+    && observedFromCache;
+  // Keep the action's full run while parent polling still presents a previous route generation.
+  // Its old query requests are cancelled before the accepted state enters either owner cache below.
+  const props = acceptedRun && observed.selection.runId === acceptedRun.id && !caughtUp
+    ? { ...observed, run: acceptedRun } : observed;
+  useEffect(() => {
+    if (caughtUp || observed.selection.runId !== acceptedRun?.id) setAcceptedRun(null);
+  }, [caughtUp, observed.selection.runId, acceptedRun?.id]);
   const chatRef = useRef<AssistantChatHandle>(null);
+  const [handoffStatus] = useState(createHandoffStatusHub);
   const { call } = useNativeActionCaller();
   const latest = useRef(props);
   latest.current = props;
@@ -671,9 +796,18 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     // Discard unsubmitted consent; an operation already accepted by the host keeps settling.
     setPendingSwitch(current => current?.step === "stopping" || current?.step === "switching" ? current : null);
   }, [readOnly, pendingSwitch?.step]);
-  const shown = (readOnly && !switchInFlight ? null : pendingSwitch) ?? choice;
+  // A recorded target is a display choice, never an accepted Send route or a remembered choice.
+  const serverPending = props.run?.pendingSwitch ?? null;
+  const shown = (readOnly && !switchInFlight ? null : pendingSwitch) ?? serverPending ?? choice;
+  const observationChanged = !!pendingSwitch
+    && pendingSwitch.expectedSwitchGeneration !== props.run?.switchGeneration;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
-  const runWorking = props.streaming || (!!props.run && isCodeAgentRunActive(props.run));
+  const runWorking = props.streaming || (!!props.run && (isCodeAgentRunActive(props.run) || props.run.phase === "stopping"));
+  // Polling can start or settle a turn while a choice is open. Derive its legal actions on every render.
+  const switchStep = observationChanged ? undefined
+    : pendingSwitch?.step === "confirm" ? (runWorking ? "working" : "confirm")
+    : pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)
+      ? (runWorking ? "working" : "confirm") : pendingSwitch?.step;
   // Proceed acknowledges the turns working in this folder now, keyed by turn. One that starts later asks again, including
   // a later turn of a conversation that was acknowledged before.
   const [acknowledgedRuns, setAcknowledgedRuns] = useState<ReadonlySet<string>>(() => new Set());
@@ -727,14 +861,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     !(engine.engine === choice.engine && model === choice.model)
     && (engine.claudeModels?.find(item => item.id === model)?.support ?? "supported") === "supported"));
   const runtime = selectedEngine?.runtime;
-  // The selectors show a pending switch's target. A switch target lists only what that runtime supports now.
+  // The picker shows a pending switch's target.
   const shownEngine = props.state.engines.find(engine => engine.engine === shown.engine);
-  const shownModelChoices = !pendingSwitch ? modelChoices
-    : shownEngine ? codeConversationModelChoices(shownEngine, false) : [];
   // A retained conversation switches in place (vivary-code-switch). Another conversation's run never locks either kind.
   const retained = !!props.selection.runId;
-  // A Stop and switch the host recorded on the run. It survives a reload and applies when the run stops.
-  const serverPending = props.run?.pendingSwitch ?? null;
   const selectorsDisabled = retained
     ? props.viewingMatch || !props.workspaceAvailable || !props.run || !!serverPending
       || (!!pendingSwitch && ["stopping", "switching"].includes(pendingSwitch.step))
@@ -742,11 +872,28 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const switchPanelId = useId();
   // The server refuses a switch to a Claude model the installed version cannot confirm, so only listed,
   // supported models are offered as switch targets. The current model stays selectable.
-  const modelOptionDisabled = (model: string) => {
-    const support = shownEngine?.claudeModels?.find(item => item.id === model)?.support;
+  const modelOptionDisabled = (engine: VivaryCodeState["engines"][number], model: string) => {
+    const support = engine.claudeModels?.find(item => item.id === model)?.support;
     return support === "upgrade-required"
-      || (retained && support === "unverified" && !(shown.engine === props.run?.engine && model === props.run?.model));
+      || (retained && support === "unverified" && !(engine.engine === props.run?.engine && model === props.run?.model));
   };
+  // One group per runtime. The current runtime lists this conversation's choices. Another runtime lists only what it
+  // supports now. An unavailable runtime keeps its heading and reason, with its models disabled.
+  const pickerGroups: CodeRuntimeGroup[] = props.state.engines.map(engine => {
+    const models = engine.engine === choice.engine ? modelChoices : codeConversationModelChoices(engine, false);
+    const options = models.map(model => {
+      const support = engine.claudeModels?.find(item => item.id === model)?.support;
+      const current = engine.engine === choice.engine && model === choice.model;
+      return { model, label: modelLabel(engine, model),
+        disabled: !current && (!engine.configured || modelOptionDisabled(engine, model)),
+        note: support === "upgrade-required" ? "Update required" : support === "unverified" ? "Version unverified" : undefined };
+    });
+    // A saved choice that is no longer listed stays shown and selected until the owner picks a listed one.
+    if (engine.engine === shown.engine && !models.includes(shown.model)) {
+      options.unshift({ model: shown.model, label: `${shown.model} (saved, unavailable)`, disabled: true, note: undefined });
+    }
+    return { engine: engine.engine, label: engine.label, status: runtimeUnavailableLabel(engine), options };
+  });
   const routeLabel = (route: ModelChoice) => {
     const engine = props.state.engines.find(item => item.engine === route.engine);
     return `${engine?.label ?? route.engine} ${modelLabel(engine, route.model)}`;
@@ -761,22 +908,21 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     && events.findLast(event => event.kind === "status")?.metadata?.reason === "user";
   const runtimeReady = selectedEngine?.configured === true;
   // Issue #121. Leftover coding processes refuse every send, so the composer waits for the host strip's choice.
+  // Selectors show the unconfirmed target. Keep the draft, but pause the composer until the choice is resolved.
   const disabled = props.viewingMatch || !props.workspaceAvailable || props.active || props.streaming || !runtimeReady
     || (!!props.selection.runId && !props.run) || !!props.state.cleanup || !selectedModelAvailable
-    || pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching" || !!serverPending || sharedFolderHeld;
+    || !!pendingSwitch || !!serverPending || sharedFolderHeld;
 
-  function chooseRuntime(engineName: string) {
+  // A new conversation takes the chosen route. A retained one asks to switch in place.
+  function chooseRoute(engineName: string, model: string) {
     const engine = props.state.engines.find(item => item.engine === engineName);
     if (!engine) return;
+    const next = { engine: engine.engine, model };
     if (retained) {
-      requestSwitch({ engine: engine.engine,
-        model: engine.engine === props.run?.engine ? props.run.model : defaultModelFor(engine) });
+      requestSwitch(next);
       return;
     }
     if (props.active || props.streaming) return;
-    const model = engine.modelCatalog?.status === "ready" ? engine.modelCatalog.defaultModel
-      : engine.engine === "claude-cli" ? engine.models[0] ?? "sonnet" : "default";
-    const next = { engine: engine.engine, model };
     setChoice(next);
     props.onChoice(next);
   }
@@ -792,29 +938,46 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // Choosing a retained conversation's current route cancels a pending switch. Anything else asks first.
   function requestSwitch(target: ModelChoice) {
     if (!canMutateConversation()) return;
+    const run = props.run;
     setSwitchError(undefined);
-    if (!props.run || (target.engine === props.run.engine && target.model === props.run.model)) {
+    if (!run || (target.engine === run.engine && target.model === run.model)) {
       setPendingSwitch(null);
       return;
     }
     setPendingSwitch(current => ({ ...target,
-      step: current?.step === "confirm-stop" ? "confirm-stop" : runWorking ? "working" : "confirm" }));
+      expectedSwitchGeneration: run.switchGeneration,
+      step: current?.step === "confirm-stop" && !observationChanged && runWorking
+        && current.turnId === run.turnId ? "confirm-stop" : "confirm",
+      turnId: run.turnId }));
   }
 
-  async function completeSwitch({ engine, model }: ModelChoice) {
+  async function acceptSwitchReply(state: VivaryCodeState, runId: string) {
+    if (state.error) throw new Error(state.error);
+    if (!state.run || state.run.id !== runId || state.projectId !== props.projectId) {
+      throw new Error("The switched conversation could not be loaded. Refresh before continuing.");
+    }
+    // Cancel pre-action polling before seeding these exact owner queries. Opaque generations have no order.
+    // Only a subsequent owner-cache snapshot may supersede the reply while parent props lag behind it.
+    await Promise.all(stateQueryKeys.map(queryKey => queryClient.cancelQueries({ queryKey, exact: true })));
+    setAcceptedRun(state.run);
+    for (const queryKey of stateQueryKeys) queryClient.setQueryData(queryKey, state);
+    const accepted = { engine: state.run.engine, model: state.run.model };
+    setChoice(accepted);
+    if (!state.run.pendingSwitch) props.onChoice(accepted);
+    setPendingSwitch(null);
+    props.onSettled();
+  }
+
+  async function completeSwitch(target: PendingSwitch) {
     const runId = props.run?.id;
-    if (!canMutateConversation() || !runId) return;
+    if (!canMutateConversation() || !runId || observationChanged || switchStep !== "confirm") return;
     // The pending step stays out of the saved conversation choice.
-    const target = { engine, model };
     setPendingSwitch({ ...target, step: "switching" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
-        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model });
-      if (state.error) throw new Error(state.error);
-      setChoice(target);
-      props.onChoice(target);
-      setPendingSwitch(null);
-      props.onSettled();
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model,
+        expectedSwitchGeneration: target.expectedSwitchGeneration });
+      await acceptSwitchReply(state, runId);
     } catch (failure) {
       setPendingSwitch(null);
       setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
@@ -823,16 +986,16 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
 
   // Stop and switch. The host records the target on the run, stops it, and applies the switch when the run leaves the
   // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
-  async function stopThenSwitch({ engine, model }: ModelChoice) {
+  async function stopThenSwitch(target: PendingSwitch) {
     const runId = props.run?.id;
-    if (!canMutateConversation() || !runId) return;
-    setPendingSwitch({ engine, model, step: "stopping" });
+    if (!canMutateConversation() || !runId || observationChanged || switchStep !== "confirm-stop"
+      || target.turnId === undefined || target.turnId !== props.run?.turnId) return;
+    setPendingSwitch({ ...target, step: "stopping" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
-        projectId: props.projectId ?? undefined, runId, engine, model, stop: true });
-      if (state.error) throw new Error(state.error);
-      setPendingSwitch(null);
-      props.onSettled();
+        projectId: props.projectId ?? undefined, runId, engine: target.engine, model: target.model, stop: true,
+        expectedSwitchGeneration: target.expectedSwitchGeneration, expectedTurnId: target.turnId });
+      await acceptSwitchReply(state, runId);
     } catch (failure) {
       setPendingSwitch(null);
       setSwitchError(actionErrorMessage(failure) ?? (failure instanceof Error ? failure.message : "The runtime could not be switched."));
@@ -851,12 +1014,23 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, [sharedFolderHeld]);
 
   const runStopped = !!props.run && !isCodeAgentRunActive(props.run) && props.run.phase !== "stopping" && !props.streaming;
+  const limitsDetail = `${choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.`;
+  const limitsText = `${selectedEngine?.label ?? choice.engine} · ${choice.model}. ${limitsDetail}`;
   useEffect(() => {
-    // A turn that finished while the owner was choosing needs only the plain confirm now.
-    if (pendingSwitch?.step === "working" && runStopped) setPendingSwitch({ ...pendingSwitch, step: "confirm" });
-  }, [pendingSwitch?.step, runStopped]);
+    if (observationChanged && (pendingSwitch?.step === "confirm" || pendingSwitch?.step === "confirm-stop")) {
+      setPendingSwitch(null);
+      setSwitchError("This conversation changed. Choose its runtime and confirm again.");
+    }
+  }, [observationChanged, pendingSwitch?.step]);
 
-  return <AssistantChat key={viewKey.current} ref={chatRef}
+  useEffect(() => {
+    // A Stop confirmation belongs to the current turn. A later turn needs the owner's Stop choice again.
+    if (pendingSwitch?.step === "confirm-stop" && (!runWorking || pendingSwitch.turnId !== props.run?.turnId)) {
+      setPendingSwitch(current => current?.step === "confirm-stop" ? { ...current, step: "confirm" } : current);
+    }
+  }, [pendingSwitch?.step, pendingSwitch?.turnId, runWorking, props.run?.turnId]);
+
+  return <HandoffStatusContext.Provider value={handoffStatus}><AssistantChat key={viewKey.current} ref={chatRef}
     tabId={draftThreadId}
     hostComposerDraft={draft.hostComposerDraft}
     contextNamespace={previewContextKey}
@@ -873,19 +1047,9 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       return false;
     }}
     composerDisabled={disabled}
-    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.pendingApprovals > 0 ? "Review the pending request above. Approve or deny before sending another message." : sharedFolderHeld ? "Other agents are working in this folder. Choose Proceed or use another folder before sending." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : "The agent is working. Stop it before sending another message."}
+    composerDisabledPlaceholder={props.viewingMatch ? "Reading saved history. Return to the latest project conversation to continue." : props.state.cleanup ? props.state.cleanup.composer : props.selection.runId && !props.run ? "Opening conversation…" : !props.workspaceAvailable ? "This folder is unavailable. You can read this conversation, but project work cannot start." : props.pendingApprovals > 0 ? "Review the pending request above. Approve or deny before sending another message." : sharedFolderHeld ? "Other agents are working in this folder. Choose Proceed or use another folder before sending." : !runtimeReady ? "Connect a runtime in Settings to start." : !selectedModelAvailable ? selectedClaudeModel?.support === "upgrade-required" ? `Update Claude Code to ${selectedClaudeModel.minimumVersion} or later${otherModelAvailable ? ", or choose another model" : ""}.` : selectedClaudeModel?.support === "unverified" ? `Verify the installed Claude Code version in Settings${otherModelAvailable ? ", or choose another model" : ""}.` : otherModelAvailable ? "The selected model is unavailable. Choose another model." : "The selected model is unavailable. Check Runtime settings." : pendingSwitch ? "Resolve the runtime or model choice above before sending another message." : "The agent is working. Stop it before sending another message."}
     selectedEngine={choice.engine} selectedModel={choice.model} defaultModel={props.state.defaultModel}
-    availableModels={availableModels} onModelChange={(model, engine) => {
-      const selected = props.state.engines.find(item => item.engine === engine);
-      if (!selected) return;
-      if (retained) {
-        requestSwitch({ engine: selected.engine, model });
-        return;
-      }
-      const choice = { engine: selected.engine, model };
-      setChoice(choice);
-      props.onChoice(choice);
-    }}
+    availableModels={availableModels} onModelChange={(model, engine) => chooseRoute(engine, model)}
     providerStatusChecksEnabled={false}
     showModelSelector={false}
     plusMenuMode="hidden" dynamicSuggestions={false} suggestions={[]}
@@ -896,7 +1060,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
       <p>Read files, make changes, and inspect the results in your workspace.</p>
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => chatRef.current?.prefillMessage(example)}>Try a file change</Button>
     </div>}
-    composerSlot={<div className="min-h-0 overflow-auto">
+    composerSlot={<div className="local-agent-composer-notices">
       {props.notices}
       {props.folderRuns.length > 0 && !runWorking && !props.viewingMatch && (undecided.length > 0 || !unacknowledged.length)
         && <SharedFolderNotice runs={props.folderRuns} onCancel={cancelSharedFolder}
@@ -904,11 +1068,11 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         onProceed={() => setAcknowledgedRuns(new Set(props.folderRuns.map(item => item.turnId)))} onOpen={props.onOpenRun} />}
       {!props.viewingMatch && props.run && <>
         <LinkedHistoryNotice key={props.run.id} projectId={props.projectId} target={{ kind: "code", id: props.run.id }} />
-        <CodeLinkOptions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
+        <CodeLinkActions key={"link:" + props.run.id} projectId={props.projectId} runId={props.run.id}
           sourceEngine={props.run.engine} engines={props.state.engines} storageKey={props.ownerKey}
-          workspaceAvailable={props.workspaceAvailable}
+          workspaceAvailable={props.workspaceAvailable} menuSlot={props.actionsSlot ?? null}
           saveDraft={sourceDraftSaver(draft, draftThreadId)} />
-        {props.projectId && <HandoffControl key={"handoff:" + props.run.id} projectId={props.projectId}
+        {props.projectId && <OneLineNotice key={"handoff:" + props.run.id}><HandoffControl projectId={props.projectId}
           conversation={{ kind: "code", id: props.run.id }} disabled={disabled}
           submit={async message => {
             // Core's window submit reaches only Native chats. This chat's own handle
@@ -916,7 +1080,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
             if (!chatRef.current) return false;
             chatRef.current.sendMessage(message);
             return true;
-          }} />}
+          }} /></OneLineNotice>}
       </>}
       {!draftError && draft.draftSaveStatusForThread(draftThreadId) && <div className="local-agent-notice" role="status">
         <span>{draft.draftSaveStatusForThread(draftThreadId) === "saved"
@@ -953,83 +1117,54 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <Button variant="ghost" size="sm" onClick={() => setSwitchError(undefined)}>Dismiss</Button>
       </div>}
       {pendingSwitch && props.run && (!readOnly || switchInFlight) && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
-        role={pendingSwitch.step === "stopping" || pendingSwitch.step === "switching" ? "status" : "group"}
+        role={switchStep === "stopping" || switchStep === "switching" ? "status" : "group"}
         aria-label="Switch runtime or model">
-        {pendingSwitch.step === "confirm" && <>
+        {switchStep === "confirm" && <>
           <span>Switch this conversation from {routeLabel(props.run)} to {routeLabel(pendingSwitch)}? {SWITCH_TRANSFER}</span>
           <Button variant="outline" size="sm" onClick={() => void completeSwitch(pendingSwitch)}>Switch</Button>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Cancel</Button>
         </>}
-        {pendingSwitch.step === "working" && <>
+        {switchStep === "working" && <>
           <span>This conversation is working. Wait for the current request to finish, or stop it and switch to {routeLabel(pendingSwitch)}.</span>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Wait</Button>
           <Button variant="outline" size="sm" onClick={() => {
-            if (canMutateConversation()) setPendingSwitch({ ...pendingSwitch, step: "confirm-stop" });
+            if (canMutateConversation()) setPendingSwitch({ ...pendingSwitch, step: "confirm-stop", turnId: props.run?.turnId });
           }}>Stop and switch</Button>
         </>}
-        {pendingSwitch.step === "confirm-stop" && <>
+        {switchStep === "confirm-stop" && <>
           <span>Stop and switch to {routeLabel(pendingSwitch)}? The current request will be cancelled. Completed work stays in this conversation and the workspace. {SWITCH_TRANSFER}</span>
           <Button variant="outline" size="sm" onClick={() => void stopThenSwitch(pendingSwitch)}>Stop and switch</Button>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Keep working</Button>
         </>}
-        {pendingSwitch.step === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
-        {pendingSwitch.step === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
+        {switchStep === "stopping" && <span>Stopping the current request. The switch follows once it stops.</span>}
+        {switchStep === "switching" && <span>Switching to {routeLabel(pendingSwitch)}.</span>}
       </div>}
       {!pendingSwitch && serverPending && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
         role="status" aria-label="Switch runtime or model">
         <span>Stopping the current request. This conversation then switches to {routeLabel(serverPending)}.</span>
       </div>}
+      {props.run && !props.viewingMatch && props.onNewConversation && <p className="local-agent-route-note">
+        <span>Start another conversation using this project's default.</span>
+        <Button variant="link" size="sm" disabled={!props.workspaceAvailable || props.newConversationAvailable === false} onClick={props.onNewConversation}>New conversation</Button>
+      </p>}
       {props.workspaceAvailable && !runtimeReady ? <div className="local-agent-runtime-setup" role="status">
       <div><h3>Set up {selectedEngine?.label ?? "a runtime"}</h3><p>{selectedEngine?.modelCatalog?.status === "unavailable"
         ? selectedEngine.modelCatalog.message : runtime?.message ?? "Choose a local runtime in Settings."}</p></div>
       <Button variant="outline" size="sm" onClick={props.onSettings}>Open runtime settings</Button>
       </div> : null}
     </div>}
-    composerToolbarSlot={<div className="local-agent-composer-controls">
-        <label className="local-agent-composer-runtime">
-          Runtime
-          <select aria-label="Conversation runtime" value={shown.engine}
-            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
-            className="local-agent-composer-select"
-            disabled={selectorsDisabled}
-            onChange={event => chooseRuntime(event.target.value)}>
-            {props.state.engines.map(engine => <option key={engine.engine} value={engine.engine}
-              disabled={retained && engine.engine !== props.run?.engine && !engine.configured}>
-              {engine.label}{engine.runtime.status === "ready" ? "" : ` (${engine.runtime.status.replaceAll("-", " ")})`}
-            </option>)}
-          </select>
-        </label>
-        <label className="local-agent-composer-model">
-          Model
-          <select aria-label="Conversation model" value={shown.model}
-            aria-describedby={pendingSwitch || serverPending ? switchPanelId : undefined}
-            className="local-agent-composer-select"
-            disabled={selectorsDisabled || !shownModelChoices.length}
-            onChange={event => {
-              const model = event.target.value;
-              if (!shownEngine || !shownModelChoices.includes(model)) return;
-              const next = { engine: shownEngine.engine, model };
-              if (retained) {
-                requestSwitch(next);
-                return;
-              }
-              setChoice(next);
-              props.onChoice(next);
-            }}>
-            {!shownModelChoices.includes(shown.model) && <option value={shown.model}>{shown.model} (saved, unavailable)</option>}
-            {shownModelChoices.map(model => <option key={model} value={model}
-              disabled={modelOptionDisabled(model)}>
-              {modelLabel(shownEngine, model)}
-            </option>)}
-          </select>
-        </label>
-      </div>}
-    composerExtraActionButton={!props.viewingMatch && props.active && !props.streaming ?
-      <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => {
-        if (canStopConversation()) void latest.current.onStop();
-      }} aria-label="Stop response">
-        <IconSquare size={14} /> Stop
-      </Button> : undefined}
-    threadFooterSlot={<p className="local-agent-limits"><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.</p>}
-  />;
+    composerExtraActionButton={<>
+      <CodeModelPicker groups={pickerGroups} engine={shown.engine} model={shown.model}
+        runtimeLabel={shownEngine?.label ?? shown.engine} modelLabel={modelLabel(shownEngine, shown.model)}
+        disabled={selectorsDisabled} describedBy={pendingSwitch || serverPending ? switchPanelId : undefined}
+        onSelect={chooseRoute} onSettings={props.onSettings} />
+      {!props.viewingMatch && props.active && !props.streaming &&
+        <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => { if (canStopConversation()) void latest.current.onStop(); }} aria-label="Stop response">
+          <IconSquare size={14} /> Stop
+        </Button>}
+    </>}
+    // A short window keeps this line to one line (local-agent.css). Hover shows all of it through the title, and
+    // keyboard focus wraps it in full.
+    threadFooterSlot={<p className="local-agent-limits" tabIndex={0} title={limitsText}><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {limitsDetail}</p>}
+  /></HandoffStatusContext.Provider>;
 }

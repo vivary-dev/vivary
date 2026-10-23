@@ -189,10 +189,12 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'\n"
         "    steps: []\n"
         "\n"
-        "  site:\n"
-        "    needs: changes\n"
+        f"{SITE_JOB_HEADER}"
         "    steps:\n"
-        f"{site_steps}"
+        f"{SITE_TOOLS_STEP}"
+        f"{SITE_DEPENDENCY_STEP}"
+        f"{site_steps.replace(INSTALL, INSTALL + SITE_INSTALLED_DEPENDENCY_STEP)}"
+        f"{SITE_BUILD_STEP}"
         f"{trailing_job}"
     )
 
@@ -211,6 +213,8 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
         if '    steps: []\n' in block:
             updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
@@ -232,7 +236,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
     for index, name in enumerate(module.CI_JOBS):
         block = module.job_block(text, name)
         bootstrap = module.runner_bootstrap_step() if index == 0 else module.BOOTSTRAP_ALIAS
-        host = '    runs-on: ubuntu-latest\n'
+        host = '' if name == 'site' else '    runs-on: ubuntu-latest\n'
         if name == 'orientation-proof':
             host = '    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n'
             block_with_upload = block + (
@@ -250,14 +254,42 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
     return text
 
 
+SITE_JOB_HEADER = (
+    "  site:\n"
+    "    name: site build\n"
+    "    needs: changes\n"
+    "    if: needs.changes.outputs.site == 'true'\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n"
+)
+SITE_TOOLS_STEP = (
+    '      - name: qualified site build tools\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
+SITE_DEPENDENCY_STEP = (
+    "      - name: known site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py\n"
+)
+SITE_INSTALLED_DEPENDENCY_STEP = (
+    "      - name: installed site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py --installed\n"
+)
+SITE_BUILD_STEP = (
+    "      - name: build (re-syncs docs, then astro build)\n"
+    '        run: |\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build\n'
+    "        working-directory: site\n"
+)
 INSTALL = (
     "      - name: install\n"
-    "        run: npm ci\n"
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts\'\n'
     "        working-directory: site\n"
 )
 AUDIT = (
     "      - name: audit high and critical site dependencies\n"
-    "        run: npm audit --audit-level=high\n"
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high\'\n'
     "        working-directory: site\n"
 )
 CONTRACT_TEST_COMMAND = "python scripts/tests/test_ci_workflow.py"
@@ -450,6 +482,23 @@ def test_missing_site_audit_gate_fails():
     message = _run(_workflow(INSTALL))
     assert message, "a workflow without the blocking audit must fail"
     assert "npm audit --audit-level=high" in message
+
+
+def test_isolated_build_tool_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8").replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1)
+    message = _run(workflow)
+    assert message and "isolated build tool regressions" in message
+
+
+def test_build_tool_changes_select_the_site_job():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"grep -Eq \\\n\s+'([^']+)'", workflow)
+    assert match, "site input selection must remain explicit"
+    expression = re.compile(match[1])
+    for filename in ("scripts/bootstrap_build_tools.py", "scripts/build_go_tools.py",
+                     "scripts/check_site_dependencies.py", "site/package-lock.json"):
+        assert expression.search(filename), filename
+    assert not expression.search("packages/workbench/tests/chat-title.test.mjs")
 
 
 def test_site_audit_must_follow_install():
@@ -1173,6 +1222,73 @@ def test_selected_node_pin_cannot_regress_or_float():
                 assert "fixed admitted Node 24.22.1" in str(error), (name, unsafe, error)
             else:
                 raise AssertionError((name, unsafe))
+
+
+def test_site_lock_admission_precedes_install_and_build():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_site_dependencies(workflow)
+    block = module.job_block(workflow, "site")
+    guard = module.SITE_DEPENDENCY_STEP
+    installed = module.SITE_INSTALLED_DEPENDENCY_STEP
+    install = INSTALL
+    audit = AUDIT
+    build = module.SITE_BUILD_STEP
+    tools = module.SITE_TOOLS_STEP
+    mutations = {
+        "missing_tools": block.replace(tools, "", 1),
+        "conditional_tools": block.replace(tools, tools.replace("        run:", "        if: false\n        run:"), 1),
+        "ignored_tools": block.replace(tools, tools.replace("        run:", "        continue-on-error: true\n        run:"), 1),
+        "masked_tools": block.replace(tools, tools.replace("|| exit $?", "|| true", 1), 1),
+        "tools_after_lock": block.replace(tools + guard, guard + tools, 1),
+        "unqualified_cache": block.replace('          node-version: "24.22.1"\n',
+                                             '          node-version: "24.22.1"\n          cache: npm\n', 1),
+        "missing_sync": block.replace('          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n', '', 1),
+        "lifecycle_install": block.replace(" ci --ignore-scripts", " ci", 1),
+        "missing": block.replace(guard, "", 1),
+        "duplicate": block.replace(guard, guard + guard, 1),
+        "conditional": block.replace(guard, guard.replace("        run:", "        if: false\n        run:"), 1),
+        "ignored": block.replace(guard, guard.replace("        run:", "        continue-on-error: true\n        run:"), 1),
+        "masked": block.replace(guard, guard.replace(".py\n", ".py || true\n"), 1),
+        "redirected": block.replace(guard, guard + "        working-directory: site\n", 1),
+        "after_install": block.replace(guard + install, install + guard, 1),
+        "after_build": block.replace(guard, "", 1).replace(build, build + guard, 1),
+        "build_before_audit": block.replace(build, "", 1).replace(audit, build + audit, 1),
+        "no_build": block.replace(build, "", 1),
+        "ignored_build": block.replace(build, build.replace("        run:", "        continue-on-error: true\n        run:"), 1),
+        "inherited_shell": block.replace("    steps:\n", "    defaults:\n      run:\n        shell: echo {0}\n    steps:\n", 1),
+        "ignored_job": block.replace("    steps:\n", "    continue-on-error: true\n    steps:\n", 1),
+        "missing_installed": block.replace(installed, "", 1),
+        "duplicate_installed": block.replace(installed, installed + installed, 1),
+        "conditional_installed": block.replace(installed, installed.replace("        run:", "        if: false\n        run:"), 1),
+        "ignored_installed": block.replace(installed, installed.replace("        run:", "        continue-on-error: true\n        run:"), 1),
+        "masked_installed": block.replace(installed, installed.replace("--installed\n", "--installed || true\n"), 1),
+        "redirected_installed": block.replace(installed, installed + "        working-directory: site\n", 1),
+        "installed_after_audit": block.replace(installed, "", 1).replace(audit, audit + installed, 1),
+        "installed_before_install": block.replace(install + installed, installed + install, 1),
+        "escaped_defaults": block.replace("    steps:\n", r'    "def\u0061ults":' + "\n      run:\n        shell: echo {0}\n    steps:\n", 1),
+        "escaped_continue_on_error": block.replace("    steps:\n", r'    "continue-on-err\u006fr": true' + "\n    steps:\n", 1),
+        "late_defaults": block.rstrip("\n") + "\n    defaults:\n      run:\n        shell: echo {0}\n",
+        "late_continue_on_error": block.rstrip("\n") + "\n    'continue-on-error': true\n",
+    }
+    # These are YAML mapping keys, including the exact two previously accepted forms.
+    for key, value in (("defaults", "\n      run:\n        shell: echo {0}\n"),
+                       ("continue-on-error", " true\n")):
+        for spelling in (key, "'" + key + "'", '"' + key + '"'):
+            for spacing in ("", " ", "\t"):
+                if spelling == key and not spacing:
+                    continue  # The two plain forms already occur above.
+                addition = "    " + spelling + spacing + ":" + value
+                mutations[f"header:{spelling}:{spacing!r}"] = block.replace("    steps:\n", addition + "    steps:\n", 1)
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_site_dependencies(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "site known dependency admission" in str(error) or "site cannot add job fields" in str(error), (label, error)
+        else:
+            raise AssertionError(label + " bypassed site dependency admission")
+    assert REAL_WORKFLOW.read_text(encoding="utf-8") == workflow
 
 
 if __name__ == "__main__":

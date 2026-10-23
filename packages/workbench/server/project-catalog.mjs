@@ -6,6 +6,7 @@ import { getH3App, mountActionRoutes } from "@agent-native/core/server";
 import { defineEventHandler } from "h3";
 import { z } from "zod";
 import { catalogSchema } from "../app/lib/project-catalog-schema.ts";
+import { workspaceKind } from "../shared/workspace-kind.ts";
 import { getDb } from "./db/index.mjs";
 import { bindings, projects, revisions } from "./db/schema.mjs";
 
@@ -24,8 +25,11 @@ function contextSnapshot(context) {
     .filter(key => typeof context[key] === "string").map(key => [key, context[key]])));
 }
 
-/** Installation-only arguments. Browser input cannot supply a resolver or root label map. */
-export function createProjectCatalog({ readScope, provider, locationLabels, canReconnect }) {
+/**
+ * Installation-only arguments. Browser input cannot supply a resolver or root label map. `kindEditable` says whether
+ * this host can save a project's Coding or Personal kind, so the client shows the kind controls only where they work.
+ */
+export function createProjectCatalog({ readScope, provider, locationLabels, canReconnect, kindEditable = false }) {
   if (typeof readScope !== "function" || typeof provider?.inspect !== "function") {
     throw new TypeError("project catalog requires the current native scope and trusted root provider");
   }
@@ -43,7 +47,7 @@ export function createProjectCatalog({ readScope, provider, locationLabels, canR
         eq(revisions.collectionId, scope.collectionId), eq(revisions.deviceId, scope.deviceId),
       ));
       const records = await tx.select({ projectId: projects.projectId, displayName: projects.displayName,
-        bindingRevision: bindings.bindingRevision, locationRef: bindings.locationRef, rootId: bindings.rootId,
+        workspaceKind: projects.workspaceKind, bindingRevision: bindings.bindingRevision, locationRef: bindings.locationRef, rootId: bindings.rootId,
         verificationKind: bindings.verificationKind,
       }).from(bindings).innerJoin(projects, eq(projects.projectId, bindings.projectId)).where(and(
         eq(bindings.actorId, scope.actorId), eq(bindings.collectionId, scope.collectionId),
@@ -84,11 +88,13 @@ export function createProjectCatalog({ readScope, provider, locationLabels, canR
           && bindingCounts.get(record.projectId) === 1
           && record.verificationKind === "local-stat-revalidated-v1"
           && reconnectable.get(record.locationRef) === true,
+        // The column check admits only these values. Anything else reads as Not set rather than failing the list.
+        workspaceKind: workspaceKind.safeParse(record.workspaceKind).data ?? null,
       });
     }
     return { code: "catalog", scopeKey: fingerprint({ actorId: scope.actorId,
       collectionId: scope.collectionId, deviceId: scope.deviceId }), policyRevision: scope.policyRevision,
-      registryRevision: snapshot.registryRevision,
+      registryRevision: snapshot.registryRevision, kindEditable: kindEditable === true,
       locations: scope.locationRefs.map(locationRef => ({ locationRef, displayName: labels[locationRef],
         status: observed.get(locationRef)?.code === "available" ? "available" : "unavailable" })),
       projects: [...byProject.values()].sort((left, right) => left.displayName.localeCompare(right.displayName)

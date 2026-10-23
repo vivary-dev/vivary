@@ -11,6 +11,27 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude replies recorded once
+
+Claude Code streams each assistant message and then repeats the last one as its
+result text. Core recorded both, so every reply was stored twice. The patch puts
+the engine, model and effort on each streamed reply event and records the result
+only when nothing streamed or the result differs from the last streamed message.
+`tests/claude-session-continuity.test.mjs` covers a single reply, a reply after a
+tool call, and a result with no streamed text. Workbench readers treat an exact
+repeat in older transcripts as one reply.
+
+## Message display renderers
+
+`dist/client/chat/message-text-renderers.js` holds two display registries,
+exported from `@agent-native/core/client/chat`. `registerMarkdownFenceRenderer`
+renders a fenced code language in chat Markdown with an app component, and
+`registerUserMessageTextRenderer` renders a matching user message. The `pre`
+component in `markdown-renderer.js` and `UserMessageText` in
+`message-components.js` consult them before their defaults. Stored message text
+and clipboard copies are unchanged. Vivary registers the handoff request and
+reply renderers in `app/components/workspace/HandoffDisplay.tsx`.
+
 ## Claude launcher and provider errors
 
 The optional `claudeCli` executor options preserve the resolved executable,
@@ -3367,3 +3388,83 @@ The resource schema and one-second autosave contract are unchanged. Code remains
 the source editor for syntax outside the Visual schema. Focused installed-component
 checks cover non-content updates, real edits, view switching, and height ownership.
 They do not establish Markdown display fidelity or native pixel acceptance.
+
+## Chat table long tokens
+
+A follow-up to the table wrapping change for issue #256. Workbench gives chat
+Markdown tables `width: auto`, so cell text wraps at spaces. A column still cannot
+be narrower than its longest unbroken string, so a long URL, hash, or identifier
+made the table scroll. The patch adds `th` and `td` to `markdownComponents` in
+`dist/client/chat/markdown-renderer.js`, and the plain branch of its `a` component
+applies the same helper to its children. `markLongTokens` wraps each run of 20 or
+more non-whitespace characters in a cell's text in
+`<span class="agent-markdown-long-token">`. It descends into plain elements such as
+`strong`, `em`, and `del`, since a long run in bold or struck text widens the
+column the same way. Inline `code`, `kbd`, `samp`, and `pre` stay whole. An element
+rendered by a component passes through unchanged, and the `a` component marks its
+own text, so a link inside bold text is marked once. The span adds no characters,
+so DOM text, selection, and hrefs match the unpatched rendering. The cells drop react-markdown's `node`
+prop and pass every other prop, so column alignment is kept. The new-chat and
+Builder link branches and `clipboardMarkdownComponents` are unchanged.
+`dist/client/chat/markdown-renderer.d.ts` declares the two components.
+
+Workbench's `app/global.css` lets only `.agent-markdown-table-wrap
+.agent-markdown-long-token` break anywhere. Short link text keeps breaking at
+spaces. `tests/markdown-reader.test.mjs` renders the installed components with
+react-markdown and remark-gfm and checks the spans, text, hrefs, code, cell
+attributes, and copied HTML. Remove these hunks when a pinned Core release lets
+long unbroken table text wrap without splitting ordinary words.
+
+## Read-only Markdown footnotes
+
+The Files reader and Settings > Documentation showed GFM footnotes as raw text.
+Toolkit's shared editor parses Markdown with tiptap-markdown, which uses plain
+markdown-it with no footnote syntax. `[^id]` references stayed literal, and
+consecutive `[^id]: note` definitions ran together as one paragraph.
+
+The Toolkit patch adds `dist/editor/footnotes.js` and a `features.footnotes`
+option to `createSharedEditorExtensions`. The option is off by default. When it
+is on, three nodes are added. `footnotes` registers markdown-it rules for
+definitions and references through tiptap-markdown's parse setup hook.
+`footnoteReference` renders a superscript link to `#fn-<number>`, and
+`footnoteItem` renders the note as the list item with that id. Following GFM,
+notes appear once in a list at the end in order of first reference, a reference
+with no definition stays text, and a definition that nothing references is not
+shown. Labels match ignoring case, through markdown-it's `normalizeReference`
+as for link references, and the first definition of a label wins. Only `\[`,
+`\]`, and `\\` escapes are accepted in a label. Any other backslash escape
+leaves the citation and definition outside footnote syntax. Citations inside
+Markdown link labels stay literal, including during silent scans for link
+boundaries, so a link label never contains a footnote anchor. A definition
+nested inside another becomes its own note, and the outer note keeps the blocks
+after it. Each node has a serializer that writes the footnote syntax back with
+the label as written, so a read-only reconcile that reads Markdown never falls
+back to placeholder text.
+
+The inline rule records reference identities without assigning numbers. After
+definition blocks are removed from the body, the tail rule numbers body
+references first, then scans each reached definition once in note order.
+References in those retained notes can reach further notes. Discarded duplicate
+definitions and definitions unreachable from body references contribute neither
+numbers nor return links. This also keeps definition placement from changing the
+number of a body's first citation.
+
+As in GFM's HTML, each reference link has its own id, `fnref-<number>` for the
+first reference to a note and `fnref-<number>-<k>` for its k-th. A fourth node,
+`footnoteBackref`, puts one return link per reference at the end of the note's
+last paragraph, or in a paragraph of its own when the note ends with another
+block. A return link points at its reference's id, reads "Back to reference 1"
+or "Back to reference 1-2", and shows `↩`, with the occurrence number after it
+from the second reference on. It adds no text and serializes to nothing, so the
+Markdown a read-only reconcile reads is unchanged.
+
+Only Workbench's two read-only routes pass `footnotes: true`, and their
+`focusFootnote` helper moves focus to a rendered note, and from a rendered return
+link back to its reference, without changing the route. Any other `#fn-` or
+`#fnref-` link keeps its normal handling. An
+editable document gets no footnote nodes, so its parse and save path is
+unchanged. That path already escapes `[^id]` as `\[^id\]` and joins
+consecutive definitions when it saves. `tests/markdown-reader.test.mjs` pins
+that output and the existing round-trip corpus, renders footnotes in the
+reader, and checks the route opt-ins. Remove these hunks when a pinned Toolkit
+release renders GFM footnotes in read-only views.

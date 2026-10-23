@@ -78,6 +78,10 @@ Windows Explorer can reject a deeply nested destination before the application s
 ### First launch
 
 1. Choose a project, use **Open folder**, or create a disposable project with **New project**.
+   Both ask whether the project is **Coding** or **Personal**. Coding opens new
+   conversations with a coding agent. Personal opens them as API chat. Either kind
+   of conversation stays available in every project. Cancel after Open folder
+   leaves the kind **Not set**, and you can set it later in Project details.
 2. Open **Runtime settings** to inspect the installed coding runtime and its readiness before sending a message.
 
 Both downloads hold the same application. It bundles Node, Python, and the
@@ -245,7 +249,13 @@ folder where another conversation's agent is working, Vivary shows a warning.
 Choose **Proceed** to work there anyway, **Use another folder** to open a
 separate folder or a Git worktree you made, or **Cancel** to close the warning
 and keep your draft. The warning shows a
-`git worktree add` command you can copy. This prerelease artifact predates the
+`git worktree add` command you can copy. Settings, Runtime limits how many Code
+conversations work at once on the host, 3 by default and up to 16. The default
+is a starting value, not a tested safe limit. Beyond it, a message queues and
+starts when a slot frees, or Vivary refuses it if you choose Refuse. The strip
+shows how many run and wait, and each waiting message has Cancel, which puts it
+back in your draft. After a restart, waiting messages are held until you choose
+Start. This prerelease artifact predates the
 switch and concurrent conversations. Codex integration
 includes its catalog, configured tools, action approvals, permission modes,
 follow-ups, progress, and Stop. Earlier Windows candidates exercised real Codex

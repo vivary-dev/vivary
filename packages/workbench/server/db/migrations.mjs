@@ -1,6 +1,6 @@
 import { runMigrations } from "@agent-native/core/db";
 
-export const migrateRegistry = runMigrations([{
+export const REGISTRY_MIGRATIONS = [{
   version: 1,
   name: "vivary-registry-registration-v1",
   sql: `
@@ -118,4 +118,14 @@ export const migrateRegistry = runMigrations([{
   );
   CREATE UNIQUE INDEX IF NOT EXISTS vivary_handoff_record_document
     ON vivary_handoff_records(project_id, binding_id, path);`,
-}], { table: "vivary_workbench_registry_migrations" });
+}, {
+  version: 7,
+  // Coding or Personal sets conversation defaults only. Existing projects stay
+  // null ("Not set") until the owner chooses. The registry decision engine and
+  // the portable project record do not carry this preference.
+  name: "vivary-project-workspace-kind-v1",
+  sql: `ALTER TABLE vivary_registry_projects ADD COLUMN workspace_kind TEXT
+    CHECK (workspace_kind IS NULL OR workspace_kind IN ('coding', 'personal'));`,
+}];
+
+export const migrateRegistry = runMigrations(REGISTRY_MIGRATIONS, { table: "vivary_workbench_registry_migrations" });

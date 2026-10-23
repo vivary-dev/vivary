@@ -13,6 +13,7 @@ import * as esbuild from "esbuild";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKBENCH = resolve(HERE, "..");
 const CONTROL = join(WORKBENCH, "app", "components", "layout", "CodeRunControl.tsx");
+const SETTINGS = join(WORKBENCH, "app", "components", "settings", "LocalRuntimeSettings.tsx");
 const CORE = dirname(realpathSync(join(WORKBENCH, "node_modules", "@agent-native", "core", "package.json")));
 
 const stubs = new Map([
@@ -20,14 +21,21 @@ const stubs = new Map([
     import { useSyncExternalStore } from "react";
     let state = { data: undefined, error: null };
     const listeners = new Set();
-    export const hostProof = { set(data) { state = { data, error: null }; for (const listener of listeners) listener(); } };
-    export function useActionQuery() {
+    // The host strip reads the host state. Runtime settings reads other actions, which answer from byName.
+    export const hostProof = { queries: [], byName: new Map(),
+      set(data) { state = { data, error: null }; for (const listener of listeners) listener(); },
+      fail(error) { state = { data: undefined, error }; for (const listener of listeners) listener(); },
+      answer(name, data) { this.byName.set(name, data); state = { ...state }; for (const listener of listeners) listener(); } };
+    export function useActionQuery(name, params, options) {
+      hostProof.queries.push({ name, options });
       const current = useSyncExternalStore(listener => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       }, () => state);
-      return { ...current, refetch: async () => current };
+      const read = hostProof.byName.has(name) ? { data: hostProof.byName.get(name), error: null } : current;
+      return { ...read, isPending: false, refetch: async () => read };
     }
+    export async function callAction() { return {}; }
     export function actionErrorMessage(failure) { return failure?.message; }`],
   ["../../lib/native-actions", `
     export const callProof = { calls: [], answer: null };
@@ -41,11 +49,22 @@ const stubs = new Map([
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
   ["react-router", `export function useNavigate() { return () => {}; }
     export function useLocation() { return { pathname: "/", search: "" }; }`],
+  ["../projects/open-project-folder", `export const folderProof = { available: false, opened: 0 };
+    export function useOpenProjectFolder() {
+      return { available: folderProof.available, choosing: false, error: undefined,
+        async openFolder() { folderProof.opened += 1; } }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
       return <button ref={ref} type="button" {...props} />;
-    });`],
+    });
+    export function Badge({ variant, ...props }) { return <span {...props} />; }
+    export function Skeleton(props) { return <span {...props} />; }`],
+  ["@agent-native/core/client/settings", `
+    export function SettingsGroup({ title, children }) { return <section aria-label={title}>{children}</section>; }
+    export function SettingsRow({ label, children }) { return <div aria-label={label}>{children}</div>; }`],
+  ["@tabler/icons-react", `export function IconExternalLink() { return null; }
+    export function IconRefresh() { return null; }`],
 ]);
 
 const proofSource = String.raw`
@@ -53,8 +72,10 @@ import assert from "node:assert/strict";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { CodeRunControl } from "@proof/CodeRunControl";
+import { LocalRuntimeSettings } from "@proof/LocalRuntimeSettings";
 import { hostProof } from "@agent-native/core/client/hooks";
 import { callProof } from "../../lib/native-actions";
+import { folderProof } from "../projects/open-project-folder";
 
 const HOST = { activeRuns: [], recentRun: null, busy: false };
 const NAMED = {
@@ -280,6 +301,108 @@ export async function eachRunningConversationHasItsOwnApprovalsAndStop() {
   } finally { await dispose(); }
 }
 
+export async function queuedConversationsShowCountsAndTheirOwnChoices() {
+  const queued = (id, title, state, extra = {}) => ({ id, title, projectId: null, workspaceLabel: "fixture",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z", state,
+    position: null, reason: null, ...extra });
+  const queuedRuns = [queued("run-waiting", "Write the changelog", "queued", { position: 1 }),
+    queued("run-held", "Rename the module", "held"),
+    queued("run-check", "Fix the tests", "needs-confirmation", { reason: "Other agents are working in this folder." })];
+  const { host, dispose } = await mount(null, { activeRuns: [activeRun(CLAUDE_RUN)], busy: true, queuedRuns,
+    capacity: { limit: 1, whenFull: "queue", running: 1, queued: 1, held: 2 } });
+  try {
+    assert.equal(host.querySelector('[role="status"]')?.textContent,
+      "1 running, 1 queued, 2 waiting for you (limit 1)");
+    const rows = [...host.querySelectorAll('[aria-label="Queued conversations"] > li')];
+    assert.deepEqual(rows.map(row => row.querySelector('[role="status"]')?.textContent), [
+      "Queued, position 1 in Personal workspace (Claude Code): Write the changelog",
+      "Held after restart in Personal workspace (Claude Code): Rename the module",
+      "Needs confirmation in Personal workspace (Claude Code): Fix the tests"]);
+    assert.deepEqual(rows.map(row => [...row.querySelectorAll("button")].map(item => item.textContent)), [
+      ["Open conversation", "Cancel"], ["Open conversation", "Start", "Cancel"], ["Open conversation", "Cancel", "Proceed"]]);
+    const press = async (row, label) => click([...row.querySelectorAll("button")].find(item => item.textContent === label));
+    await press(rows[0], "Cancel");
+    await press(rows[1], "Start");
+    await press(rows[2], "Proceed");
+    assert.deepEqual(callProof.calls.map(call => [call.name, call.params.operation, call.params.runId]), [
+      ["vivary-code-queue", "cancel", "run-waiting"], ["vivary-code-queue", "start", "run-held"],
+      ["vivary-code-queue", "proceed", "run-check"]], "each choice acts on its own queued conversation");
+  } finally { await dispose(); }
+}
+
+export async function queueOnlyStatusHasNoFalseLoadError() {
+  const item = { id: "run-held", title: "Write the changelog", projectId: null, workspaceLabel: "fixture",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z",
+    state: "held", position: null, reason: null };
+  const { host, dispose } = await mount(null, { queuedRuns: [item],
+    capacity: { limit: 1, whenFull: "queue", running: 0, queued: 0, held: 1 } });
+  try {
+    assert.ok(host.querySelector('[aria-label="Queued conversations"] > li'), "the successful query shows queued work");
+    assert.equal(host.textContent.includes("Agent status could not be loaded."), false,
+      "a successful queue-only response is not a load failure");
+    assert.equal(button(host, "Retry"), undefined, "a successful response needs no load retry");
+    assert.ok(button(host, "Cancel"), "queue controls remain available");
+
+    await act(async () => { hostProof.fail(new Error("The status request failed.")); });
+    assert.equal(host.textContent.includes("Agent status could not be loaded."), true,
+      "a real query failure still offers recovery");
+    assert.ok(button(host, "Retry"));
+  } finally { await dispose(); }
+}
+
+export async function useAnotherFolderOpensThePickerOnlyAfterTheCancel() {
+  const item = { id: "run-check", title: "Fix the tests", projectId: null, workspaceLabel: "fixture", engineLabel: "Claude Code",
+    model: "claude-sonnet-5-5", queuedAt: "2026-10-20T00:00:00.000Z", state: "needs-confirmation", position: null,
+    reason: "Other agents are working in this folder." };
+  folderProof.available = true;
+  folderProof.opened = 0;
+  const { host, dispose } = await mount(null, { queuedRuns: [item],
+    capacity: { limit: 1, whenFull: "queue", running: 0, queued: 0, held: 1 } });
+  const flush = () => act(async () => { for (let turn = 0; turn < 5; turn += 1) await Promise.resolve(); });
+  try {
+    // The cancel fails, for example because the turn started meanwhile. The message may still run in this folder.
+    callProof.answer = { then(_resolve, reject) { reject(new Error("That queued message was not found.")); } };
+    await click(button(host, "Use another folder"));
+    await flush();
+    assert.equal(folderProof.opened, 0, "a failed cancel opens no folder picker");
+    assert.equal(alertText(host), "That queued message was not found.");
+    callProof.answer = null;
+    await click(button(host, "Use another folder"));
+    await flush();
+    assert.equal(folderProof.opened, 1, "a confirmed cancel opens the picker");
+    assert.deepEqual(callProof.calls.map(call => [call.name, call.params.operation]),
+      [["vivary-code-queue", "cancel"], ["vivary-code-queue", "cancel"]]);
+  } finally {
+    folderProof.available = false;
+    callProof.answer = null;
+    await dispose();
+  }
+}
+
+export async function runtimeSettingsCountsRefreshWhileOpen() {
+  hostProof.queries.length = 0;
+  hostProof.answer("vivary-runtime-status", { runtimes: [] });
+  hostProof.answer("vivary-code-permissions", { mode: "normal" });
+  hostProof.answer("vivary-code-capacity", { limit: 2, whenFull: "queue", running: 1, queued: 0, held: 0 });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => { root.render(<LocalRuntimeSettings />); });
+  const counts = () => [...host.querySelectorAll('[role="status"]')].map(item => item.textContent).find(text => / running, /.test(text));
+  try {
+    assert.equal(counts(), "1 running, 0 queued.");
+    const reads = hostProof.queries.filter(query => query.name === "vivary-code-capacity");
+    assert.ok(reads.length > 0);
+    assert.equal(reads.at(-1).options?.refetchInterval, 1000, "the counts refresh on the strip's interval while the page is open");
+    await act(async () => { hostProof.answer("vivary-code-capacity", { limit: 2, whenFull: "queue", running: 2, queued: 1, held: 1 }); });
+    assert.equal(counts(), "2 running, 1 queued, 1 waiting for you.");
+  } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    hostProof.byName.clear();
+  }
+}
+
 export async function aStoppingRunHoldsItsStopOnly() {
   const runs = [activeRun(CLAUDE_RUN, { stopping: true }), activeRun(CODEX_RUN, { engineLabel: "Codex CLI" })];
   const { host, dispose } = await mount(null, { activeRuns: runs, busy: true });
@@ -311,6 +434,7 @@ async function buildProof() {
       setup(build) {
         build.onResolve({ filter: /.*/ }, args => {
           if (args.path === "@proof/CodeRunControl") return { path: CONTROL };
+          if (args.path === "@proof/LocalRuntimeSettings") return { path: SETTINGS };
           if (stubs.has(args.path)) return { path: args.path, namespace: "stub" };
           return undefined;
         });
@@ -321,6 +445,7 @@ async function buildProof() {
   });
   const inputs = Object.keys(result.metafile.inputs).map(input => resolve(WORKBENCH, input));
   assert.ok(inputs.includes(CONTROL), "the proof bundles the real CodeRunControl");
+  assert.ok(inputs.includes(SETTINGS), "the proof bundles the real LocalRuntimeSettings");
   return result.outputFiles[0].text;
 }
 
@@ -361,6 +486,10 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["the run's owner sees its failed stop's check in place of Stop", proof.theOwnerSeesItsFailedStopsCheckInPlaceOfStop],
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
+    ["queued conversations show the counts and their own Cancel, Start, and Proceed", proof.queuedConversationsShowCountsAndTheirOwnChoices],
+    ["queue-only status has no false load error and real errors still offer Retry", proof.queueOnlyStatusHasNoFalseLoadError],
+    ["Runtime settings refreshes the run counts while it is open", proof.runtimeSettingsCountsRefreshWhileOpen],
+    ["Use another folder opens the folder picker only after the cancel succeeds", proof.useAnotherFolderOpensThePickerOnlyAfterTheCancel],
   ]) await t.test(name, () => run());
 });
 

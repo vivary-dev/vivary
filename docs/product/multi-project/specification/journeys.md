@@ -18,7 +18,25 @@ On a wide display, a project/conversation navigation rail sits beside the active
 +------------------+--------------------------------+-----------------------+
 ```
 
-The diagram shows available regions, not mandatory open columns. Close each side independently. Reopening restores that client's prior selection and safe width. A document can expand for focused work, then return beside the conversation. Phone preferences must not overwrite desktop widths. At 390 px, navigation and work panels start closed and open as focused views with a clear return to the conversation.
+The diagram shows available regions, not mandatory open columns. Close each side independently. Reopening restores that client's prior selection and safe width. A document can expand for focused work, then return beside the conversation. Phone preferences must not overwrite desktop widths. At 390 px, navigation and work panels start closed. Where the conversation and a work panel cannot sit side by side (a window under 768 px or a split under 620 px), they switch views: a visible Conversation and panel switch above the work area chooses which one fills it. Opening a panel shows it, Conversation is one click or key press away, and closing the panel shows the conversation. While the panel covers a Code conversation, the Conversation option shows Working or Needs approval for the project's runs. Maximize panel and Full page also hide the conversation by choice, each with a visible way back.
+
+```mermaid
+stateDiagram-v2
+  [*] --> NoPanel
+  NoPanel --> SideBySide: open panel, split 620 px or wider
+  NoPanel --> PanelView: open panel, narrow window or split under 620 px
+  SideBySide --> PanelView: window narrows
+  PanelView --> SideBySide: window widens
+  PanelView --> ConversationView: choose Conversation
+  ConversationView --> PanelView: choose the panel, or its header tool
+  ConversationView --> SideBySide: window widens
+  SideBySide --> Maximized: Maximize panel or Full page
+  PanelView --> Maximized: Full page (Preview)
+  Maximized --> SideBySide: Restore or Back to workspace
+  Maximized --> PanelView: Back to workspace, narrow window or split under 620 px
+  SideBySide --> NoPanel: close panel
+  PanelView --> NoPanel: close panel
+```
 
 Acceptance: keyboard and pointer resize, close/reopen, maximize/restore, theme, 200% zoom, loading/empty/error states and long labels. Opening a panel must not remount an active chat, interrupt its stream, change project, approve work or lose a draft. Relevant actions: A001-A009 and M06.
 
@@ -41,7 +59,7 @@ stateDiagram-v2
 
 Missing and denied are distinct. Missing keeps authorized history and drafts readable with file-dependent execution disabled. Denied must protect history and files. The metadata/history read path must not require live folder resolution, but must still recheck current project authorization. Never silently select a different project. An active owned run keeps a Stop path even if its root disappears.
 
-Acceptance: two projects with different drafts and conversations. Fail selection/refresh. Move/remove one folder. Revoke access. Retry. Reopen the previous authorized history. Registration never creates instructions or adopts the folder. M02, M03 and M05 own this path.
+Acceptance: two projects with different drafts and conversations. Fail selection/refresh. Move/remove one folder. Revoke access. Retry. Reopen the previous authorized history. Registration never creates instructions or adopts the folder. The Coding or Personal choice that follows Open folder ([J06](#project-kind-coding-or-personal)) saves only a registry value. M02, M03 and M05 own this path.
 
 ## J03: Choose a model or another harness
 
@@ -73,15 +91,18 @@ stateDiagram-v2
   Working --> Idle: turn ends
 ```
 
+Implemented for Code conversations on 2026-10-19: one picker inside the prompt box groups model rows under Claude Code and Codex, with readiness beside an unavailable runtime and its models disabled. A choice on a new conversation selects the route. A choice on a retained conversation enters the in-place switch above. The linked conversation opens from the conversation actions menu, not from the picker. Logos and other registered harnesses remain target behavior.
+
 The single picker groups model rows under Claude Code, Codex and other supported registered harness names. Each group has a small trusted logo or generic fallback. Unknown brands cannot inject markup. Readiness appears beside unavailable entries. No preset persona is required. Optional user-authored profiles use the existing Native resource/settings owner or intentionally authored project instructions. A person can create/edit, select, clear and inspect their effective instruction sources. Selection applies to future explicitly requested context and records the profile revision. Clearing preserves history and does not claim prior model context was erased. Profiles cannot grant tool permissions or transfer approval.
 
 ```mermaid
 stateDiagram-v2
   [*] --> CurrentConversation
-  CurrentConversation --> Picker: open model menu
-  Picker --> CurrentConversation: cancel
-  Picker --> CurrentConversation: compatible same-harness model change
-  Picker --> Linking: choose different harness
+  CurrentConversation --> Picker: open runtime and model picker
+  Picker --> CurrentConversation: Escape
+  Picker --> CurrentConversation: choice on a new conversation, route selected
+  Picker --> InPlaceSwitch: choice on a retained conversation, first chart
+  CurrentConversation --> Linking: Open linked conversation in the actions menu
   Linking --> LinkedConversation: destination reference created
   Linking --> CurrentConversation: refused or failed, retain draft
   LinkedConversation --> PendingRequest: explicit send
@@ -163,8 +184,24 @@ stateDiagram-v2
   state "Proceeded in this folder" as Proceeded
   state "Separate folder or worktree" as Elsewhere
   state "Awaiting tool approval" as AwaitingToolApproval
+  state "Queued for a slot" as Queued
+  state "Held for the owner" as Held
+  state "Needs confirmation" as NeedsConfirmation
   [*] --> Idle
   Idle --> Busy: send, no other agent in an overlapping folder
+  Idle --> Queued: send while every slot is in use, Queue setting
+  Idle --> Idle: send while every slot is in use, Refuse setting, limit named
+  Queued --> Busy: a slot frees, oldest first, fresh checks pass
+  Queued --> NeedsConfirmation: an agent started in its folder since it queued
+  Queued --> Held: another fresh check refused, reason shown
+  Queued --> Held: host restart
+  Held --> Queued: Start
+  NeedsConfirmation --> Queued: Proceed
+  NeedsConfirmation --> Elsewhere: Use another folder, message back in the draft
+  Queued --> Idle: Cancel or Stop, nothing started, message back in the draft
+  Held --> Idle: Cancel
+  NeedsConfirmation --> Idle: Cancel
+  Queued --> Queued: second send refused
   Idle --> Warning: another agent works in an overlapping folder
   Warning --> Proceeded: Proceed
   Warning --> Elsewhere: Use another folder
@@ -241,6 +278,34 @@ sequenceDiagram
   Original-->>View: Actual receipt and recovery if partial
   View-->>User: Open registered project conversation
 ```
+
+### Project kind: Coding or Personal
+
+The owner chose this on 2026-10-19. New project and Open folder ask for one of two kinds in a modal. **Coding** starts new conversations with a coding agent (Claude Code or Codex) and uses `STATE.md` for handoff. **Personal** starts new conversations as API chat for notes, research and writing. The kind sets defaults and locks nothing: Code conversations and API chat stay available in every project. Not set and the Personal workspace keep the Code default.
+
+```mermaid
+stateDiagram-v2
+  state "Not set" as NotSet
+  [*] --> AskNew: New project
+  AskNew --> Form: choose Coding or Personal (fills the preset)
+  AskNew --> [*]: cancel, nothing created
+  Form --> AskNew: change kind
+  Form --> Coding: create with Coding
+  Form --> Personal: create with Personal
+  Form --> [*]: cancel, nothing created
+  [*] --> Registered: Open folder registers the folder, no files written
+  NotSet --> Registered: Open folder finds the folder already registered
+  Registered --> Coding: choose Coding, registry row only
+  Registered --> Personal: choose Personal, registry row only
+  Registered --> NotSet: cancel
+  [*] --> NotSet: project registered before migration 7
+  NotSet --> Coding: owner sets kind in Project details
+  NotSet --> Personal: owner sets kind in Project details
+  Coding --> Personal: owner changes kind
+  Personal --> Coding: owner changes kind
+```
+
+The project is selected after the Open folder choice or cancel, so its first conversation already follows the kind. A saved or requested conversation surface still wins over the kind. No path sets a kind without the owner's choice. Only the local host saves a kind. A configured installation shows the kind in Project details without a control, and its Open folder does not ask. Acceptance: both kinds from New project and Open folder, cancel at each step, keyboard-only choice, an upgraded profile whose projects show Not set, and a folder whose files are unchanged after Open folder and a kind choice.
 
 Skip VCS, repository host, template and Brain independently. Adoption preserves existing instructions/tooling and makes conflicts visible. A built-in pattern is editable workspace content, not a mandatory agent personality. External templates remain held until their separate prerequisites and owner decision pass. Test empty/populated/no-VCS folders, changed files after preview, duplicate submit and partial application.
 

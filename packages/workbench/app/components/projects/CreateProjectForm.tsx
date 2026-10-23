@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconFileText } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { RegistrationResult } from "@/lib/project-catalog-schema";
 import { WorkspacePatternChoices } from "./WorkspacePatternChoices";
+import { WORKSPACE_KIND_PRESET, workspaceKindLabel, type WorkspaceKind } from "../../../shared/workspace-kind.ts";
 import { workspacePatternCatalog, workspacePreset, type WorkspacePatternChoice,
   type WorkspacePatternDefinition, type WorkspacePreset } from "../../../shared/workspace-patterns.ts";
 
@@ -28,26 +29,40 @@ type Created = {
   target: string;
   planSha256: string;
   registration: RegistrationResult;
+  kindSaved?: boolean;
 };
 type CreateResult = Created | { code: "plan-changed" };
 
 export function CreateProjectForm({
   disabled,
+  workspaceKind,
+  onChangeKind,
+  onNameInputReady,
   onClose,
   onCreated,
 }: {
   disabled: boolean;
+  workspaceKind: WorkspaceKind;
+  onChangeKind: (trigger: HTMLButtonElement) => void;
+  onNameInputReady?: (input: HTMLInputElement) => void;
   onClose: () => void;
-  onCreated: (projectId: string) => Promise<boolean>;
+  onCreated: (projectId: string, kindSaved: boolean) => Promise<boolean>;
 }) {
   const { call, ready } = useNativeActionCaller();
+  const nameInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
-  const [preset, setPreset] = useState<WorkspacePreset>("coding");
+  const [preset, setPreset] = useState<WorkspacePreset>(WORKSPACE_KIND_PRESET[workspaceKind]);
   const [catalog, setCatalog] = useState<WorkspacePatternDefinition[] | null>(null);
   const [patternChoices, setPatternChoices] = useState<WorkspacePatternChoice[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [working, setWorking] = useState<"preview" | "create" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // A changed kind starts from that kind's guidance preset. The owner can still pick another one below.
+  useEffect(() => {
+    setPreset(WORKSPACE_KIND_PRESET[workspaceKind]);
+    setPreview(null);
+  }, [workspaceKind]);
 
   useEffect(() => {
     if (!ready) return;
@@ -83,6 +98,7 @@ export function CreateProjectForm({
       const result = await call<CreateResult>("vivary-create-new-project", {
         name,
         preset,
+        workspaceKind,
         displayName: name,
         acceptedPlanSha256: preview.plan.plan_sha256,
         patternChoices,
@@ -97,7 +113,7 @@ export function CreateProjectForm({
         setMessage("The files were created, but the project could not be registered. Retry creation.");
         return;
       }
-      if (await onCreated(registration.projectId)) {
+      if (await onCreated(registration.projectId, result.kindSaved !== false)) {
         onClose();
       } else {
         setMessage("Project created. Retry selecting it from the Projects list.");
@@ -110,9 +126,16 @@ export function CreateProjectForm({
   }
 
   const unavailable = disabled || !ready || catalog === null || working !== null;
+  useEffect(() => {
+    if (!unavailable && nameInput.current?.isConnected) onNameInputReady?.(nameInput.current);
+  }, [unavailable, onNameInputReady]);
+
   return <form className="project-registration" onSubmit={previewProject} aria-label="Create project">
+    <p className="project-kind-summary">Project kind: <strong>{workspaceKindLabel(workspaceKind)}</strong>
+      <Button size="sm" variant="ghost" type="button" disabled={unavailable}
+        onClick={event => onChangeKind(event.currentTarget)}>Change</Button></p>
     <label htmlFor="new-project-name">Project name</label>
-    <Input id="new-project-name" value={name} autoComplete="off" maxLength={128}
+    <Input ref={nameInput} id="new-project-name" value={name} autoComplete="off" maxLength={128}
       pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" disabled={unavailable}
       aria-describedby="new-project-name-help"
       title="Use 1 to 128 ASCII letters, numbers, periods, underscores, or hyphens. Start with a letter or number. Do not end with a period. Do not use CON, PRN, AUX, NUL, COM1 through COM9, or LPT1 through LPT9."
