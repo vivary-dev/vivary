@@ -1,4 +1,4 @@
-"""Async wire regressions against the official MCP 2.0.0 SDK."""
+"""Async wire regressions against the official MCP 2.2.0 SDK."""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ try:
     _MCP_DISTRIBUTION = distribution("mcp")
     _MCP_TYPES_DISTRIBUTION = distribution("mcp-types")
 except PackageNotFoundError:
-    pytest.skip("official mcp==2.0.0 and mcp-types==2.0.0 are required", allow_module_level=True)
+    pytest.skip("official mcp==2.2.0 and mcp-types==2.2.0 are required", allow_module_level=True)
 
-if _MCP_DISTRIBUTION.version != "2.0.0" or _MCP_TYPES_DISTRIBUTION.version != "2.0.0":
-    pytest.skip("official mcp==2.0.0 and mcp-types==2.0.0 are required", allow_module_level=True)
+if _MCP_DISTRIBUTION.version != "2.2.0" or _MCP_TYPES_DISTRIBUTION.version != "2.2.0":
+    pytest.skip("official mcp==2.2.0 and mcp-types==2.2.0 are required", allow_module_level=True)
 
-mcp = pytest.importorskip("mcp", reason="official mcp==2.0.0 is required")
-types = pytest.importorskip("mcp.types", reason="official mcp==2.0.0 types are required")
-mcp_types = pytest.importorskip("mcp_types", reason="official mcp-types==2.0.0 is required")
+mcp = pytest.importorskip("mcp", reason="official mcp==2.2.0 is required")
+types = pytest.importorskip("mcp.types", reason="official mcp==2.2.0 types are required")
+mcp_types = pytest.importorskip("mcp_types", reason="official mcp-types==2.2.0 is required")
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
@@ -146,8 +146,8 @@ def anyio_backend() -> str:
 
 
 def test_official_sdk_distributions_are_exactly_pinned() -> None:
-    assert _MCP_DISTRIBUTION.version == "2.0.0"
-    assert _MCP_TYPES_DISTRIBUTION.version == "2.0.0"
+    assert _MCP_DISTRIBUTION.version == "2.2.0"
+    assert _MCP_TYPES_DISTRIBUTION.version == "2.2.0"
 
 
 @pytest.mark.anyio
@@ -286,12 +286,14 @@ async def test_typed_cancellation_stops_cooperative_producer_before_recovery(mon
     exited = threading.Event()
     cancellation_notification_observed = anyio.Event()
     cancelled_notifications: list[Any] = []
+    producer_threads: list[threading.Thread] = []
     calls = 0
 
     def producer(_tool: str, _root: str, _arguments: dict[str, Any], cancelled: Callable[[], bool]) -> dict[str, Any]:
         nonlocal calls
         calls += 1
         if calls == 1:
+            producer_threads.append(threading.current_thread())
             started.set()
             try:
                 while not cancelled():
@@ -325,6 +327,12 @@ async def test_typed_cancellation_stops_cooperative_producer_before_recovery(mon
             await cancellation_notification_observed.wait()
         await _wait_for_thread_event(cancellation_observed)
         await _wait_for_thread_event(exited)
+        # The producer returns before its one-shot worker validates the result
+        # and releases admission. Join that worker before expecting recovery.
+        await _within_wire_deadline(
+            anyio.to_thread.run_sync(producer_threads[0].join, _WIRE_TIMEOUT_SECONDS)
+        )
+        assert not producer_threads[0].is_alive()
         recovered = await _within_wire_deadline(client.call_tool("vivary_query", _QUERY_ARGUMENTS))
 
     assert recovered.is_error is False

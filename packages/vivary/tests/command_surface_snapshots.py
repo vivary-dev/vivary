@@ -519,7 +519,7 @@ SNAPSHOTS = {
         "stderr": (
             "usage: vivary [-h] [--version] {logs,email,create,adopt,doctor,capabilities,\n"
             "       check,find,decide,review,impact,control} ...\n"
-            "vivary: error: argument command: invalid choice: 'nope' (choose from 'logs', 'email', 'create', 'adopt', 'doctor', 'capabilities', 'check', 'find', 'decide', 'review', 'impact', 'control')\n"
+            "vivary: error: argument command: invalid choice: 'nope' (choose from logs, email, create, adopt, doctor, capabilities, check, find, decide, review, impact, control)\n"
         ),
     },
     "vivary-help": {
