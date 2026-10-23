@@ -75,6 +75,15 @@ def verify_certifi(data):
         raise ValueError("certifi wheel differs from the authenticated 2026.10.23 artifact")
 
 
+def certifi_ca_bytes(data):
+    verify_certifi(data)
+    with zipfile.ZipFile(io.BytesIO(data)) as certifi:
+        bundle = certifi.read("certifi/cacert.pem")
+    if hashlib.sha256(bundle).hexdigest() != CERTIFI_CA_SHA256:
+        raise ValueError("certifi CA differs from the authenticated 2026.10.23 bundle")
+    return bundle
+
+
 def patched_pip_bytes(pip_bytes, certifi_bytes):
     if hashlib.sha256(pip_bytes).hexdigest() != PIP_SHA256:
         raise ValueError("pip input differs from the authenticated upstream wheel")

@@ -75,6 +75,15 @@ class BundleTests(unittest.TestCase):
             target.unlink(); target.symlink_to(pip)
             with self.assertRaises(ValueError): prepare(pip, cert, target)
 
+    def test_exported_certifi_bundle_requires_both_authenticated_wheel_and_ca_digest(self):
+        extract = policy['certifi_ca_bytes']
+        with mock.patch.dict(g, CERTIFI_CA_SHA256=hashlib.sha256(b'new CA').hexdigest()):
+            self.assertEqual(extract(self.certifi), b'new CA')
+            with self.assertRaisesRegex(ValueError, 'authenticated.*artifact'):
+                extract(self.certifi + b'changed wheel')
+        with self.assertRaisesRegex(ValueError, 'authenticated.*bundle'):
+            extract(self.certifi)
+
     def test_filter_removes_only_selected_der_and_preserves_order(self):
         def pem(data):
             return b'-----BEGIN CERTIFICATE-----\n'+base64.b64encode(data)+b'\n-----END CERTIFICATE-----'

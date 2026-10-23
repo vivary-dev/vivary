@@ -4,7 +4,10 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import ssl
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -15,6 +18,7 @@ GUARD = Path(__file__).resolve().parents[1] / "check_pip_runtime.py"
 SPEC = importlib.util.spec_from_file_location("pip_runtime_guard", GUARD)
 guard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(guard)
+CA_VARIABLES = {"PIP_CERT", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
 
 class StableVersionTests(unittest.TestCase):
@@ -43,6 +47,10 @@ class StableVersionTests(unittest.TestCase):
 
 class PipRuntimeTests(unittest.TestCase):
     def setUp(self):
+        environment = mock.patch.dict(os.environ, {name: value for name, value in os.environ.items()
+                                                   if name not in CA_VARIABLES}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -105,6 +113,54 @@ class PipRuntimeTests(unittest.TestCase):
                     self.ca.write_bytes(b"inert qualified CA fixture")
                     self.certifi.__file__ = str(self.module)
                 with self.assertRaisesRegex(RuntimeError, "qualified certifi"):
+                    guard.assert_pip_runtime()
+
+    def test_each_effective_certificate_override_must_match_the_qualified_ca(self):
+        changed = self.root / "unrelated-host-roots.pem"
+        changed.write_bytes(b"unrelated CA fixture")
+        for name in ("PIP_CERT", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+            with self.subTest(name=name), mock.patch.dict(os.environ, {name: str(changed)}):
+                with self.assertRaisesRegex(RuntimeError, "certificate override"):
+                    guard.assert_pip_runtime()
+
+    def test_qualified_exact_copies_are_admitted_for_each_effective_override(self):
+        copy = self.root / "qualified-copy.pem"
+        copy.write_bytes(self.ca.read_bytes())
+        for name in ("PIP_CERT", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+            with self.subTest(name=name), mock.patch.dict(os.environ, {name: str(copy)}):
+                self.assertEqual(guard.assert_pip_runtime()["ca"], str(self.ca))
+
+    def test_pip_cert_and_requests_effective_bundle_are_independently_admitted(self):
+        changed = self.root / "unrelated-host-roots.pem"
+        changed.write_bytes(b"unrelated CA fixture")
+        for values in ({"PIP_CERT": str(changed), "REQUESTS_CA_BUNDLE": str(self.ca)},
+                       {"PIP_CERT": str(self.ca), "REQUESTS_CA_BUNDLE": str(changed)},
+                       {"PIP_CERT": str(self.ca), "CURL_CA_BUNDLE": str(changed)}):
+            with self.subTest(values=tuple(values)), mock.patch.dict(os.environ, values):
+                with self.assertRaisesRegex(RuntimeError, "certificate override"):
+                    guard.assert_pip_runtime()
+
+    def test_requests_qualified_bundle_takes_precedence_over_unrelated_curl_bundle(self):
+        changed = self.root / "unrelated-host-roots.pem"
+        changed.write_bytes(b"unrelated CA fixture")
+        with mock.patch.dict(os.environ, REQUESTS_CA_BUNDLE=str(self.ca), CURL_CA_BUNDLE=str(changed)):
+            guard.assert_pip_runtime()
+        with mock.patch.dict(os.environ, REQUESTS_CA_BUNDLE="", CURL_CA_BUNDLE=str(changed)):
+            with self.assertRaisesRegex(RuntimeError, "certificate override"):
+                guard.assert_pip_runtime()
+        with mock.patch.dict(os.environ, REQUESTS_CA_BUNDLE="", CURL_CA_BUNDLE=str(self.ca)):
+            guard.assert_pip_runtime()
+
+    def test_certificate_override_requires_a_plain_absolute_exclusive_file(self):
+        copy = self.root / "qualified-copy.pem"
+        copy.write_bytes(self.ca.read_bytes())
+        alias = self.root / "qualified-alias.pem"
+        alias.symlink_to(copy)
+        hardlink = self.root / "qualified-hardlink.pem"
+        os.link(copy, hardlink)
+        for path in (Path("relative.pem"), self.root, alias, hardlink, self.root / "missing.pem"):
+            with self.subTest(path=path.name), mock.patch.dict(os.environ, PIP_CERT=str(path)):
+                with self.assertRaisesRegex(RuntimeError, "certificate override"):
                     guard.assert_pip_runtime()
 
     def test_equivalent_stable_two_component_versions_pass(self):
@@ -178,6 +234,49 @@ class PipRuntimeTests(unittest.TestCase):
             self.assertEqual(guard.main(), 0)
         self.assertEqual(json.loads(output.getvalue())["pip"], "26.2.2")
         self.assertEqual(self.runtime.stderr.getvalue(), "")
+
+
+class ActualPipRequestsTests(unittest.TestCase):
+    def test_qualified_actual_session_uses_the_same_environment_precedence_offline(self):
+        # Inspect local metadata/CA bytes before importing the optional real pip.
+        # This is an offline settings test, not a TLS handshake or CI-pass claim.
+        if (sys.implementation.name != "cpython" or tuple(sys.version_info) != (3, 12, 15, "final", 0)
+                or ssl.OPENSSL_VERSION.split()[:2] != ["OpenSSL", "3.5.9"] or not sys.flags.isolated):
+            self.skipTest("actual session test requires the qualified isolated CPython/OpenSSL runtime")
+        try:
+            distribution = importlib.metadata.distribution("pip")
+            ca = Path(distribution.locate_file("pip/_vendor/certifi/cacert.pem"))
+            qualified = (distribution.version == "26.2.2" and ca.is_file()
+                         and guard.hashlib.sha256(ca.read_bytes()).hexdigest() == guard.CA_POLICY["CERTIFI_CA_SHA256"])
+        except (OSError, importlib.metadata.PackageNotFoundError):
+            qualified = False
+        if not qualified:
+            self.skipTest("actual pip 26.2.2 with the qualified certifi overlay is unavailable")
+        clean = {name: value for name, value in os.environ.items() if name not in CA_VARIABLES}
+        with mock.patch.dict(os.environ, clean, clear=True), tempfile.TemporaryDirectory() as temporary:
+            guard.assert_pip_runtime()
+            session_type = importlib.import_module("pip._internal.network.session").PipSession
+            copy, changed = Path(temporary) / "qualified.pem", Path(temporary) / "unrelated.pem"
+            copy.write_bytes(ca.read_bytes())
+            changed.write_bytes(b"unrelated CA fixture")
+            with session_type(retries=0) as session, \
+                    mock.patch.object(session_type, "send", side_effect=AssertionError("offline settings test cannot network")) as send:
+                settings = lambda: session.merge_environment_settings("https://example.invalid/", {}, None, None, None)["verify"]
+                self.assertIs(settings(), True)
+                with mock.patch.dict(os.environ, CURL_CA_BUNDLE=str(changed)):
+                    self.assertEqual(settings(), str(changed))
+                    with self.assertRaisesRegex(RuntimeError, "certificate override"):
+                        guard.assert_pip_runtime()
+                with mock.patch.dict(os.environ, REQUESTS_CA_BUNDLE=str(copy), CURL_CA_BUNDLE=str(changed)):
+                    self.assertEqual(settings(), str(copy))
+                    guard.assert_pip_runtime()
+                # Requests can override pip's explicit session CA as well.
+                session.verify = str(copy)
+                with mock.patch.dict(os.environ, PIP_CERT=str(copy), CURL_CA_BUNDLE=str(changed)):
+                    self.assertEqual(settings(), str(changed))
+                    with self.assertRaisesRegex(RuntimeError, "certificate override"):
+                        guard.assert_pip_runtime()
+                send.assert_not_called()
 
 
 if __name__ == "__main__":

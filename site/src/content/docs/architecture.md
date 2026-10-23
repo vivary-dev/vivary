@@ -1553,7 +1553,10 @@ and the certificate-store boundaries remain unchanged.
 share an authenticated certifi 2026.10.23 overlay for pip 26.2.2, retaining pip's
 vendored import rewrites and distlib. The same derived wheel supplies build pip
 and retained ensurepip seeds, so a new venv does not restore the older CA bundle.
-Actual pip admission binds the loaded vendor path, version and CA digest. CI pip
+Actual pip admission binds the loaded vendor path, version and CA digest, and
+rejects broader effective pip/Requests certificate overrides. Provisioning binds
+both clients to a separate authenticated copy of the exact certifi anchors;
+general Python/native/build clients retain the filtered host-derived bundle. CI pip
 commands explicitly use the verified certifi store without adding host truststore
 roots, including Windows CryptoAPI, while retaining TLS verification. Private
 build-client bundles exclude C1/C3 alongside the existing G3 exclusion while
