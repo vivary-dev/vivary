@@ -139,7 +139,7 @@ if os.name == "nt":
 __version__ = "0.1.3"
 
 PROTOCOL_VERSION = "2026-07-28"
-MCP_SCHEMA_REVISION = "mcp-types==2.0.0"
+MCP_SCHEMA_REVISION = "mcp-types==2.2.0"
 CONFORMANCE_HARNESS_REVISION = "@modelcontextprotocol/conformance@0.2.0-alpha.10"
 
 MAX_STDIN_LINE_BYTES = 65_536

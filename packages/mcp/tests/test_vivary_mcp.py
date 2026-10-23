@@ -104,7 +104,7 @@ def adapter():
 
 def test_contract_pins_current_protocol_schema_and_unrun_harness(adapter):
     assert adapter.PROTOCOL_VERSION == "2026-07-28"
-    assert adapter.MCP_SCHEMA_REVISION == "mcp-types==2.0.0"
+    assert adapter.MCP_SCHEMA_REVISION == "mcp-types==2.2.0"
     assert (
         adapter.CONFORMANCE_HARNESS_REVISION
         == "@modelcontextprotocol/conformance@0.2.0-alpha.10"
