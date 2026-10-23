@@ -701,6 +701,19 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 
 ## Delivery and known gaps
 
+Build and publication have a runtime admission boundary separate from the
+application's project and session owners. Native workflow setup binds the actual
+ancestor Worker's action interpreter and retains its complete admission after a
+hash-bound repair of known affected Node bytes. Jobs provision authenticated
+standalone CPython 3.12.15, replace its retained pip seed with the verified
+certificate overlay, export filtered task trust, and admit its loaded OpenSSL
+3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
+isolated package clients and Go 1.26.10 compiler builds before executing
+dependencies; the Workbench lock is checked first and its dev feature
+test lists and Native patch remain intact. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md)
+owns artifact pins, client isolation, and the remaining native verification.
+Standalone Node evidence does not admit Electron or authorize publication.
+
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
 
 Issue #19's five project read reports entered `dev` in PR #89. Its receipt records hosted fake-provider proof and the Windows packages, including the final `e6ccddf5` package, which passed the panel reads and the agent turn. PR #94 recorded that result, and the owner closed issue #19 on 2026-09-26. PR #90 added [route-question research](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/research/tropo-find-route-questions.md) only. It did not change Tropo's public path refusal or MCP privacy rules.
@@ -722,6 +735,43 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Private artifact paths. The action-Node bootstrap canonicalizes its
+newly created private temporary directory before creating the download, retaining
+all path, hash and owning-Worker checks. This handles Windows temporary-directory
+aliases without changing runner custody. Kernel lease tests select the explicit
+physical qualified Node binary, then authenticate its hash before execution;
+package-client wrappers cannot stand in for the fixture executable. The selected
+runner's complete admission guard remains unchanged. Live package-client probes
+also receive that executable and the provisioned tool root, so hosted CI runs
+their identity, child-certificate and lifecycle assertions rather than skipping
+those probes.
+
+2026-10-23 Independent dev security prerequisites. CI and the existing review,
+npm-publish, stats, and steward workflows receive the same guarded runtime
+boundary without importing the stacked session features. Workbench keeps dev's
+Native patch and feature scripts while its lock receives the reviewed security
+overrides, including SQLite 13.0.3's N-API binding. Runtime, package, and installer
+entry checks bind executable bytes and keep Electron publication held. CI's
+Python jobs provision and admit the authenticated runtime and retained
+seed before package use; its filtered CA context reaches Python, pip and uv.
+All three Workbench jobs provision isolated clients and rebuilt compilers before
+installation. Linux type checking retains route generation before rebuilt
+TypeScript, and release packing uses the same isolated npm. Focused source
+contracts, runtime/packaging boundary tests, and lock admission support this
+change; full hosted CI, installed dependency compatibility, native Windows
+execution, Electron remediation, and installer acceptance remain incomplete.
+Project/session execution and storage owners above are unchanged.
+
+2026-10-23 Python certificate and seed preservation. Desktop packaging now pins
+CPython 3.12.15 and authenticates its pip 26.2.2/setuptools 84.1.0 build inputs.
+The shared certifi 2026.10.23 overlay preserves pip's vendor imports and distlib,
+changes only the certificate/version data and corresponding metadata, and binds
+both the offline builder and retained ensurepip seeds. Fresh venvs therefore do
+not restore the older trust bundle. The seven-package runtime closure and profile
+paths are unchanged. C1/C3 removal is not evidence of exploitation. The
+[desktop runtime contract](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md) describes this boundary;
+source verification does not replace Windows or Electron release acceptance.
 
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff

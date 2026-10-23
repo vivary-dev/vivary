@@ -24,6 +24,11 @@ permissions:
   contents: read
   pull-requests: read
 
+# Build-isolation pip children inherit this; isolated parent commands also pass
+# the explicit flag. Keep TLS verification while excluding host-store additions.
+env:
+  PIP_USE_DEPRECATED: legacy-certs
+
 jobs:
   changes:
     name: changed paths
@@ -31,7 +36,713 @@ jobs:
     outputs:
       site: ${{ steps.scope.outputs.site }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - &runner_action_node_bootstrap
+        name: runner action Node admission
+        id: runner_action_node
+        shell: python -I -B {0}
+        run: |
+          import types
+
+          RUNNER_ADMISSION_SOURCE = r'''"""Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
+
+          import ctypes
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          import platform
+          import re
+          import struct
+          import subprocess
+          import sys
+          import threading
+
+
+          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+          # Checked by the controller on 2026-10-21. CVE-2026-111497 is a Brotli
+          # out-of-bounds write / RCE on all three lines. This is known-advisory coverage,
+          # not a zero-vulnerability claim or permission to select another project runtime.
+          FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
+          MAX_ANCESTORS = 64
+          PROBE_TIMEOUT = 10
+          KNOWN_SELECTION_FLAGS = {
+              "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
+              "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION",
+              "ACTIONS_RUNNER_FORCED_INTERNAL_NODE_VERSION",
+          }
+
+
+          def refuse(message):
+              raise RuntimeError("Runner action Node: " + message)
+
+
+          def node_version(value, selected_major=None):
+              if not isinstance(value, str) or not re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value):
+                  refuse("malformed or prerelease version")
+              major, minor, patch = map(int, value.removeprefix("v").split("."))
+              if major not in FLOORS or (minor, patch) < FLOORS[major]:
+                  refuse("EOL, unknown or advisory-affected Node release")
+              if selected_major is not None and major != selected_major:
+                  refuse("the action interpreter must actually be Node 24")
+              return f"{major}.{minor}.{patch}"
+
+
+          def check_selection_overrides(environment):
+              # Examined runner dispatch leaves explicit node24 on node24 for the known
+              # migration flags. Internal-function selection does not select action Node.
+              for name, value in environment.items():
+                  if value and "NODE" in name and name.startswith(("ACTIONS_", "FORCE_JAVASCRIPT_")) and name not in KNOWN_SELECTION_FLAGS:
+                      refuse("unproved selection override " + name)  # Report names, never values.
+
+
+          def check_host(system, machine, environment, container=False):
+              if system not in ("linux", "win32") or machine.lower() not in ("x86_64", "amd64") or struct.calcsize("P") != 8:
+                  refuse("only native Linux/Windows x64 hosts are supported")
+              if environment.get("RUNNER_ARCH", "X64") != "X64" or environment.get("RUNNER_OS", {"linux": "Linux", "win32": "Windows"}[system]) != {"linux": "Linux", "win32": "Windows"}[system]:
+                  refuse("runner OS/architecture disagrees with the native host")
+              if container:
+                  refuse("container execution is unsupported")
+              check_selection_overrides(environment)
+
+
+          def container_host(system):
+              if any(os.environ.get(name) for name in ("CONTAINER_SANDBOX_MOUNT_POINT", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_RUNNING_IN_CONTAINERS")):
+                  return True
+              if system == "linux":
+                  if any(Path(name).exists() for name in ("/.dockerenv", "/run/.containerenv", "/run/systemd/container")):
+                      return True
+                  return bool(re.search(r"docker|kubepods|containerd|lxc", Path("/proc/1/cgroup").read_text()))
+              return False
+
+
+          def parse_linux_stat(text):
+              pid, separator, rest = text.partition(" (")
+              name, closing, tail = rest.rpartition(") ")
+              fields = tail.split()
+              if not separator or not closing or not pid.isdecimal() or len(fields) < 20 or fields[0] in ("Z", "X"):
+                  refuse("unreadable Linux process identity")
+              try:
+                  return {"pid": int(pid), "ppid": int(fields[1]), "created": int(fields[19])}
+              except ValueError:
+                  refuse("malformed Linux process identity")
+
+
+          def linux_process(pid):
+              folder = Path("/proc") / str(pid)
+              before = parse_linux_stat((folder / "stat").read_text())
+              executable = os.readlink(folder / "exe")
+              after = parse_linux_stat((folder / "stat").read_text())
+              if before != after or before["pid"] != pid or executable.endswith(" (deleted)") or not Path(executable).is_absolute():
+                  refuse("Linux process disappeared, changed or reused its PID")
+              return {**before, "exe": str(Path(executable).resolve(strict=True))}
+
+
+          def windows_process(pid):
+              from ctypes import wintypes
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              ntdll = ctypes.WinDLL("ntdll")
+
+              class BasicInformation(ctypes.Structure):
+                  _fields_ = [("reserved", ctypes.c_void_p), ("peb", ctypes.c_void_p),
+                              ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_size_t), ("parent", ctypes.c_size_t)]
+
+              kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+              kernel.OpenProcess.restype = wintypes.HANDLE
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+              kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+              kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+              kernel.WaitForSingleObject.restype = wintypes.DWORD
+              ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
+              ntdll.NtQueryInformationProcess.restype = wintypes.LONG
+              handle = kernel.OpenProcess(0x1000 | 0x100000, False, pid)
+              if not handle:
+                  refuse("unreadable Windows process identity")
+              try:
+                  info = BasicInformation()
+                  size = wintypes.ULONG()
+                  if ntdll.NtQueryInformationProcess(handle, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(size)) != 0:
+                      refuse("Windows parent identity is unavailable")
+                  times = [wintypes.FILETIME() for _ in range(4)]
+                  if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+                      refuse("Windows creation identity is unavailable")
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = wintypes.DWORD(len(buffer))
+                  if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)) or info.pid != pid or kernel.WaitForSingleObject(handle, 0) != 258:
+                      refuse("Windows process disappeared or reused its PID")
+                  return {"pid": pid, "ppid": int(info.parent), "created": (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime, "exe": buffer.value}
+              finally:
+                  kernel.CloseHandle(handle)
+
+
+          def discover_worker(pid, read_process, system):
+              # The nearest owning Worker selects this action's interpreter. Its own
+              # service ancestors are outside that execution boundary.
+              chain = []
+              seen = set()
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
+              worker = None
+              while pid:
+                  if pid in seen or len(chain) >= MAX_ANCESTORS:
+                      refuse("cyclic or overlong process ancestry")
+                  seen.add(pid)
+                  item = read_process(pid)
+                  if item["pid"] != pid or item["created"] <= 0 or item["ppid"] < 0 or not paths(item["exe"]).is_absolute():
+                      refuse("missing process identity")
+                  chain.append(item)
+                  if item["ppid"] in seen:
+                      refuse("cyclic or overlong process ancestry")
+                  name = paths(item["exe"]).name
+                  if len(chain) > 1 and (name.lower() if system == "win32" else name) == expected:
+                      runner_paths(item, system)
+                      worker = item
+                      break
+                  pid = item["ppid"]
+              if worker is None:
+                  refuse("an owning Runner.Worker ancestor is required")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("ancestry changed or reused a process identity")
+              return worker, chain
+
+
+          def runner_paths(worker, system):
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              executable = paths(worker["exe"])
+              directory = executable.parent.name.lower() if system == "win32" else executable.parent.name
+              if not executable.is_absolute() or directory != "bin" or ".." in executable.parts:
+                  refuse("Worker is not in the runner root's bin directory")
+              root = executable.parent.parent
+              node = root / "externals" / "node24" / "bin" / ("node.exe" if system == "win32" else "node")
+              return str(root), str(node)
+
+
+          def binary_x64(file, system):
+              with open(file, "rb") as stream:
+                  header = stream.read(64)
+                  if system == "linux":
+                      if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 62:
+                          refuse("expected a Linux x64 ELF executable")
+                  else:
+                      if len(header) != 64 or header[:2] != b"MZ":
+                          refuse("expected a Windows x64 PE executable")
+                      offset = struct.unpack_from("<I", header, 60)[0]
+                      if not 64 <= offset <= 1024 * 1024:
+                          refuse("malformed PE header")
+                      stream.seek(offset)
+                      pe = stream.read(26)
+                      if len(pe) != 26 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664 or struct.unpack_from("<H", pe, 24)[0] != 0x20b:
+                          refuse("expected a Windows x64 PE32+ executable")
+
+
+          def sha256(file):
+              digest = hashlib.sha256()
+              with open(file, "rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+
+          def sanitized_environment(system):
+              environment = {"LANG": "C", "LC_ALL": "C"}
+              if system == "win32":
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = kernel.GetWindowsDirectoryW(buffer, len(buffer))
+                  if not 0 < length < len(buffer):
+                      refuse("Windows directory is unavailable")
+                  environment["SystemRoot"] = buffer.value
+              return environment
+
+
+          def probe_version(executable, environment):
+              # Bound output as well as elapsed time, without running any JavaScript guard.
+              process = subprocess.Popen([str(executable), "--version"], stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
+                                         cwd=str(executable.parent), shell=False)
+              output = []
+              def read_output():
+                  try:
+                      output.append(process.stdout.read(129))
+                  except OSError:
+                      output.append(b"")
+              reader = threading.Thread(target=read_output, daemon=True)
+              reader.start()
+              try:
+                  reader.join(PROBE_TIMEOUT)
+                  if reader.is_alive() or not output or len(output[0]) > 128:
+                      refuse("interpreter probe timed out or exceeded its output bound")
+                  try:
+                      status = process.wait(timeout=2)
+                  except subprocess.TimeoutExpired:
+                      refuse("interpreter probe timed out")
+                  if status != 0:
+                      refuse("interpreter probe failed")
+                  try:
+                      text = output[0].decode("ascii")
+                  except UnicodeDecodeError:
+                      refuse("interpreter probe returned malformed output")
+                  if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:\r?\n)?", text):
+                      refuse("interpreter probe returned malformed output")
+                  return text.rstrip("\r\n")
+              finally:
+                  if process.poll() is None:
+                      process.kill()
+                  process.wait(timeout=2)
+                  reader.join(2)
+                  # A failed probe may leave an inherited pipe open. Never block on a
+                  # buffered close while the bounded daemon reader still owns that pipe.
+                  if not reader.is_alive():
+                      process.stdout.close()
+
+
+          def check_runner_action_node():
+              system = sys.platform
+              check_host(system, platform.machine(), os.environ, container_host(system))
+              if system == "win32":
+                  # Refuse x64 emulation on ARM even when the Python process reports AMD64.
+                  from ctypes import wintypes
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  kernel.GetCurrentProcess.restype = wintypes.HANDLE
+                  kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
+                  process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
+                  if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
+                      refuse("native Windows x64 identity is required")
+              read_process = windows_process if system == "win32" else linux_process
+              worker, chain = discover_worker(os.getpid(), read_process, system)
+              root, selected = runner_paths(worker, system)
+              interpreter = Path(selected)
+              if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
+                  refuse("missing interpreter or a path outside the discovered runner root")
+              binary_x64(worker["exe"], system)
+              binary_x64(interpreter, system)
+              worker_hash, before = sha256(worker["exe"]), sha256(interpreter)
+              version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
+              if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
+                  refuse("Worker or interpreter bytes changed during the probe")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("Worker ancestry changed or reused a process identity")
+              return {"worker": worker, "workerSha256": worker_hash, "root": root,
+                      "interpreter": str(interpreter), "sha256": before, "version": version,
+                      "platform": system, "architecture": "x64"}
+
+
+          def admission_failure(error):
+              phases = {
+                  "container_host": "container-detection", "check_host": "host-policy",
+                  "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
+                  "linux_process": "process-identity", "windows_process": "process-identity",
+                  "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+                  "binary_x64": "binary-identity", "sha256": "binary-hash",
+                  "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
+                  "node_version": "interpreter-version",
+              }
+              phase = "admission"
+              observed = None
+              trace = error.__traceback__
+              while trace is not None:
+                  frame = trace.tb_frame
+                  phase = phases.get(frame.f_code.co_name, phase)
+                  if isinstance(error, RuntimeError) and frame.f_code is node_version.__code__:
+                      value = frame.f_locals.get("value")
+                      selected = frame.f_locals.get("selected_major")
+                      if (type(value) is str and len(value) <= 32 and type(selected) is int and selected == 24
+                              and re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)):
+                          observed = value.removeprefix("v")
+                  trace = trace.tb_next
+              detail = f", observedNode={observed}, requiredNode=24.22.1" if observed is not None else ""
+              return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__}{detail})"
+
+
+          def main():
+              try:
+                  print(json.dumps(check_runner_action_node(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
+                  # Report only owned labels and validated numeric versions, never raw exception text.
+                  print(admission_failure(error), file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          '''
+          admission = types.ModuleType('runner_node_admission')
+          exec(compile(RUNNER_ADMISSION_SOURCE, 'runner-node-admission.py', 'exec'), admission.__dict__)
+
+          """Repair only the owning runner's known-affected action Node, then admit it.
+
+          Runner externals are an internal compatibility dependency, not a vendor API.
+          No old Node runs during repair. Unknown bytes get only the unchanged admission.
+          """
+
+          import ctypes
+          import errno
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+          import sys
+          import tarfile
+          import tempfile
+
+
+          if "admission" not in globals():
+              spec = importlib.util.spec_from_file_location("runner_node_admission", Path(__file__).with_name("check_runner_action_node.py"))
+              admission = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(admission)
+
+          # New bytes match official runner 2.338.1 and Node 24.22.1; the old allowlist
+          # contains only Node 24.21.0 from authenticated official runner 2.338.0 archives.
+          ARTIFACTS = {
+              "linux": {
+                  "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz",
+                  "size": 32026916,
+                  "sha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+                  "member": "node-v24.22.1-linux-x64/bin/node", "node_size": 126879696,
+                  "node_sha256": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+                  "old_sha256": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+              },
+              "win32": {
+                  "url": "https://nodejs.org/dist/v24.22.1/win-x64/node.exe",
+                  "size": 93915464, "node_size": 93915464, "member": None,
+                  "sha256": "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
+                  "node_sha256": "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
+                  "old_sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+              },
+          }
+
+
+          class RepairRefusal(RuntimeError):
+              pass
+
+
+          def refuse(message):
+              raise RepairRefusal("Runner Node repair: " + message)
+
+
+          def filesystem_failure(operation, error):
+              code = error.errno if type(error.errno) is int else 0
+              windows = getattr(error, "winerror", 0)
+              windows = windows if type(windows) is int else 0
+              reason = "filesystem-unavailable"
+              if code == errno.ETXTBSY:
+                  reason = "selected-node-busy"
+              elif windows in (32, 33):
+                  reason = "image-sharing-lock"
+              elif code in (errno.EACCES, errno.EPERM, errno.EROFS):
+                  reason = "same-user-write-unavailable"
+              return f"{operation}: {reason} (errno={code}, winerror={windows})"
+
+
+          def native_windows():
+              from ctypes import wintypes
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              kernel.GetCurrentProcess.restype = wintypes.HANDLE
+              kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
+              process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
+              if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
+                  refuse("native Windows x64 identity is required before repair")
+
+
+          def plain(path, directory=False, role="artifact"):
+              # Report only owned role/reason names and numeric filesystem evidence. The
+              # unchanged admission also requires the interpreter's canonical spelling.
+              if role not in ("root", "externals", "node24", "bin", "interpreter", "worker", "artifact", "stage"):
+                  role = "artifact"
+              try:
+                  info = path.lstat()
+                  attributes = getattr(info, "st_file_attributes", 0)
+                  reason = None
+                  if stat.S_ISLNK(info.st_mode):
+                      reason = "symlink"
+                  elif attributes & 0x400:
+                      reason = "reparse-point"
+                  elif not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+                      reason = "unexpected-type"
+                  elif not directory and info.st_nlink != 1:
+                      reason = "nonexclusive-file-links"
+                  elif os.path.normcase(str(path.resolve(strict=True))) != os.path.normcase(str(path)):
+                      reason = "canonical-spelling-mismatch"
+              except OSError as error:
+                  refuse(filesystem_failure("path-" + role, error))
+              if reason:
+                  refuse(f"plain canonical runner paths are required (role={role}, reason={reason}, "
+                         f"mode={info.st_mode & 0xffff}, attributes={attributes & 0xffffffff}, links={min(info.st_nlink, 0x7fffffff)})")
+              return info
+
+
+          def identity(info):
+              return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_nlink)
+
+
+          def context():
+              system = sys.platform
+              admission.check_host(system, admission.platform.machine(), os.environ, admission.container_host(system))
+              if system == "win32":
+                  native_windows()
+              read = admission.windows_process if system == "win32" else admission.linux_process
+              worker, chain = admission.discover_worker(os.getpid(), read, system)
+              root, selected = admission.runner_paths(worker, system)
+              interpreter = Path(selected)
+              folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
+              directories = []
+              for role, path in zip(("root", "externals", "node24", "bin"), folders):
+                  info = plain(path, directory=True, role=role)
+                  directories.append((path, (info.st_dev, info.st_ino)))
+              original = plain(interpreter, role="interpreter")
+              if original.st_mode & (stat.S_ISUID | stat.S_ISGID):
+                  refuse("privileged interpreter modes are not admitted")
+              plain(Path(worker["exe"]), role="worker")
+              admission.binary_x64(worker["exe"], system)
+              admission.binary_x64(interpreter, system)
+              result = {"system": system, "worker": worker, "chain": chain, "root": root,
+                        "interpreter": interpreter, "directories": directories, "original": identity(original),
+                        "mode": stat.S_IMODE(original.st_mode), "oldSha256": admission.sha256(interpreter),
+                        "workerSha256": admission.sha256(worker["exe"])}
+              verify_context(result, result["oldSha256"])
+              return result
+
+
+          def verify_context(current, expected_sha=None):
+              system = current["system"]
+              read = admission.windows_process if system == "win32" else admission.linux_process
+              for item in current["chain"]:
+                  if read(item["pid"]) != item:
+                      refuse("Worker ancestry changed")
+              if admission.runner_paths(current["worker"], system) != (current["root"], str(current["interpreter"])):
+                  refuse("runner layout changed")
+              if admission.sha256(current["worker"]["exe"]) != current["workerSha256"]:
+                  refuse("Worker bytes changed")
+              for role, (path, expected) in zip(("root", "externals", "node24", "bin"), current["directories"]):
+                  info = plain(path, directory=True, role=role)
+                  if (info.st_dev, info.st_ino) != expected:
+                      refuse("runner directory changed")
+              info = plain(current["interpreter"], role="interpreter")
+              if expected_sha == current["oldSha256"] and identity(info) != current["original"]:
+                  refuse("original interpreter identity changed")
+              if expected_sha is not None and admission.sha256(current["interpreter"]) != expected_sha:
+                  refuse("selected interpreter bytes changed")
+              admission.binary_x64(current["interpreter"], system)
+
+
+          def windows_node_processes():
+              from ctypes import wintypes
+              class Entry(ctypes.Structure):
+                  _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                              ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                              ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                              ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+              kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+              kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+              kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              handle = kernel.CreateToolhelp32Snapshot(2, 0)
+              if handle == ctypes.c_void_p(-1).value:
+                  refuse("process snapshot unavailable")
+              try:
+                  entry = Entry()
+                  entry.dwSize = ctypes.sizeof(entry)
+                  if not kernel.Process32FirstW(handle, ctypes.byref(entry)):
+                      refuse("process snapshot unreadable")
+                  while True:
+                      if entry.szExeFile.lower() == "node.exe":
+                          yield int(entry.th32ProcessID)
+                      if not kernel.Process32NextW(handle, ctypes.byref(entry)):
+                          if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                              refuse("process snapshot incomplete")
+                          break
+              finally:
+                  kernel.CloseHandle(handle)
+
+
+          def assert_quiescent(current):
+              if current["system"] == "linux":
+                  info = os.fstat(current["lease"])
+                  if (info.st_dev, info.st_ino) != current["original"][:2]:
+                      refuse("the original Node write lease changed")
+              else:
+                  for pid in windows_node_processes():
+                      try:
+                          process = admission.windows_process(pid)
+                      except (OSError, RuntimeError):
+                          refuse("a potential Node process cannot be inspected")
+                      if os.path.normcase(process["exe"]) == os.path.normcase(str(current["interpreter"])):
+                          refuse("the selected Node is still running")
+
+
+          def acquire_write_lease(current):
+              # Linux refuses O_WRONLY with ETXTBSY for an executing inode. Holding this
+              # non-truncating descriptor also prevents new execs of the old inode across
+              # rename, for every UID, without depending on /proc visibility.
+              try:
+                  descriptor = os.open(current["interpreter"], os.O_WRONLY | os.O_NOFOLLOW)
+              except OSError as error:
+                  refuse(filesystem_failure("write-lease", error))
+              try:
+                  if identity(os.fstat(descriptor)) != current["original"]:
+                      refuse("the original Node changed before its write lease")
+              except BaseException:
+                  os.close(descriptor)
+                  raise
+              return descriptor
+
+
+          def curl_path():
+              if sys.platform == "linux":
+                  return "/usr/bin/curl"
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              directory = ctypes.create_unicode_buffer(32768)
+              length = kernel.GetWindowsDirectoryW(directory, len(directory))
+              if not 0 < length < len(directory):
+                  refuse("native Windows directory is unavailable")
+              return str(Path(directory.value) / "System32/curl.exe")
+
+
+          def download(artifact, path):
+              # Preserve the host's existing TLS/proxy policy; discard executable injection
+              # and user curl configuration without logging environment or curl diagnostics.
+              keep = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                      "https_proxy", "http_proxy", "all_proxy", "no_proxy", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+              environment = {key: value for key, value in os.environ.items() if key in keep}
+              before = identity(plain(path))
+              try:
+                  subprocess.run([curl_path(), "--disable", "--fail", "--silent", "--show-error",
+                                  "--proto", "=https", "--proto-redir", "=https", "--location", "--max-redirs", "0",
+                                  "--connect-timeout", "10", "--max-time", "90", "--max-filesize", str(artifact["size"]),
+                                  "--output", str(path), artifact["url"]], env=environment, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=95, check=True)
+              except subprocess.CalledProcessError as error:
+                  refuse("download failed (curlReturnCode=" + str(error.returncode) + ")")
+              except subprocess.TimeoutExpired:
+                  refuse("download exceeded its deadline")
+              after = plain(path)
+              if (after.st_dev, after.st_ino) != before[:2] or after.st_size != artifact["size"] or admission.sha256(path) != artifact["sha256"]:
+                  refuse("download size, identity or SHA256 mismatch")
+
+
+          def stage_node(artifact, downloaded, node_dir, mode):
+              if plain(downloaded).st_size != artifact["size"] or admission.sha256(downloaded) != artifact["sha256"]:
+                  refuse("artifact must be authenticated before parsing")
+              fd, name = tempfile.mkstemp(prefix=".vivary-node-stage-", dir=node_dir)
+              staged = Path(name)
+              try:
+                  with os.fdopen(fd, "wb") as output:
+                      if artifact["member"] is None:
+                          with downloaded.open("rb") as source:
+                              copy_node(source, output, artifact)
+                      else:
+                          with tarfile.open(downloaded, "r:xz") as archive:
+                              matches = [item for item in archive if item.name == artifact["member"]]
+                              if len(matches) != 1 or not matches[0].isreg() or matches[0].size != artifact["node_size"]:
+                                  refuse("one exact regular Node archive member is required")
+                              with archive.extractfile(matches[0]) as source:
+                                  copy_node(source, output, artifact)
+                      output.flush()
+                      os.fsync(output.fileno())
+                  os.chmod(staged, mode & 0o777)
+                  if admission.sha256(staged) != artifact["node_sha256"]:
+                      refuse("staged Node SHA256 mismatch")
+                  admission.binary_x64(staged, sys.platform)
+                  plain(staged, role="stage")
+                  return staged
+              except BaseException:
+                  staged.unlink(missing_ok=True)
+                  raise
+
+
+          def copy_node(source, output, artifact):
+              total = 0
+              while True:
+                  chunk = source.read(min(65536, artifact["node_size"] + 1 - total))
+                  if not chunk:
+                      break
+                  total += len(chunk)
+                  if total > artifact["node_size"]:
+                      refuse("Node member exceeded its exact byte bound")
+                  output.write(chunk)
+              if total != artifact["node_size"]:
+                  refuse("Node member is incomplete")
+
+
+          def repair_runner_action_node():
+              current = context()
+              artifact = ARTIFACTS[current["system"]]
+              outcome = "already-qualified"
+              staged = None
+              lease = None
+              try:
+                  if current["oldSha256"] not in (artifact["node_sha256"], artifact["old_sha256"]):
+                      # Preserve future patched workers without blindly downgrading unknown bytes.
+                      outcome = "admitted-unmodified"
+                  elif current["oldSha256"] == artifact["old_sha256"]:
+                      if current["system"] == "linux":
+                          lease = current["lease"] = acquire_write_lease(current)
+                      assert_quiescent(current)
+                      with tempfile.TemporaryDirectory(prefix="vivary-runner-node-") as directory:
+                          # Windows TEMP may use a short alias. Resolve only this newly
+                          # owned temporary root; runner paths retain their custody checks.
+                          downloaded = Path(directory).resolve(strict=True) / "artifact"
+                          with downloaded.open("xb"):
+                              pass
+                          downloaded.chmod(0o600)
+                          download(artifact, downloaded)
+                          staged = stage_node(artifact, downloaded, current["interpreter"].parent, current["mode"])
+                          staged_identity = identity(plain(staged, role="stage"))
+                          verify_context(current, current["oldSha256"])
+                          assert_quiescent(current)
+                          if identity(plain(staged, role="stage")) != staged_identity or admission.sha256(staged) != artifact["node_sha256"]:
+                              refuse("staged interpreter changed before replacement")
+                          verify_context(current, current["oldSha256"])
+                          try:
+                              os.replace(staged, current["interpreter"])
+                          except OSError as error:
+                              refuse(filesystem_failure("atomic-replacement", error))
+                          staged = None
+                          verify_context(current, artifact["node_sha256"])
+                          assert_quiescent(current)
+                          outcome = "repaired"
+                  # Full, unchanged admission independently rediscovers and probes this same Node.
+                  result = admission.check_runner_action_node()
+                  result["repair"] = {"outcome": outcome, "previousSha256": current["oldSha256"],
+                                      "artifact": artifact["url"] if outcome == "repaired" else None,
+                                      "artifactSha256": artifact["sha256"] if outcome == "repaired" else None}
+                  return result
+              finally:
+                  if staged is not None:
+                      staged.unlink(missing_ok=True)
+                  if lease is not None:
+                      os.close(lease)
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("arguments and caller-supplied runtime facts are not admitted")
+                  print(json.dumps(repair_runner_action_node(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, tarfile.TarError, subprocess.SubprocessError) as error:
+                  if type(error) is RepairRefusal:
+                      message = str(error)
+                  elif isinstance(error, RuntimeError):
+                      message = admission.admission_failure(error)
+                  elif isinstance(error, OSError):
+                      message = "Runner Node repair: " + filesystem_failure("filesystem", error)
+                  else:
+                      message = "Runner Node repair: refused (exception=" + type(error).__name__ + ")"
+                  print(message, file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: validate dispatched pull request
@@ -69,7 +780,7 @@ jobs:
           fi
 
           if printf '%s\n' "$changed" | grep -Eq \
-            '^(site/|docs/|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
+            '^(site/|docs/|scripts/(bootstrap_build_tools|build_go_tools|check_site_dependencies|certifi_bundle)\.py$|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
             echo "site=true" >> "$GITHUB_OUTPUT"
           else
             echo "site=false" >> "$GITHUB_OUTPUT"
@@ -82,18 +793,46 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - *runner_action_node_bootstrap
       - name: require changed-path and dispatch validation
         if: needs.changes.result != 'success'
         run: exit 1
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
-      - uses: actions/setup-node@v7
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
+      - name: qualified release package clients
+        shell: bash
+        run: |
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
+          printf '%s/vivary-build-tools/bin\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: high-level design review
         env:
           BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
@@ -102,11 +841,39 @@ jobs:
           python scripts/tests/test_hldd.py
           python scripts/check_hldd.py --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: install Python test runner
-        run: python -m pip install pytest packaging
+        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging
       - name: install release build frontend
-        run: python -m pip install uv==0.11.21
+        env:
+          PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
+        run: |
+          python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946"
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: CI workflow contract
         run: python scripts/check_ci_workflow.py
+      - name: Python runtime admission tests
+        run: python -I -B scripts/tests/test_python_runtime.py
+      - name: pip runtime admission tests
+        run: python -I -B scripts/tests/test_pip_runtime.py
+      - name: verified pip provisioning tests
+        run: python -I -B scripts/tests/test_bootstrap_ci_pip.py
+      - name: verified Python provisioning regression tests
+        run: python -I -B scripts/tests/test_bootstrap_ci_python.py
+      - name: certificate overlay preservation tests
+        run: python -I -B scripts/tests/test_certifi_bundle.py
+      - name: known site dependency admission tests
+        run: python -I -B scripts/tests/test_site_dependencies.py
+      - name: isolated build tool tests
+        env:
+          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node
+          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools
+        run: python -I -B scripts/tests/test_build_tools.py
+      - name: runner action Node bootstrap tests
+        run: python -I -B scripts/tests/test_runner_action_node.py
+      - name: runner action Node repair tests
+        env:
+          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node
+        run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py
       - name: CI workflow contract tests
         run: python scripts/tests/test_ci_workflow.py
       - name: required review gate tests
@@ -148,7 +915,7 @@ jobs:
         run: python packages/memory-cognee/tests/test_memory_cognee.py
       - name: mcp read-only adapter
         run: |
-          python -m pip install "mcp==2.2.0"
+          python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
           python -m pytest packages/mcp/tests/ -q
       - name: vivary meta CLI
         run: python packages/vivary/tests/test_vivary_cli.py
@@ -164,16 +931,17 @@ jobs:
         shell: bash
         run: |
           artifacts="$(mktemp -d)"
-          uv build --out-dir "$artifacts" packages/core
-          uv build --out-dir "$artifacts" packages/tropo
-          uv build --out-dir "$artifacts" packages/strato
-          uv build --out-dir "$artifacts" packages/ozone
-          uv build --out-dir "$artifacts" packages/exo
-          uv build --out-dir "$artifacts" packages/create-vivary
-          uv build --out-dir "$artifacts" packages/memory-cognee
-          uv build --out-dir "$artifacts" packages/mcp
-          uv build --out-dir "$artifacts" packages/vivary
-          npm pack packages/create-vivary/npm --pack-destination "$artifacts"
+          uv="$(python -I -B scripts/check_uv_runtime.py)" || exit $?
+          "$uv" build --out-dir "$artifacts" packages/core
+          "$uv" build --out-dir "$artifacts" packages/tropo
+          "$uv" build --out-dir "$artifacts" packages/strato
+          "$uv" build --out-dir "$artifacts" packages/ozone
+          "$uv" build --out-dir "$artifacts" packages/exo
+          "$uv" build --out-dir "$artifacts" packages/create-vivary
+          "$uv" build --out-dir "$artifacts" packages/memory-cognee
+          "$uv" build --out-dir "$artifacts" packages/mcp
+          "$uv" build --out-dir "$artifacts" packages/vivary
+          "$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"
           python scripts/check_release_artifacts.py --repository . --artifacts "$artifacts"
       - name: core (governed-context seam; suite is the ported reference tests)
         run: python -m pytest packages/core/tests/ -q
@@ -185,7 +953,7 @@ jobs:
           smoke="$(mktemp -d)"
           wheelhouse="$smoke/wheels"
           mkdir -p "$wheelhouse"
-          python -m pip wheel --no-deps --wheel-dir "$wheelhouse" \
+          python -I -m pip --use-deprecated=legacy-certs wheel --no-deps --wheel-dir "$wheelhouse" \
             ./packages/core \
             ./packages/tropo \
             ./packages/strato \
@@ -195,12 +963,15 @@ jobs:
             ./packages/vivary \
             ./packages/memory-cognee \
             ./packages/mcp
-          python -m venv "$smoke/venv"
+          python -m venv --without-pip "$smoke/venv"
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
           unset PYTHONPATH
-          "$venv_python" -m pip install --no-index --find-links "$wheelhouse" vivary
-          "$venv_python" -m pip check
+          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?
+          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
+          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs check
           "$venv_python" -I scripts/check_installed_workspace_roles.py
           (
             cd "$smoke"
@@ -379,11 +1150,14 @@ jobs:
           )
           PY
           mcp_venv="$smoke/mcp-venv"
-          python -m venv "$mcp_venv"
+          python -m venv --without-pip "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
-          "$mcp_python" -m pip install "mcp==2.2.0"
-          "$mcp_python" -m pip install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
-          "$mcp_python" -m pip check
+          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?
+          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
+          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary-mcp create-vivary
+          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check
           "$mcp_venv/bin/vivary-mcp" --help > /dev/null
           "$mcp_python" - <<'PY'
           from importlib.metadata import PackageNotFoundError, requires, version
@@ -418,7 +1192,7 @@ jobs:
           else:
               raise AssertionError("optional MCP install pulled the vivary meta-package")
           PY
-          "$venv_python" -m pip install --no-index --find-links "$wheelhouse" --no-deps \
+          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" --no-deps \
             vivary-memory-cognee
           mkdir -p "$smoke/ws/.vivary" "$smoke/ws/modules/auth"
           cat > "$smoke/ws/tropo.toml" <<'EOF'
@@ -644,7 +1418,9 @@ jobs:
       - name: npm launcher
         run: node packages/create-vivary/tests/test_npm_launcher.js
       - name: npm trusted publish workflow guard
-        run: python scripts/check_npm_trusted_publish_workflow.py
+        run: |
+          python scripts/check_npm_trusted_publish_workflow.py
+          python scripts/tests/test_npm_trusted_publish_workflow.py
       - name: package docs parity guard tests
         run: python scripts/tests/test_package_docs_parity.py
       - name: package docs parity (documented PyPI list vs manifests)
@@ -677,31 +1453,64 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - *runner_action_node_bootstrap
       - name: require changed-path and dispatch validation
         if: needs.changes.result != 'success'
         run: exit 1
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-      - name: install workbench dependencies
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
         run: |
-          npm install --global pnpm@10.33.2
-          pnpm --dir packages/workbench install --frozen-lockfile
-      - name: install pinned Python launcher tooling
-        run: python -m pip install pip==26.0.1
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
+      - name: Node runtime policy and boundary tests
+        run: node --test packages/workbench/tests/runtime-security.test.mjs
+      - name: qualified workbench build tools
+        shell: bash
+        run: |
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
+          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" --typescript || exit $?
+          printf '%s/vivary-build-tools/bin\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          printf 'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: known workbench dependency admission
+        shell: bash
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs'
+      - name: install workbench dependencies
+        shell: bash
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts'
       - name: workbench state transport
         run: |
           pnpm --dir packages/workbench exec tsx --test tests/local-access.test.ts tests/owner-sign-in.test.ts tests/native-state.test.ts tests/native-actions.test.ts tests/desktop-host.test.ts tests/chat-scope.test.ts tests/native-chat-project.test.ts
           pnpm --dir packages/workbench exec tsx --test --test-concurrency=1 tests/local-code-agent.test.ts tests/linked-history.test.ts tests/linked-conversations.test.ts tests/linked-conversation-components.test.mjs tests/claude-session-continuity.test.mjs tests/code-session-details.test.ts tests/code-state-snapshot.test.mjs tests/codex-models.test.ts tests/codex-executor.test.mjs tests/codex-app-server.test.ts tests/codex-transcript.test.mjs tests/codex-active-state.test.mjs tests/core-message-parent.test.mjs tests/local-root-provider.test.mjs tests/native-registry-scope.test.mjs tests/codex-approval.test.ts tests/code-execution-host.test.ts tests/local-runtime-setup.test.ts tests/local-code-approval-restart.test.ts tests/local-code-cleanup-refusal.test.ts tests/code-host-lifecycle.test.ts tests/desktop-server-shutdown.test.mjs tests/managed-projects.test.mjs tests/managed-project-reconnection.test.mjs tests/creator-runner.test.ts tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs tests/project-files.test.ts tests/project-memory.test.ts tests/file-draft-state.test.ts tests/original-runtime.test.ts tests/original-runtime-shutdown.test.ts tests/original-runtime-control-shutdown.test.ts tests/project-search.test.ts tests/project-file-location.test.ts tests/project-search-state.test.ts tests/project-read.test.ts tests/project-evaluate.test.ts tests/project-evaluate-form.test.ts tests/documentation-links.test.mjs tests/project-adoption.test.ts tests/project-adoption-service.test.mjs tests/project-preview.test.ts tests/preview-isolation.test.ts
           node --test packages/desktop/tests/main.test.mjs packages/desktop/tests/original-runtime.test.mjs packages/desktop/tests/package-snapshot.test.mjs packages/desktop/tests/installer-script.test.mjs packages/desktop/tests/installer-build.test.mjs packages/workbench/tests/startup.test.mjs
           python packages/workbench/tests/managed-projects-python.test.py
-          pnpm --dir packages/workbench typecheck
+          pnpm --dir packages/workbench exec react-router typegen
+          "$RUNNER_TEMP/vivary-build-tools/typescript-7.0.2-go1.26.10/tsc" --noEmit --project packages/workbench/tsconfig.json
           pnpm --dir packages/workbench run doctor
 
   workbench-maintained:
@@ -711,19 +1520,54 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - *runner_action_node_bootstrap
       - name: require changed-path and dispatch validation
         if: needs.changes.result != 'success'
         run: exit 1
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          node-version: "22"
-      - name: install workbench dependencies
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
         run: |
-          npm install --global pnpm@10.33.2
-          pnpm --dir packages/workbench install --frozen-lockfile
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
+      - name: qualified workbench build tools
+        shell: bash
+        run: |
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
+          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" --typescript || exit $?
+          printf '%s/vivary-build-tools/bin\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          printf 'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: known workbench dependency admission
+        shell: bash
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs'
+      - name: install workbench dependencies
+        shell: bash
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts'
       - name: automation lifecycle regression batch
         run: node --test packages/workbench/tests/usage-metrics-cold-start.test.mjs packages/workbench/tests/native-thread-save.test.mjs packages/workbench/tests/native-thread-fold.test.mjs packages/workbench/tests/native-thread-save-queue.test.mjs packages/workbench/tests/native-thread-save-store.test.mjs packages/workbench/tests/native-engine-packages.test.mjs packages/workbench/tests/chat-model-groups.test.mjs packages/workbench/tests/replay-tool-call-ids.test.mjs packages/workbench/tests/automation-run-now.test.mjs packages/workbench/tests/automation-local-only.test.mjs packages/workbench/tests/automation-approval.test.mjs packages/workbench/tests/automation-approval-owner-scope.test.mjs packages/workbench/tests/cli-bridge-arguments.test.mjs packages/workbench/tests/sql-inspection.test.mjs packages/workbench/tests/sql-postgres-inspection.test.mjs packages/workbench/tests/automation-webhook.test.mjs packages/workbench/tests/automation-event-condition.test.mjs packages/workbench/tests/automation-event-loop.test.mjs packages/workbench/tests/automation-status.test.mjs packages/workbench/tests/automation-quit.test.mjs packages/workbench/tests/automation-file-review.test.mjs packages/workbench/tests/automation-file-review-component.test.mjs packages/workbench/tests/builder-offers.test.mjs packages/workbench/tests/builder-offers-component.test.mjs packages/workbench/tests/code-run-control-cleanup-component.test.mjs packages/workbench/tests/mcp-settings-component.test.mjs packages/workbench/tests/dependency-advisories.test.mjs packages/workbench/tests/pdf-ingestion.test.mjs packages/workbench/tests/xlsx-codepages.test.mjs packages/workbench/tests/markdown-reader.test.mjs
       - name: maintained workbench checks
@@ -735,16 +1579,37 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7
+      - *runner_action_node_bootstrap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - name: source navigation contract on Windows
         run: python -B scripts/check-source-navigation.py --check
       - name: source navigation contract tests on Windows
         run: python -B scripts/tests/test-source-navigation.py
       - name: install test runner
-        run: python -m pip install pytest packaging
+        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging
       - name: preview owner startup cancellation on Windows
         run: python -m pytest packages/workbench/tests/test_windows_preview_owner.py -q
       - name: thin init CLI on Windows
@@ -753,15 +1618,29 @@ jobs:
         run: python packages/create-vivary/tests/test_thin_init_preview.py
       - name: managed project bridge on Windows
         run: python packages/workbench/tests/managed-projects-python.test.py
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
+      - name: qualified workbench build tools
+        shell: pwsh
+        run: |
+          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"
+          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }
+          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript
+          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }
+          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: known workbench dependency admission
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }
       - name: install workbench dependencies
         shell: pwsh
         run: |
-          npm install --global pnpm@10.33.2
-          if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" }
-          pnpm --dir packages/workbench install --frozen-lockfile
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts
           if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }
       - name: desktop and creator shutdown and bytecode cache on Windows
         run: pnpm --dir packages/workbench exec tsx --test tests/desktop-server-shutdown.test.mjs tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs
@@ -777,7 +1656,7 @@ jobs:
           $smoke = Join-Path $env:RUNNER_TEMP "vivary-wheel-$([guid]::NewGuid())"
           $wheelhouse = Join-Path $smoke "wheels"
           New-Item -ItemType Directory -Path $wheelhouse -Force | Out-Null
-          python -m pip wheel --no-deps --wheel-dir $wheelhouse `
+          python -I -m pip --use-deprecated=legacy-certs wheel --no-deps --wheel-dir $wheelhouse `
             ./packages/core `
             ./packages/tropo `
             ./packages/strato `
@@ -788,13 +1667,19 @@ jobs:
             ./packages/memory-cognee `
             ./packages/mcp
           if ($LASTEXITCODE -ne 0) { throw "wheel build failed" }
-          python -m venv (Join-Path $smoke "venv")
+          python -m venv --without-pip (Join-Path $smoke "venv")
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
           $scripts = Join-Path $smoke "venv\Scripts"
           $python = Join-Path $scripts "python.exe"
-          & $python -m pip install --no-index --find-links $wheelhouse vivary
+          & $python -I -B scripts/check_python_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }
+          & $python -I -B scripts/bootstrap_ci_pip.py
+          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" }
+          & $python -I -B scripts/check_pip_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission failed" }
+          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links $wheelhouse vivary
           if ($LASTEXITCODE -ne 0) { throw "vivary install failed" }
-          & $python -m pip check
+          & $python -I -m pip --use-deprecated=legacy-certs check
           if ($LASTEXITCODE -ne 0) { throw "pip check failed" }
           & $python -I scripts/check_installed_workspace_roles.py
           if ($LASTEXITCODE -ne 0) { throw "installed role API failed" }
@@ -838,15 +1723,21 @@ jobs:
           python scripts/check_installed_route_parity.py --characterize $scripts
           if ($LASTEXITCODE -ne 0) { throw "installed command surface failed" }
           $mcpVenv = Join-Path $smoke "mcp-venv"
-          python -m venv $mcpVenv
+          python -m venv --without-pip $mcpVenv
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
-          & $mcpPython -m pip install "mcp==2.2.0"
+          & $mcpPython -I -B scripts/check_python_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }
+          & $mcpPython -I -B scripts/bootstrap_ci_pip.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning failed" }
+          & $mcpPython -I -B scripts/check_pip_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
           if ($LASTEXITCODE -ne 0) { throw "MCP dependency install failed" }
-          & $mcpPython -m pip install --no-index --find-links $wheelhouse vivary-mcp create-vivary
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs install --no-index --find-links $wheelhouse vivary-mcp create-vivary
           if ($LASTEXITCODE -ne 0) { throw "optional MCP install failed" }
-          & $mcpPython -m pip check
+          & $mcpPython -I -m pip --use-deprecated=legacy-certs check
           if ($LASTEXITCODE -ne 0) { throw "optional MCP pip check failed" }
           & (Join-Path $mcpScripts "vivary-mcp.exe") --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "vivary-mcp entrypoint failed" }
@@ -895,15 +1786,43 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7
+      - *runner_action_node_bootstrap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
-      - uses: actions/setup-node@v7
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - name: verified pip runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")
+      - name: actual pip runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
       - name: install pinned uv runner
-        run: python -m pip install uv==0.11.21
+        env:
+          PIP_CONFIG_FILE: ${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}
+        run: |
+          python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ runner.os == 'Linux' && 'https://files.pythonhosted.org/packages/3a/ad/3c2a81d66d1839063662e5b6c0002ec31f8ee987dbc5295747627ca6160a/uv-0.13.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=fa8d26e08e34c29c0c4e820cf3181757086d547240b4f4d31ff1d8bd810ca946' || runner.os == 'Windows' && 'https://files.pythonhosted.org/packages/32/ea/771744a784b16aa21d195cb5d5d5a2878d72fa00fc26f11ea3f9646994fe/uv-0.13.5-py3-none-win_amd64.whl#sha256=1fb29fc46ba12033e2ef95a95ac79d649e71bbb1358419bbbcbd19d86026ef2f' || '' }}"
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: governed context adapter (Windows path contract)
         if: runner.os == 'Windows'
         run: python packages/tropo/tests/test_tropo.py
@@ -912,11 +1831,13 @@ jobs:
           python packages/create-vivary/tests/test_init_thin.py
           python packages/create-vivary/tests/test_record_workflow.py
           python packages/create-vivary/tests/test_adopt.py
+      - name: actual uv runtime admission
+        run: python -I -B scripts/check_uv_runtime.py
       - name: run disposable orientation proof
         run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json
       - name: preserve orientation receipt
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.runner_action_node.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: orientation-proof-${{ runner.os }}
           path: orientation-proof.json
@@ -929,10 +1850,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7
+      - *runner_action_node_bootstrap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - run: mkdir -p sandboxes
       - name: scaffold a workspace
         run: python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding --force --no-wizard
@@ -950,23 +1882,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7
+      - *runner_action_node_bootstrap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: site/package-lock.json
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24.22.1"
+      - name: actual Node security admission
+        run: node packages/workbench/bin/runtime-security.mjs
+      - name: qualified site build tools
+        run: |
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
+          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
+          printf 'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: known site dependency admission
+        run: python -I -B scripts/check_site_dependencies.py
       - name: install
-        run: npm ci
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts'
         working-directory: site
+      - name: installed site dependency admission
+        run: python -I -B scripts/check_site_dependencies.py --installed
       - name: audit high and critical site dependencies
-        run: npm audit --audit-level=high
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high'
         working-directory: site
       - name: site behavior and information architecture tests
-        run: npm run test:site
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" run test:site'
         working-directory: site
       - name: build (re-syncs docs, then astro build)
-        run: npm run build
+        run: |
+          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?
+          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build
         working-directory: site
       - name: verify generated docs are committed
         run: |
@@ -984,5 +1941,5 @@ jobs:
             exit 1
           fi
       - name: check built links and anchors
-        run: npm run test:links
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" run test:links'
         working-directory: site
