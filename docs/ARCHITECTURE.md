@@ -326,7 +326,7 @@ host stores out of that context. General Python and Node descendants instead use
 filtered task-local host bundles, retaining other eligible roots while excluding
 the existing G3 and removed C1/C3 roots. No host-global trust store changes.
 
-[Isolated build tools](BUILD-TOOLS.md) own the authenticated package clients,
+[Isolated build tools](https://github.com/vivary-dev/vivary/blob/main/docs/BUILD-TOOLS.md) own the authenticated package clients,
 Go 1.26.10 compilers, archive checks and certificate behavior. Workbench's known
 security dependency closure retains its feature dependency keys and Core patch;
 metadata admission precedes dependency installation and compiler execution.
