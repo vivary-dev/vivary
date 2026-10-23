@@ -191,6 +191,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "\n"
         f"{SITE_JOB_HEADER}"
         "    steps:\n"
+        f"{SITE_TOOLS_STEP}"
         f"{SITE_DEPENDENCY_STEP}"
         f"{site_steps.replace(INSTALL, INSTALL + SITE_INSTALLED_DEPENDENCY_STEP)}"
         f"{SITE_BUILD_STEP}"
@@ -213,6 +214,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
         if '    steps: []\n' in block:
             updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
@@ -260,6 +262,13 @@ SITE_JOB_HEADER = (
     "    runs-on: ubuntu-latest\n"
     "    timeout-minutes: 10\n"
 )
+SITE_TOOLS_STEP = (
+    '      - name: qualified site build tools\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
 SITE_DEPENDENCY_STEP = (
     "      - name: known site dependency admission\n"
     "        run: python -I -B scripts/check_site_dependencies.py\n"
@@ -270,17 +279,17 @@ SITE_INSTALLED_DEPENDENCY_STEP = (
 )
 SITE_BUILD_STEP = (
     "      - name: build (re-syncs docs, then astro build)\n"
-    "        run: npm run build\n"
+    '        run: |\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build\n'
     "        working-directory: site\n"
 )
 INSTALL = (
     "      - name: install\n"
-    "        run: npm ci\n"
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts\'\n'
     "        working-directory: site\n"
 )
 AUDIT = (
     "      - name: audit high and critical site dependencies\n"
-    "        run: npm audit --audit-level=high\n"
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high\'\n'
     "        working-directory: site\n"
 )
 CONTRACT_TEST_COMMAND = "python scripts/tests/test_ci_workflow.py"
@@ -473,6 +482,23 @@ def test_missing_site_audit_gate_fails():
     message = _run(_workflow(INSTALL))
     assert message, "a workflow without the blocking audit must fail"
     assert "npm audit --audit-level=high" in message
+
+
+def test_isolated_build_tool_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8").replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1)
+    message = _run(workflow)
+    assert message and "isolated build tool regressions" in message
+
+
+def test_build_tool_changes_select_the_site_job():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"grep -Eq \\\n\s+'([^']+)'", workflow)
+    assert match, "site input selection must remain explicit"
+    expression = re.compile(match[1])
+    for filename in ("scripts/bootstrap_build_tools.py", "scripts/build_go_tools.py",
+                     "scripts/check_site_dependencies.py", "site/package-lock.json"):
+        assert expression.search(filename), filename
+    assert not expression.search("packages/workbench/tests/chat-title.test.mjs")
 
 
 def test_site_audit_must_follow_install():
@@ -1205,10 +1231,20 @@ def test_site_lock_admission_precedes_install_and_build():
     block = module.job_block(workflow, "site")
     guard = module.SITE_DEPENDENCY_STEP
     installed = module.SITE_INSTALLED_DEPENDENCY_STEP
-    install = "      - name: install\n        run: npm ci\n        working-directory: site\n"
-    audit = "      - name: audit high and critical site dependencies\n        run: npm audit --audit-level=high\n        working-directory: site\n"
+    install = INSTALL
+    audit = AUDIT
     build = module.SITE_BUILD_STEP
+    tools = module.SITE_TOOLS_STEP
     mutations = {
+        "missing_tools": block.replace(tools, "", 1),
+        "conditional_tools": block.replace(tools, tools.replace("        run:", "        if: false\n        run:"), 1),
+        "ignored_tools": block.replace(tools, tools.replace("        run:", "        continue-on-error: true\n        run:"), 1),
+        "masked_tools": block.replace(tools, tools.replace("|| exit $?", "|| true", 1), 1),
+        "tools_after_lock": block.replace(tools + guard, guard + tools, 1),
+        "unqualified_cache": block.replace('          node-version: "24.22.1"\n',
+                                             '          node-version: "24.22.1"\n          cache: npm\n', 1),
+        "missing_sync": block.replace('          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n', '', 1),
+        "lifecycle_install": block.replace(" ci --ignore-scripts", " ci", 1),
         "missing": block.replace(guard, "", 1),
         "duplicate": block.replace(guard, guard + guard, 1),
         "conditional": block.replace(guard, guard.replace("        run:", "        if: false\n        run:"), 1),

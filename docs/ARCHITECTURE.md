@@ -1104,6 +1104,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Reproducible Linux build tools. Repository setup now owns the pinned
+Node/npm/pnpm clients and Go-built esbuild, with optional TypeScript, previously
+provisioned only in the cloud session. Client launchers bind the actual Node,
+exclude inherited selection and TLS overrides, and carry the isolated CA policy
+to child processes. Archive and repeated-tree checks precede execution; package
+installation scripts remain off. The site job provisions these tools after its
+existing runner and Node guards, removes the early npm cache invocation, and
+explicitly syncs docs before its guarded build. [Build setup](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md)
+requires separately qualified Python 3.12.15/OpenSSL 3.5.9; fresh-image Python
+provisioning remains a gap, and unsupported hosts fail closed. Windows and other
+hosted jobs retain their separate admission requirements. This changes no app
+runtime boundary, environment settings, trust store, or release authority.
+
 2026-10-23 Site build dependency admission. The internal documentation site pins
 Vite 8.1.6 and the compatible selector-parser 6.1.5 backport; esbuild's JavaScript
 package moves to 0.28.2 so it can use the qualified matching compiler binary.
