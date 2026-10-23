@@ -295,8 +295,11 @@ test("Claude Code and Codex conversations run in one project with their own appr
 
     // Each worker received its own conversation's request, and each transcript holds only its own messages.
     const starts = (await readFile(path.join(fixture, "starts.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    assert.deepEqual(starts.map(start => [start.runId, start.prompt, start.model]), [[claude, "Claude works here", "claude-sonnet-5-5"],
-      [first, "Ask from Codex first", "gpt-6-astra"], [second, "Ask from Codex second", "gpt-6-astra"]]);
+    const expectedStarts = [[claude, "Claude works here", "claude-sonnet-5-5"],
+      [first, "Ask from Codex first", "gpt-6-astra"], [second, "Ask from Codex second", "gpt-6-astra"]];
+    // Independent workers receive IPC in any order; host admission order is asserted above.
+    const byRunId = (left: string[], right: string[]) => left[0]!.localeCompare(right[0]!);
+    assert.deepEqual(starts.map(start => [start.runId, start.prompt, start.model]).sort(byRunId), expectedStarts.sort(byRunId));
     for (const [runId, message] of [[claude, "Claude works here"], [first, "Ask from Codex first"], [second, "Ask from Codex second"]]) {
       assert.deepEqual(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").map(event => event.message), [message]);
     }
