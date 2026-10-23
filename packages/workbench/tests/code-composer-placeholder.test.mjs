@@ -7,7 +7,7 @@ const source = await readFile(new URL("../app/components/workspace/CodeConversat
 const expression = source.match(/composerDisabledPlaceholder=\{([^\n]+)\}/)?.[1];
 assert.ok(expression, "the Code composer exposes its disabled reason");
 const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", "otherModelAvailable",
-  "sharedFolderHeld", `return (${expression});`);
+  "sharedFolderHeld", "pendingSwitch = null", `return (${expression});`);
 const props = { viewingMatch: false, state: {}, selection: {}, workspaceAvailable: true, pendingApprovals: 0 };
 
 test("review regression: unavailable models explain the refusal without claiming an active run", () => {
@@ -45,4 +45,22 @@ test("existing disabled reasons retain priority over unavailable models", () => 
     "Other agents are working in this folder. Choose Proceed or use another folder before sending.");
   assert.match(evaluate(props, false, false), /Connect a runtime/);
   assert.match(evaluate(props, true, true), /agent is working/);
+});
+
+test("a pending route choice explains the refusal after higher priority disabled reasons", () => {
+  const pending = { engine: "codex-cli", model: "gpt-fixture", step: "confirm" };
+  assert.equal(evaluate(props, true, true, undefined, true, false, pending),
+    "Resolve the runtime or model choice above before sending another message.");
+  assert.match(evaluate({ ...props, viewingMatch: true }, true, true, undefined, true, false, pending), /Reading saved history/);
+  assert.equal(evaluate({ ...props, state: { cleanup: { composer: "Clean up first" } } }, true, true, undefined, true, false, pending), "Clean up first");
+  assert.match(evaluate({ ...props, selection: { runId: "saved" } }, true, true, undefined, true, false, pending), /Opening conversation/);
+  assert.match(evaluate({ ...props, workspaceAvailable: false }, true, true, undefined, true, false, pending), /folder is unavailable/);
+  assert.match(evaluate({ ...props, pendingApprovals: 1 }, true, true, undefined, true, false, pending), /Review the pending request/);
+  assert.match(evaluate(props, true, true, undefined, true, true, pending), /Other agents are working/);
+  assert.match(evaluate(props, false, true, undefined, true, false, pending), /Connect a runtime/);
+  for (const [model, expected] of [
+    [undefined, /selected model is unavailable.*Choose another model/i],
+    [{ support: "upgrade-required", minimumVersion: "2.1.296" }, /Update Claude Code.*2\.1\.296/i],
+    [{ support: "unverified", minimumVersion: "2.1.296" }, /Verify.*version/i],
+  ]) assert.match(evaluate(props, true, false, model, true, false, pending), expected);
 });

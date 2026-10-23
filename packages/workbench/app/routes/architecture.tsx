@@ -4,9 +4,10 @@ import { Link } from "react-router";
 import type { MouseEvent } from "react";
 import architecture from "../../../../docs/ARCHITECTURE.md?raw";
 import { documentationLink, resolveDocumentationLinks } from "@/lib/documentation-links";
+import { focusFootnote } from "@/lib/footnote-links";
 import "@agent-native/toolkit/editor.css";
 
-const readOnlyFeatures = { image: false, tables: true, tasks: true, link: true };
+const readOnlyFeatures = { image: false, tables: true, tasks: true, link: true, footnotes: true };
 const documentWithOnlineLinks = resolveDocumentationLinks(architecture);
 
 export function meta() {
@@ -18,6 +19,10 @@ export default function ArchitectureRoute() {
 
   function openReference(event: MouseEvent<HTMLElement>) {
     if (!(event.target instanceof Element)) return;
+    if (focusFootnote(event)) {
+      event.stopPropagation();
+      return;
+    }
     const anchor = event.target.closest("a[href]");
     if (!anchor) return;
     event.preventDefault();

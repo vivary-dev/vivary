@@ -106,7 +106,7 @@ test("a refused reply lists the problems and keeps Save handoff", async () => {
   handoffFixture.status = { status: "pending", requestId: "req-1", conversation: { kind: "code", id: "run-a" }, covered: null };
   handoffFixture.call = async (name, input) => {
     handoffFixture.calls.push({ name, input });
-    return name === "vivary-handoff-save" ? { code: "refused", problems: ["goal: Required"] } : handoffFixture.status;
+    return name === "vivary-handoff-save" ? { code: "refused", replyRefused: true, problems: ["goal: Required"] } : handoffFixture.status;
   };
   await render(); await settle();
   await click("Save handoff");

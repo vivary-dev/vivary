@@ -276,3 +276,22 @@ test("only completed tool results are quoted, not tool starts or Codex agent-ope
   assert.deepEqual(items.map(item => item.id), ["ask", "done", "answer"]);
   assert.match(items[1].text, /file\.txt/);
 });
+
+// The pair an older Claude Code build recorded for one reply, observed in a Windows transcript on 2026-10-19.
+test("an older Claude Code reply recorded twice is one history entry, and a repeat in a later turn still counts", () => {
+  const reply = "Here is the handoff.\n\n```vivary-handoff\n{}\n```";
+  const items = codeHistoryItems([
+    event("ask", "user", "Prepare handoff"),
+    event("streamed", "system", reply, { role: "assistant", source: "claude-cli" }),
+    event("final", "system", reply, { role: "assistant", engine: "claude-cli", model: "claude-haiku-5-5" }),
+    event("done", "status", "Completed", { status: "completed", phase: "complete", engine: "claude-cli" }),
+    event("again", "user", "Say it again"),
+    event("repeat", "system", reply, { role: "assistant", engine: "claude-cli", model: "claude-haiku-5-5" }),
+    event("done-again", "status", "Completed", { status: "completed", phase: "complete", engine: "claude-cli" }),
+  ]);
+  // The later copy carries the engine and model, as the Code conversation view keeps it.
+  assert.deepEqual(items.map(item => item.id), ["ask", "final", "again", "repeat"]);
+  const distinct = codeHistoryItems([event("ask", "user", "Request"), event("one", "system", "Looking.", { role: "assistant" }),
+    event("two", "system", "Done.", { role: "assistant" }), event("done", "status", "Completed", { status: "completed", phase: "complete" })]);
+  assert.deepEqual(distinct.map(item => item.id), ["ask", "one", "two"]);
+});
