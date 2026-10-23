@@ -243,6 +243,8 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
   // Conversations run concurrently. Only this conversation's own run locks its composer and owns its Stop.
   const activeRuns = codeState?.activeRuns ?? [];
   const ownActiveRun = activeRuns.find(item => item.id === selection?.runId) ?? null;
+  const stopAuthority = useRef({ requestedEvent, unassigned, ownActiveRun });
+  stopAuthority.current = { requestedEvent, unassigned, ownActiveRun };
   const otherWorking = activeRuns.filter(item => item.id !== selection?.runId).length;
   const folderRuns = folderRunTargets(codeState?.folderRuns ?? [], activeRuns, selection?.runId, projectId);
   const folderIsolation = useOpenProjectFolder();
@@ -322,7 +324,9 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
 
   // Stops the selected conversation's run, never another conversation's.
   async function stopRun() {
-    if (!ownActiveRun) return false;
+    // A retained streaming callback must use current view authority. Folder loss does not revoke Stop.
+    const { requestedEvent, unassigned, ownActiveRun } = stopAuthority.current;
+    if (requestedEvent || unassigned || !ownActiveRun) return false;
     setNotice(undefined);
     try {
       const result = await stop.mutateAsync({ projectId: ownActiveRun.projectId ?? undefined, runId: ownActiveRun.id });
@@ -624,6 +628,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   const { call } = useNativeActionCaller();
   const latest = useRef(props);
   latest.current = props;
+  const readOnly = !!props.viewingMatch || !props.workspaceAvailable;
   const previewContextKey = JSON.stringify(["vivary-preview", props.previewScope, props.selection.key]);
   useEffect(() => {
     const projectId = props.projectId;
@@ -660,7 +665,13 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   }, [props.run?.id, props.run?.engine, props.run?.model]);
   const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
   const [switchError, setSwitchError] = useState<string>();
-  const shown = pendingSwitch ?? choice;
+  const switchInFlight = pendingSwitch?.step === "stopping" || pendingSwitch?.step === "switching";
+  useEffect(() => {
+    if (!readOnly) return;
+    // Discard unsubmitted consent; an operation already accepted by the host keeps settling.
+    setPendingSwitch(current => current?.step === "stopping" || current?.step === "switching" ? current : null);
+  }, [readOnly, pendingSwitch?.step]);
+  const shown = (readOnly && !switchInFlight ? null : pendingSwitch) ?? choice;
   // This conversation's own turn, never another conversation's. A switch waits only for this one.
   const runWorking = props.streaming || (!!props.run && isCodeAgentRunActive(props.run));
   // Proceed acknowledges the turns working in this folder now, keyed by turn. One that starts later asks again, including
@@ -770,8 +781,17 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     props.onChoice(next);
   }
 
+  function canMutateConversation() {
+    return !latest.current.viewingMatch && latest.current.workspaceAvailable;
+  }
+
+  function canStopConversation() {
+    return !latest.current.viewingMatch;
+  }
+
   // Choosing a retained conversation's current route cancels a pending switch. Anything else asks first.
   function requestSwitch(target: ModelChoice) {
+    if (!canMutateConversation()) return;
     setSwitchError(undefined);
     if (!props.run || (target.engine === props.run.engine && target.model === props.run.model)) {
       setPendingSwitch(null);
@@ -783,7 +803,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
 
   async function completeSwitch({ engine, model }: ModelChoice) {
     const runId = props.run?.id;
-    if (!runId) return;
+    if (!canMutateConversation() || !runId) return;
     // The pending step stays out of the saved conversation choice.
     const target = { engine, model };
     setPendingSwitch({ ...target, step: "switching" });
@@ -805,7 +825,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
   // host, so leaving or reloading this view does not lose it. A run that already ended switches at once.
   async function stopThenSwitch({ engine, model }: ModelChoice) {
     const runId = props.run?.id;
-    if (!runId) return;
+    if (!canMutateConversation() || !runId) return;
     setPendingSwitch({ engine, model, step: "stopping" });
     try {
       const state = await call<VivaryCodeState>("vivary-code-switch", {
@@ -847,7 +867,8 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
     externalStreaming={!!props.run && isCodeAgentRunActive(props.run)}
     externalUserStopped={stoppedByUser}
     onStop={async () => {
-      await props.onStop();
+      if (!canStopConversation()) return false;
+      await latest.current.onStop();
       // Code polling settles this response. Skip Native's unrelated global SSE abort.
       return false;
     }}
@@ -931,7 +952,7 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         <span>{switchError}</span>
         <Button variant="ghost" size="sm" onClick={() => setSwitchError(undefined)}>Dismiss</Button>
       </div>}
-      {pendingSwitch && props.run && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
+      {pendingSwitch && props.run && (!readOnly || switchInFlight) && <div className="local-agent-notice local-agent-switch" id={switchPanelId}
         role={pendingSwitch.step === "stopping" || pendingSwitch.step === "switching" ? "status" : "group"}
         aria-label="Switch runtime or model">
         {pendingSwitch.step === "confirm" && <>
@@ -942,7 +963,9 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
         {pendingSwitch.step === "working" && <>
           <span>This conversation is working. Wait for the current request to finish, or stop it and switch to {routeLabel(pendingSwitch)}.</span>
           <Button variant="ghost" size="sm" onClick={() => setPendingSwitch(null)}>Wait</Button>
-          <Button variant="outline" size="sm" onClick={() => setPendingSwitch({ ...pendingSwitch, step: "confirm-stop" })}>Stop and switch</Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            if (canMutateConversation()) setPendingSwitch({ ...pendingSwitch, step: "confirm-stop" });
+          }}>Stop and switch</Button>
         </>}
         {pendingSwitch.step === "confirm-stop" && <>
           <span>Stop and switch to {routeLabel(pendingSwitch)}? The current request will be cancelled. Completed work stays in this conversation and the workspace. {SWITCH_TRANSFER}</span>
@@ -1001,8 +1024,10 @@ function LocalCodeConversation(props: LocalCodeConversationProps) {
           </select>
         </label>
       </div>}
-    composerExtraActionButton={props.active && !props.streaming ?
-      <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => void props.onStop()} aria-label="Stop response">
+    composerExtraActionButton={!props.viewingMatch && props.active && !props.streaming ?
+      <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => {
+        if (canStopConversation()) void latest.current.onStop();
+      }} aria-label="Stop response">
         <IconSquare size={14} /> Stop
       </Button> : undefined}
     threadFooterSlot={<p className="local-agent-limits"><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.</p>}
