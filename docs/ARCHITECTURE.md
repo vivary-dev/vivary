@@ -1102,6 +1102,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Workbench dependency maintenance. MCP packages now resolve to the fixed
+SDK 1.32 / v2 2.3 lines, including the nested WebMCP server; inbound MCP remains
+disabled, so the upgrade does not claim audience enforcement for a future enabled
+endpoint. Vite/Vitest, HTTP and Markdown dependencies move to fixed releases.
+Targeted UUID and selector-parser overrides retain their consumers' APIs, covered
+by MSAL, Bot Framework and Typography compatibility tests. Core and Toolkit patches
+remain byte-for-byte unchanged, as does the guarded build command. Lock checks
+retain exact SheetJS archive integrity and reject affected later release branches.
+The SQLite override uses better-sqlite3 13.0.3 with SQLite 3.53.4 and bundled N-API
+prebuilds, removing its obsolete lifecycle build permission. Windows staging still
+requires reconciliation with its older pinned binding format; this change does not
+establish desktop packaging, profile migration, browser or release acceptance.
+
 2026-10-23 Workbench Node compatibility metadata. The package engine range now names only
 the admitted 22, 24 and 26 release lines at their existing runtime-security floors, so
 installation compatibility no longer advertises affected or unsupported Node versions.
