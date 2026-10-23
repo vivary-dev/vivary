@@ -1471,6 +1471,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Hosted Python prerequisite. CI selects CPython 3.12.15 and checks
+the executing interpreter and OpenSSL 3.5.9 before pip or build-tool use,
+including fresh environments. This closes the mismatch between a floating
+Python 3.11 selection and the build bootstrap's qualified runtime contract.
+Unknown hosted toolcache builds fail admission; selecting a version does not
+establish a passing runtime or hosted check. Runner action-interpreter admission
+and the certificate-store boundaries remain unchanged.
+
 2026-10-23 Certificate bundle coherence. CI bootstrap and desktop packaging now
 share an authenticated certifi 2026.10.23 overlay for pip 26.2.2, retaining pip's
 vendored import rewrites and distlib. The same derived wheel supplies build pip

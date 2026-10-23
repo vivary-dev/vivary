@@ -14,10 +14,11 @@ is still a separate prerequisite**. This is not an end-to-end fresh-image setup.
 No pip or virtual environment is created here. New Python environments must
 retain pip 26.2.2 with the authenticated certifi 2026.10.23 overlay described below; an unchanged upstream pip wheel still vendors the older bundle.
 
-The setup is Linux x64 only. Windows and workbench hosted jobs are not migrated
-by this change. Hosted jobs must first pass the unchanged pre-JavaScript runner
-interpreter guard; replacing Node on PATH cannot satisfy that guard. A hosted
-site job with an unqualified Python prerequisite remains blocked.
+The tool setup is Linux x64 only. Hosted CI selects CPython 3.12.15 and must
+admit its actual CPython/OpenSSL versions before pip or build-tool use. A version
+selection alone does not qualify the hosted executable. Hosted jobs must also
+pass the unchanged pre-JavaScript runner interpreter guard; replacing Node on
+PATH cannot satisfy that guard. An unqualified hosted Python remains blocked.
 
 ## Setup and use
 

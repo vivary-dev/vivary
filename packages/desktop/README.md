@@ -190,7 +190,7 @@ pip's vendored distlib 0.4.2 console launcher and its supported
 passes `-I -X utf8 -B` so redirected Unicode output has the same encoding
 contract as the application adapter. See the first-party
 [distlib launcher source](https://github.com/pypa/distlib/blob/0.4.2/PC/launcher.c).
-The packaged runtime omits pip and Python bytecode caches. It retains distlib's
+The packaged runtime omits installed pip from site-packages and Python bytecode caches. It retains distlib's
 license at `licenses/LICENSE.distlib` for the copied Windows launcher stubs.
 The builder requires the authenticated 108,032-byte `t64.exe` with SHA-256
 `81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7`.

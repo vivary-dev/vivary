@@ -405,7 +405,57 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          """Admit the executing CI Python and its loaded OpenSSL before network use."""
+
+          import json
+          from pathlib import Path
+          import ssl
+          import sys
+
+
+          PYTHON = (3, 12, 15, "final", 0)
+          OPENSSL = ["OpenSSL", "3.5.9"]
+
+
+          def refuse(message):
+              raise RuntimeError("Python runtime admission: " + message)
+
+
+          def assert_python_runtime():
+              # Read the current process, never caller-supplied version or environment facts.
+              if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
+                  refuse("invoke this guard with Python -I -B")
+              if sys.implementation.name != "cpython" or tuple(sys.version_info) != PYTHON:
+                  refuse("the qualified CPython 3.12.15 final runtime is required")
+              # Match the separately qualified build-tool baseline, including the library
+              # actually loaded by ssl rather than an executable's declared dependency.
+              if ssl.OPENSSL_VERSION.split()[:2] != OPENSSL:
+                  refuse("the loaded OpenSSL library must be the qualified 3.5.9 release")
+              executable = Path(sys.executable).resolve(strict=True)
+              if not executable.is_file():
+                  refuse("the executing Python must resolve to a regular file")
+              return {"python": str(executable), "implementation": "CPython",
+                      "version": "3.12.15", "openssl": ssl.OPENSSL_VERSION}
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("this guard accepts no caller-supplied runtime facts or arguments")
+                  print(json.dumps(assert_python_runtime(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as error:
+                  message = str(error) if isinstance(error, RuntimeError) else "Python runtime admission: actual runtime evidence is unavailable"
+                  print(message, file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
       - name: wait for completed reviews and resolved threads
         env:
           GH_TOKEN: ${{ github.token }}
@@ -428,6 +478,7 @@ def check_review_workflow(text: str) -> None:
         raise SystemExit(f"{REVIEW_WORKFLOW}: must match the canonical required review gate workflow "
                          "in scripts/check_ci_workflow.py (pull requests only, base-revision or pinned bootstrap script, real wait)")
     check_runner_action_bootstrap(text, ("review-gate",), auxiliary=True)
+    check_python_runtime(text, ("review-gate",), inline=True)
 
 
 def job_block(text: str, name: str) -> str:
@@ -670,17 +721,59 @@ PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")\n')
 PIP_SETUP_STEP = ('      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
  '        with:\n'
- '          python-version: "3.11"\n')
+ '          python-version: "3.12.15"\n')
+PYTHON_JOBS = (*PIP_JOBS, "review", "site")
+PYTHON_RUNTIME_SOURCE = Path(__file__).resolve().with_name("check_python_runtime.py")
+PYTHON_RUNTIME_STEP = (
+    "      - name: actual Python runtime admission\n"
+    "        shell: python -I -B {0}\n"
+    "        run: |\n"
+    "          import runpy\n"
+    '          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")\n'
+)
+
+
+def python_runtime_step(inline=False) -> str:
+    if not inline:
+        return PYTHON_RUNTIME_STEP
+    # The review gate checks out only the base and pinned fallback gate scripts.
+    # Bind its inline admission to this helper without adding a head checkout.
+    source = PYTHON_RUNTIME_SOURCE.read_text(encoding="utf-8")
+    require(source.endswith("\n") and "\r" not in source,
+            "canonical Python runtime guard requires LF and a final newline")
+    return ("      - name: actual Python runtime admission\n"
+            "        shell: python -I -B {0}\n"
+            "        run: |\n"
+            + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
+
+
+def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
+    for name in names:
+        steps = re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]
+        setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
+        guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
+        contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
+        require(len(setups) == len(guards) == 1, contract)
+        setup, guard = setups[0], guards[0]
+        require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"), contract)
+        require(guard == setup + 1
+                and steps[guard].rstrip("\n") == python_runtime_step(inline).rstrip("\n"), contract)
+        require(not re.search(r"scripts/(?:bootstrap_ci_pip|check_pip_runtime|bootstrap_build_tools|build_go_tools)\.py|\s-m\s+pip\b",
+                              "".join(steps[:guard])), contract)
+
+
 PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv"\n'
           '          venv_python="$smoke/venv/bin/python"\n'
           '          export PATH="$smoke/venv/bin:$PATH"\n'
           '          unset PYTHONPATH\n'
+          '          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?\n'
           '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
           '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" '
           'vivary\n',
           '          python -m venv --without-pip "$mcp_venv"\n'
           '          mcp_python="$mcp_venv/bin/python"\n'
+          '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
           '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
           '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'),
@@ -688,6 +781,8 @@ PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv
                              '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
                              '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
                              '          $python = Join-Path $scripts "python.exe"\n'
+                             '          & $python -I -B scripts/check_python_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }\n'
                              '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
                              '}\n'
@@ -701,6 +796,8 @@ PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv
                              'failed" }\n'
                              '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
                              '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                             '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                              '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                              'failed" }\n'
@@ -718,10 +815,13 @@ PIP_RUNTIME_STEP = (
     '          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")\n'
 )
 PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
          '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
  'governed-platform-proof': '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                             'failed" }\n'
@@ -749,9 +849,10 @@ def check_pip_runtime(text: str) -> None:
         setup, guard = setups[0], guards[0]
         require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"),
                 f"{name} pip provisioning requires exact setup-python without old-pip options")
-        require(guard == setup + 2 and steps[setup + 1].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
+        require(guard == setup + 3 and steps[setup + 1].rstrip("\n") == PYTHON_RUNTIME_STEP.rstrip("\n")
+                and steps[setup + 2].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
                 and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
-                f"{name} verified pip provisioning and admission must immediately follow setup-python unconditionally")
+                f"{name} actual Python admission, verified pip provisioning and admission must immediately follow setup-python unconditionally")
         require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:setup + 1])),
                 f"{name} must admit the selected pip before package operations")
         if name in PIP_VENV_BLOCKS:
@@ -920,6 +1021,7 @@ def check_runtime_security(text: str) -> None:
 def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     check_pip_runtime(text)
+    check_python_runtime(text)
     changes_job = job_block(text, "changes")
     test_job = job_block(text, "test")
     workbench_job = job_block(text, "workbench")
@@ -1156,6 +1258,8 @@ def main() -> None:
     check_pip_commands(text)
     require("python -I -B scripts/tests/test_pip_runtime.py" in test_job,
             "tests job must run pip runtime admission regressions")
+    require("python -I -B scripts/tests/test_python_runtime.py" in test_job,
+            "tests job must run Python runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
             "tests job must run verified pip provisioning regressions")
     require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,

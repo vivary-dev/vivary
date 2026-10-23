@@ -426,7 +426,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - name: verified pip runtime provisioning
         shell: python -I -B {0}
         run: |
@@ -460,6 +465,8 @@ jobs:
         run: python -I -B scripts/check_uv_runtime.py
       - name: CI workflow contract
         run: python scripts/check_ci_workflow.py
+      - name: Python runtime admission tests
+        run: python -I -B scripts/tests/test_python_runtime.py
       - name: pip runtime admission tests
         run: python -I -B scripts/tests/test_pip_runtime.py
       - name: verified pip provisioning tests
@@ -565,6 +572,7 @@ jobs:
           venv_python="$smoke/venv/bin/python"
           export PATH="$smoke/venv/bin:$PATH"
           unset PYTHONPATH
+          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?
           "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
           "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?
           "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary
@@ -749,6 +757,7 @@ jobs:
           mcp_venv="$smoke/mcp-venv"
           python -m venv --without-pip "$mcp_venv"
           mcp_python="$mcp_venv/bin/python"
+          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?
           "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?
           "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?
           "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"
@@ -1058,7 +1067,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - name: verified pip runtime provisioning
         shell: python -I -B {0}
         run: |
@@ -1127,7 +1141,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - name: verified pip runtime provisioning
         shell: python -I -B {0}
         run: |
@@ -1193,6 +1212,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
           $scripts = Join-Path $smoke "venv\Scripts"
           $python = Join-Path $scripts "python.exe"
+          & $python -I -B scripts/check_python_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }
           & $python -I -B scripts/bootstrap_ci_pip.py
           if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" }
           & $python -I -B scripts/check_pip_runtime.py
@@ -1247,6 +1268,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" }
           $mcpScripts = Join-Path $mcpVenv "Scripts"
           $mcpPython = Join-Path $mcpScripts "python.exe"
+          & $mcpPython -I -B scripts/check_python_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }
           & $mcpPython -I -B scripts/bootstrap_ci_pip.py
           if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning failed" }
           & $mcpPython -I -B scripts/check_pip_runtime.py
@@ -1308,7 +1331,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - name: verified pip runtime provisioning
         shell: python -I -B {0}
         run: |
@@ -1362,7 +1390,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - run: mkdir -p sandboxes
       - name: scaffold a workspace
         run: python packages/create-vivary/create_vivary.py init sandboxes/ci-ws --preset coding --force --no-wizard
@@ -1382,6 +1415,14 @@ jobs:
     steps:
       - *runner_action_node_bootstrap
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12.15"
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "24.22.1"

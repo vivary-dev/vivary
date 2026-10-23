@@ -213,6 +213,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
             setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
@@ -221,16 +222,21 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         else:
             updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
         text = text.replace(block, updated, 1)
-    for name in ("test", "workbench", "governed-platform-proof", "orientation-proof"):
+    for name in module.PYTHON_JOBS:
         block = module.job_block(text, name)
         setup = (
             '      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
-            '        with:\n          python-version: "3.11"\n'
-            + PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
+            '        with:\n          python-version: "3.12.15"\n'
+            + module.PYTHON_RUNTIME_STEP
         )
+        if name in module.PIP_JOBS:
+            setup += PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
         if name in PIP_MCP_FIXTURES:
             block += PIP_MCP_FIXTURES[name]
-        updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
+        if '    steps: []\n' in block:
+            updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
+        else:
+            updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
         original = module.job_block(text, name)
         text = text.replace(original, updated, 1)
     for index, name in enumerate(module.CI_JOBS):
@@ -1048,6 +1054,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
          '          venv_python="$smoke/venv/bin/python"\n'
          '          export PATH="$smoke/venv/bin:$PATH"\n'
          '          unset PYTHONPATH\n'
+         '          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
          '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary\n'
@@ -1056,6 +1063,7 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
          '        run: |\n'
          '          python -m venv --without-pip "$mcp_venv"\n'
          '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
          '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
@@ -1066,6 +1074,8 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
                             '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
                             '          $python = Join-Path $scripts "python.exe"\n'
+                            '          & $python -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }\n'
                             '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
                             '}\n'
@@ -1082,6 +1092,8 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '}\n'
                             '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
                             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                             'failed" }\n'
@@ -1104,7 +1116,7 @@ def test_actual_workflow_requires_pip_runtime_admission():
         assert block.count(PIP_BOOTSTRAP_STEP) == 1, (name, "verified pip provisioning missing")
         unchecked = '      - run: python -I -m pip --use-deprecated=legacy-certs install pip==26.2.2\n'
         cases = {
-            "setup_old_pip_network": block.replace('          python-version: "3.11"\n', '          python-version: "3.11"\n          pip-version: "26.2.2"\n', 1),
+            "setup_old_pip_network": block.replace('          python-version: "3.12.15"\n', '          python-version: "3.12.15"\n          pip-version: "26.2.2"\n', 1),
             "missing_provisioning": block.replace(PIP_BOOTSTRAP_STEP, "", 1),
             "provisioning_after_guard": block.replace(PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP, PIP_RUNTIME_STEP + PIP_BOOTSTRAP_STEP, 1),
             "conditional_provisioning": block.replace(PIP_BOOTSTRAP_STEP, PIP_BOOTSTRAP_STEP.replace("        shell:", "        if: false\n        shell:"), 1),
@@ -1300,6 +1312,83 @@ def test_pip_network_cannot_reintroduce_host_truststore_roots():
         assert mutation != workflow
         message = _run(mutation)
         assert message and "pip" in message, message
+
+
+def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_python_runtime(workflow)
+    guard = module.PYTHON_RUNTIME_STEP
+    for name in module.PYTHON_JOBS:
+        block = module.job_block(workflow, name)
+        cases = {
+            "old_python": block.replace('python-version: "3.12.15"', 'python-version: "3.11"', 1),
+            "floating_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12"', 1),
+            "future_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1),
+            "missing_guard": block.replace(guard, "", 1),
+            "conditional_guard": block.replace(guard, guard.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_guard": block.replace(guard, guard.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "nonisolated_guard": block.replace(guard, guard.replace("python -I -B", "python -B"), 1),
+            "bytecode_guard": block.replace(guard, guard.replace("python -I -B", "python -I"), 1),
+            "wrong_guard": block.replace(guard, guard.replace("check_python_runtime.py", "check_pip_runtime.py"), 1),
+            "early_pip": block.replace(guard, '      - run: python -m pip install anything\n' + guard, 1),
+            "early_tools": block.replace(module.PIP_SETUP_STEP,
+                                        '      - run: python scripts/bootstrap_build_tools.py --root /tmp/tools\n' + module.PIP_SETUP_STEP, 1),
+        }
+        for label, mutation in cases.items():
+            assert mutation != block, (name, label)
+            try:
+                module.check_python_runtime(workflow.replace(block, mutation, 1))
+            except SystemExit as error:
+                assert name in str(error) and "Python" in str(error), (name, label, error)
+            else:
+                raise AssertionError((name, label, "bypassed actual Python/OpenSSL admission"))
+
+
+def test_python_runtime_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_python_runtime.py", "echo skipped", 1))
+    assert message and "Python runtime admission regressions" in message
+
+
+def test_fresh_venvs_admit_their_actual_python_before_pip_provisioning():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    for name, blocks in module.PIP_VENV_BLOCKS.items():
+        for required in blocks:
+            lines = required.splitlines(keepends=True)
+            guard = next(line for line in lines if "scripts/check_python_runtime.py" in line)
+            seed = next(line for line in lines if "scripts/bootstrap_ci_pip.py" in line)
+            assert lines.index(guard) < lines.index(seed)
+            failure = guard if "exit $?" in guard else lines[lines.index(guard) + 1]
+            mutations = {
+                "missing_python_admission": required.replace(guard, "", 1),
+                "wrong_python_target": required.replace(guard, guard.replace('"$venv_python"', "python").replace('"$mcp_python"', "python").replace("& $mcpPython", "python").replace("& $python", "python"), 1),
+                "python_after_pip_seed": required.replace(guard, "", 1).replace(seed, seed + guard, 1),
+                "ignored_python_failure": required.replace(failure, failure.replace("exit $?", "true").replace("$LASTEXITCODE -ne 0", "$false"), 1),
+            }
+            for label, mutation in mutations.items():
+                assert mutation != required, (name, label)
+                message = _run(workflow.replace(required, mutation, 1))
+                assert message and "pip" in message, (name, label, message)
+
+
+def test_review_python_admission_remains_bound_to_the_helper_after_canonical_edits():
+    module = _load()
+    canonical = module.CANONICAL_REVIEW_WORKFLOW
+    guard = module.python_runtime_step(inline=True)
+    for mutation in (canonical.replace(guard, "", 1),
+                     canonical.replace(guard, guard.replace('OPENSSL = ["OpenSSL", "3.5.9"]',
+                                                           'OPENSSL = ["OpenSSL", "3.5.8"]'), 1),
+                     canonical.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1)):
+        assert mutation != canonical
+        module.CANONICAL_REVIEW_WORKFLOW = mutation
+        try:
+            module.check_review_workflow(mutation)
+        except SystemExit as error:
+            assert "Python" in str(error), error
+        else:
+            raise AssertionError("canonical edits bypassed the actual review Python admission")
 
 
 if __name__ == "__main__":
