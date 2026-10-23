@@ -827,6 +827,48 @@ def check_pip_commands(text: str) -> None:
                             f"{name} pip commands cannot override their admitted interpreter environment")
 
 
+SITE_JOB_HEADER = (
+    "  site:\n"
+    "    name: site build\n"
+    "    needs: changes\n"
+    "    if: needs.changes.outputs.site == 'true'\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n"
+)
+SITE_DEPENDENCY_STEP = (
+    "      - name: known site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py\n"
+)
+SITE_INSTALLED_DEPENDENCY_STEP = (
+    "      - name: installed site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py --installed\n"
+)
+SITE_BUILD_STEP = (
+    "      - name: build (re-syncs docs, then astro build)\n"
+    "        run: npm run build\n"
+    "        working-directory: site\n"
+)
+
+
+def check_site_dependencies(text: str) -> None:
+    job = job_block(text, "site")
+    header, steps_key, body = job.partition("    steps:\n")
+    contract = "site known dependency admission must block before install and admit installed packages before audit and build"
+    require(steps_key and header == SITE_JOB_HEADER, contract)
+    require(not re.search(r"(?m)^    [^\s#]", body),
+            "site cannot add job fields after its canonical header and steps key")
+    steps = re.split(r"(?m)(?=^      - )", job)[1:]
+    guard = [index for index, step in enumerate(steps) if "scripts/check_site_dependencies.py" in step]
+    installs = [index for index, step in enumerate(steps) if "        run: npm ci\n" in step]
+    audits = [index for index, step in enumerate(steps) if "        run: npm audit --audit-level=high\n" in step]
+    builds = [index for index, step in enumerate(steps) if "        run: npm run build\n" in step]
+    require(len(guard) == 2 and len(installs) == len(audits) == len(builds) == 1, contract)
+    require(steps[guard[0]].rstrip("\n") == SITE_DEPENDENCY_STEP.rstrip("\n"), contract)
+    require(steps[guard[1]].rstrip("\n") == SITE_INSTALLED_DEPENDENCY_STEP.rstrip("\n"), contract)
+    require(guard[0] + 1 == installs[0] and installs[0] + 1 == guard[1] < audits[0] < builds[0], contract)
+    require(steps[builds[0]].rstrip("\n") == SITE_BUILD_STEP.rstrip("\n"), contract)
+
+
 def check_runtime_security(text: str) -> None:
     for name in NODE_JOBS:
         job = job_block(text, name)
@@ -1092,6 +1134,7 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
+    check_site_dependencies(text)
     check_runtime_security(text)
     check_uv_acquisition(text)
     check_pip_commands(text)
@@ -1099,6 +1142,8 @@ def main() -> None:
             "tests job must run pip runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
             "tests job must run verified pip provisioning regressions")
+    require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
+            "tests job must run known site dependency admission regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
             "tests job must run the runner action bootstrap regressions")

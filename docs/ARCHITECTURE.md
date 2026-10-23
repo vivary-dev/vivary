@@ -1104,6 +1104,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Site build dependency admission. The internal documentation site pins
+Vite 8.1.6 and the compatible selector-parser 6.1.5 backport; esbuild's JavaScript
+package moves to 0.28.2 so it can use the qualified matching compiler binary.
+The existing Astro cache-policy replacement remains scoped to Astro 7.3.5.
+The site lock is checked before installation and installed target metadata is
+checked before the existing audit and build. These checks reject affected nested
+copies, aliases, inconsistent registry inputs, and redirected installed metadata.
+Vite admission covers the reviewed 8.1 line only: later minor lines have separate
+security fixes and cannot pass merely by having a greater version. The lock and
+workflow regression suites cover these refusals. These known-version checks do
+not authenticate installed package bytes or qualify bundled native tools; those
+remain separate build prerequisites. Local qualification uses the isolated
+patched npm client and the matching esbuild compiler built with Go 1.26.10.
+The hosted workflow still selects the runner's npm and packaged esbuild binary;
+reproducible provisioning of those qualified tools remains a separate hosted
+execution gate. Local results do not admit that hosted toolchain. The site
+architecture and application runtime boundaries are unchanged. No deployment
+or publication is authorized.
+
 2026-10-23 Desktop Python build dependencies. The desktop pins the authenticated
 CPython 3.12.15 release archives and pip 26.2.2/setuptools 84.1.0 build wheels.
 The builder creates its temporary environment without ensurepip, rechecks exact
