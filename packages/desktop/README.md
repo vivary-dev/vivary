@@ -116,14 +116,22 @@ checkout, runtime data, credentials, or the development preview service.
 
 ### Bundled original runtime
 
-The desktop bundles CPython 3.12.14 from the
-[python-build-standalone `20260901` release](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901).
+The desktop pins CPython 3.12.15 from the
+[python-build-standalone `20261021` release](https://github.com/astral-sh/python-build-standalone/releases/tag/20261021).
 The runtime archives are fixed inputs:
 
 | Target | Archive | SHA-256 |
 | --- | --- | --- |
-| Linux x64 | `cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c` |
-| Windows x64 | `cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz` | `7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14` |
+| Linux x64 | `cpython-3.12.15+20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `6d7521138fd33afddc1ccd08abb007d9a2829e38117c2576f9efdc0ec73ce772` |
+| Windows x64 | `cpython-3.12.15+20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz` | `aac5d331fc3307343f95928fdbea4583f0d53973d08c7e1d081884fbd229a0e1` |
+
+These target pins do not establish native acceptance. The Linux artifact contains
+Expat 2.9.0 and OpenSSL 3.5.9; static inspection of the Windows artifact still
+finds Expat 2.8.5. No affected XML call path was found in the seven bundled Vivary
+Python packages, but Windows library applicability, certificate paths and native
+acceptance remain open. Neither target is admitted here for arbitrary Python
+database workloads. Artifact digests were matched to the official release;
+independent provenance verification is not claimed. Electron publication remains held.
 
 Package-time downloads stay under `packages/desktop/.tmp/original-runtime` and
 are reused only after their hashes match. This includes the following build-only
@@ -131,14 +139,16 @@ Python tools:
 
 | Tool | Version | SHA-256 |
 | --- | --- | --- |
-| [pip](https://pypi.org/project/pip/26.0.1/) | 26.0.1 | `bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b` |
-| [setuptools](https://pypi.org/project/setuptools/84.0.0/) | 84.0.0 | `51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670` |
+| [pip](https://pypi.org/project/pip/26.2.2/) | 26.2.2 | `fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70` |
+| [setuptools](https://pypi.org/project/setuptools/84.1.0/) | 84.1.0 | `5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9` |
 
 Each build then:
 
 1. Creates a temporary isolated build environment under the same `.tmp`
-   directory, installs only the verified local pip and setuptools wheels, and
-   checks that pip vendors distlib 0.4.0.
+   directory without running the host's ensurepip seed. It authenticates the local
+   pip and setuptools wheel bytes again, bootstraps from that pip wheel with isolated
+   imports and package-client configuration, and
+   checks that pip vendors distlib 0.4.2.
 2. Builds fresh pure-Python wheels from the owned `vivary`, `create-vivary`,
    `core`, `tropo`, `strato`, `ozone`, and `exo` sources without an
    index or build isolation.
@@ -150,7 +160,9 @@ Each build then:
 6. Copies and hashes the reviewed managed-project bridge.
 7. Writes the runtime manifest and license inventory.
 
-The build tools remain package-time inputs. They do not add a first-launch
+The build tools remain package-time inputs. The pip wheel is
+`pip-26.2.2-py3-none-any.whl`, with 1,819,850 authenticated bytes and the digest
+above. Setuptools moves to 84.1.0, which fixes the Windows legacy wheel-to-egg traversal advisory. These inputs do not add a first-launch
 installer or a new runtime dependency.
 
 The distributed application needs no global Python, source checkout, or
@@ -159,20 +171,26 @@ adopt, doctor, capabilities, check, find, decide, review, impact, and control.
 Its logs and email-draft helpers remain available through the bundled CLI.
 
 Linux component commands resolve the bundled sibling `python3`. Windows uses
-pip's vendored distlib 0.4.0 console launcher and its supported
+pip's vendored distlib 0.4.2 console launcher and its supported
 `<launcher_dir>` interpreter path. Every standalone and component launcher
 passes `-I -X utf8 -B` so redirected Unicode output has the same encoding
 contract as the application adapter. See the first-party
-[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.0/PC/launcher.c).
+[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.2/PC/launcher.c).
 The packaged runtime omits pip and Python bytecode caches. It retains distlib's
 license at `licenses/LICENSE.distlib` for the copied Windows launcher stubs.
+The builder requires the authenticated 108,032-byte `t64.exe` with SHA-256
+`81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7`.
+Before creating the license destination, it requires the 14,531-byte LICENSE
+with SHA-256 `808e10c8a6ab8deb149ff9b3fb19f447a808094606d712a9ca57fead3552599d`.
+Both boundaries retain the authenticated bytes for the subsequent write.
+An unknown vendor, missing input, wrong size or wrong digest is refused.
 Electron Packager copies the staged Python tree with verbatim relative symlinks.
 
 The manifest records the target, source revision, interpreter and component
 versions, wheel hashes, launchers, bridge hash, and license paths. The package
 includes each component's MIT license, the repository MIT license for the
 bridge, CPython and distlib licenses, and the release-pinned
-[python-build-standalone aggregate licenses](https://github.com/astral-sh/python-build-standalone/blob/20260901/python-licenses.rst).
+[python-build-standalone aggregate licenses](https://github.com/astral-sh/python-build-standalone/blob/20261021/python-licenses.rst).
 That aggregate is 105,875 bytes with SHA-256
 `e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab`.
 
@@ -236,16 +254,18 @@ and its limits belong to the [issue receipt](../../docs/product/multi-project/re
 
 ## Windows x64 portable preview
 
-A Linux build host can also assemble the unsigned Windows x64 folder:
+The Windows x64 packaging entry is:
 
 ```console
 npm --prefix packages/desktop run package -- --windows-x64
 ```
 
-This mode requires Workbench output built with Node 24.20.0 (ABI 137) and
-`better-sqlite3` 12.11.1. It verifies pinned official Windows Node and SQLite
-assets, replaces the binding only in the staged copy, and asks Electron Packager
-for Windows x64. It uses the build host's `tar` command for the one SQLite entry.
+This mode requires Workbench output built with Node 24.22.1 (ABI 137) and
+`better-sqlite3` 13.0.3. It verifies the pinned official Windows Node asset and
+the bundled `prebuilds/win32-x64.node` in the staged copy. That N-API binding must
+match SHA-256 `e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a`.
+It remains at the path selected by the 13.x loader; staging does not download or
+extract a separate ABI-specific SQLite archive. The source Workbench output is unchanged.
 The source checkout and its installed native modules stay intact.
 
 This mode also writes `package-file-manifest.json` beside the `Vivary-win32-x64`
@@ -253,11 +273,35 @@ folder in the dated `dist/` directory. It maps each file's path relative to that
 folder, with forward slashes, to its lowercase SHA-256. The
 [Windows installer](#windows-installer) build takes it as `--manifest`.
 
-[Node checksums](https://nodejs.org/dist/v24.20.0/SHASUMS256.txt) and the
-[SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.11.1)
+[Node checksums](https://nodejs.org/dist/v24.22.1/SHASUMS256.txt) and the
+[SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v13.0.3)
 are the asset authorities. [Electron Packager](https://github.com/electron/packager/blob/v20.3.0/README.md)
-supports cross-platform packaging. A successful package build establishes an
-artifact, not Windows runtime acceptance.
+supports cross-platform assembly, but Vivary's mandatory native runtime
+collector requires matching Windows x64 evidence and refuses that collection
+on Linux. Electron publication remains held because standalone Node admission
+does not resolve its incomplete advisory backport evidence.
+
+The approved Node 24.22.1 inputs are:
+
+| Input | SHA-256 |
+| --- | --- |
+| Linux x64 archive | `6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6` |
+| Windows x64 ZIP | `d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5` |
+| `node-v24.22.1-win-x64.exe` | `d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5` |
+
+The signed-checksum exception covers only those approved Linux and Windows
+archives. Their OIDC build attestations are missing, and fresh online key
+revocation was not checked. The separate verified Windows executable receipt
+exited 0 and reported Node 24.22.1, OpenSSL 3.5.9 and ABI 137. It did not verify
+installed Vivary. Linux packaging still binds the actual native process and
+copied executable bytes.
+
+The pip/distlib source port preserves the verified transfer's pinned inputs and
+exact-byte checks. Source reconciliation and Linux tests do not establish native
+Windows execution or acceptance of installed Vivary. Final-head hosted CI,
+independent server review and packaged Windows acceptance remain separate gates.
+Electron and PyPI or raw registry publication remain held. No publication is
+authorized by these source or artifact checks.
 
 `vivary.exe` carries the Vivary name and icon. The icon is
 `assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`

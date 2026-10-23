@@ -1,39 +1,30 @@
-import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
   copyFile,
+  lstat,
   mkdir,
-  mkdtemp,
   readFile,
   rename,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCallback);
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultCacheDirectory = path.join(packageRoot, ".tmp", "windows-assets");
-const SQLITE_VERSION = "12.11.1";
-const SQLITE_ARCHIVE_ENTRY = "build/Release/better_sqlite3.node";
+const SQLITE_VERSION = "13.0.3";
+const SQLITE_BINDING = "prebuilds/win32-x64.node";
+// The Windows N-API binding bundled in the authenticated 13.0.3 npm archive.
+const SQLITE_BINDING_SHA256 = "e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a";
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
 const NODE_ASSET = Object.freeze({
   fileName: "node-v24.22.1-win-x64.exe",
   sha256: "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
   url: "https://nodejs.org/dist/v24.22.1/win-x64/node.exe",
-});
-
-const SQLITE_ASSET = Object.freeze({
-  fileName: "better-sqlite3-v12.11.1-node-v137-win32-x64.tar.gz",
-  sha256: "4ee5e653174d6ddd301605d351798cdae2613da06c4f37ecdce263021fcf1255",
-  url: "https://github.com/WiseLibs/better-sqlite3/releases/download/v12.11.1/better-sqlite3-v12.11.1-node-v137-win32-x64.tar.gz",
 });
 
 export const WINDOWS_X64_TARGET = Object.freeze({
@@ -55,37 +46,25 @@ export async function prepareWindowsX64Target({ runtimeDir, nodeDir, cacheDirect
 
   const serverRoot = path.join(runtimeDir, ".output", "server");
   const sqliteRoot = path.join(serverRoot, "node_modules", "better-sqlite3");
-  const sqliteBinding = path.join(sqliteRoot, SQLITE_ARCHIVE_ENTRY);
+  const sqliteBinding = path.join(sqliteRoot, SQLITE_BINDING);
   const sourceMarker = await verifyTracedRuntime(serverRoot, sqliteRoot, sqliteBinding);
 
   await mkdir(cacheDir, { recursive: true });
   const nodeAsset = await cachedAsset(NODE_ASSET, cacheDir);
-  const sqliteAsset = await cachedAsset(SQLITE_ASSET, cacheDir);
   await mkdir(nodeDir, { recursive: true });
   await copyFile(nodeAsset, path.join(nodeDir, WINDOWS_X64_TARGET.nodeExecutable));
 
-  const extractDir = await mkdtemp(path.join(cacheDir, "sqlite-"));
-  try {
-    await execFile("tar", [
-      "-xzf",
-      sqliteAsset,
-      "-C",
-      extractDir,
-      SQLITE_ARCHIVE_ENTRY,
-    ], { maxBuffer: 64 * 1024, windowsHide: true });
-    await copyFile(path.join(extractDir, SQLITE_ARCHIVE_ENTRY), sqliteBinding);
-    await writeFile(
-      path.join(serverRoot, ".agent-native-node-runtime.json"),
-      `${JSON.stringify({
-        nodeVersion: sourceMarker.nodeVersion,
-        nodeAbi: sourceMarker.nodeAbi,
-        platform: WINDOWS_X64_TARGET.platform,
-        arch: WINDOWS_X64_TARGET.arch,
-      })}\n`,
-    );
-  } finally {
-    await rm(extractDir, { recursive: true, force: true });
-  }
+  // Nitro retains the package's platform prebuilds. The verified Windows binding
+  // is already in its loader-selected location; no ABI-specific replacement is needed.
+  await writeFile(
+    path.join(serverRoot, ".agent-native-node-runtime.json"),
+    `${JSON.stringify({
+      nodeVersion: sourceMarker.nodeVersion,
+      nodeAbi: sourceMarker.nodeAbi,
+      platform: WINDOWS_X64_TARGET.platform,
+      arch: WINDOWS_X64_TARGET.arch,
+    })}\n`,
+  );
 
   return WINDOWS_X64_TARGET;
 }
@@ -108,12 +87,15 @@ async function verifyTracedRuntime(serverRoot, sqliteRoot, sqliteBinding) {
   }
   let binding;
   try {
-    binding = await stat(sqliteBinding);
+    binding = await lstat(sqliteBinding);
   } catch {
     throw new Error("The traced better-sqlite3 runtime binding is missing.");
   }
   if (!binding.isFile()) {
     throw new Error("The traced better-sqlite3 runtime binding is missing.");
+  }
+  if (await fileSha256(sqliteBinding) !== SQLITE_BINDING_SHA256) {
+    throw new Error("The traced better-sqlite3 Windows binding does not match the authenticated asset.");
   }
   return { nodeVersion: runtime.nodeVersion, nodeAbi: runtime.nodeAbi };
 }

@@ -1108,6 +1108,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Desktop Python build dependencies. The desktop pins the authenticated
+CPython 3.12.15 release archives and pip 26.2.2/setuptools 84.1.0 build wheels.
+The builder creates its temporary environment without ensurepip, rechecks exact
+wheel bytes, and invokes the verified pip wheel with isolated imports and pip
+configuration. Its later wheel build and installation also exclude inherited
+Python/pip overrides. Windows launcher and license writes retain the checked
+bytes and lengths from distlib 0.4.2. The README now describes SQLite 13 bundled
+Windows prebuild staging and separates authenticated assets from native evidence.
+Direct Linux verification extracted the pinned interpreter, built all seven owned
+wheels with hostile pip/Python settings ignored and ensurepip prohibited, and ran
+six installed CLI help commands. That proves this build path, not Windows, TLS,
+XML or database acceptance. The Windows Python candidate still contains Expat
+2.8.5; native/library applicability and target certificate evidence remain open.
+No existing Node, Electron or publication guard was relaxed.
+
 2026-10-23 Inbox creation and metadata review fixes. Personal folder lookup now distinguishes confirmed
 absence from pending or failed resolution, so New conversation cannot silently choose API billing while
 Code readiness is unknown. The explicit API choice remains available, and failed folder reads can retry.
@@ -1117,6 +1132,21 @@ cases cover delayed and failed folder reads, explicit API choice, action authent
 broken folders, plus revoke/rebind during admission and archive reads. These direct Linux checks do not
 establish hosted CI, browser acceptance or Windows acceptance.
 
+2026-10-23 Workbench dependency maintenance. MCP packages now resolve to the fixed
+SDK 1.32 / v2 2.3 lines, including the nested WebMCP server; inbound MCP remains
+disabled, so the upgrade does not claim audience enforcement for a future enabled
+endpoint. Vite/Vitest, HTTP and Markdown dependencies move to fixed releases.
+Targeted UUID and selector-parser overrides retain their consumers' APIs, covered
+by MSAL, Bot Framework and Typography compatibility tests. Core and Toolkit patches
+remain byte-for-byte unchanged, as does the guarded build command. Lock checks
+retain exact SheetJS archive integrity and reject affected later release branches.
+The SQLite override uses better-sqlite3 13.0.3 with SQLite 3.53.4 and bundled N-API
+prebuilds, removing its obsolete lifecycle build permission. Windows staging now
+verifies the bundled win32-x64 N-API binding against its authenticated package hash
+before downloading or staging Node. The loader-selected prebuild stays in place;
+the obsolete ABI-specific SQLite download and extraction are removed. Standalone
+Node admission and the Electron publication hold remain unchanged. This change
+does not establish Windows execution, profile migration, browser or release acceptance.
 
 2026-10-23 Workbench Node compatibility metadata. The package engine range now names only
 the admitted 22, 24 and 26 release lines at their existing runtime-security floors, so
@@ -4327,8 +4357,9 @@ admit the actual runner Node interpreter before any JavaScript action. CI and
 protected npm jobs select the qualified Node 24.22.1 runtime and immediately admit
 the selected executable before package work. Source support still starts at Node
 22.23.4. The build, startup, desktop packaging, and installer entry points retain
-the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and SQLite
-12.11.1. Affected standalone Node and the held Electron runtime are refused.
+the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and the
+authenticated better-sqlite3 13.0.3 Windows N-API prebuild. Affected standalone
+Node and the held Electron runtime are refused.
 
 Python-bearing CI provisions the exact verified pip 26.2.2 wheel before admission,
 including the four new pipless environment paths. The existing verified uv

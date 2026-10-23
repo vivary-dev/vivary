@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { compileFunction } from "node:vm";
 import test from "node:test";
 import { transform } from "esbuild";
+import { withCodeConversationAdmission } from "../server/conversation-admission.ts";
 import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS, claudeCodeModelChoices }
   from "../shared/claude-models.ts";
 
@@ -25,6 +26,9 @@ const resolverEnd = source.indexOf("\nfunction titleFromMessage", resolverStart)
 assert.ok(resolverStart >= 0 && resolverEnd > resolverStart);
 const resolver = await transform(source.slice(resolverStart, resolverEnd).replace("export ", ""), { loader: "ts" });
 const fail = (message, options) => { throw Object.assign(new Error(message), options); };
+const openConversation = compileFunction(
+  await slice("function assertCodeConversationOpen(", "\n/** The same owned legacy-draft association")
+    + "\nreturn assertCodeConversationOpen;", ["fail"])(fail);
 // vivary-code-switch, its refusals, its model check, and the record change, as written.
 const switchCode = await slice("export async function switchVivaryCodeRuntime(", "\nexport async function getVivaryCodeFiles(");
 const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
@@ -43,6 +47,7 @@ function fixture() {
   const owners = {
     resolveWorkspace: async () => workspace, ensureVivaryCodeHostInitialized: async () => {},
     hostState, assertCodeHostAvailable() {}, assertConversationCanStart() {}, canonicalFolder: async folder => folder,
+    withCodeConversationAdmission, assertCodeConversationOpen: openConversation,
     requireOwnedRun: id => records.get(id) ?? fail("Local Vivary code run not found.", { statusCode: 404 }),
     getCodeAgentRunRecord: id => records.get(id) ?? null,
     engineFromRun: run => run.metadata.engine,
@@ -98,6 +103,19 @@ for (const engine of ["claude-cli", "codex-cli"]) test(`${engine} new and resume
   assert.equal(value.events.length, 2);
   assert.deepEqual(value.launches.map(launch => [launch.engine, launch.model]), [[engine, model], [engine, model]]);
   assert.deepEqual(value.records.get(first.run.id).metadata.subscriptionFundingBinding, { obsolete: true });
+});
+
+test("an archived conversation refuses a resumed send before any transcript or launch mutation", async () => {
+  const value = fixture();
+  const input = { ownerEmail: "fixture@example.test", engine: "codex-cli", message: "First",
+    model: "gpt-fixture", workspace: value.workspace };
+  const first = await value.send(input);
+  value.records.get(first.run.id).metadata.archivedAt = "2026-10-23T00:00:00.000Z";
+  const before = value.snapshot();
+  await assert.rejects(value.send({ ...input, runId: first.run.id, message: "Follow up" }), {
+    errorCode: "vivary_conversation_archived", statusCode: 409,
+  });
+  assert.equal(value.snapshot(), before);
 });
 
 // A send names the conversation's route. Without a switch, another runtime or model still refuses, because only

@@ -387,6 +387,8 @@ test("production installer refuses unverified runtime payloads before invoking N
     product: "Vivary", platform: "win32", architecture: "x64", version: "0.0.0", sourceCommit: commit, sourceDirty: false,
     node: "24.22.1", runtimeSecurity: { standalone: { sha256: "a".repeat(64), versions: { node: "24.22.1" } } },
   }));
+  await mkdir(path.join(payload, "resources/node"), { recursive: true });
+  await writeFile(path.join(payload, "resources/node/node.exe"), "synthetic corrupt Windows Node fixture\n");
   await writeManifest(payload, manifest);
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
   await assert.rejects(buildProductionInstaller(inputs, fake, { installerCommit }), /Runtime security/);
