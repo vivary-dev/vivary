@@ -1299,6 +1299,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Local site admission integration. Published PR268 site dependency
+versions, lock integrities, pre-install and installed-tree guards are retained
+unchanged alongside the runtime/queue integration. Only architecture histories
+needed reconciliation. Earlier site evidence stays scoped to its tested head;
+this merge does not establish a new site build or product acceptance.
+
 2026-10-23 Local queue and inbox integration. The published PR265 queue lifecycle
 now shares the current conversation admission lock with archive and draft writes;
 fresh project grants, archive checks and queued Stop checks precede its claim.
@@ -1338,6 +1344,24 @@ passed 70 tests, and the rebuilt TypeScript compiler passed. These Linux checks
 use the qualified dependency graph from the dependency-maintenance branch; they
 do not establish live provider streaming, packaged Windows or hosted CI acceptance.
 Pending-route placeholder reconciliation remains separate from this repair.
+2026-10-23 Site build dependency admission. The internal documentation site pins
+Vite 8.1.6 and the compatible selector-parser 6.1.5 backport; esbuild's JavaScript
+package moves to 0.28.2 so it can use the qualified matching compiler binary.
+The existing Astro cache-policy replacement remains scoped to Astro 7.3.5.
+The site lock is checked before installation and installed target metadata is
+checked before the existing audit and build. These checks reject affected nested
+copies, aliases, inconsistent registry inputs, and redirected installed metadata.
+Vite admission covers the reviewed 8.1 line only: later minor lines have separate
+security fixes and cannot pass merely by having a greater version. The lock and
+workflow regression suites cover these refusals. These known-version checks do
+not authenticate installed package bytes or qualify bundled native tools; those
+remain separate build prerequisites. Local qualification uses the isolated
+patched npm client and the matching esbuild compiler built with Go 1.26.10.
+The hosted workflow still selects the runner's npm and packaged esbuild binary;
+reproducible provisioning of those qualified tools remains a separate hosted
+execution gate. Local results do not admit that hosted toolchain. The site
+architecture and application runtime boundaries are unchanged. No deployment
+or publication is authorized.
 
 2026-10-23 Desktop Python build dependencies. The desktop pins the authenticated
 CPython 3.12.15 release archives and pip 26.2.2/setuptools 84.1.0 build wheels.
