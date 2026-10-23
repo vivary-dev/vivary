@@ -5,9 +5,11 @@ import importlib.metadata
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import runpy
+import stat
 import sys
 
 
@@ -29,6 +31,30 @@ def stable_version(value):
     if version < MINIMUM:
         refuse("pip 26.2.2 or later is required before network access")
     return version
+
+
+def assert_certificate_overrides():
+    # Requests consults these even when pip ignores its PIP_* environment.
+    # An inherited CURL_CA_BUNDLE is only effective without REQUESTS_CA_BUNDLE.
+    overrides = (os.environ.get("PIP_CERT"),
+                 os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE"))
+    for value in overrides:
+        if value is None:
+            continue
+        path = Path(value)
+        try:
+            info = path.lstat()
+            if (not path.is_absolute() or stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                    or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_size > 1024 * 1024):
+                refuse("certificate override must be a plain absolute CA file")
+            with path.open("rb") as stream:
+                digest = hashlib.sha256(stream.read(1024 * 1024 + 1)).hexdigest()
+        except OSError:
+            refuse("certificate override is unavailable")
+        if digest != CA_POLICY["CERTIFI_CA_SHA256"]:
+            refuse("certificate override must contain only the qualified certifi bundle")
 
 
 def assert_pip_runtime():
@@ -62,6 +88,7 @@ def assert_pip_runtime():
             or certifi.__version__ != CA_POLICY["CERTIFI_VERSION"]
             or hashlib.sha256(ca.read_bytes()).hexdigest() != CA_POLICY["CERTIFI_CA_SHA256"]):
         refuse("pip must load the qualified certifi 2026.10.23 bundle from its own distribution")
+    assert_certificate_overrides()
     return {"python": str(executable), "pip": actual, "module": str(module), "main": str(main),
             "certifi": certifi.__version__, "ca": str(ca)}
 

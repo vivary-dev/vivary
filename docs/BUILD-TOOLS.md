@@ -159,7 +159,11 @@ derived digests are separate; pip retains version 26.2.2 for ensurepip compatibi
 CI runs `bootstrap_ci_pip.py` with the selected qualified Python, then
 `check_pip_runtime.py` with the same interpreter and `-I`. The guard checks the
 loaded pip/distribution paths plus the actual vendored certifi path, version and
-CA digest. CI pip commands explicitly select pip's supported `--use-deprecated=legacy-certs` mode so its verified certifi store is not unioned with an unqualified host store, including Windows CryptoAPI. The workflow also passes `PIP_USE_DEPRECATED=legacy-certs` to build-isolation pip children, which do not inherit parent command flags. This retains certificate and hostname verification; it does not use `--trusted-host` or disable TLS. Unknown future bundles require qualification rather than a version-only
+CA digest. Provisioning exports `PIP_CERT` and `REQUESTS_CA_BUNDLE` to a separate,
+authenticated copy of that exact certifi bundle. Admission also rejects effective
+pip/Requests certificate overrides with different bytes, including Requests'
+`CURL_CA_BUNDLE` fallback. This keeps non-isolated pip calls and build-isolation
+children on the same anchors. CI pip commands explicitly select pip's supported `--use-deprecated=legacy-certs` mode so its verified certifi store is not unioned with an unqualified host store, including Windows CryptoAPI. The workflow also passes `PIP_USE_DEPRECATED=legacy-certs` to build-isolation pip children, which do not inherit parent command flags. This retains certificate and hostname verification; it does not use `--trusted-host` or disable TLS. Unknown future bundles require qualification rather than a version-only
 pass. Desktop packaging uses the same overlay before its first build-pip execution
 and replaces the authenticated retained Linux/Windows ensurepip seed, preventing
 fresh default venvs from restoring the older bundle. The seven shipped Vivary
@@ -168,7 +172,8 @@ packages do not gain a standalone certifi dependency. See the
 
 The task-local CA policy also removes the same C1/C3 fingerprints from generated
 system-derived bundles, retaining all other roots and the existing G3 exclusion.
-Python/pip/uv and generated Node package-client descendants must use those task
-bundles. Updating standalone certifi alone does not update pip's vendor, ensurepip,
+Python's general SSL context, native downloads and generated Node package-client
+descendants use those filtered task bundles; pip and Requests use only the
+authenticated certifi anchors described above. Updating standalone certifi alone does not update pip's vendor, ensurepip,
 or operating-system trust. No host-global CA store is changed. These source/build
 changes do not modify already published ZIPs or installed user environments.

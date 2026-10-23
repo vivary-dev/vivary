@@ -226,6 +226,12 @@ def provision_python():
         with trust.open("xb") as output:
             output.write(CA_POLICY["host_ca_bytes"]())
         trust.chmod(0o600)
+        pip_trust = prefix / "pip-certifi-ca.pem"
+        certifi = temporary / "vivary-pip-26.2.2" / CA_POLICY["CERTIFI_WHEEL"]
+        plain(certifi)
+        with pip_trust.open("xb") as output:
+            output.write(CA_POLICY["certifi_ca_bytes"](certifi.read_bytes()))
+        pip_trust.chmod(0o600)
         empty_ca = prefix / "empty-ca-directory"
         empty_ca.mkdir(mode=0o700)
         paths = [executable.parent]
@@ -234,14 +240,15 @@ def provision_python():
             scripts.mkdir(exist_ok=True)
             plain(scripts, directory=True)
             paths.append(scripts)
-        trust_names = ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "PIP_CERT", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO")
+        trust_names = ("SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO")
         with environment_file.open("a", encoding="utf-8", newline="\n") as output:
             output.write("".join(name + "=" + str(trust) + "\n" for name in trust_names)
+                         + "".join(name + "=" + str(pip_trust) + "\n" for name in ("PIP_CERT", "REQUESTS_CA_BUNDLE"))
                          + "SSL_CERT_DIR=" + str(empty_ca) + "\n")
         with path_file.open("a", encoding="utf-8", newline="\n") as output:
             output.write("".join(str(path) + "\n" for path in paths))
         return {"python": str(executable), "archiveSha256": asset["sha256"], "seedSha256": seed,
-                "trustSha256": sha256(trust)}
+                "trustSha256": sha256(trust), "pipTrustSha256": sha256(pip_trust)}
     except BaseException:
         shutil.rmtree(prefix)
         raise

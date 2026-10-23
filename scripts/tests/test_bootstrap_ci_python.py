@@ -207,6 +207,10 @@ class ProvisioningTests(unittest.TestCase):
         export, environment = self.root / "github-path", self.root / "github-env"
         export.touch(); environment.touch()
         trust = b"inert eligible filtered host anchors"
+        pip_trust = b"inert authenticated certifi anchors"
+        certifi = self.root / "vivary-pip-26.2.2" / self.module.CA_POLICY["CERTIFI_WHEEL"]
+        certifi.parent.mkdir()
+        certifi.write_bytes(b"authenticated certifi wheel fixture")
         def extracted(archive, runtime, asset, system):
             executable = runtime / "python/bin/python3.12"
             executable.parent.mkdir(parents=True)
@@ -216,7 +220,8 @@ class ProvisioningTests(unittest.TestCase):
                 mock.patch.object(self.module, "download", return_value=self.archive), \
                 mock.patch.object(self.module, "unpack", side_effect=extracted), \
                 mock.patch.object(self.module, "patch_seed", return_value="authenticated-seed-fixture"), \
-                mock.patch.dict(self.module.CA_POLICY, host_ca_bytes=lambda: trust):
+                mock.patch.dict(self.module.CA_POLICY, host_ca_bytes=lambda: trust,
+                                certifi_ca_bytes=lambda data: pip_trust if data == certifi.read_bytes() else self.fail("wrong wheel")):
             receipt = self.module.provision_python()
         values = dict(line.split("=", 1) for line in environment.read_text().splitlines())
         self.assertEqual(set(values), {"SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "PIP_CERT", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"})
@@ -224,9 +229,15 @@ class ProvisioningTests(unittest.TestCase):
         self.assertEqual(bundle.read_bytes(), trust)
         self.assertEqual(bundle.stat().st_mode & 0o777, 0o600)
         self.assertEqual(list(Path(values["SSL_CERT_DIR"]).iterdir()), [])
-        self.assertEqual({values[name] for name in values if name != "SSL_CERT_DIR"}, {str(bundle)})
+        self.assertEqual({values[name] for name in ("SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO")}, {str(bundle)})
+        pip_bundle = Path(values["PIP_CERT"])
+        self.assertNotEqual(pip_bundle, bundle)
+        self.assertEqual(values["REQUESTS_CA_BUNDLE"], str(pip_bundle))
+        self.assertEqual(pip_bundle.read_bytes(), pip_trust)
+        self.assertEqual(pip_bundle.stat().st_mode & 0o777, 0o600)
         self.assertEqual(export.read_text().splitlines(), [str(Path(receipt["python"]).parent)])
         self.assertEqual(receipt["trustSha256"], hashlib.sha256(trust).hexdigest())
+        self.assertEqual(receipt["pipTrustSha256"], hashlib.sha256(pip_trust).hexdigest())
 
 
 if __name__ == "__main__":

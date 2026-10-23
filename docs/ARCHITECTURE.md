@@ -798,7 +798,11 @@ CPython 3.12.15 and authenticates its pip 26.2.2/setuptools 84.1.0 build inputs.
 The shared certifi 2026.10.23 overlay preserves pip's vendor imports and distlib,
 changes only the certificate/version data and corresponding metadata, and binds
 both the offline builder and retained ensurepip seeds. Fresh venvs therefore do
-not restore the older trust bundle. The seven-package runtime closure and profile
+not restore the older trust bundle. CI provisioning binds pip and Requests to a
+separate authenticated copy of the exact certifi anchors, and actual pip
+admission rejects broader effective certificate overrides. General Python,
+native downloads and build clients retain the filtered host-derived bundle.
+The seven-package runtime closure and profile
 paths are unchanged. C1/C3 removal is not evidence of exploitation. The
 [desktop runtime contract](../packages/desktop/README.md) describes this boundary;
 source verification does not replace Windows or Electron release acceptance.
