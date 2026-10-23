@@ -440,6 +440,25 @@ PYTHON_PROVISIONING_STEP = (
     "          import runpy\n"
     '          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")\n'
 )
+WINDOWS_PYTHON_PROVISIONING_STEP = (
+    "      - name: verified Windows Python runtime provisioning\n"
+    "        shell: pwsh\n"
+    "        run: ./scripts/bootstrap_ci_python_windows.ps1\n"
+)
+
+
+def python_admission_prefix(name, inline=False):
+    guard = python_runtime_step(inline)
+    if name == "governed-platform-proof":
+        return [WINDOWS_PYTHON_PROVISIONING_STEP, guard]
+    if name == "orientation-proof":
+        def when(step, condition):
+            first, rest = step.split("\n", 1)
+            return first + "\n        if: " + condition + "\n" + rest
+        return [when(PIP_SETUP_STEP, "${{ runner.os != 'Windows' && steps.runner_action_node.outcome == 'success' }}"),
+                when(PYTHON_PROVISIONING_STEP, "runner.os != 'Windows'"),
+                when(WINDOWS_PYTHON_PROVISIONING_STEP, "runner.os == 'Windows'"), guard]
+    return [PIP_SETUP_STEP, python_provisioning_step(inline), guard]
 
 
 def python_provisioning_step(inline=False) -> str:
@@ -492,12 +511,16 @@ def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
         setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
-        require(len(setups) == len(guards) == 1, contract)
-        setup, guard = setups[0], guards[0]
-        require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"), contract)
-        require(guard == setup + 2
-                and steps[setup + 1].rstrip("\n") == python_provisioning_step(inline).rstrip("\n")
-                and steps[guard].rstrip("\n") == python_runtime_step(inline).rstrip("\n"), contract)
+        require(len(setups) == (0 if name == "governed-platform-proof" else 1)
+                and len(guards) == 1, contract)
+        guard = guards[0]
+        prefix = python_admission_prefix(name, inline)
+        first = guard - len(prefix) + 1
+        require(first >= 0 and [step.rstrip("\n") for step in steps[first:guard + 1]]
+                == [step.rstrip("\n") for step in prefix], contract)
+        require(sum("name: verified Python runtime provisioning" in step
+                    or "name: verified Windows Python runtime provisioning" in step for step in steps)
+                == (2 if name == "orientation-proof" else 1), contract)
         require(not re.search(r"scripts/(?:bootstrap_ci_pip|check_pip_runtime|bootstrap_build_tools|build_go_tools)\.py|\s-m\s+pip\b",
                               "".join(steps[:guard])), contract)
 
@@ -574,6 +597,10 @@ PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
 
 
 def check_pip_runtime(text: str) -> None:
+    try:
+        check_python_runtime(text, names=PIP_JOBS)
+    except SystemExit as error:
+        raise SystemExit("pip provisioning prerequisite: " + str(error)) from error
     for name in PIP_JOBS:
         job = job_block(text, name)
         header = job.split("    steps:\n", 1)[0]
@@ -582,19 +609,16 @@ def check_pip_runtime(text: str) -> None:
             require(not re.search(r"(?m)^    (?:defaults|'defaults'|\"defaults\"):", header),
                     f"{name} pip runtime admission cannot inherit run defaults")
         steps = re.split(r"(?m)(?=^      - )", job)[1:]
-        setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
+        python_guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual pip runtime admission" in step]
-        require(len(setups) == len(guards) == 1,
-                f"{name} needs exactly one setup-python and actual pip runtime admission")
-        setup, guard = setups[0], guards[0]
-        require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"),
-                f"{name} pip provisioning requires exact setup-python without old-pip options")
-        require(guard == setup + 4 and steps[setup + 1].rstrip("\n") == PYTHON_PROVISIONING_STEP.rstrip("\n")
-                and steps[setup + 2].rstrip("\n") == PYTHON_RUNTIME_STEP.rstrip("\n")
-                and steps[setup + 3].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
+        require(len(python_guards) == len(guards) == 1,
+                f"{name} needs exactly one actual Python and pip runtime admission")
+        python_guard, guard = python_guards[0], guards[0]
+        require(guard == python_guard + 2
+                and steps[python_guard + 1].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
                 and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
-                f"{name} actual Python admission, verified pip provisioning and admission must immediately follow setup-python unconditionally")
-        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:setup + 1])),
+                f"{name} verified pip provisioning and admission must immediately follow actual Python admission unconditionally")
+        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:python_guard])),
                 f"{name} must admit the selected pip before package operations")
         if name in PIP_VENV_BLOCKS:
             expected_venvs = PIP_VENV_BLOCKS[name]
@@ -1117,6 +1141,8 @@ def main() -> None:
             "tests job must run pip runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_python.py" in test_job,
             "tests job must run verified Python provisioning regressions")
+    require("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py" in test_job,
+            "tests job must run native Windows Python bootstrap regressions")
     require("python -I -B scripts/tests/test_python_runtime.py" in test_job,
             "tests job must run Python runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,

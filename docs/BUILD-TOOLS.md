@@ -14,7 +14,7 @@ is still a separate prerequisite**. This is not an end-to-end fresh-image setup.
 No pip or virtual environment is created here. New Python environments must
 retain pip 26.2.2 with the authenticated certifi 2026.10.23 overlay described below; an unchanged upstream pip wheel still vendors the older bundle.
 
-The tool setup supports native Linux and Windows x64. Hosted CI uses its initial
+The tool setup supports native Linux and Windows x64. Linux hosted CI uses its initial
 Python only to provision an authenticated standalone CPython 3.12.15 build with
 OpenSSL 3.5.9 into the task directory. The runtime's retained ensurepip seed gets
 the verified certifi overlay before its directory is exported. Jobs must then
@@ -22,6 +22,16 @@ admit the actual CPython/OpenSSL versions before pip or build-tool use. A versio
 selection alone does not qualify an executable. Hosted jobs must also
 pass the unchanged pre-JavaScript runner interpreter guard; replacing Node on
 PATH cannot satisfy that guard. An unqualified hosted Python remains blocked.
+
+Windows CI cannot obtain 3.12.15 from `setup-python`'s Windows manifest. Its native
+PowerShell bootstrap instead authenticates the existing standalone Windows archive
+before .NET gzip/tar extraction, authenticates the extracted executable, and uses
+it only to run the same seed-correcting Python provisioner. It runs no installer,
+`setup.ps1`, pip or old seed and never exports that initial extracted runtime on
+PATH. The resulting runtime still must pass the unchanged Python/OpenSSL guard.
+The matrix job selects exactly one platform route. Publishing's Python metadata
+and launcher tests use the same admitted Linux runtime; they do not need to run
+pip. Native Windows execution remains a required check of this bootstrap.
 
 ## Setup and use
 

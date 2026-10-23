@@ -82,6 +82,21 @@ def check_runtime_and_archive(text: str) -> None:
     require(not re.search(r"(?m)^\s*(?:run:\s*)?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
 
 
+def check_python_consumers(text: str, contract) -> None:
+    contract.check_python_runtime(text, names=("verify", "publish"))
+    for name in ("verify", "publish"):
+        steps = re.split(r"(?m)(?=^      - )", contract.job_block(text, name))[1:]
+        guard = next(index for index, step in enumerate(steps)
+                     if "name: actual Python runtime admission" in step)
+        for index, step in enumerate(steps[:guard]):
+            # The first runner admission and authenticated Python provisioner
+            # intentionally run before the newly provisioned Python is exposed.
+            if index == 0 or step.rstrip("\n") == contract.PYTHON_PROVISIONING_STEP.rstrip("\n"):
+                continue
+            require(not re.search(r"(?m)^\s*(?:(?:run|shell):\s*)?['\"]?python(?:3(?:\.\d+)?)?(?:\s|$)", step),
+                    f"{name} must admit actual Python before its consumers")
+
+
 def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
@@ -192,6 +207,7 @@ def main() -> None:
     spec.loader.exec_module(contract)
     contract.WORKFLOW = WORKFLOW
     contract.check_runner_action_bootstrap(text, ("verify", "publish"), npm=True)
+    check_python_consumers(text, contract)
     print(f"{WORKFLOW}: trusted publish guard passed")
 
 
