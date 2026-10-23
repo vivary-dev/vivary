@@ -736,6 +736,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
+select the already authenticated task-local pnpm package through the real preview
+resolver, with an explicit tool root and matching physical Node executable. They
+derive the version from the build bootstrap pin, so removing global npm/pnpm
+setup cannot silently restore an unqualified client. The real pnpm, command-shell,
+preview and descendant ownership checks and cleanup deadlines remain unchanged.
+Portable layout/refusal checks are distinct from native process-chain acceptance.
+
 2026-10-23 Artifact transfer diagnostics. Build clients and rebuilt Go tools still
 require the original pinned hashes before parsing or execution. Their downloader
 now requests identity encoding, refuses partial or non-200 responses, checks
