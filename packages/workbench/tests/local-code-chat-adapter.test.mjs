@@ -45,6 +45,33 @@ test("a shared-folder refusal restores the draft and asks the warning again", as
   assert.equal(refused, 1, "the warning asks again");
 });
 
+test("a queued send keeps the turn open while it waits, then follows it to the end", { timeout: 20_000 }, async t => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { dispatchEvent: () => true };
+  t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  const state = (status, phase) => ({ projectId: "project-one", error: null,
+    run: { id: "queued-run", engine: "codex-cli", status, phase, events: [] } });
+  // The host reports the turn queued three times, then running, then finished.
+  const reads = [state("queued", "queued"), state("queued", "queued"), state("queued", "queued"),
+    state("running", "running"), state("completed", "complete")];
+  let read = 0;
+  const started = [];
+  const adapter = createLocalCodeChatAdapter({
+    context: { engineRef: { current: "codex-cli" }, modelRef: { current: "fixture-model" } },
+    call: async () => state("queued", "queued"),
+    readState: async () => reads[Math.min(read++, reads.length - 1)],
+    projectId: "project-one", draftThreadId: "queued-draft", runIdRef: { current: null },
+    engines: () => [{ engine: "codex-cli", models: ["fixture-model"],
+      modelCatalog: { status: "ready", models: [{ id: "fixture-model" }] } }],
+    onKnownRejected: async () => {}, acknowledgeSharedFolder: () => false,
+    onStarted: runId => started.push(runId), onStreaming: () => {}, onSettled: () => {},
+  });
+  for await (const _ of adapter.run({ messages: [{ role: "user", content: [{ type: "text", text: "Queued words" }] }],
+    abortSignal: new AbortController().signal })) {}
+  assert.deepEqual(started, ["queued-run"], "a queued send opens the turn like a started one");
+  assert.ok(read >= reads.length, `the turn stayed open through the queued reads (${read} reads)`);
+});
+
 test("Code local validation restores a known rejected draft before any owner action", async () => {
   const rejections = [], actions = [];
   const adapter = adapterForTest(rejections, actions);

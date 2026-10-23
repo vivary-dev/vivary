@@ -5,6 +5,8 @@ import { Badge, Button, Skeleton } from "@agent-native/toolkit/ui";
 import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 
 import type { CodePermissionMode } from "../../../server/code-permissions";
+import { CODE_RUN_LIMIT_DEFAULT, CODE_RUN_LIMIT_MAX, CODE_RUN_LIMIT_MIN, type CodeRunCapacity } from "../../../shared/code-run-capacity";
+import type { VivaryCodeCapacityView } from "../../../server/local-code-agent";
 import type { VivaryCodeEngine, VivaryRuntimeStatus, VivaryRuntimeStatusResult } from "../../../server/local-runtime-setup";
 
 const runtimes = [
@@ -60,6 +62,17 @@ export function LocalRuntimeSettings() {
     } catch (failure) { setRefreshError(actionErrorMessage(failure) ?? "Permissions could not be saved."); }
     finally { setSaving(false); }
   }
+  // The counts change as runs start, finish and queue, so they refresh on the agent work strip's interval.
+  const capacity = useActionQuery<VivaryCodeCapacityView>("vivary-code-capacity", {}, { retry: false, refetchInterval: 1000 });
+  async function saveCapacity(next: CodeRunCapacity) {
+    setSaving(true);
+    setRefreshError(undefined);
+    try {
+      await callAction("vivary-code-capacity-set", next);
+      await capacity.refetch();
+    } catch (failure) { setRefreshError(actionErrorMessage(failure) ?? "The limit could not be saved."); }
+    finally { setSaving(false); }
+  }
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string>();
   const error = refreshError ?? actionErrorMessage(status.error);
@@ -110,6 +123,34 @@ export function LocalRuntimeSettings() {
               : "Codex can work inside the project. It asks before actions that need broader access."}
         </p>
         {permissions.error && <p role="alert" className="text-sm text-destructive">Permissions could not be loaded. <button onClick={() => void permissions.refetch()}>Retry</button></p>}
+      </SettingsRow>
+    </SettingsGroup>
+    <SettingsGroup title="Concurrent Code runs">
+      <SettingsRow id="code-run-limit" label="Runs at once on this host"
+        description={`Code conversations that can work at the same time, across every project and runtime. The default of ${CODE_RUN_LIMIT_DEFAULT} is a starting value that has not been validated as safe for this computer. Raise or lower it to match what the host handles.`}>
+        <select aria-label="Concurrent Code runs" className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          value={capacity.data?.limit ?? CODE_RUN_LIMIT_DEFAULT} disabled={saving || !capacity.data}
+          onChange={event => {
+            if (capacity.data) void saveCapacity({ limit: Number(event.target.value), whenFull: capacity.data.whenFull });
+          }}>
+          {Array.from({ length: CODE_RUN_LIMIT_MAX - CODE_RUN_LIMIT_MIN + 1 }, (_, index) => CODE_RUN_LIMIT_MIN + index)
+            .map(limit => <option key={limit} value={limit}>{limit}</option>)}
+        </select>
+      </SettingsRow>
+      <SettingsRow id="code-run-when-full" label="When every slot is in use"
+        description="Queue starts the message when a slot frees, oldest first. Refuse keeps the message in the composer.">
+        <select aria-label="When every Code run slot is in use" className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          value={capacity.data?.whenFull ?? "queue"} disabled={saving || !capacity.data}
+          onChange={event => {
+            const whenFull = event.target.value === "refuse" ? "refuse" : "queue";
+            if (capacity.data) void saveCapacity({ limit: capacity.data.limit, whenFull });
+          }}>
+          <option value="queue">Queue</option><option value="refuse">Refuse</option>
+        </select>
+        {capacity.data && <p className="mt-3 text-sm leading-6 text-muted-foreground" role="status">
+          {capacity.data.running} running, {capacity.data.queued} queued{capacity.data.held ? `, ${capacity.data.held} waiting for you` : ""}.
+        </p>}
+        {capacity.error && <p role="alert" className="text-sm text-destructive">The limit could not be loaded. <button onClick={() => void capacity.refetch()}>Retry</button></p>}
       </SettingsRow>
     </SettingsGroup>
     <SettingsGroup title="Local agents">

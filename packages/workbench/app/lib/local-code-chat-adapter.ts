@@ -16,7 +16,7 @@ const PRE_APPEND_CODE_REJECTIONS = new Set([
   "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_conversation_active",
   "vivary_code_shared_folder_active",
   "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
-  "vivary_code_cleanup_required",
+  "vivary_code_cleanup_required", "vivary_code_capacity_full", "vivary_code_conversation_queued",
   "vivary_linked_history_unavailable",
 ]);
 
@@ -40,6 +40,8 @@ type LocalCodeChatOptions = {
   onStreaming: (streaming: boolean) => void;
   onSettled: () => void;
   onKnownRejected: (submitId: string) => Promise<void>;
+  /** Reads the run's state while the turn is open. The default asks the host. Tests pass a fixture. */
+  readState?: (runId: string) => Promise<VivaryCodeState>;
 };
 
 export function createLocalCodeChatAdapter(
@@ -109,7 +111,8 @@ export function createLocalCodeChatAdapter(
 
         let readInFlight: Promise<VivaryCodeState> | null = null;
         const read = (runId: string) => {
-          readInFlight ??= callAction<VivaryCodeState>("vivary-code-state", { projectId, runId }, { method: "GET" })
+          readInFlight ??= (options.readState?.(runId)
+            ?? callAction<VivaryCodeState>("vivary-code-state", { projectId, runId }, { method: "GET" }))
             .then(scopedState)
             .finally(() => { readInFlight = null; });
           return readInFlight;
