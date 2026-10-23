@@ -116,7 +116,9 @@ for (const fixture of [
   { name: "rejects a fixed release with the wrong ABI before staging assets", nodeVersion: "v24.22.1", nodeAbi: "136",
     refusal: /Windows packaging requires Workbench built with Node 24\.22\.1 ABI 137\./ },
   { name: "accepts the fixed version and ABI through the next SQLite validation boundary", nodeVersion: "v24.22.1", nodeAbi: "137",
-    refusal: /Windows packaging requires traced better-sqlite3 12\.11\.1\./ },
+    refusal: /Windows packaging requires traced better-sqlite3 13\.0\.3\./ },
+  { name: "rejects changed Windows N-API bytes before staging assets", nodeVersion: "v24.22.1", nodeAbi: "137",
+    sqliteVersion: "13.0.3", refusal: /Windows binding does not match the authenticated asset/ },
 ]) {
   test("Windows traced runtime " + fixture.name, async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-windows-traced-runtime-"));
@@ -124,14 +126,14 @@ for (const fixture of [
       const runtimeDir = path.join(directory, "workbench");
       const server = path.join(runtimeDir, ".output/server");
       const sqlite = path.join(server, "node_modules/better-sqlite3");
-      await mkdir(path.join(sqlite, "build/Release"), { recursive: true });
+      await mkdir(path.join(sqlite, "prebuilds"), { recursive: true });
       const marker = path.join(server, ".agent-native-node-runtime.json");
       const originalMarker = JSON.stringify({ nodeVersion: fixture.nodeVersion, nodeAbi: fixture.nodeAbi,
         platform: "linux", arch: "x64" }) + "\n";
       await writeFile(marker, originalMarker);
-      // A deliberately different SQLite version stops the accepted marker before any download.
-      await writeFile(path.join(sqlite, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "12.11.0" }));
-      const binding = path.join(sqlite, "build/Release/better_sqlite3.node");
+      // Both mismatched metadata and unverified binding bytes stop before any download.
+      await writeFile(path.join(sqlite, "package.json"), JSON.stringify({ name: "better-sqlite3", version: fixture.sqliteVersion ?? "12.11.0" }));
+      const binding = path.join(sqlite, "prebuilds/win32-x64.node");
       await writeFile(binding, "unchanged fixture binding\n");
       const nodeDir = path.join(directory, "node");
       const cacheDirectory = path.join(directory, "cache");

@@ -1115,9 +1115,12 @@ by MSAL, Bot Framework and Typography compatibility tests. Core and Toolkit patc
 remain byte-for-byte unchanged, as does the guarded build command. Lock checks
 retain exact SheetJS archive integrity and reject affected later release branches.
 The SQLite override uses better-sqlite3 13.0.3 with SQLite 3.53.4 and bundled N-API
-prebuilds, removing its obsolete lifecycle build permission. Windows staging still
-requires reconciliation with its older pinned binding format; this change does not
-establish desktop packaging, profile migration, browser or release acceptance.
+prebuilds, removing its obsolete lifecycle build permission. Windows staging now
+verifies the bundled win32-x64 N-API binding against its authenticated package hash
+before downloading or staging Node. The loader-selected prebuild stays in place;
+the obsolete ABI-specific SQLite download and extraction are removed. Standalone
+Node admission and the Electron publication hold remain unchanged. This change
+does not establish Windows execution, profile migration, browser or release acceptance.
 
 2026-10-23 Workbench Node compatibility metadata. The package engine range now names only
 the admitted 22, 24 and 26 release lines at their existing runtime-security floors, so
@@ -4328,8 +4331,9 @@ admit the actual runner Node interpreter before any JavaScript action. CI and
 protected npm jobs select the qualified Node 24.22.1 runtime and immediately admit
 the selected executable before package work. Source support still starts at Node
 22.23.4. The build, startup, desktop packaging, and installer entry points retain
-the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and SQLite
-12.11.1. Affected standalone Node and the held Electron runtime are refused.
+the runtime guard; Windows staging binds Node 24.22.1 with ABI 137 and the
+authenticated better-sqlite3 13.0.3 Windows N-API prebuild. Affected standalone
+Node and the held Electron runtime are refused.
 
 Python-bearing CI provisions the exact verified pip 26.2.2 wheel before admission,
 including the four new pipless environment paths. The existing verified uv
