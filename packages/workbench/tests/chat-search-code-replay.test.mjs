@@ -92,7 +92,14 @@ test("a switch after the last turn becomes the head row", () => {
   const repository = codeMatchRepository(events);
   assert.deepEqual(repository.messages.map(entry => entry.message.id).slice(-1), ["code-switch-switch"]);
   assert.equal(repository.headId, "code-switch-switch");
-  // Other notes, such as the project context load, keep Core's rows.
+  // A project context note is its own muted status row too, never folded into the reply before it.
   const other = [events[0], events[1], event("context", "note", "Project context loaded.", { source: "vivary-project-context" })];
-  assert.deepEqual(codeMatchRepository(other), builder(other));
+  const context = codeMatchRepository(other);
+  assert.deepEqual(context.messages.map(entry => entry.message.id).slice(-1), ["code-context-context"]);
+  assert.deepEqual(context.messages.at(-1).message.content, [{ type: "text", text: "Project context loaded." }]);
+  assert.deepEqual(context.messages.at(-2).message.content, builder(other.slice(0, 2)).messages.at(-1).message.content,
+    "the reply keeps only its own text");
+  // Any other note keeps Core's rows.
+  const plain = [events[0], events[1], event("plain", "note", "A plain note.")];
+  assert.deepEqual(codeMatchRepository(plain), builder(plain));
 });

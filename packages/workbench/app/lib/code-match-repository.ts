@@ -5,19 +5,25 @@ type Message = Repository["messages"][number]["message"];
 
 /** The note `applyVivaryCodeRuntimeSwitch` appends. Matches `VIVARY_CODE_SWITCH_SOURCE` on the server. */
 const RUNTIME_SWITCH_SOURCE = "vivary-runtime-switch";
+/** The note `recordProjectContextLoad` appends once per turn, such as "Loaded project context ...". */
+const PROJECT_CONTEXT_SOURCE = "vivary-project-context";
 
 /**
- * The Code transcript as chat rows. Core would fold a runtime switch note into the reply before it, so each switch
- * becomes its own divider row instead. Some lifecycle events have no normal transcript row. Expose the exact saved
- * event only in the read-only match view.
+ * The Code transcript as chat rows. Core would fold a runtime switch note or a project context note into the reply
+ * before it, so each becomes its own row instead: a switch as a divider, a context note as a short status row that
+ * local-agent.css mutes by its `code-context-` ID. Some lifecycle events have no normal transcript row. Expose the
+ * exact saved event only in the read-only match view.
  */
 export function codeMatchRepository(events: CodeAgentTranscriptEvent[], referenceId?: string | null): Repository {
-  let repository = buildRepositoryFromCodeAgentTranscript(events.filter(event => !isRuntimeSwitch(event))) as Repository;
+  let repository = buildRepositoryFromCodeAgentTranscript(events.filter(event => !ownRow(event))) as Repository;
   for (const event of events) {
-    if (!isRuntimeSwitch(event)) continue;
-    repository = insertEventRow(repository, events, event, "code-switch-" + event.id,
-      // A Markdown rule and one short line. Core renders assistant text as Markdown and has no divider row of its own.
-      `---\n\n*${event.message.replace(/[*_`\\]/g, "\\$&")}*`);
+    if (isRuntimeSwitch(event)) {
+      repository = insertEventRow(repository, events, event, "code-switch-" + event.id,
+        // A Markdown rule and one short line. Core renders assistant text as Markdown and has no divider row of its own.
+        `---\n\n*${escapeMarkdown(event.message)}*`);
+    } else if (event.kind === "note" && event.metadata?.source === PROJECT_CONTEXT_SOURCE) {
+      repository = insertEventRow(repository, events, event, "code-context-" + event.id, escapeMarkdown(event.message));
+    }
   }
   if (!referenceId || codeMatchMessageId(repository, referenceId)) return repository;
   const event = events.find(event => event.id === referenceId);
@@ -27,6 +33,15 @@ export function codeMatchRepository(events: CodeAgentTranscriptEvent[], referenc
 
 function isRuntimeSwitch(event: CodeAgentTranscriptEvent): boolean {
   return event.kind === "note" && event.metadata?.source === RUNTIME_SWITCH_SOURCE;
+}
+
+/** A note shown as its own row rather than folded into a reply. */
+function ownRow(event: CodeAgentTranscriptEvent): boolean {
+  return event.kind === "note" && (event.metadata?.source === RUNTIME_SWITCH_SOURCE || event.metadata?.source === PROJECT_CONTEXT_SOURCE);
+}
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/[*_`\\]/g, "\\$&");
 }
 
 /** Adds one row for an event Core gave no row, in saved event order, keeping the canonical rows and their content. */

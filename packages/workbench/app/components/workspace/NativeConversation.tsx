@@ -20,6 +20,7 @@ import { LinkedHistoryNotice, NativeLinkOptions, sourceDraftSaver, useLinkSource
 import { HandoffControl } from "./HandoffControl";
 import "./HandoffDisplay";
 import { HandoffStatusContext, createHandoffStatusHub } from "./handoff-status";
+import { NativeConversationHeader } from "./NativeConversationHeader";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
 
@@ -73,7 +74,7 @@ function ResolveHistory({ params }: { params: URLSearchParams }) {
 
 function ScopedConversation({ unassigned }: { unassigned: boolean }) {
   const query = useVivaryChatIdentity(unassigned ? "unassigned" : "project");
-  const { workspaceAvailable, checking, catalog } = useProjects();
+  const { workspaceAvailable, checking, catalog, activeProject } = useProjects();
   if (!query.identity) {
     if (checking || query.waiting) return <OpeningConversation />;
     return <div className="panel-empty" role="alert"><h1>Conversation could not open</h1>
@@ -81,11 +82,14 @@ function ScopedConversation({ unassigned }: { unassigned: boolean }) {
       <Button variant="outline" onClick={() => void query.refetch()}>Retry history</Button></div>;
   }
   return <DraftedConversation key={query.identity.storageKey} identity={query.identity} unassigned={unassigned}
-    workspaceAvailable={workspaceAvailable} ownerKey={catalog?.scopeKey ?? ""} />;
+    workspaceAvailable={workspaceAvailable} ownerKey={catalog?.scopeKey ?? ""}
+    detail={"API chat / " + (unassigned ? "No project" : activeProject?.displayName ?? "Personal workspace")} />;
 }
 
-function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKey }: {
+function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKey, detail }: {
   ownerKey: string;
+  /** The header's muted line under the conversation title. */
+  detail: string;
   identity: NonNullable<ReturnType<typeof useVivaryChatIdentity>["identity"]>;
   unassigned: boolean;
   workspaceAvailable: boolean;
@@ -250,6 +254,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   </div>;
   return <HandoffStatusContext.Provider value={handoffStatus}>
   <section ref={matchContainer} aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
+    <NativeConversationHeader storageKey={identity.storageKey} scope={identity.scope} threadId={selectedThread} detail={detail} />
     {!unassigned && !requestedMessage && selectedThread && <>
       <LinkedHistoryNotice key={selectedThread} projectId={identity.projectId} target={{ kind: "native", id: selectedThread }} />
       <NativeLinkOptions key={"link:" + selectedThread} projectId={identity.projectId} threadId={selectedThread}

@@ -110,8 +110,14 @@ The selected coding runtime owns execution, tools, model access, and native sess
 
 ### Coding model selection and provider routes
 
-The Code composer embeds the runtime and model selectors inside its existing
-toolbar. Saved draft choices remain unchanged when a model catalog changes.
+The Code composer has one runtime and model picker inside the prompt box, beside
+Send, styled like Core's Native model button. It opens a menu that lists models
+grouped under Claude Code and Codex, with an unavailable runtime's reason beside
+its heading and its models disabled. [`CodeModelPicker.tsx`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/workspace/CodeModelPicker.tsx)
+renders it with Toolkit's Radix menu, which supplies the roles, arrow keys,
+typeahead, Escape and focus return. Core's own picker is not reused because it
+shows the `claude-cli` and `codex-cli` groups only for a matching harness agent
+and has no per-model disabled state. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
 model, update Claude Code, or verify its installed version. A retained
 conversation changes its runtime or model in place through a confirmed switch,
@@ -348,6 +354,14 @@ show the durable pending target, retaining an unavailable recorded model as a
 disabled option after catalog drift. Leaving or reloading the view
 does not cancel the recorded switch. A refused switch keeps the route and shows
 the server's reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
+action, and the picker then shows the new route. While this conversation's run
+works, the choice offers Wait, which changes nothing, or Stop and switch. Stop and
+switch asks again and says the current request will be cancelled and completed
+work stays. Confirming sends one `vivary-code-switch` request with `stop`, and the
+composer then shows the recorded target until the host applies it. Leaving or
+reloading the view does not cancel the switch. If the turn finishes during the choice, the plain
+confirm replaces it. A refused switch keeps the route and shows the server's
+reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
 draws these states. A linked conversation, described next, remains the way to
 continue in a separate conversation that keeps the source unchanged.
 
@@ -962,7 +976,10 @@ support an owner with no organization, so an ordinary run's follow-up send and
 notice need none. Linking does need one: such an owner is not offered the chooser,
 and creation refuses with a clear reason. The Code and Native choosers both appear
 only after the same source eligibility check, so an owner without an organization,
-or a target whose link no longer validates, is not offered choices that cannot work. An unlinked conversation in a project whose
+or a target whose link no longer validates, is not offered choices that cannot work.
+Native shows its chooser above the composer. A Code conversation offers "Open
+linked conversation in <runtime>" in the conversation actions menu beside Session
+details, and shows a failed check or link beside its composer with Retry. An unlinked conversation in a project whose
 folder is not connected therefore shows no notice and no false verification error.
 The mounted notice refreshes through ordinary Code thread updates and Native
 request lifecycle events. A Code send refused after linked preparation emits
@@ -1243,9 +1260,9 @@ checking access again are explicit choices. Network failures have separate retry
 wording. An already mounted workspace is hidden during denial so Native fallback notices cannot compete with access recovery. It stays mounted through denial or connection
 failure so unsent drafts survive. The connection
 wrapper owns the dynamic viewport height; its wrapping notice and workspace share
-that height, with the existing shell filling the remaining space. Conversation recovery notices, runtime selectors and the setup
-card share the existing scrollable composer slot when space is short, preserving
-the composer.
+that height, with the existing shell filling the remaining space. Conversation recovery notices, the handoff bar and the setup
+card share the composer slot, which is compact and scrolls on its own above 35
+percent of the viewport height, preserving the composer.
 
 Optional remote previews use a separate protected HTTPS port on the same hostname,
 with a dedicated loopback listener that never dispatches Native. Port separation
@@ -1269,8 +1286,29 @@ refresh. Preview grants expire on restart and revocation cuts their streams with
 stopping unrelated host work. Shared review/start/status/stop controls remain in
 BrowserPreview. After opening, setup collapses behind a disclosure so the page
 fills the available height. The shared work panel has a visible drag grip with
-keyboard resizing. Full page and Back to workspace controls expand and restore
-the same mounted panel on desktop and phone. The iframe stays in its DOM position,
+keyboard resizing. Where the conversation and the panel cannot sit side by side, a
+window under 768 pixels or a split under 620, `Workspace.tsx` switches views: a
+Conversation and panel switch (a tab list named Workspace view, with the panel's
+name, such as Files) sits above the work area, and the chosen view takes the full
+height. Opening a panel shows it, and the switch keeps Conversation one click or
+one key press away. Closing the panel shows the conversation. Choosing the open
+panel's header tool again from the Conversation view shows the panel instead of
+closing it. Both views stay mounted, so a draft, a stream and a preview page
+survive each switch. While the panel view covers a Code conversation, the
+Conversation option shows Working or Needs approval when any conversation in the
+project has an active run or a pending approval, read from the same
+`vivary-code-state` query the conversation uses. That indicator is project-wide,
+and an API chat shows none. A stacked layout was tried first and dropped: at 150
+percent a 700 to 800 pixel window leaves about 470 to 530 CSS pixels, and the
+fixed chrome left no readable transcript beside a panel. In a window under 600 CSS
+pixels tall, `local-agent.css` tightens the conversation chrome: one header row,
+the runtime line on one line (hover or keyboard focus shows all of it), and the
+state-document notice on one line with Show more. Side by side, the panel's first
+width leaves the conversation its 360 pixel minimum, so a split between 620 and
+840 pixels never starts with the conversation squeezed out. Maximize panel and
+Full page still hide the conversation by the owner's choice, and each has a
+visible way back. Full page and Back to workspace controls expand and restore the same
+mounted panel on desktop and phone. The iframe stays in its DOM position,
 so display changes preserve page state, navigation and live connections. Covered
 workspace controls are inert during full-page display. A compact header preserves
 project identity and Back to workspace. Setup, Stop, Refresh and Close share one
@@ -1436,6 +1474,20 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Picker and work-panel integration. Published PR264's grouped model
+menu, compact headers, conversation actions and narrow view switch now compose
+with the integrated project-kind and queued-work flows. Handoff status providers,
+accepted runtime-switch snapshots, observed turn/generation consent and replay
+Stop authority remain owned by the current conversation. Existing switch/send
+and replay tests now activate the actual grouped menu and inspect its displayed
+route. The affected Native and search component rerun passed all 130 tests after
+fixtures separated header title reads, admitted a null new-conversation run and
+used Radix's Enter activation. The first six-file run also passed the standalone
+header, linking, transcript and route-hold suites; its failures and command-level
+45-second parent timeout are retained as failed evidence. The complete rerun
+used a 120-second parent bound without changing repository test budgets.
+Rebuilt TypeScript passes. Browser layout and Windows acceptance remain pending.
 
 2026-10-23 Project-kind integration. Published PR260 registry defaults, owner
 kind writes and project creation now compose with the unified inbox, runtime
@@ -1862,6 +1914,39 @@ releases a newer click's hold or shows its error. Stop, switch, and a pending
 switch now check the run's own cleanup refusal, not only the host's oldest one.
 The inbox's two owner actions, `vivary-code-conversation-meta` and
 `vivary-conversation-archive`, move from this PR's allowlist to the inbox PR #263.
+2026-10-19 One runtime and model picker in the Code composer, stacked on PR #261.
+The owner asked for the runtime choice as one dropdown inside the prompt box,
+as other coding agents show it, instead of the Runtime and Model selects and the Linked
+conversation select above the composer. The Coding model selection section now
+describes `CodeModelPicker`. The switch flow, its confirm, Stop and switch, the
+host-recorded pending switch and every server refusal are unchanged. Only the
+control that starts them changed. The Linked runtime conversations section now
+says the Code conversation offers its links in the conversation actions menu,
+built from `LinkedConversationMenuItems` and `useLinkedConversationOpener` in
+`LinkedConversation.tsx` so another menu can reuse them. Native keeps its chooser.
+The composer slot scrolls on its own above 35 percent of the viewport height, and
+each "Loaded project context" note is its own muted row in
+`code-match-repository.ts`, with no reply actions. The API chat now has the same
+compact header as a Code conversation, from `NativeConversationHeader.tsx`: Core's
+own thread title, which already prefers a manual rename, over "API chat / <project>".
+It reads the same scoped `useChatThreads` list as the history and refreshes on
+`agent-chat:threads-updated`, so a rename or switch shows at once. It adds no title
+store. A thread outside the history's loaded page, such as one opened from search
+or a link, is read directly by its ID through Core's thread read, so its header
+names it too. The shared header stylesheet keeps an h2 title on one line, as it
+does an h1. Owner decision on #264: with a work panel open the composer stays reachable.
+Under 620 pixels of split, the panel had taken the whole area and hidden the
+composer in 16 of the 90 measured layouts. There the conversation and the panel
+now switch views with a visible Conversation option, and wide windows keep the
+side-by-side layout. No server,
+action or storage contract changed. Evidence:
+`tests/native-chat-components.test.mjs` drives the picker with Radix's keyboard handling, `tests/linked-conversation-components.test.mjs`
+opens a linked conversation from the header action, and a headless Chrome run of
+the built app on the server measured 90 layouts (three window sizes, three zooms,
+short and long conversations, no panel and each work panel) plus the work panel
+split at 1536x767 and 1280x720, grown from 700, 853 and 1426 px. The B1 whole-window
+scroll the owner reported did not reproduce in those runs, so this change makes no
+layout fix.
 
 2026-10-19 Cancel on the shared-folder warning, on PR #261. The owner asked for
 three choices: Proceed, another folder or worktree, and Cancel. Cancel and Escape
