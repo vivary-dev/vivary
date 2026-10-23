@@ -434,7 +434,7 @@ jobs:
           runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: high-level design review
@@ -1060,7 +1060,7 @@ jobs:
           runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: Node runtime policy and boundary tests
@@ -1094,7 +1094,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: install workbench dependencies
@@ -1143,7 +1143,7 @@ jobs:
         run: python packages/workbench/tests/managed-projects-python.test.py
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: install workbench dependencies
@@ -1310,7 +1310,7 @@ jobs:
           runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
       - name: actual Node security admission
         run: node packages/workbench/bin/runtime-security.mjs
       - name: install pinned uv runner
@@ -1373,7 +1373,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: site/package-lock.json
       - name: actual Node security admission

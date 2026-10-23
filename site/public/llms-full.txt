@@ -11693,6 +11693,19 @@ references replace line ranges invalidated by this consolidation. The linked
 contracts and dispatch source confirm the same package boundaries. This reference
 repair changes no runtime behavior or acceptance claim.
 
+The October 23, 2026 CI pin review selects Node 24.22.1 explicitly in each build
+job, matching the already qualified Linux and Windows runtime archives. The
+actual-runtime guard still runs immediately after selection and before package
+work. Source support starts at Node 22.23.4. Per-job mutation controls reject
+floating, affected, and wrong-line selections while retaining independent runner
+Node admission. Existing PR260 test commands, permissions, and triggers are
+preserved.
+
+The checker and mutation-test delta is identical to the focused source controls
+accepted on the Inbox branch. This source backport does not establish a new
+PR260 final-head CI or product-acceptance result. Existing Electron, merge, and
+artifact-publication holds remain in force.
+
 
 ---
 

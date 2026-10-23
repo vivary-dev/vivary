@@ -835,6 +835,8 @@ def check_runtime_security(text: str) -> None:
         guards = [i for i, step in enumerate(steps) if NODE_GUARD in step]
         require(len(setups) == len(guards) == 1, f"{name} needs exactly one actual Node guard and setup")
         require(guards[0] == setups[0] + 1, f"{name} Node guard must immediately follow setup-node")
+        require('          node-version: "24.22.1"\n' in steps[setups[0]],
+                f"{name} must select the fixed admitted Node 24.22.1 runtime")
         guard = steps[guards[0]]
         require(re.search(r"(?m)^        run: " + re.escape(NODE_GUARD) + r"\s*$", guard) is not None,
                 f"{name} Node guard must be an unconditional standalone command")

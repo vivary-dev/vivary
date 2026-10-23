@@ -201,7 +201,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         block = module.job_block(text, name)
         setup = (
             '      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n'
-            '        with:\n          node-version: "22"\n'
+            '        with:\n          node-version: "24.22.1"\n'
             '      - name: actual Node security admission\n'
             f'        run: {module.NODE_GUARD}\n'
         )
@@ -1155,6 +1155,24 @@ def test_all_fresh_venvs_provision_fixed_pip_before_actual_admission():
                 assert mutation != required, (name, index, label)
                 message = _run(workflow.replace(required, mutation, 1))
                 assert message and "pip" in message, (name, index, label, message)
+
+
+def test_selected_node_pin_cannot_regress_or_float():
+    module = _load()
+    text = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_runtime_security(text)
+    pin = '          node-version: "24.22.1"\n'
+    for name in module.NODE_JOBS:
+        block = module.job_block(text, name)
+        assert block.count(pin) == 1, name
+        for unsafe in ("22", "22.22.0", "24.20.0", ">=24.22.1"):
+            mutation = block.replace(pin, f'          node-version: "{unsafe}"\n', 1)
+            try:
+                module.check_runtime_security(text.replace(block, mutation, 1))
+            except SystemExit as error:
+                assert "fixed admitted Node 24.22.1" in str(error), (name, unsafe, error)
+            else:
+                raise AssertionError((name, unsafe))
 
 
 if __name__ == "__main__":
