@@ -736,6 +736,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Artifact transfer diagnostics. Build clients and rebuilt Go tools still
+require the original pinned hashes before parsing or execution. Their downloader
+now requests identity encoding, refuses partial or non-200 responses, checks
+response length, and enforces the official Go archive sizes on new and cached
+bytes. Rejections expose only bounded byte-count, algorithm, digest and status
+facts, without response bodies, URLs or foreign exception diagnostics. One
+hosted Go checksum refusal motivated these controls; its exact transport cause
+is unknown, and official metadata still matches the retained pins. No automatic
+retry, hash replacement, TLS change or admission exception is introduced.
+
 2026-10-23 Windows Python bootstrap and publishing admission. Windows' actual
 setup-python manifest lacks 3.12.15, so its native PowerShell step authenticates
 the existing standalone archive before .NET extraction and invokes the same

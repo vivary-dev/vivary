@@ -1,6 +1,7 @@
 """Boundaries which prevent executing a different client or changed artifact."""
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -57,10 +58,114 @@ class BuildToolsTest(unittest.TestCase):
             root = Path(temporary)
             (root / "archives").mkdir()
             (root / "archives/tool.tgz").write_bytes(b"tampered")
-            with patch("urllib.request.urlopen", side_effect=AssertionError("no network")):
+            with patch("urllib.request.build_opener", side_effect=AssertionError("no network")):
                 with self.assertRaisesRegex(RuntimeError, "Checksum mismatch"):
                     TOOLS["download"](root, "https://registry.npmjs.org/tool.tgz", "tool.tgz",
                                       "sha256", hashlib.sha256(b"expected").digest())
+            self.assertEqual((root / "archives/tool.tgz").read_bytes(), b"tampered")
+
+    def test_download_requires_full_identity_response_before_cache_publish(self):
+        payload = b"authenticated inert artifact fixture"
+        class Response(io.BytesIO):
+            status = 200
+            def __init__(self, data, headers=None, status=200):
+                super().__init__(data)
+                self.headers = {} if headers is None else headers
+                self.status, self.reads = status, 0
+            def read(self, size=-1):
+                self.reads += 1
+                return super().read(size)
+        cases = (
+            ("valid", payload, {"Content-Length": str(len(payload))}, 200),
+            ("short", payload[:-1], {}, 200),
+            ("oversize", payload + b"extra", {}, 200),
+            ("partial-status", payload, {}, 206),
+            ("partial-header", payload, {"Content-Range": "PRIVATE"}, 200),
+            ("encoded", payload, {"Content-Encoding": "PRIVATE"}, 200),
+            ("wrong-length", payload, {"Content-Length": str(len(payload) + 1)}, 200),
+            ("invalid-length", payload, {"Content-Length": "PRIVATE"}, 200),
+            ("bad-hash", b"x" * len(payload), {}, 200),
+            ("non-200", payload, {}, 503),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            for label, data, headers, status in cases:
+                root = Path(temporary) / label
+                response, opener = Response(data, headers, status), Mock()
+                opener.open.return_value = response
+                with self.subTest(label=label), patch("ssl.create_default_context") as context, \
+                        patch("urllib.request.build_opener", return_value=opener):
+                    if label == "valid":
+                        result = TOOLS["download"](root, "https://go.dev/dl/PRIVATE", "tool.tgz", "sha256",
+                                                   hashlib.sha256(payload).digest(), size=len(payload))
+                        self.assertEqual(result.read_bytes(), payload)
+                    else:
+                        with self.assertRaises(RuntimeError) as refusal:
+                            TOOLS["download"](root, "https://go.dev/dl/PRIVATE", "tool.tgz", "sha256",
+                                              hashlib.sha256(payload).digest(), size=len(payload))
+                        message = str(refusal.exception)
+                        self.assertRegex(message, r"bytes=\d+, algorithm=sha256, digest=[0-9a-f]{64}, status=\d{3}")
+                        self.assertNotIn("PRIVATE", message)
+                        self.assertFalse((root / "archives/tool.tgz").exists())
+                    context.assert_called_once_with(cafile=str(root / "ca.pem"))
+                    request = opener.open.call_args.args[0]
+                    self.assertEqual(request.get_header("Accept-encoding"), "identity")
+                    self.assertEqual(opener.open.call_args.kwargs, {"timeout": 90})
+                    self.assertEqual(opener.open.call_count, 1, "download failures cannot retry")
+                if label in ("partial-status", "partial-header", "encoded", "invalid-length", "non-200"):
+                    self.assertEqual(response.reads, 0)
+
+    def test_http_and_incomplete_read_errors_are_sanitized_and_never_cached(self):
+        import urllib.error
+        payload = b"complete fixture"
+        for failure in (urllib.error.HTTPError("https://PRIVATE", 403, "PRIVATE", {"PRIVATE": "PRIVATE"}, None),
+                        http.client.IncompleteRead(b"short", len(payload)),
+                        urllib.error.URLError("PRIVATE transport diagnostics")):
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as temporary:
+                root, opener = Path(temporary), Mock()
+                if isinstance(failure, http.client.IncompleteRead):
+                    response = Mock(status=200, headers={})
+                    response.__enter__ = Mock(return_value=response)
+                    response.__exit__ = Mock(return_value=False)
+                    response.read.side_effect = failure
+                    opener.open.return_value = response
+                else:
+                    opener.open.side_effect = failure
+                with patch("ssl.create_default_context"), patch("urllib.request.build_opener", return_value=opener):
+                    with self.assertRaises(RuntimeError) as refusal:
+                        TOOLS["download"](root, "https://go.dev/dl/PRIVATE", "tool.tgz", "sha256",
+                                          hashlib.sha256(payload).digest(), size=len(payload))
+                message = str(refusal.exception)
+                self.assertNotIn("PRIVATE", message)
+                self.assertIn("algorithm=sha256", message)
+                self.assertIn("bytes=5" if isinstance(failure, http.client.IncompleteRead) else "bytes=0", message)
+                self.assertFalse((root / "archives/tool.tgz").exists())
+                self.assertTrue(refusal.exception.__suppress_context__)
+
+    def test_known_size_is_rechecked_on_cached_bytes_and_sha512_remains_supported(self):
+        payload = b"authenticated inert SHA512 fixture"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "archives").mkdir()
+            target = root / "archives/tool.tgz"
+            target.write_bytes(payload)
+            with patch("urllib.request.build_opener", side_effect=AssertionError("cache cannot network")):
+                self.assertEqual(TOOLS["download"](root, "https://example.invalid", "tool.tgz", "sha512",
+                                                   hashlib.sha512(payload).digest()), target)
+                with self.assertRaisesRegex(RuntimeError, "Artifact byte count mismatch.*status=cache"):
+                    TOOLS["download"](root, "https://example.invalid", "tool.tgz", "sha512",
+                                      hashlib.sha512(payload).digest(), size=len(payload) + 1)
+            self.assertEqual(target.read_bytes(), payload)
+
+    def test_go_archive_sizes_are_bound_for_both_platforms_before_compiler_execution(self):
+        bootstrap = GO["build"].__globals__["bootstrap"]
+        for windows, size, digest in ((False, 66936659, GO["GO_SHA"]), (True, 75004774, GO["WINDOWS_GO_SHA"])):
+            with self.subTest(windows=windows), patch.object(bootstrap, "windows_host", return_value=windows), \
+                    patch.object(bootstrap, "download", side_effect=RuntimeError("fixture stop before parsing")) as download, \
+                    patch("subprocess.check_output", side_effect=AssertionError("no compiler execution")):
+                with self.assertRaisesRegex(RuntimeError, "fixture stop"):
+                    GO["build"](Path("/owned"))
+            self.assertEqual(download.call_args.kwargs, {"size": size})
+            self.assertEqual(download.call_args.args[-1].hex(), digest)
 
     def test_archive_traversal_and_devices_are_refused(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -290,10 +395,11 @@ class BuildToolsTest(unittest.TestCase):
             global_ = GO["build"].__globals__
             bootstrap = global_["bootstrap"]
             downloads = []
-            def download(directory, url, filename, algorithm, expected):
+            def download(directory, url, filename, algorithm, expected, size=None):
                 downloads.append(url)
                 if filename.startswith("go1."):
                     self.assertEqual(expected.hex(), "7ecd2d7260e82c59bcbd7f1077a07cee2dea607295b858df67195a1e4e09629b")
+                    self.assertEqual(size, 75004774)
                     return go_archive
                 self.assertIn(GO["TS_COMMIT"], url)
                 self.assertEqual(expected.hex(), GO["TS_ARCHIVE_SHA"])

@@ -50,6 +50,14 @@ builds esbuild 0.28.2 from checksum-bound source with Go 1.26.10. Add
 checks the exact source commit and module manifests and copies only the verified
 declarations from its platform package; it never runs the package's old compiler.
 
+Artifact transfers require a complete HTTP 200 response with identity encoding,
+consistent response length and the unchanged pinned digest. Go archives also
+require their official exact byte count, including when reusing cached bytes.
+A rejected transfer is never published to the archive cache or executed. Bounded
+failure metadata identifies its byte count, digest algorithm, actual digest and
+status without printing response content. There are no automatic retries or
+fallback hashes; a failure requires diagnosis against the official artifact.
+
 Use the generated launchers by absolute path. Each package-client launcher binds
 the actual Node executable, excludes inherited client/Node overrides, and gives
 its child processes the same Node and isolated certificate policy. The bundled
