@@ -16,6 +16,8 @@ export default defineAction({
   requiresAuth: true, agentTool: false, mcpTool: false, toolCallable: false,
   run: async (input, ctx?: ActionRunContext) => {
     requireVivaryCodeUser(ctx);
+    // guard:allow-env-credential - Deployment folder absence differs from an inaccessible configured folder.
+    if (!input.projectId && !process.env.VIVARY_LOCAL_AGENT_WORKSPACE?.trim()) return null;
     const root = input.projectId ? (await resolveVivaryCodeProject(ctx, input.projectId))!.root
       : (await resolveWorkspace()).root;
     return { projectId: input.projectId ?? null, folderName: path.basename(root) || root, path: root };

@@ -198,7 +198,7 @@ test.beforeEach(() => {
       if (name === "vivary-conversation-inbox") return { rows: inboxFixture.rows, drafts: inboxFixture.serverDrafts ?? [],
         unavailableProjects: [], limited: inboxFixture.limited ?? false };
       if (name === "vivary-project-location" && !input.projectId && inboxFixture.noPersonalFolder) {
-        throw new Error("Personal workspace has no folder.");
+        return null;
       }
       if (name === "vivary-project-location") return { folderName: `${input.projectId ?? "home"}-folder`,
         path: `/work/${input.projectId ?? "home"}-folder` };
@@ -377,6 +377,59 @@ test("the active Personal workspace without a folder offers only API chat", asyn
   assert.doesNotMatch(route(), /run=new/, "no Code draft that cannot run");
   assert.equal(route(), "?runtime=native&history=project&thread=new-native");
 });
+
+for (const state of ["pending", "failed"]) {
+  test(`Personal explicit API choice works while its folder is ${state}`, async () => {
+    inboxFixture.active = null;
+    inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+    const originalRead = inboxFixture.read;
+    inboxFixture.read = (name, input) => name === "vivary-project-location" && !input.projectId
+      ? state === "pending" ? new Promise(() => {}) : Promise.reject(new Error("Unavailable"))
+      : originalRead(name, input);
+    inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+      return { changed: true, record: { status: "cleared" } }; };
+    await render();
+    await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+    await act(async () => button("API chat (separate billing)").click());
+    await settle();
+    assert.equal(route(), "?runtime=native&history=project&thread=new-native");
+  });
+}
+
+for (const active of [null, "alpha"]) {
+  for (const state of ["pending", "failed"]) {
+    test(`Personal ${state} folder blocks the default until resolved from ${active ?? "Personal"}`, async () => {
+      inboxFixture.active = active;
+      inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "personal" });
+      const originalRead = inboxFixture.read;
+      let finishFolder, failed = state === "failed";
+      inboxFixture.read = (name, input) => {
+        if (name !== "vivary-project-location" || input.projectId) return originalRead(name, input);
+        if (failed) return Promise.reject(new Error("Folder service unavailable"));
+        return new Promise(resolve => { finishFolder = resolve; });
+      };
+      await render();
+      assert.equal(button("New conversation").disabled, true);
+      await act(async () => button("New conversation").click());
+      assert.equal(inboxFixture.calls.length, 0, "an unknown folder creates neither conversation type");
+      await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+      assert.equal(button("Code conversation").disabled, true);
+      assert.equal(button("API chat (separate billing)").disabled, false);
+      if (failed) {
+        failed = false;
+        await act(async () => button("Retry folder").click());
+        assert.equal(button("New conversation").disabled, true);
+      }
+      await act(async () => finishFolder({ folderName: "personal", path: "/work/personal" }));
+      await settle();
+      assert.equal(button("New conversation").disabled, false);
+      await act(async () => button("New conversation").click());
+      await settle();
+      assert.match(route(), /^\?run=new&draft=/);
+      assert.equal(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"), false);
+    });
+  }
+}
 
 test("the active Personal workspace with a folder keeps Code creation available", async () => {
   inboxFixture.active = null;

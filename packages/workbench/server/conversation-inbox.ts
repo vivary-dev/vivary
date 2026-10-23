@@ -363,22 +363,24 @@ export type CodeConversationChange =
  * hidden run would keep its approvals out of sight.
  */
 export async function changeCodeConversation(input: { ownerEmail: string; orgId?: string; runId: string;
-  projectId: string | null; scope: VivaryCodeReadScope; change: CodeConversationChange }): Promise<{ changed: true }> {
-  const requireOwned = () => {
-    // `scope` is current project history or Personal's folder. Recheck after waiting for admission.
+  projectId: string | null; resolveScope: () => Promise<VivaryCodeReadScope>; change: CodeConversationChange }): Promise<{ changed: true }> {
+  const requireOwned = (scope: VivaryCodeReadScope) => {
     const owned = listOwnedVivaryCodeRuns(input.ownerEmail, input.orgId).find(run => run.id === input.runId
       && (typeof run.metadata?.projectId === "string" ? run.metadata.projectId : null) === input.projectId
-      && isOwnedRun(run, input.ownerEmail, input.orgId, input.scope));
+      && isOwnedRun(run, input.ownerEmail, input.orgId, scope));
     if (!owned) fail("This conversation does not belong to the selected workspace.", { statusCode: 404 });
   };
-  requireOwned();
+  requireOwned(await input.resolveScope());
   // Initialization can inspect recovered workers. It finishes before admission is held.
   if (input.change.operation === "archive") await getVivaryCodeHostState(input.ownerEmail, input.orgId);
   return withCodeConversationAdmission<{ changed: true }>(input.ownerEmail, input.orgId, input.projectId, async () => {
-    requireOwned();
+    const scope = await input.resolveScope();
+    requireOwned(scope);
     if (input.change.operation === "archive") {
-      const before = await codeArchiveRefusal(input);
+      const before = await codeArchiveRefusal({ ...input, scope });
       if (before) refuseArchive(before);
+      // Archive checks await host/draft state. A revoked grant or rebound folder must still refuse the write.
+      requireOwned(await input.resolveScope());
     }
     const now = new Date().toISOString();
     const change = input.change;
