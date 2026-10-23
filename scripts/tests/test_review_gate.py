@@ -277,7 +277,7 @@ class ReviewGate(unittest.TestCase):
     def test_bootstrap_checkout_runs_only_when_the_base_lacks_the_script(self):
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
         probe = real.split("      - name: find the base commit's gate script\n", 1)[1].split("run: |\n", 1)[1]
-        probe = "\n".join(line[10:] for line in probe.split("      - if:", 1)[0].splitlines())
+        probe = "\n".join(line[10:] for line in probe.split("\n      - ", 1)[0].splitlines())
         for base_has_script, expected in ((True, "missing=false"), (False, "missing=true")):
             with tempfile.TemporaryDirectory() as root:
                 Path(root, "base", "scripts").mkdir(parents=True)
@@ -303,7 +303,10 @@ class ReviewGate(unittest.TestCase):
         real = (Path(__file__).resolve().parents[2] / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
         contract.check_review_workflow(real)
         BOOTSTRAP = re.search(r"ref: ([0-9a-f]{40})\n", real).group(1)
-        self.assertIn("      - if: steps.base.outputs.missing == 'true'\n        uses: actions/checkout@v7.0.1\n        with:\n          ref: " + BOOTSTRAP, real)
+        bootstrap_condition = "        if: ${{ steps.base.outputs.missing == 'true' && steps.runner_action_node.outcome == 'success' }}\n"
+        self.assertIn("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+                      + bootstrap_condition + "        with:\n          ref: " + BOOTSTRAP, real)
+        python_setup = "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n"
         weakened = {
             "push": real.replace("on:\n  pull_request:\n", "on:\n  push:\n  pull_request:\n"),
             "dispatch": real + "  workflow_dispatch:\n",
@@ -313,16 +316,19 @@ class ReviewGate(unittest.TestCase):
             "conditional": real.replace("      - name: wait for completed reviews", "      - if: false\n        name: wait for completed reviews"),
             "renamed": real.replace("name: required review gate", "name: review gate (optional)"),
             "no edited": real.replace(", edited]", "]"),
-            "extra step": real.replace("      - uses: actions/setup-python@v7\n", "      - run: echo exit 0 > scripts/check_review_gate.py\n      - uses: actions/setup-python@v7\n"),
+            "extra step": real.replace(python_setup, "      - run: echo exit 0 > scripts/check_review_gate.py\n" + python_setup, 1),
             "head checkout": real.replace("persist-credentials: false", "persist-credentials: true"),
             "bootstrap from head": real.replace("ref: " + BOOTSTRAP, "ref: ${{ github.event.pull_request.head.sha }}"),
             "bootstrap branch": real.replace("ref: " + BOOTSTRAP, "ref: dev"),
-            "unconditional bootstrap": real.replace("      - if: steps.base.outputs.missing == 'true'\n        uses:", "      - uses:"),
+            "unconditional bootstrap": real.replace(bootstrap_condition, "", 1),
+            "bootstrap ignores base custody": real.replace(bootstrap_condition, "        if: ${{ steps.runner_action_node.outcome == 'success' }}\n", 1),
+            "bootstrap ignores runner admission": real.replace(bootstrap_condition, "        if: ${{ steps.base.outputs.missing == 'true' }}\n", 1),
             "always missing": real.replace('echo "missing=false"', 'echo "missing=true"'),
             "head script": real.replace("gate=bootstrap/scripts/check_review_gate.py", "gate=scripts/check_review_gate.py"),
             "no concurrency": real.replace("concurrency:\n", "noconcurrency:\n"),
         }
         for label, text in weakened.items():
+            self.assertNotEqual(text, real, label)
             with self.assertRaises(SystemExit, msg=label):
                 contract.check_review_workflow(text)
 
