@@ -1640,6 +1640,8 @@ jobs:
           & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts
           if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }
       - name: desktop and creator shutdown and bytecode cache on Windows
+        env:
+          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools
         run: pnpm --dir packages/workbench exec tsx --test tests/desktop-server-shutdown.test.mjs tests/creator-shutdown.test.mjs tests/python-bytecode.test.mjs
       - name: core governed-context contract
         run: python -m pytest packages/core/tests/ -q
