@@ -1,9 +1,8 @@
 import { openCommandMenu } from "@agent-native/core/client/navigation";
 import { IconBook2, IconLayoutSidebarLeftCollapse, IconSearch, IconSettings } from "@tabler/icons-react";
 import { Link } from "react-router";
-import { useProjects } from "../projects/ProjectContext";
 import { ProjectNavigation } from "../projects/ProjectNavigation";
-import { ProjectHistory } from "./ProjectHistory";
+import { ConversationInbox } from "./ConversationInbox";
 import { ChatHistory } from "./ChatHistory";
 import { useVivaryChatIdentity } from "./use-vivary-chat-identity";
 
@@ -15,7 +14,6 @@ type SidebarProps = {
 
 export function Sidebar({ collapsible = true, onCollapsedChange }: SidebarProps) {
   const { identity } = useVivaryChatIdentity("unassigned");
-  const { activeProject } = useProjects();
   return <aside className="vivary-sidebar flex h-full min-w-0 flex-col overflow-hidden" aria-label="Projects and conversations">
     <div className="vivary-sidebar-brand">
       <Link to="/" className="flex min-w-0 flex-1 items-center gap-3" aria-label="Vivary home">
@@ -27,10 +25,7 @@ export function Sidebar({ collapsible = true, onCollapsedChange }: SidebarProps)
     </div>
     <div className="vivary-sidebar-content">
       <div className="vivary-project-navigation"><ProjectNavigation /></div>
-      <section className="workspace-project-conversations">
-        <h2>{activeProject?.displayName ?? "Personal workspace"} conversations</h2>
-        <ProjectHistory />
-      </section>
+      <ConversationInbox />
       {identity && <details className="workspace-saved-conversations">
         <summary>Unassigned conversations</summary>
         <p>Earlier chats keep their original history and are not assigned to a project.</p>

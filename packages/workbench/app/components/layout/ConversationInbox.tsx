@@ -9,7 +9,7 @@ import {
   IconAlertTriangle, IconArchive, IconArchiveOff, IconCheck, IconChevronDown, IconCircleDashed, IconDots,
   IconFolder, IconFolderPlus, IconHandStop, IconLoader2, IconPencil, IconPinned, IconPinnedOff, IconPlus,
 } from "@tabler/icons-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import type { ConversationInbox as InboxData, InboxAttention, InboxDraft, InboxRow } from "../../../server/conversation-inbox";
@@ -41,6 +41,17 @@ export type InboxFilter = string;
 const FILTER_KEY = "vivary-conversation-filter-v1";
 const ALL_PROJECTS = "all";
 const PERSONAL = "personal";
+// Layout keeps the desktop sidebar mounted beside the narrow drawer. Their writes and project opens share an owner,
+// so a slow operation from one surface cannot win over a later choice in the other. Separate apps keep separate state.
+const inboxOperations = new WeakMap<QueryClient, { saving: Promise<unknown>; selectionsPending: number; navigation: number }>();
+function sharedInboxOperations(client: QueryClient) {
+  let operations = inboxOperations.get(client);
+  if (!operations) {
+    operations = { saving: Promise.resolve(), selectionsPending: 0, navigation: 0 };
+    inboxOperations.set(client, operations);
+  }
+  return operations;
+}
 const filterProjectId = (filter: InboxFilter) => filter === PERSONAL ? null : filter;
 const ATTENTION: Record<InboxAttention, { label: string; icon: ReactNode } | null> = {
   "needs-approval": { label: "Needs approval", icon: <IconHandStop size={13} aria-hidden /> },
@@ -101,7 +112,7 @@ function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) 
   const queryClient = useQueryClient();
   const { writeAppState, ready } = useAppStateWriter();
   // Saves run one after another, so a slow earlier save never lands after a newer choice.
-  const saving = useRef<Promise<unknown>>(Promise.resolve());
+  const operations = sharedInboxOperations(queryClient);
   const saved = useQuery({
     queryKey: [FILTER_KEY, scopeKey], enabled: scopeKey !== null, retry: false, staleTime: Infinity,
     queryFn: async ({ signal }) => {
@@ -119,8 +130,8 @@ function useInboxFilter(scopeKey: string | null, projectIds: readonly string[]) 
     queryClient.setQueryData([FILTER_KEY, scopeKey], next);
     // The filter is a view preference. A failed save keeps the shown filter and retries on the next change.
     if (!ready || !scopeKey) return;
-    const save = saving.current.then(() => writeAppState(FILTER_KEY, { scopeKey, filter: next })).catch(() => {});
-    saving.current = save;
+    const save = operations.saving.then(() => writeAppState(FILTER_KEY, { scopeKey, filter: next })).catch(() => {});
+    operations.saving = save;
     await save;
   }
   return { filter, setFilter };
@@ -153,6 +164,11 @@ type Shared = {
   refetchInbox: () => unknown;
   /** The route as it is now. A step that finishes after an await compares it with the route it started from. */
   currentRoute: () => string;
+  /** A later open in either responsive sidebar invalidates an earlier deferred navigation. */
+  claimNavigation: () => () => boolean;
+  nativeStartIsCurrent: () => boolean;
+  /** Supersedes an earlier project selection before a deferred operation starts in the current project. */
+  keepCurrentProject: () => Promise<boolean>;
 };
 
 /**
@@ -160,6 +176,11 @@ type Shared = {
  * lives here, because the selected project's Native scope below remounts on every change.
  */
 export function ConversationInbox() {
+  const operations = sharedInboxOperations(useQueryClient());
+  function claimNavigation() {
+    const intent = ++operations.navigation;
+    return () => operations.navigation === intent;
+  }
   const { catalog, activeProject, checking, selectProject } = useProjects();
   const activeProjectId = activeProject?.projectId ?? null;
   const navigate = useNavigate();
@@ -189,7 +210,7 @@ export function ConversationInbox() {
   const latestRoute = useRef(location);
   latestRoute.current = location;
   const currentRoute = () => latestRoute.current.pathname + latestRoute.current.search;
-  const pendingNativeStart = useRef<{ from: string } | null>(null);
+  const pendingNativeStart = useRef<{ from: string; isCurrent: () => boolean } | null>(null);
   // New conversation in another project is the explicit action that selects it. The API chat waits for that project's
   // Native scope.
   const [pendingNative, setPendingNative] = useState<string | null>();
@@ -204,9 +225,11 @@ export function ConversationInbox() {
   }, [pendingNative, activeProjectId, checking]);
 
   async function openRow(row: InboxListRow, scope: NativeScope | null) {
+    const isCurrent = claimNavigation();
     pendingNativeStart.current = null;
     setNotice(undefined);
     if (row.archived) {
+      if (!await keepCurrentProject() || !isCurrent()) return;
       // An archived conversation is restored before it opens. Native cannot open one, and a Code send never checks
       // archive, so a run could otherwise start hidden in the Archived section.
       const from = currentRoute();
@@ -220,30 +243,32 @@ export function ConversationInbox() {
             projectId: row.projectId });
         }
       } catch (failure) {
-        setNotice(actionErrorMessage(failure) ?? "The conversation could not be restored. Try again.");
+        if (isCurrent()) setNotice(actionErrorMessage(failure) ?? "The conversation could not be restored. Try again.");
         return;
       }
       void refetchInbox();
       // A conversation the owner opened while the restore ran keeps the route.
-      if (currentRoute() !== from) return;
+      if (!isCurrent() || currentRoute() !== from) return;
     }
     if (row.projectId === activeProjectId && row.id.startsWith("native:")) scope?.switchThread(row.id.slice("native:".length));
-    await openHref(row.projectId, inboxRowHref(row));
+    await openHref(row.projectId, inboxRowHref(row), isCurrent);
   }
 
-  // Project selections this inbox started that have not finished. While one runs, an open in the selected project also
+  // Project selections either inbox started that have not finished. While one runs, an open in the selected project also
   // goes through a hold and a selection, so it supersedes the pending one instead of losing to its later hold.
-  const selectionsPending = useRef(0);
   async function select(projectId: string | null): Promise<boolean> {
-    selectionsPending.current++;
-    try { return await selectProject(projectId); } finally { selectionsPending.current--; }
+    operations.selectionsPending++;
+    try { return await selectProject(projectId); } finally { operations.selectionsPending--; }
+  }
+  async function keepCurrentProject(): Promise<boolean> {
+    return operations.selectionsPending === 0 || await select(activeProjectId);
   }
 
-  async function openHref(projectId: string | null, href: string) {
+  async function openHref(projectId: string | null, href: string, isCurrent = claimNavigation()) {
     // Opening a conversation replaces a deferred API chat request.
     setPendingNative(undefined);
     pendingNativeStart.current = null;
-    if (projectId === activeProjectId && selectionsPending.current === 0) {
+    if (projectId === activeProjectId && operations.selectionsPending === 0) {
       navigate(href);
       return;
     }
@@ -251,7 +276,7 @@ export function ConversationInbox() {
     // A same-project selection may not reset the route, so land its row before waiting.
     if (projectId === activeProjectId) navigate(href);
     // A newer open owns the route by now, so a slow failure here neither releases it nor reports over it.
-    if (!await select(projectId) && release()) {
+    if (!await select(projectId) && release() && isCurrent()) {
       setNotice("That project is unavailable. Its conversations are retained.");
     }
   }
@@ -289,7 +314,7 @@ export function ConversationInbox() {
   // stays put, so it is replaced directly.
   const nativeStart = pendingNativeStart.current;
   function hold(href: string) {
-    if (!nativeStart || pendingNativeStart.current !== nativeStart) return;
+    if (!nativeStart || pendingNativeStart.current !== nativeStart || !nativeStart.isCurrent()) return;
     const { pathname, search } = latestRoute.current;
     const route = pathname + search;
     if (route !== nativeStart.from && hasWorkspaceRoute(pathname, search)) navigate(href, { replace: true });
@@ -297,28 +322,35 @@ export function ConversationInbox() {
     pendingNativeStart.current = null;
   }
   async function startIn(projectId: string | null, kind: "code" | "native") {
+    const isCurrent = claimNavigation();
     setNotice(undefined);
-    pendingNativeStart.current = kind === "native" ? { from: currentRoute() } : null;
+    pendingNativeStart.current = kind === "native" ? { from: currentRoute(), isCurrent } : null;
     const release = kind === "code" ? holdConversationRoute(projectId, "/?run=new&draft=" + crypto.randomUUID()) : null;
     if (kind === "native") {
       setPendingNative(projectId);
     }
     if (!await select(projectId)) {
       if (release && !release()) return;
+      if (!isCurrent()) return;
       setPendingNative(current => current === projectId ? undefined : current);
       setNotice("That project is unavailable. Choose another destination.");
     }
   }
 
   const shared: Shared = { inbox, filter, search, setSearch, notice, setNotice, openRow, change, hold, openHref, startIn,
-    pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox, currentRoute };
+    pendingNative, clearPendingNative: () => setPendingNative(undefined), refetchInbox, currentRoute, claimNavigation, keepCurrentProject,
+    nativeStartIsCurrent: nativeStart?.isCurrent ?? (() => false) };
   return <ScopedInbox shared={shared} />;
 }
 
 function ScopedInbox({ shared }: { shared: Shared }) {
-  const { identity } = useVivaryChatIdentity();
-  return identity ? <NativeScoped key={identity.storageKey} identity={identity} shared={shared} />
-    : <InboxView shared={shared} scope={null} />;
+  const query = useVivaryChatIdentity();
+  return query.identity ? <NativeScoped key={query.identity.storageKey} identity={query.identity} shared={shared} />
+    : <>
+      <InboxView shared={shared} scope={null} />
+      {query.isError && <p role="alert">Native history could not be opened.
+        <Button size="sm" variant="ghost" onClick={() => void query.refetch()}>Retry history</Button></p>}
+    </>;
 }
 
 /** The selected project's Native history owner, which creates and selects its API chats. */
@@ -371,15 +403,18 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
     if (shared.pendingNative === undefined || checking || !scope || activeProjectId !== shared.pendingNative
       || scope.identity.projectId !== shared.pendingNative) return;
     shared.clearPendingNative();
+    if (!shared.nativeStartIsCurrent()) return;
     void newNative(true);
   }, [shared.pendingNative, checking, scope?.identity.projectId, activeProjectId]);
   async function newNative(afterProjectChange = false) {
     if (!afterProjectChange && elsewhere) return void shared.startIn(destinationId, "native");
     if (creatingNative.current || !scope) return;
+    const isCurrent = afterProjectChange ? shared.nativeStartIsCurrent : shared.claimNavigation();
     creatingNative.current = true;
     setNotice(undefined);
     const from = shared.currentRoute();
     try {
+      if (!afterProjectChange && (!await shared.keepCurrentProject() || !isCurrent())) return;
       const threadId = await scope.createThread();
       if (!threadId) throw new Error("No conversation ID was created.");
       // An empty Native conversation has no server thread row. Record its exact ID with the draft owner first.
@@ -387,13 +422,13 @@ function InboxView({ shared, scope }: { shared: Shared; scope: NativeScope | nul
         operation: "change", kind: scope.identity.kind, projectId: scope.identity.projectId, threadId, expected: null,
         next: { status: "cleared", text: "", submitId: null } });
       if (!initialized.changed || initialized.record?.status !== "cleared") throw new Error("Draft initialization failed.");
-      if (!nativeScopeMounted.current) return;
+      if (!nativeScopeMounted.current || !isCurrent()) return;
       const href = `/?runtime=native&history=project&thread=${encodeURIComponent(threadId)}`;
       if (afterProjectChange) shared.hold(href);
       // A conversation the owner opened while the chat was created keeps the route.
       else if (shared.currentRoute() === from) navigate(href);
     } catch {
-      if (nativeScopeMounted.current) setNotice("The conversation could not be saved. Try again.");
+      if (nativeScopeMounted.current && isCurrent()) setNotice("The conversation could not be saved. Try again.");
     } finally {
       creatingNative.current = false;
     }

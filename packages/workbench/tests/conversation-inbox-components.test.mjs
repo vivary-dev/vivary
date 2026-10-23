@@ -25,6 +25,13 @@ window.HTMLElement.prototype.focus = function focus() {
 const { createRoot } = await import("react-dom/client");
 const fixture = `globalThis.inboxFixture`;
 const stubs = new Map([
+  ["@agent-native/core/client/navigation", `export const openCommandMenu = () => ${fixture}.calls.push({ name: "command-menu" });`],
+  ["../projects/ProjectNavigation", `import { createElement } from "react";
+    export const ProjectNavigation = () => createElement("nav", { "aria-label": "Project selection" }, "Projects");`],
+  ["./ProjectHistory", `import { createElement } from "react";
+    export const ProjectHistory = () => createElement("div", { "data-old-history": true }, "Old project history");`],
+  ["./ChatHistory", `import { createElement } from "react";
+    export const ChatHistory = ({ identity }) => createElement("div", { "data-legacy-scope": identity.storageKey }, "Legacy conversations");`],
   ["../projects/ProjectContext", `import { useSyncExternalStore } from "react";
     export function useProjects() {
       useSyncExternalStore(${fixture}.subscribe, () => ${fixture}.version);
@@ -37,7 +44,11 @@ const stubs = new Map([
     writeAppState: async (key, value) => { await ${fixture}.writeDelay?.(value);
       ${fixture}.state.set(key, value); return value; } });`],
   ["@/lib/chat-draft", `export const useChatDraftList = scope => ({ data: { drafts: ${fixture}.drafts[scope.kind] ?? [] } });`],
-  ["./use-vivary-chat-identity", `export const useVivaryChatIdentity = () => ({ identity: ${fixture}.identity() });`],
+  ["./use-vivary-chat-identity", `export const useVivaryChatIdentity = kind => ({ identity:
+    kind === "unassigned" ? ${fixture}.unassignedIdentity : ${fixture}.identity(),
+    isError: kind !== "unassigned" && ${fixture}.identityError,
+    refetch: () => { ${fixture}.calls.push({ name: "retry-identity" });
+      ${fixture}.identityError = false; ${fixture}.identityBlocked = undefined; ${fixture}.notify(); } });`],
   ["@agent-native/core/client/agent-chat", `export const useChatThreads = () => ({ createThread: async () => "new-native",
     switchThread: id => ${fixture}.switched.push(id) });`],
   ["@agent-native/core/client/api-path", `export const agentNativePath = path => path;`],
@@ -85,6 +96,7 @@ const bundle = await build({ stdin: { contents: `
   import { MemoryRouter, useLocation, useSearchParams } from "react-router";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { ConversationInbox } from "./app/components/layout/ConversationInbox";
+  import { Sidebar } from "./app/components/layout/Sidebar";
   import { useConversationRouteHold } from "./app/lib/conversation-route-hold";
   // The layout applies the page's route hold through CodeRunControl. The fixture applies it the same way.
   function HoldApplier() {
@@ -121,10 +133,13 @@ const bundle = await build({ stdin: { contents: `
     }, [ready, current, params.toString(), setParams]);
     return null;
   }
-  export function view(route) {
+  export function view(route, sidebar = false) {
     const client = ${fixture}.client ??= new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: [route] },
-      createElement(HoldApplier), createElement(ConversationInbox), createElement(ProjectRouteReset), createElement(Location)));
+      createElement(HoldApplier), createElement(sidebar ? Sidebar : ConversationInbox,
+        sidebar ? { onCollapsedChange: value => ${fixture}.calls.push({ name: "collapse", value }) } : undefined),
+      sidebar === 2 && createElement(Sidebar, { collapsible: false }),
+      createElement(ProjectRouteReset), createElement(Location)));
   }`, loader: "tsx", resolveDir: workbench }, bundle: true, write: false, format: "cjs", platform: "node",
   jsx: "automatic", loader: { ".css": "empty" }, external: ["react", "react/*", "react-dom/*", "react-router", "@tanstack/react-query"],
   plugins: [{ name: "host-services", setup(build) {
@@ -203,9 +218,13 @@ test.beforeEach(() => {
   // Most tests read the selected project's rows. The filter tests start from All projects.
   inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "alpha" });
 });
-test.afterEach(async () => { await act(async () => root.unmount()); inboxFixture.client?.clear(); host.remove(); focused = null; });
+test.afterEach(async () => {
+  // A real pointer action releases the page-wide route hold; unmount alone deliberately does not.
+  await act(async () => document.dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
+  await act(async () => root.unmount()); inboxFixture.client?.clear(); host.remove(); focused = null;
+});
 const settle = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 10)); });
-async function render(route = "/") { await act(async () => root.render(module.exports.view(route))); await settle(); }
+async function render(route = "/", sidebar = false) { await act(async () => root.render(module.exports.view(route, sidebar))); await settle(); }
 const rowButtons = (list = host.querySelector('ul[aria-label="Conversations"]')) =>
   [...list.querySelectorAll(".conversation-inbox__row-button")];
 const titles = list => rowButtons(list).map(button => button.querySelector(".conversation-inbox__title").textContent);
@@ -225,8 +244,8 @@ function gate() {
   const wait = new Promise(resolve => { release = resolve; });
   return { wait, release: () => release() };
 }
-async function chooseFilter(value) {
-  const select = host.querySelector(".conversation-inbox__filter select");
+async function chooseFilter(value, surface = host) {
+  const select = surface.querySelector(".conversation-inbox__filter select");
   Object.defineProperty(select, "value", { value, configurable: true });
   await act(async () => select.dispatchEvent(new window.Event("change", { bubbles: true })));
   await settle();
@@ -964,4 +983,174 @@ test("route helpers name exactly one row", () => {
   }
   assert.equal(selectedInboxRowId("?runtime=native&history=unassigned&thread=x"), null);
   assert.equal(selectedInboxRowId(""), null);
+});
+
+test("production Sidebar mounts the inbox and preserves project navigation and unassigned history", async () => {
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.unassignedIdentity = { kind: "unassigned", projectId: null, storageKey: "legacy-owner-scope",
+    scope: { type: "workspace-app", id: "legacy-scope" } };
+  await render("/", true);
+  const sidebar = host.querySelector('aside[aria-label="Projects and conversations"]');
+  assert.ok(sidebar.querySelector(".conversation-inbox"), "the production Sidebar must mount the real inbox");
+  assert.equal(sidebar.querySelector("[data-old-history]"), null, "the old project list must not compete with the inbox");
+  assert.ok(sidebar.querySelector('nav[aria-label="Project selection"]'));
+  assert.equal(sidebar.querySelector(".workspace-saved-conversations summary").textContent, "Unassigned conversations");
+  assert.equal(sidebar.querySelector("[data-legacy-scope]").dataset.legacyScope, "legacy-owner-scope");
+  assert.ok(sidebar.querySelector('a[href="/settings"]'));
+  assert.ok(sidebar.querySelector('a[href="/settings/architecture"]'));
+  await act(async () => sidebar.querySelector('[data-row-id="code:b1"]').click());
+  await settle();
+  assert.equal(inboxFixture.active, "beta");
+  assert.equal(new URLSearchParams(host.querySelector("#route").textContent).get("run"), "b1");
+  assert.equal(sidebar.querySelector("[data-legacy-scope]").dataset.legacyScope, "legacy-owner-scope",
+    "project navigation must not relabel unassigned history");
+});
+
+test("production Sidebar keeps inbox access without legacy history and retains utility controls", async () => {
+  await render("/", true);
+  const sidebar = host.querySelector("aside");
+  assert.ok(sidebar.querySelector(".conversation-inbox"));
+  assert.equal(sidebar.querySelector(".workspace-saved-conversations"), null);
+  await act(async () => sidebar.querySelector('[aria-label="Search Vivary"]').click());
+  await act(async () => sidebar.querySelector('[aria-label="Close project navigation"]').click());
+  assert.ok(inboxFixture.calls.some(call => call.name === "command-menu"));
+  assert.ok(inboxFixture.calls.some(call => call.name === "collapse" && call.value === true));
+});
+
+test("a row opened from the other Sidebar supersedes an in-flight project selection", async () => {
+  const slow = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.selectionWait = projectId => projectId === "beta" ? slow.wait : Promise.resolve();
+  await render("/", 2);
+  const [desktop, narrow] = host.querySelectorAll("aside");
+  try {
+    await act(async () => desktop.querySelector('[data-row-id="code:b1"]').click());
+    await act(async () => narrow.querySelector('[data-row-id="code:a1"]').click());
+    await settle();
+    assert.equal(new URLSearchParams(route()).get("run"), "a1");
+  } finally {
+    await act(async () => slow.release());
+    await settle();
+  }
+  assert.equal(inboxFixture.active, "alpha", "the later click in either Sidebar owns project selection");
+  assert.equal(new URLSearchParams(route()).get("run"), "a1", "the older selection must not replace the later row");
+});
+
+test("filter saves from both Sidebars retain the latest choice after a slow write", async () => {
+  const slow = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.writeDelay = value => value.filter === "alpha" ? slow.wait : Promise.resolve();
+  await render("/", 2);
+  const [desktop, narrow] = host.querySelectorAll("aside");
+  try {
+    await chooseFilter("alpha", desktop);
+    await chooseFilter("beta", narrow);
+    assert.deepEqual(titles(narrow.querySelector('ul[aria-label="Conversations"]')), ["Review onboarding"]);
+  } finally {
+    await act(async () => slow.release());
+    await settle();
+  }
+  assert.deepEqual(inboxFixture.state.get(FILTER), { scopeKey: "scope", filter: "beta" },
+    "the earlier surface's delayed save must not overwrite the newer filter");
+});
+
+test("Sidebar exposes identity retry while keeping Code conversations usable", async () => {
+  inboxFixture.identityError = true;
+  inboxFixture.identityBlocked = "alpha";
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    return { changed: true, record: { status: "cleared" } }; };
+  await render("/", true);
+  assert.match(host.querySelector('[role="alert"]').textContent, /Native history could not be opened/);
+  await act(async () => host.querySelector('[data-row-id="code:a1"]').click());
+  await settle();
+  assert.equal(new URLSearchParams(route()).get("run"), "a1");
+  await act(async () => button("Retry history").click());
+  await settle();
+  assert.ok(inboxFixture.calls.some(call => call.name === "retry-identity"));
+  assert.equal(host.querySelector('[role="alert"]'), null);
+  await act(async () => host.querySelector('[aria-label="Choose conversation type"]').click());
+  await act(async () => button("API chat (separate billing)").click());
+  await settle();
+  assert.equal(inboxFixture.calls.find(call => call.name === "vivary-chat-draft").input.projectId, "alpha");
+  assert.equal(route(), "?runtime=native&history=project&thread=new-native");
+});
+
+test("a deferred API chat in one Sidebar cannot replace a newer row in the other", async () => {
+  const slow = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "beta" });
+  inboxFixture.call = async (name, input) => {
+    inboxFixture.calls.push({ name, input });
+    if (name === "vivary-chat-draft") await slow.wait;
+    return { changed: true, record: { status: "cleared" } };
+  };
+  await render("/?run=a1", 2);
+  const [desktop, narrow] = host.querySelectorAll("aside");
+  try {
+    await act(async () => desktop.querySelector('[aria-label="Choose conversation type"]').click());
+    await act(async () => [...desktop.querySelectorAll("button")].find(item => item.textContent === "API chat (separate billing)").click());
+    await settle();
+    assert.equal(inboxFixture.active, "beta");
+    assert.ok(inboxFixture.calls.some(call => call.name === "vivary-chat-draft"));
+    await act(async () => narrow.querySelector('[data-row-id="code:b1"]').click());
+    await settle();
+  } finally {
+    await act(async () => slow.release());
+    await settle();
+  }
+  assert.equal(new URLSearchParams(route()).get("run"), "b1");
+});
+
+test("an older Sidebar restore cannot supersede a newer pending project open", async () => {
+  const restore = gate(), selection = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.rows.push(row("native:a5", "alpha", "Archived API chat", 1, { archived: true }));
+  inboxFixture.selectionWait = projectId => projectId === "beta" ? selection.wait : Promise.resolve();
+  inboxFixture.call = async (name, input) => {
+    inboxFixture.calls.push({ name, input });
+    if (name === "vivary-conversation-archive") await restore.wait;
+    return { changed: true };
+  };
+  await render("/?run=a1", 2);
+  const [desktop, narrow] = host.querySelectorAll("aside");
+  try {
+    await act(async () => desktop.querySelector('[data-row-id="native:a5"]').click());
+    await act(async () => narrow.querySelector('[data-row-id="code:b1"]').click());
+    assert.equal(route(), "?run=a1", "the later project's selection is still pending");
+    await act(async () => restore.release());
+    await settle();
+  } finally {
+    await act(async () => { restore.release(); selection.release(); });
+    await settle();
+  }
+  assert.equal(inboxFixture.active, "beta");
+  assert.equal(new URLSearchParams(route()).get("run"), "b1");
+});
+
+for (const restore of [false, true]) test(`a later ${restore ? "archived row" : "API chat"} cancels the other Sidebar's pending project selection`, async () => {
+  const slow = gate(), restored = gate();
+  inboxFixture.state.set(FILTER, { scopeKey: "scope", filter: "all" });
+  inboxFixture.rows.push(row("native:a5", "alpha", "Archived API chat", 1, { archived: true }));
+  inboxFixture.selectionWait = projectId => projectId === "beta" ? slow.wait : Promise.resolve();
+  inboxFixture.call = async (name, input) => { inboxFixture.calls.push({ name, input });
+    if (name === "vivary-conversation-archive") await restored.wait;
+    return { changed: true, record: { status: "cleared" } }; };
+  await render("/?run=a1", 2);
+  const [desktop, narrow] = host.querySelectorAll("aside");
+  try {
+    await act(async () => desktop.querySelector('[data-row-id="code:b1"]').click());
+    if (restore) {
+      await act(async () => narrow.querySelector('[data-row-id="native:a5"]').click());
+    } else {
+      await act(async () => narrow.querySelector('[aria-label="Choose conversation type"]').click());
+      await act(async () => [...narrow.querySelectorAll("button")].find(item => item.textContent === "API chat (separate billing)").click());
+    }
+    await settle();
+    await act(async () => slow.release());
+    await settle();
+  } finally {
+    await act(async () => { slow.release(); restored.release(); });
+    await settle();
+  }
+  assert.equal(inboxFixture.active, "alpha");
+  assert.equal(new URLSearchParams(route()).get("thread"), restore ? "a5" : "new-native");
 });

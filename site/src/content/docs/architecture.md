@@ -518,7 +518,17 @@ labels, drafts, the folder, and a cross-project open that lands on the clicked
 row with and without a restored saved conversation.
 `tests/conversation-inbox-app.mjs` runs against the built app with a fresh data
 folder: a manual API chat name survives a later PUT carrying a generated title,
-before and after a server restart, and the archive action refuses queued messages. Until the sidebar integration lands, the inbox is not mounted in the app.
+before and after a server restart, and the archive action refuses queued messages.
+The production `Sidebar` mounts `ConversationInbox` in place of `ProjectHistory`, retaining
+project navigation, the separately scoped Unassigned conversations section and the footer controls.
+The desktop sidebar and narrow drawer share pending project-selection tracking and serialize filter saves
+through the same query-client owner. A later row open or filter choice in either surface wins over an older
+pending operation in the other. Identity failures retain Retry history while the Code list stays usable.
+Shared navigation intent also prevents a delayed API-chat creation or archived-thread restore from replacing
+a later conversation choice, even while that choice is still waiting for its project selection.
+The component suite also renders the real Sidebar to check inbox row navigation, delayed operations across
+both mounted sidebars, identity retry and those retained surfaces. Project navigation and legacy-history services remain fixtures in that test; browser layout,
+real dropdown focus, final database integration and Windows acceptance remain separate gates.
 
 ### Linked runtime conversations
 
@@ -1091,6 +1101,16 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Production Sidebar inbox integration. The Conversation inbox section now records its
+production mount and the preserved project navigation, unassigned-history identity and footer controls.
+The regressions exercise the real Sidebar and inbox together, including a cross-project row open,
+competing selections and filter saves from both responsive sidebars, and recovery from an identity failure
+through API-chat creation. Delayed API creation and archive restoration cannot overtake a newer open in the
+other sidebar. Each new race/error regression failed before its fix. Query-client-scoped
+coordination keeps separate app instances independent. Explicit fixture and platform limits remain.
+Current published archive/admission contracts
+and their historical receipts remain unchanged.
 
 2026-10-22 Inbox archive and send admission (review threads 4324883731 and 4325071865). The Conversation inbox
 section now describes the shared Native thread and Code owner/organization/project locks, the separate Native
