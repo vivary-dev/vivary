@@ -746,6 +746,13 @@ publish-workflow checker also refuses compact `- run: python` and
 prefetch tests now assert the derived wheel, the refusal source and the cached
 trailer reuse they describe. No runtime behavior changes.
 
+2026-10-23 Zod advisory GHSA-mrhx-c7xc-m3w5. Workbench and the internal site move
+zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
+which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
+issue collection in the v4 core array parser. The 3.25.76 copy stays because its
+only consumer, Core's botframework connector, requires zod 3 and does not import
+the v4 core. No schema or runtime behavior is otherwise changed.
+
 2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
 select the already authenticated task-local pnpm package through the real preview
 resolver, with an explicit tool root and matching physical Node executable. They
