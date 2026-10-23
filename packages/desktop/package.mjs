@@ -3,6 +3,7 @@ import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readFile, rm,
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { assertCurrentNode, assertElectronPublication, validateStagedNode } from "../workbench/bin/runtime-security.mjs";
 
 
 const decodeGitPaths = value => value.toString("utf8").split("\0").filter(Boolean);
@@ -60,7 +61,9 @@ export async function snapshotTrackedRepository(repository, destination) {
   });
 }
 
-async function packageDesktop() {
+export async function packageDesktop() {
+  await assertCurrentNode();
+  assertElectronPublication();
   const { values } = parseArgs({ options: { "windows-x64": { type: "boolean" } } });
 
   const root = path.dirname(fileURLToPath(import.meta.url));
@@ -93,7 +96,7 @@ async function packageDesktop() {
       private: true, type: "module", main: "main.mjs",
     }, null, 2));
     await cp(path.join(workbench, ".output"), path.join(runtimeDir, ".output"), { recursive: true, dereference: true });
-    for (const file of ["start.mjs", "desktop-server.mjs"]) {
+    for (const file of ["start.mjs", "desktop-server.mjs", "runtime-security.mjs"]) {
       await copyFile(path.join(sourceWorkbench, "bin", file), path.join(runtimeDir, "bin", file));
     }
     await writeFile(path.join(runtimeDir, "package.json"), JSON.stringify({
@@ -112,6 +115,8 @@ async function packageDesktop() {
       await copyFile(process.execPath, path.join(nodeDir, target.nodeExecutable));
       if (target.platform !== "win32") await chmod(path.join(nodeDir, target.nodeExecutable), 0o755);
     }
+
+    const standalone = await validateStagedNode(path.join(nodeDir, target.nodeExecutable), target);
 
     const nodeLicense = await fetch(
       `https://raw.githubusercontent.com/nodejs/node/${target.nodeVersion}/LICENSE`,
@@ -145,6 +150,8 @@ async function packageDesktop() {
       workbenchOutput: { kind: "prebuilt", capturedOnce: true, sourceCommitVerified: false },
       platform: target.platform, architecture: target.arch, node: target.nodeVersion,
       nodeAbi: target.nodeAbi, electron: manifest.devDependencies.electron,
+      runtimeSecurity: { standalone: { sha256: standalone.sha256, versions: standalone.versions,
+        platform: standalone.platform, arch: standalone.arch } },
       buildHost: { platform: process.platform, architecture: process.arch },
       channel: "private-preview",
       originalRuntime: {

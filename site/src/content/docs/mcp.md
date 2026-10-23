@@ -8,6 +8,11 @@ editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/MCP.md"
 bounded public context producers. It is not part of the baseline install, does not
 change the graph, and does not add MCP dependencies to `vivary-core`.
 
+The dependency and schema pin below describes this unpublished security source
+candidate. Published `vivary-mcp` 0.1.3 still contains the older SDK dependency;
+retaining the source component identity does not update that existing artifact or
+claim that an ordinary public-index install receives this fix.
+
 Read-only is the adapter's authority ceiling, not a claim that Vivary cannot maintain
 its workspace. Vivary Core and its CLI workflow can create governed records when an
 operation has evidence binding and explicit human approval; MCP never grants that
@@ -21,7 +26,7 @@ Vivary install starts it for you.
 The adapter pins:
 
 - MCP protocol `2026-07-28`
-- official Python SDK `mcp==2.0.0` and `mcp-types==2.0.0`
+- official Python SDK `mcp==2.2.0` and `mcp-types==2.2.0`
 - local standard input/output transport only
 - SDK-owned discovery through `server/discover`
 - exactly four tools and no extensions
@@ -185,7 +190,7 @@ Doctor reads installed distribution metadata and entry-point declarations only. 
 does not import the adapter, start a process, connect to a server, or use the network.
 
 The capability is `not-installed` by default. Compatibility requires the active
-interpreter to see the `vivary-mcp` entry point and exact declared `mcp==2.0.0`
+interpreter to see the `vivary-mcp` entry point and exact declared `mcp==2.2.0`
 dependency. Doctor reports a different SDK version as incompatible rather than
 accepting it speculatively.
 
