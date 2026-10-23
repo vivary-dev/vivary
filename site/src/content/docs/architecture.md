@@ -736,6 +736,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Windows Python bootstrap and publishing admission. Windows' actual
+setup-python manifest lacks 3.12.15, so its native PowerShell step authenticates
+the existing standalone archive before .NET extraction and invokes the same
+seed-correcting provisioner without an installer or old pip. The temporary
+bootstrap interpreter is never exported. Linux and Windows matrix paths are
+explicit and still converge on the unchanged actual Python/OpenSSL admission
+before pip or build use. The npm publishing jobs now use that admitted Linux
+runtime for their metadata and launcher checks, closing their retained 3.11
+selection without adding an unnecessary pip consumer. Certificate policy,
+source-review custody and product runtime behavior stay unchanged. Native Windows
+bootstrap, final hosted checks and release acceptance remain separate evidence.
+The workbench job keeps every test and per-test deadline and now allows twenty
+minutes for authenticated compiler provisioning plus the existing sequential
+suite: both ten-minute hosted runs were still emitting passing cases when
+canceled. This is the bounded job deadline, not a changed product latency budget.
+
 2026-10-23 Private artifact paths. The action-Node bootstrap canonicalizes its
 newly created private temporary directory before creating the download, retaining
 all path, hash and owning-Worker checks. This handles Windows temporary-directory

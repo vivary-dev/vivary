@@ -220,6 +220,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += module.BUILD_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_python.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_ci_python_windows_bootstrap.py\n'
         if name in ("workbench", "workbench-maintained", "governed-platform-proof"):
             windows = name == "governed-platform-proof"
             setup += (module.WINDOWS_WORKBENCH_TOOLS_STEP + module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
@@ -234,12 +235,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         text = text.replace(block, updated, 1)
     for name in module.PYTHON_JOBS:
         block = module.job_block(text, name)
-        setup = (
-            '      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
-            '        with:\n          python-version: "3.12.15"\n'
-            + module.PYTHON_PROVISIONING_STEP
-            + module.PYTHON_RUNTIME_STEP
-        )
+        setup = "".join(module.python_admission_prefix(name))
         if name in module.PIP_JOBS:
             setup += PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
         if name in PIP_MCP_FIXTURES:
@@ -1150,7 +1146,13 @@ def test_actual_workflow_requires_pip_runtime_admission():
             "redirected_guard": block.replace(PIP_RUNTIME_STEP, PIP_RUNTIME_STEP.replace(
                 "        shell:", "        working-directory: other\n        shell:", 1), 1),
         }
+        if name == "governed-platform-proof":
+            cases["setup_old_pip_network"] = block.replace(_load().WINDOWS_PYTHON_PROVISIONING_STEP,
+                _load().PIP_SETUP_STEP.replace('          python-version: "3.12.15"\n',
+                    '          python-version: "3.12.15"\n          pip-version: "26.2.2"\n', 1)
+                + _load().WINDOWS_PYTHON_PROVISIONING_STEP, 1)
         for label, changed in cases.items():
+            assert changed != block, (name, label)
             message = _run(workflow.replace(block, changed, 1))
             assert message and name in message and "pip" in message, (name, label, message)
     # This uses only the preexisting full-checker entrypoint. On old code the
@@ -1340,17 +1342,20 @@ def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
     guard = module.PYTHON_RUNTIME_STEP
     for name in module.PYTHON_JOBS:
         block = module.job_block(workflow, name)
+        prefix = module.python_admission_prefix(name)
+        provision = prefix[-2]
+        entry = prefix[0]
         cases = {
             "old_python": block.replace('python-version: "3.12.15"', 'python-version: "3.11"', 1),
             "floating_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12"', 1),
             "future_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1),
-            "missing_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP, "", 1),
-            "conditional_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP,
-                                                     module.PYTHON_PROVISIONING_STEP.replace("        shell:", "        if: false\n        shell:"), 1),
-            "wrong_provisioning": block.replace(module.PYTHON_PROVISIONING_STEP,
-                                               module.PYTHON_PROVISIONING_STEP.replace("bootstrap_ci_python.py", "bootstrap_ci_pip.py"), 1),
-            "provisioning_after_admission": block.replace(module.PYTHON_PROVISIONING_STEP + guard,
-                                                         guard + module.PYTHON_PROVISIONING_STEP, 1),
+            "missing_provisioning": block.replace(provision, "", 1),
+            "conditional_provisioning": block.replace(provision,
+                                                     provision.replace("        shell:", "        if: false\n        shell:"), 1),
+            "wrong_provisioning": block.replace(provision,
+                                               provision.replace("bootstrap_ci_python", "bootstrap_ci_pip"), 1),
+            "provisioning_after_admission": block.replace(provision + guard,
+                                                         guard + provision, 1),
             "missing_guard": block.replace(guard, "", 1),
             "conditional_guard": block.replace(guard, guard.replace("        shell:", "        if: false\n        shell:"), 1),
             "ignored_guard": block.replace(guard, guard.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
@@ -1358,9 +1363,20 @@ def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
             "bytecode_guard": block.replace(guard, guard.replace("python -I -B", "python -I"), 1),
             "wrong_guard": block.replace(guard, guard.replace("check_python_runtime.py", "check_pip_runtime.py"), 1),
             "early_pip": block.replace(guard, '      - run: python -m pip install anything\n' + guard, 1),
-            "early_tools": block.replace(module.PIP_SETUP_STEP,
-                                        '      - run: python scripts/bootstrap_build_tools.py --root /tmp/tools\n' + module.PIP_SETUP_STEP, 1),
+            "early_tools": block.replace(entry,
+                                        '      - run: python scripts/bootstrap_build_tools.py --root /tmp/tools\n' + entry, 1),
         }
+        if name == "governed-platform-proof":
+            for label in ("old_python", "floating_python", "future_python"):
+                del cases[label]
+            cases["unqualified_image_python"] = block.replace(provision,
+                "      - run: python scripts/bootstrap_ci_python.py\n", 1)
+        if name == "orientation-proof":
+            linux_provision = prefix[1]
+            cases["missing_linux_provision"] = block.replace(linux_provision, "", 1)
+            cases["wrong_platform_condition"] = block.replace("runner.os == 'Windows'", "runner.os != 'Windows'", 1)
+            cases["unconditional_linux_setup"] = block.replace(
+                "        if: ${{ runner.os != 'Windows' && steps.runner_action_node.outcome == 'success' }}\n", "", 1)
         for label, mutation in cases.items():
             assert mutation != block, (name, label)
             try:
@@ -1381,6 +1397,12 @@ def test_python_provisioning_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_ci_python.py", "echo skipped", 1))
     assert message and "verified Python provisioning regressions" in message
+
+
+def test_windows_python_bootstrap_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py", "echo skipped", 1))
+    assert message and "native Windows Python bootstrap regressions" in message
 
 
 def test_runner_node_repair_regressions_must_run():
