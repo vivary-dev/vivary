@@ -835,6 +835,13 @@ SITE_JOB_HEADER = (
     "    runs-on: ubuntu-latest\n"
     "    timeout-minutes: 10\n"
 )
+SITE_TOOLS_STEP = (
+    '      - name: qualified site build tools\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
 SITE_DEPENDENCY_STEP = (
     "      - name: known site dependency admission\n"
     "        run: python -I -B scripts/check_site_dependencies.py\n"
@@ -845,7 +852,7 @@ SITE_INSTALLED_DEPENDENCY_STEP = (
 )
 SITE_BUILD_STEP = (
     "      - name: build (re-syncs docs, then astro build)\n"
-    "        run: npm run build\n"
+    '        run: |\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build\n'
     "        working-directory: site\n"
 )
 
@@ -859,10 +866,16 @@ def check_site_dependencies(text: str) -> None:
             "site cannot add job fields after its canonical header and steps key")
     steps = re.split(r"(?m)(?=^      - )", job)[1:]
     guard = [index for index, step in enumerate(steps) if "scripts/check_site_dependencies.py" in step]
-    installs = [index for index, step in enumerate(steps) if "        run: npm ci\n" in step]
-    audits = [index for index, step in enumerate(steps) if "        run: npm audit --audit-level=high\n" in step]
-    builds = [index for index, step in enumerate(steps) if "        run: npm run build\n" in step]
+    tools = [index for index, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step]
+    node = [index for index, step in enumerate(steps) if NODE_GUARD in step]
+    installs = [index for index, step in enumerate(steps) if '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts\'\n' in step]
+    audits = [index for index, step in enumerate(steps) if '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high\'\n' in step]
+    builds = [index for index, step in enumerate(steps) if '        run: |\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build\n' in step]
     require(len(guard) == 2 and len(installs) == len(audits) == len(builds) == 1, contract)
+    require(len(tools) == len(node) == 1 and tools[0] == node[0] + 1 and tools[0] + 1 == guard[0], contract)
+    require(steps[tools[0]].rstrip("\n") == SITE_TOOLS_STEP.rstrip("\n"), contract)
+    require(not any(re.search(r"(?m)^\s+cache(?:-dependency-path)?:", step)
+                    for step in steps[:tools[0]]), contract + ": setup-node cache can invoke unqualified npm")
     require(steps[guard[0]].rstrip("\n") == SITE_DEPENDENCY_STEP.rstrip("\n"), contract)
     require(steps[guard[1]].rstrip("\n") == SITE_INSTALLED_DEPENDENCY_STEP.rstrip("\n"), contract)
     require(guard[0] + 1 == installs[0] and installs[0] + 1 == guard[1] < audits[0] < builds[0], contract)
@@ -950,9 +963,9 @@ def main() -> None:
         "python scripts/check_installed_route_parity.py --characterize $scripts"
     )
     strato_pin = 'assert version("vivary-strato") == "0.1.3"'
-    site_install = "        run: npm ci\n        working-directory: site"
+    site_install = '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts\'\n        working-directory: site'
     site_audit = (
-        "        run: npm audit --audit-level=high\n"
+        '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high\'\n'
         "        working-directory: site"
     )
     dispatched_base = (
@@ -1144,6 +1157,8 @@ def main() -> None:
             "tests job must run verified pip provisioning regressions")
     require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
             "tests job must run known site dependency admission regressions")
+    require("python -I -B scripts/tests/test_build_tools.py" in test_job,
+            "tests job must run isolated build tool regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
             "tests job must run the runner action bootstrap regressions")
