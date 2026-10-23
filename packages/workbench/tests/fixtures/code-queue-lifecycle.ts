@@ -11,6 +11,7 @@ import { setTextRedactor } from "@agent-native/core/audit";
 import { redactCredentials, refreshHeldCredentials } from "../../server/credential-redaction.ts";
 
 const [mode, fixture, token] = process.argv.slice(2) as [string, string, string];
+// guard:allow-env-mutation - Disposable lifecycle child only; synthetic token is process-scoped and its fetch is disabled.
 process.env.VIVARY_PROBE_TOKEN = token; // guard:allow-env-credential - Synthetic token survives the real send-boundary credential refresh in this disposable process.
 globalThis.fetch = async () => { throw new Error("Queue lifecycle fixture forbids network calls."); };
 const owner = { ownerEmail: "queue-restart@example.test", orgId: "queue-restart-org" };
