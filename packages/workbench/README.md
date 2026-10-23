@@ -49,7 +49,8 @@ node packages/workbench/bin/start.mjs --port 5173 --data-dir /path/to/data
 node packages/workbench/bin/start.mjs --workspace /path/to/workspace
 ```
 
-Source startup requires Node 22.22.0 or newer and built dependencies. The
+Source startup requires Node 22.23.4 or a newer supported release that passes
+the runtime guard, and built dependencies. The
 [private desktop package](../desktop/README.md) bundles its own Node runtime.
 
 ## Settings and models
@@ -212,6 +213,21 @@ connects that folder through the existing Native-backed project registry.
 Folder selection expires after two minutes. The app identifies an expired
 selection and asks you to close the chooser before trying again. A selection
 returned after the chooser expires does not register a project.
+
+New project and Open folder ask whether the project is **Coding** or
+**Personal**. Coding starts new conversations with a coding agent (Claude Code
+or Codex) and uses `STATE.md` for handoff. Personal starts new conversations as
+API chat for notes, research, and writing. The choice sets defaults only. You
+can start either kind of conversation in any project. New project asks before
+its form opens and fills in the matching workspace type (Coding or Knowledge
+work), which you can still change. Open folder asks after the folder is
+registered. The choice is saved in Vivary's project registry and writes no files
+in the folder. Cancel leaves the kind **Not set**. Projects registered before
+this choice existed also show **Not set**, and Vivary never sets a kind for you.
+Not set keeps the Code default. Project details shows the kind and lets you set
+or change it on the local host. A configured installation shows the kind without
+that control. Opening a registered folder again asks while its kind is Not set.
+
 New project offers a workspace type and optional Capture, Sources, Navigation,
 and Project brief guidance. Names and file locations are editable. It previews
 the original creator's exact files before creating a separate folder under the app data directory's `projects` folder. It then

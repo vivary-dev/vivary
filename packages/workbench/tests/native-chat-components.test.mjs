@@ -17,16 +17,27 @@ const COMPOSER = join(TOOLKIT, "dist", "composer");
 const translate = await import(pathToFileURL(join(CORE, "dist", "agent", "engine", "translate-ai-sdk.js")).href);
 const threads = await import(pathToFileURL(join(CORE, "dist", "agent", "thread-data-builder.js")).href);
 
-// Only the Builder connect flow, which polls a status route, is stubbed. It is matched by the file
-// it resolves to, so every importer gets the same stub.
+// Host action, draft and project/session boundaries are inert; the controls and Native thread hook
+// are real. The Builder connect flow is also stubbed to avoid its status polling.
 const stubs = new Map([
   [join(WORKBENCH, "app", "lib", "native-actions.ts"), `
-    export function useNativeActionCaller() { return { call: async () => { throw new Error("No Code action expected"); } }; }`],
+    export function useNativeActionCaller() { return { ready: !!globalThis.codeWorkspaceFixture,
+      call: globalThis.codeWorkspaceFixture?.call ?? (async () => { throw new Error("No Code action expected"); }) }; }`],
+  [join(WORKBENCH, "app", "lib", "native-state.ts"), `
+    export function useAppStateWriter() { return { ready: true, sessionStatus: "authenticated", retrySession() {},
+      writeAppState: globalThis.codeWorkspaceFixture.writeAppState }; }`],
+  [join(WORKBENCH, "app", "components", "projects", "ProjectContext.tsx"), `
+    export function useProjects() { return globalThis.codeWorkspaceFixture.projects; }`],
+  [join(WORKBENCH, "app", "components", "layout", "use-vivary-chat-identity.ts"), `
+    export function useVivaryChatIdentity() { return { identity: globalThis.codeWorkspaceFixture.identity,
+      waiting: false, isError: false, refetch: async () => {} }; }`],
+  [join(WORKBENCH, "app", "components", "layout", "ChatSessionSearch.tsx"), `
+    export function ChatSessionSearch() { return null; }`],
   [join(WORKBENCH, "app", "lib", "chat-draft.ts"), `
     export function useNativeChatDraft() { return { statusForThread: () => null, draftSaveStatusForThread: () => null,
       rejectKnownSubmission: async () => {}, hostComposerDraft: undefined }; }
     export function registerSelectionCloseFlush() { return () => {}; }
-    export function trackSelectionWrite() {}
+    export function trackSelectionWrite(write) { return write; }
     export async function flushChatDraftsForClose() {}
     export function useChatDraftList() { return { data: [] }; }`],
   [join(CLIENT, "settings", "useBuilderStatus.js"), `
@@ -42,16 +53,17 @@ const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
-import { LocalCodeConversation } from "@proof/workbench-code";
+import CodeConversation, { LocalCodeConversation } from "@proof/workbench-code";
+import { ProjectHistory } from "@proof/project-history";
 import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getRunErrorMetadata, RunErrorRecoveryCard } from "@proof/run-recovery";
 import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
 import { AssistantRuntimeProvider, ThreadPrimitive, useLocalRuntime } from "@assistant-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
@@ -107,6 +119,221 @@ export async function renderWorkbenchComposer({ model = "claude-sonnet-5-5", act
     text: view.host.textContent };
   await view.unmount(); client.clear();
   return snapshot;
+}
+
+// PR #260: mount the actual parent and retained-run composer. Only the API route destination is
+// a placeholder, matching Workspace's unmount of CodeConversation when runtime=native is selected.
+export async function startWorkbenchConversation({ control, workspaceKind = "personal", projectId = "project-personal",
+  outcome = "success", repeatControls = false, transition, retry = false, identityReady = true,
+  withHistory = false, secondControl, initialRoute = "/?run=retained-run", resolveHistoryIdentity = false }) {
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  const ownerKey = "kind-fixture-owner";
+  const selectionKey = "vivary-code-selection-v1:" + ownerKey + ":" + (projectId ?? "personal");
+  const selection = { key: "retained-run", runId: "retained-run" };
+  const model = "claude-sonnet-5-5";
+  const engine = { engine: "claude-cli", label: "Claude Code", configured: true,
+    runtime: { status: "ready", message: "Signed in", version: "2.1.296" }, modelCatalog: null,
+    models: claudeCodeModelChoices("2.1.296").map(model => model.id), claudeModels: claudeCodeModelChoices("2.1.296") };
+  const run = { id: "retained-run", title: "Retained Code conversation", engine: engine.engine,
+    engineLabel: engine.label, model, events: [], status: "completed", draftThreadId: null };
+  const state = { projectId, engines: [engine], defaultEngine: engine.engine, defaultModel: model,
+    busy: false, activeRun: null, pendingApproval: null, cleanup: null, runs: [run], run };
+  client.setQueryData([selectionKey], selection);
+  client.setQueryData(["action", "vivary-code-state", { projectId: projectId ?? undefined }], state);
+  client.setQueryData(["action", "vivary-code-state", { projectId: projectId ?? undefined, runId: run.id }], state);
+  const draftChanges = [], initialized = [], writes = [];
+  const originalFixture = globalThis.codeWorkspaceFixture;
+  const resolvedIdentity = { kind: "project", projectId, storageKey: "kind-fixture-native",
+    scope: { type: "workspace-app", id: "kind-fixture-project-scope" } };
+  const activeThreadKey = "agent-chat-active-thread:kind-fixture-native:scope:workspace-app:kind-fixture-project-scope";
+  const activeThreadWrites = [], unexpectedFetches = [];
+  const originalSetItem = localStorage.setItem;
+  const originalActiveThread = localStorage.getItem(activeThreadKey);
+  const originalSeen = localStorage.getItem(activeThreadKey + ":seen");
+  let finishInitialization;
+  const initialization = new Promise(resolve => { finishInitialization = resolve; });
+  globalThis.codeWorkspaceFixture = {
+    projects: { activeProject: projectId ? { projectId, displayName: "Kind fixture", workspaceKind } : null,
+      catalog: { scopeKey: ownerKey }, checking: false, workspaceAvailable: true, historyAvailable: true,
+      refresh: async () => {}, selectProject: async () => true },
+    identity: resolvedIdentity,
+    writeAppState: async (key, value) => { writes.push({ key, value }); return value; },
+    call: async (name, input) => {
+      if (name === "vivary-chat-draft") {
+        draftChanges.push(input);
+        await initialization;
+        if (draftChanges.length === 1) {
+          if (outcome === "reject") throw new Error("Fixture draft write failed");
+          if (outcome === "unchanged") return { changed: false, record: { ...input.next } };
+          if (outcome === "not-cleared") return { changed: true, record: { ...input.next, status: "draft" } };
+        }
+        initialized.push(input);
+        return { changed: true, record: { ...input.next } };
+      }
+      if (name === "vivary-linked-history") return input.operation === "source" ? { available: false } : null;
+      if (name === "vivary-handoff-freshness") return { status: "none", path: "STATE.md" };
+      throw new Error("Unexpected parent fixture action: " + name);
+    },
+  };
+  if (!identityReady) globalThis.codeWorkspaceFixture.identity = null;
+  // Native's real createThread is optimistic. Its history read is inert; the existing draft action,
+  // rather than a POST that would invent an empty thread row, must acknowledge the new ID.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (method === "GET" && url.pathname.endsWith("/agent-chat/threads") && (!withHistory
+      || (url.searchParams.get("scopeType") === resolvedIdentity.scope.type
+        && url.searchParams.get("scopeId") === resolvedIdentity.scope.id))) {
+      return Response.json({ threads: [] });
+    }
+    // Ancillary controls use installChatServer's 404 absence boundary for these observed probes.
+    // The context PUT also returns 404, so the fixture acknowledges no ancillary persistence.
+    if (withHistory && [
+      "GET /_agent-native/mcp/servers",
+      "GET /_agent-native/application-state/pending-selection-context",
+      "GET /_agent-native/voice-providers/status",
+      "GET /_agent-native/application-state?keys=agent-chat-context,voice-input-preference,guided-questions",
+      "GET /_agent-native/application-state?keys=voice-input-preference",
+      "GET /_agent-native/application-state?keys=voice-input-preference,agent-chat-context",
+      "PUT /_agent-native/application-state/agent-chat-context",
+    ].includes(method + " " + url.pathname + url.search)) {
+      return Response.json({ error: "not found" }, { status: 404 });
+    }
+    if (withHistory) {
+      const request = method + " " + url.pathname + url.search;
+      unexpectedFetches.push(request);
+      throw new Error("Unexpected history fixture fetch: " + request);
+    }
+    return originalFetch(input, init);
+  };
+  let route, navigateRoute, routerMounts = 0;
+  function Route() {
+    const location = useLocation();
+    navigateRoute = useNavigate();
+    route = location.pathname + location.search;
+    useEffect(() => { routerMounts++; }, []);
+    return <>
+      {withHistory && <aside data-testid="project-history"><ProjectHistory /></aside>}
+      {new URLSearchParams(location.search).get("runtime") === "native"
+        ? <div data-testid="api-route" /> : <CodeConversation previewScope="kind-fixture" />}
+    </>;
+  }
+  const render = () => <QueryClientProvider client={client}>
+    <MemoryRouter initialEntries={[initialRoute]}><Route /></MemoryRouter>
+  </QueryClientProvider>;
+  let view;
+  try {
+    // Forward every write, including repeat persistence of the same ID by Core's effect.
+    // Distinct allocations are checked from these raw observations in the tests.
+    if (withHistory) localStorage.setItem = function (key, value) {
+      if (key === activeThreadKey) activeThreadWrites.push(String(value));
+      return originalSetItem.call(this, key, value);
+    };
+    view = await mount(render());
+    const before = { route, title: view.host.querySelector(".local-agent-heading h2")?.textContent ?? null,
+      keptRoute: !!view.host.querySelector(".local-agent-route-note") };
+    const controlButton = name => view.host.querySelector(name === "sidebar"
+      ? '[data-testid="project-history"] .an-chat-history-rail__new-chat'
+      : name === "header" ? '.local-agent-header button[aria-label="New conversation"]' : ".local-agent-route-note button");
+    const controlState = name => {
+      const button = controlButton(name);
+      const disabledProperty = button?.disabled === true;
+      const disabledAttribute = button?.hasAttribute("disabled") ?? false;
+      const ariaDisabled = button?.getAttribute("aria-disabled") ?? null;
+      return { present: !!button, tag: button?.tagName ?? null, disabledProperty, disabledAttribute, ariaDisabled,
+        unavailable: !button || disabledProperty || disabledAttribute || ariaDisabled === "true" };
+    };
+    const click = name => {
+      const button = controlButton(name);
+      if (!button || button.disabled) throw new Error(name + " New conversation control is missing or disabled");
+      button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    };
+    const reading = () => ({ route, routerMounts,
+      selectionKey: client.getQueryData([selectionKey])?.key ?? null,
+      selectionRunId: client.getQueryData([selectionKey])?.runId ?? null,
+      selectionWrites: writes.filter(write => write.key === selectionKey).length,
+      draftChanges: draftChanges.slice(), initialized: initialized.length,
+      activeThreadWrites: activeThreadWrites.slice() });
+    const controlsDisabled = ["header", "kept-route"].map(name => controlButton(name)?.disabled ?? null);
+    let identityPending, firstPending, otherControl, resolvedControl;
+    if (identityReady) await act(async () => {
+      click(control);
+      if (repeatControls) { click("header"); click("kept-route"); }
+    });
+    if (secondControl) {
+      await until(() => draftChanges.length > 0, "the first owner's cleared-draft acknowledgement");
+      firstPending = reading();
+      otherControl = controlState(secondControl);
+      if (!otherControl.unavailable) await act(async () => { click(secondControl); });
+      await act(async () => { await sleep(0); });
+    }
+    if (withHistory && !identityReady) {
+      const fallback = controlState("sidebar");
+      const fallbackRendered = !!view.host.querySelector('[aria-label="Code conversations"]');
+      // Do not dispatch to an unavailable control. An enabled old fallback may navigate,
+      // and that route and any real Code selection writes are captured before recovery.
+      const clicked = !fallback.unavailable;
+      if (clicked) await act(async () => { click("sidebar"); });
+      await act(async () => { await sleep(0); });
+      identityPending = { ...reading(), fallback, fallbackRendered, clicked };
+      if (resolveHistoryIdentity) {
+        // Restore the requested surface only for the independent positive control if the
+        // old fallback left it. Keep the same mounted router and retain the failure snapshot.
+        if (route !== initialRoute) await act(async () => { navigateRoute(initialRoute); });
+        globalThis.codeWorkspaceFixture.identity = resolvedIdentity;
+        await act(async () => { view.root.render(render()); });
+        await until(() => !!view.host.querySelector('[aria-label="Project conversations"]'), "resolved SessionHistory");
+        resolvedControl = { ...controlState("sidebar"), routerMounts };
+        await act(async () => { click("sidebar"); });
+        await until(() => draftChanges.length > 0, "resolved history's cleared-draft acknowledgement");
+      }
+    }
+    const ownerPending = reading();
+    const pendingRoute = route;
+    const initializedBeforeAck = initialized.length;
+    if (transition === "route") await act(async () => { navigateRoute("/?run=new&draft=owner-chosen"); });
+    if (transition === "project") {
+      const fixture = globalThis.codeWorkspaceFixture;
+      fixture.projects = { ...fixture.projects, activeProject: { projectId: "other-project", displayName: "Other project", workspaceKind: "personal" } };
+      fixture.identity = { ...fixture.identity, projectId: "other-project", storageKey: "other-project-native",
+        scope: { type: "workspace-app", id: "other-project-scope" } };
+      const otherRun = { ...run, id: "other-run" };
+      const otherState = { ...state, projectId: "other-project", run: otherRun, runs: [otherRun] };
+      client.setQueryData(["vivary-code-selection-v1:" + ownerKey + ":other-project"], { key: "other-run", runId: "other-run" });
+      client.setQueryData(["action", "vivary-code-state", { projectId: "other-project" }], otherState);
+      client.setQueryData(["action", "vivary-code-state", { projectId: "other-project", runId: "other-run" }], otherState);
+      await act(async () => { navigateRoute("/?run=other-run"); view.root.render(render()); });
+    }
+    if (transition === "unmount") { await view.unmount(); view = null; }
+    const departedRoute = route;
+    await act(async () => { finishInitialization(); });
+    const afterInitialization = { route, saveFailure: !!view?.host.textContent.includes("The conversation could not be saved. Try again.") };
+    if (retry) await act(async () => { click(control === "header" ? "kept-route" : "header"); });
+    return { before, controlsDisabled, pendingRoute, initializedBeforeAck, departedRoute, afterInitialization, route, draftChanges, initialized,
+      identityPending, firstPending, otherControl, resolvedControl, ownerPending, routerMounts,
+      activeThreadWrites: activeThreadWrites.slice(), unexpectedFetches: unexpectedFetches.slice(),
+      nativeActiveThread: localStorage.getItem("agent-chat-active-thread:kind-fixture-native:scope:workspace-app:kind-fixture-project-scope"),
+      codeSelection: client.getQueryData([selectionKey]), codeSelectionWrites: writes.filter(write => write.key === selectionKey) };
+  } finally {
+    finishInitialization();
+    try {
+      if (view) await view.unmount();
+    } finally {
+      try { client.clear(); } finally {
+        globalThis.fetch = originalFetch;
+        if (withHistory) {
+          localStorage.setItem = originalSetItem;
+          for (const [key, value] of [[activeThreadKey, originalActiveThread], [activeThreadKey + ":seen", originalSeen]]) {
+            if (value === null) localStorage.removeItem(key);
+            else originalSetItem.call(localStorage, key, value);
+          }
+        }
+        if (originalFixture === undefined) delete globalThis.codeWorkspaceFixture;
+        else globalThis.codeWorkspaceFixture = originalFixture;
+      }
+    }
+  }
 }
 
 async function mount(element) {
@@ -479,9 +706,11 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
       setup(build) {
         build.onResolve({ filter: /.*/ }, args => {
           if (args.path === "@proof/workbench-code") return { path: join(WORKBENCH, "app", "components", "workspace", "CodeConversation.tsx"), namespace: "workbench-code" };
+          if (args.path === "@proof/project-history") return { path: join(WORKBENCH, "app", "components", "layout", "ProjectHistory.tsx") };
           const candidate = args.path.startsWith("@/") ? join(WORKBENCH, "app", args.path.slice(2) + ".ts")
             : args.path.startsWith(".") ? resolve(args.resolveDir, args.path) + (args.path.endsWith(".ts") ? "" : ".ts") : null;
           if (candidate && stubs.has(candidate)) return { path: candidate, namespace: "stub" };
+          if (candidate && stubs.has(candidate + "x")) return { path: candidate + "x", namespace: "stub" };
           if (args.path === "@proof/assistant-chat") return { path: join(CLIENT, "AssistantChat.js") };
           if (args.path === "@proof/multi-tab-chat") return { path: join(CLIENT, "MultiTabAssistantChat.js") };
           if (args.path === "@proof/run-recovery") return { path: join(CLIENT, "chat", "run-recovery.js") };
@@ -665,6 +894,226 @@ test("Native chat controls", async t => {
   const closeChannels = installDom();
   const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
   t.after(() => closeChannels());
+
+  for (const control of ["header", "kept-route"]) {
+    await t.test("a Personal project's Code " + control + " New conversation saves a new API route", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const server = installChatServer();
+      try {
+        const snapshot = await proof.startWorkbenchConversation({ control });
+        assert.deepEqual(snapshot.before, { route: "/?run=retained-run", title: "Retained Code conversation", keptRoute: true },
+          "an explicit retained Code conversation stays open in a Personal project");
+        assert.equal(snapshot.draftChanges.length, 1, "generic New conversation must initialize one durable API draft");
+        const change = snapshot.draftChanges[0];
+        assert.equal(typeof change.threadId, "string");
+        assert.ok(change.threadId.length > 0 && change.threadId !== "retained-run", "the API conversation gets a fresh ID");
+        assert.deepEqual(change, { operation: "change", kind: "project", projectId: "project-personal", threadId: change.threadId,
+          expected: null, next: { status: "cleared", text: "", submitId: null } });
+        assert.equal(snapshot.initializedBeforeAck, 0);
+        assert.equal(snapshot.pendingRoute, "/?run=retained-run", "keep the Code route until the draft is acknowledged");
+        assert.deepEqual(snapshot.initialized, [change]);
+        assert.equal(snapshot.nativeActiveThread, change.threadId, "the acknowledged ID is Native's optimistic thread");
+        assert.equal(snapshot.route, "/?runtime=native&history=project&thread=" + encodeURIComponent(change.threadId));
+        assert.deepEqual(snapshot.codeSelection, { key: "retained-run", runId: "retained-run" });
+        assert.equal(snapshot.codeSelectionWrites.length, 0, "creating API chat must not replace the retained Code selection");
+      } finally { server(); }
+    });
+  }
+  for (const outcome of ["reject", "unchanged", "not-cleared"]) {
+    await t.test("a " + outcome + " API draft write keeps Code selected and another control can retry", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const server = installChatServer();
+      try {
+        const snapshot = await proof.startWorkbenchConversation({ control: "header", outcome, retry: true });
+        assert.equal(snapshot.afterInitialization.route, "/?run=retained-run", "a failed save keeps the retained route");
+        assert.equal(snapshot.afterInitialization.saveFailure, true, "an unacknowledged save reports failure");
+        assert.equal(snapshot.draftChanges.length, 2, "the other generic control can retry after failure");
+        assert.equal(snapshot.initialized.length, 1);
+        assert.notEqual(snapshot.draftChanges[0].threadId, snapshot.draftChanges[1].threadId);
+        assert.equal(snapshot.route, "/?runtime=native&history=project&thread=" + encodeURIComponent(snapshot.draftChanges[1].threadId));
+        assert.equal(snapshot.codeSelection.runId, "retained-run");
+        assert.equal(snapshot.codeSelectionWrites.length, 0);
+      } finally { server(); }
+    });
+  }
+  await t.test("repeated header and kept-route clicks share one pending API creation", async () => {
+    localStorage.clear(); sessionStorage.clear();
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.startWorkbenchConversation({ control: "header", repeatControls: true });
+      assert.equal(snapshot.draftChanges.length, 1);
+      assert.equal(snapshot.initialized.length, 1);
+      assert.equal(snapshot.pendingRoute, "/?run=retained-run");
+      assert.equal(snapshot.route, "/?runtime=native&history=project&thread=" + encodeURIComponent(snapshot.draftChanges[0].threadId));
+      assert.equal(snapshot.codeSelectionWrites.length, 0);
+    } finally { server(); }
+  });
+  for (const [transition, outcome] of [["route", "success"], ["project", "success"], ["unmount", "success"], ["route", "reject"]]) {
+    await t.test("a late " + outcome + " API save cannot take over after " + transition, async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const server = installChatServer();
+      try {
+        const snapshot = await proof.startWorkbenchConversation({ control: "kept-route", transition, outcome });
+        assert.equal(snapshot.draftChanges.length, 1, "the test leaves a real parent creation in flight");
+        assert.equal(snapshot.initialized.length, outcome === "success" ? 1 : 0);
+        assert.equal(snapshot.route, snapshot.departedRoute, "the late completion must not navigate");
+        assert.equal(snapshot.afterInitialization.saveFailure, false, "a stale failure must not appear in the destination");
+        if (transition === "route") {
+          assert.equal(snapshot.route, "/?run=new&draft=owner-chosen");
+          assert.equal(snapshot.codeSelection.key, "owner-chosen");
+          assert.equal(snapshot.codeSelection.runId, null);
+        } else {
+          assert.equal(snapshot.route, transition === "project" ? "/?run=other-run" : "/?run=retained-run");
+          assert.equal(snapshot.codeSelection.runId, "retained-run");
+          assert.equal(snapshot.codeSelectionWrites.length, 0);
+        }
+      } finally { server(); }
+    });
+  }
+  await t.test("a Personal Code view waits for Native identity before either generic control can create", async () => {
+    localStorage.clear(); sessionStorage.clear();
+    const server = installChatServer();
+    try {
+      const snapshot = await proof.startWorkbenchConversation({ control: "header", identityReady: false });
+      assert.equal(snapshot.controlsDisabled[0], true);
+      assert.equal(snapshot.controlsDisabled[1], true);
+      assert.equal(snapshot.route, "/?run=retained-run");
+      assert.equal(snapshot.draftChanges.length, 0);
+      assert.equal(snapshot.codeSelectionWrites.length, 0);
+    } finally { server(); }
+  });
+  for (const input of [{ label: "Coding", workspaceKind: "coding" }, { label: "Not set", workspaceKind: null },
+    { label: "Personal workspace", projectId: null }]) {
+    await t.test(input.label + " keeps Code for the header New conversation", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const server = installChatServer();
+      try {
+        const snapshot = await proof.startWorkbenchConversation({ ...input, control: "header" });
+        const params = new URL(snapshot.route, "http://chat.test").searchParams;
+        assert.equal(params.get("runtime"), null);
+        assert.equal(params.get("run"), "new");
+        assert.ok(params.get("draft"), "a fresh Code draft is selected");
+        assert.deepEqual(snapshot.codeSelection, { key: params.get("draft"), runId: null });
+        assert.equal(snapshot.codeSelectionWrites.length, 1);
+        assert.equal(snapshot.draftChanges.length, 0, "Code creation must not initialize API chat");
+      } finally { server(); }
+    });
+  }
+
+  // Claims 4331832605 and 4331832608. These use the actual sidebar, parent and Native owners.
+  // Only host identity/actions and scoped history reads are fixture responses.
+  for (const first of ["header", "sidebar"]) {
+    const second = first === "header" ? "sidebar" : "header";
+    await t.test("Code view " + first + " then " + second + " shares one pending Native creation", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const snapshot = await proof.startWorkbenchConversation({ control: first, secondControl: second, withHistory: true });
+      if (snapshot.unexpectedFetches.length) console.error(snapshot.unexpectedFetches);
+      assert.equal(snapshot.unexpectedFetches.length, 0, "the combined owner fixture must make only scoped history reads");
+      assert.equal(snapshot.firstPending.draftChanges.length, 1, "the first owner reaches the real draft acknowledgement gate");
+      assert.equal(snapshot.firstPending.initialized, 0);
+      assert.equal(snapshot.firstPending.route, "/?run=retained-run");
+      assert.equal(snapshot.firstPending.selectionKey, "retained-run");
+      assert.equal(snapshot.firstPending.selectionRunId, "retained-run");
+      assert.equal(snapshot.firstPending.selectionWrites, 0);
+      assert.equal(snapshot.otherControl.present, true, "the other owner's actual control is mounted");
+      assert.equal(snapshot.otherControl.tag, "BUTTON");
+      const id = snapshot.firstPending.draftChanges[0].threadId;
+      assert.equal(typeof id, "string");
+      assert.notEqual(id, "retained-run");
+      assert.equal(new Set(snapshot.firstPending.activeThreadWrites).size, 1);
+      const pending = snapshot.ownerPending;
+      assert.equal(new Set(pending.activeThreadWrites).size, 1,
+        "the two owners must not allocate distinct optimistic IDs before acknowledgement");
+      assert.equal(pending.activeThreadWrites.every(value => value === id), true);
+      assert.equal(pending.draftChanges.length, 1, "the two owners must initialize only one cleared Native draft");
+      assert.equal(pending.draftChanges[0].threadId, id);
+      assert.equal(pending.draftChanges[0].operation, "change");
+      assert.equal(pending.draftChanges[0].kind, "project");
+      assert.equal(pending.draftChanges[0].projectId, "project-personal");
+      assert.equal(pending.draftChanges[0].expected, null);
+      assert.equal(pending.draftChanges[0].next.status, "cleared");
+      assert.equal(pending.draftChanges[0].next.text, "");
+      assert.equal(pending.draftChanges[0].next.submitId, null);
+      assert.equal(pending.initialized, 0);
+      assert.equal(pending.route, "/?run=retained-run", "acknowledgement still gates navigation after the other control");
+      assert.equal(pending.selectionKey, "retained-run");
+      assert.equal(pending.selectionRunId, "retained-run");
+      assert.equal(pending.selectionWrites, 0);
+      assert.equal(snapshot.initialized.length, 1);
+      assert.equal(snapshot.initialized[0].threadId, id);
+      assert.equal(snapshot.route, "/?runtime=native&history=project&thread=" + encodeURIComponent(id));
+      assert.equal(snapshot.nativeActiveThread, id);
+      assert.equal(snapshot.codeSelection.key, "retained-run");
+      assert.equal(snapshot.codeSelection.runId, "retained-run");
+      assert.equal(snapshot.codeSelectionWrites.length, 0);
+      assert.equal(snapshot.routerMounts, 1);
+    });
+  }
+  for (const input of [{ label: "Not set project", workspaceKind: null },
+    { label: "Personal workspace", workspaceKind: null, projectId: null }]) {
+    await t.test(input.label + " on Native waits for identity in the real fallback rail, then creates Native", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const nativeRoute = "/?runtime=native&history=project&thread=retained-native";
+      const snapshot = await proof.startWorkbenchConversation({ ...input, control: "sidebar", withHistory: true,
+        identityReady: false, initialRoute: nativeRoute, resolveHistoryIdentity: true });
+      if (snapshot.unexpectedFetches.length) console.error(snapshot.unexpectedFetches);
+      assert.equal(snapshot.unexpectedFetches.length, 0);
+      const pending = snapshot.identityPending;
+      assert.equal(pending.fallbackRendered, true, "ProjectHistory actually rendered CodeHistory while identity was unresolved");
+      assert.equal(pending.fallback.present, true);
+      assert.equal(pending.fallback.tag, "BUTTON");
+      assert.equal(snapshot.resolvedControl.present, true);
+      assert.equal(snapshot.resolvedControl.unavailable, false, "the resolved SessionHistory control must allow creation");
+      assert.equal(snapshot.resolvedControl.routerMounts, 1, "identity resolution preserves the mounted router");
+      assert.equal(snapshot.ownerPending.route, nativeRoute, "the resolved owner waits for its draft acknowledgement");
+      assert.equal(snapshot.ownerPending.initialized, 0);
+      assert.equal(snapshot.ownerPending.draftChanges.length, 1);
+      const change = snapshot.ownerPending.draftChanges[0];
+      assert.equal(change.operation, "change");
+      assert.equal(change.kind, "project");
+      assert.equal(change.projectId, input.projectId === undefined ? "project-personal" : input.projectId);
+      assert.equal(change.next.status, "cleared");
+      assert.equal(snapshot.initialized.length, 1);
+      assert.equal(snapshot.initialized[0].threadId, change.threadId);
+      assert.equal(snapshot.route, "/?runtime=native&history=project&thread=" + encodeURIComponent(change.threadId));
+      assert.equal(snapshot.nativeActiveThread, change.threadId);
+      assert.equal(snapshot.routerMounts, 1);
+      assert.equal(pending.route, nativeRoute, "a human-available fallback click must not replace the open Native route");
+      assert.equal(pending.fallback.disabledProperty || pending.fallback.disabledAttribute
+        || pending.fallback.ariaDisabled === "true", true, "actual DOM disabled semantics must gate the Code-only fallback");
+      assert.equal(pending.clicked, false);
+      assert.equal(pending.selectionKey, "retained-run");
+      assert.equal(pending.selectionRunId, "retained-run");
+      assert.equal(pending.selectionWrites, 0);
+      assert.equal(pending.draftChanges.length, 0);
+      assert.equal(pending.activeThreadWrites.length, 0);
+      assert.equal(snapshot.codeSelectionWrites.length, 0);
+    });
+  }
+  for (const input of [
+    { label: "Not set on Code", workspaceKind: null, initialRoute: "/?run=retained-run" },
+    { label: "Coding on Native", workspaceKind: "coding", initialRoute: "/?runtime=native&history=project&thread=retained-native" },
+  ]) {
+    await t.test(input.label + " keeps the real identity-loading fallback available for Code creation", async () => {
+      localStorage.clear(); sessionStorage.clear();
+      const snapshot = await proof.startWorkbenchConversation({ ...input, control: "sidebar", withHistory: true, identityReady: false });
+      if (snapshot.unexpectedFetches.length) console.error(snapshot.unexpectedFetches);
+      assert.equal(snapshot.unexpectedFetches.length, 0);
+      assert.equal(snapshot.identityPending.fallbackRendered, true);
+      assert.equal(snapshot.identityPending.fallback.unavailable, false);
+      assert.equal(snapshot.identityPending.clicked, true);
+      const params = new URL(snapshot.route, "http://chat.test").searchParams;
+      assert.equal(params.get("runtime"), null);
+      assert.equal(params.get("run"), "new");
+      assert.equal(typeof params.get("draft"), "string");
+      assert.notEqual(params.get("draft"), "retained-run");
+      assert.equal(snapshot.codeSelection.key, params.get("draft"));
+      assert.equal(snapshot.codeSelection.runId, null);
+      assert.equal(snapshot.codeSelectionWrites.length, 1);
+      assert.equal(snapshot.draftChanges.length, 0);
+      assert.equal(snapshot.activeThreadWrites.length, 0);
+    });
+  }
 
   await t.test("the Workbench selectors render inside the actual composer before Send, with notices outside", async () => {
     const server = installChatServer();

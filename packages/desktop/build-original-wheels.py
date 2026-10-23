@@ -20,10 +20,13 @@ import venv
 import zipfile
 
 
-WINDOWS_DISTLIB_VERSION = "0.4.0"
+WINDOWS_DISTLIB_VERSION = "0.4.2"
+WINDOWS_CONSOLE_LAUNCHER_SIZE = 108_032
 WINDOWS_CONSOLE_LAUNCHER_SHA256 = "81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7"
+WINDOWS_DISTLIB_LICENSE_SIZE = 14_531
+WINDOWS_DISTLIB_LICENSE_SHA256 = "808e10c8a6ab8deb149ff9b3fb19f447a808094606d712a9ca57fead3552599d"
 BUILD_BACKEND_WHEELS = (
-    ("pip", "26.0.1", "pip-26.0.1-py3-none-any.whl"),
+    ("pip", "26.2.2", "pip-26.2.2-py3-none-any.whl"),
     ("setuptools", "84.0.0", "setuptools-84.0.0-py3-none-any.whl"),
 )
 
@@ -279,9 +282,9 @@ def build_wheels(
                 (
                     "import importlib.metadata as metadata;"
                     "import pip._vendor.distlib as distlib;"
-                    "assert metadata.version('pip') == '26.0.1';"
+                    "assert metadata.version('pip') == '26.2.2';"
                     "assert metadata.version('setuptools') == '84.0.0';"
-                    "assert distlib.__version__ == '0.4.0'"
+                    "assert distlib.__version__ == '0.4.2'"
                 ),
             ],
             env=environment,
@@ -446,14 +449,18 @@ def _write_windows_launcher(
     if distlib.__version__ != WINDOWS_DISTLIB_VERSION:
         raise ValueError("Windows launchers require pip-vendored distlib " + WINDOWS_DISTLIB_VERSION)
     stub = Path(distlib.__file__).resolve().parent / "t64.exe"
-    if not stub.is_file() or hashlib.sha256(stub.read_bytes()).hexdigest() != WINDOWS_CONSOLE_LAUNCHER_SHA256:
+    if not stub.is_file():
+        raise ValueError("The pinned distlib Windows console launcher is unavailable.")
+    stub_bytes = stub.read_bytes()
+    if (len(stub_bytes) != WINDOWS_CONSOLE_LAUNCHER_SIZE
+            or hashlib.sha256(stub_bytes).hexdigest() != WINDOWS_CONSOLE_LAUNCHER_SHA256):
         raise ValueError("The pinned distlib Windows console launcher is unavailable.")
 
     class CrossTargetWindowsScriptMaker(ScriptMaker):
         def _get_launcher(self, kind: str) -> bytes:
             if kind != "t":
                 raise ValueError("Only console launchers are supported.")
-            return stub.read_bytes()
+            return stub_bytes
 
     maker = CrossTargetWindowsScriptMaker(None, str(scripts), add_launchers=True)
     maker._is_nt = True
@@ -481,9 +488,13 @@ def _stage_distlib_license(runtime_root: Path) -> Path:
     source = Path(distlib.__file__).resolve().parent / "LICENSE.txt"
     if not source.is_file():
         raise ValueError("The pinned distlib license is unavailable.")
+    license_bytes = source.read_bytes()
+    if (len(license_bytes) != WINDOWS_DISTLIB_LICENSE_SIZE
+            or hashlib.sha256(license_bytes).hexdigest() != WINDOWS_DISTLIB_LICENSE_SHA256):
+        raise ValueError("The pinned distlib license is unavailable.")
     destination = runtime_root / "licenses" / "LICENSE.distlib"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    destination.write_bytes(license_bytes)
     return destination
 
 

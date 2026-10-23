@@ -7,6 +7,8 @@ import {
   parseProjectInstallation,
   PROJECT_ACTION_PATHS,
   startProjectServices,
+  getLocalProjectAccess,
+  withLocalProjectCreation,
 } from "../server/project-services.mjs";
 import { createProjectServicesPlugin } from "../server/plugins/01-project-services.mjs";
 
@@ -256,6 +258,7 @@ test("actual plugin gates cold requests, mounts one shared registry once and lea
   assert.equal(catalog.readScope, readiness.readScope);
   assert.equal(catalog.readScope, activity.readScope);
   assert.equal(catalog.provider, runtime.provider);
+  assert.equal(catalog.kindEditable, false, "a configured installation has no local service the kind action writes through");
   assert.equal(Object.hasOwn(readiness, "runtime"), false);
   assert.equal(Object.hasOwn(activity, "runtime"), false);
 });
@@ -326,6 +329,43 @@ test("shutdown closes the gate immediately and waits for an active project reque
   assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
 });
 
+test("shutdown drains the registered set-project-kind route before closing its provider", { timeout: 2000 }, async () => {
+  const fixture = fakeNitro();
+  const actionWait = deferred();
+  const actionStarted = deferred();
+  const runtime = fakeRuntime({ getH3App: fixture.getH3App });
+  const controller = startProjectServices(fixture.nitro, pluginDependencies(fixture, runtime, {
+    requestDrainMs: 1000,
+  }));
+  // Discovered actions register their real URL separately from the runtime's catalog handlers.
+  fixture.getH3App(fixture.nitro).use("/_agent-native/actions/vivary-set-project-kind", async () => {
+    actionStarted.resolve();
+    await actionWait.promise;
+    return Response.json({ ok: true });
+  });
+  let active;
+  let closing;
+  try {
+    assert.deepEqual(await controller.ready, { status: "open", failure: null });
+    active = fixture.request("/_agent-native/actions/vivary-set-project-kind");
+    await actionStarted.promise;
+    closing = fixture.close();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 0,
+      "the provider must stay open while its set-project-kind handler is running");
+    actionWait.resolve();
+    assert.equal((await active).status, 200);
+    await closing;
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
+    await controller.close();
+    assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
+  } finally {
+    actionWait.resolve();
+    await active;
+    await (closing ?? controller.close());
+  }
+});
+
 
 test("shutdown closes the owned provider when an active request cannot drain", { timeout: 2000 }, async () => {
   const fixture = fakeNitro();
@@ -348,6 +388,58 @@ test("shutdown closes the owned provider when an active request cannot drain", {
     await active;
   }
 });
+
+for (const drain of ["complete", "timeout"]) {
+  test(`creation admission rejects copied contexts and expires after ${drain}`, { timeout: 2000 }, async () => {
+    const fixture = fakeNitro();
+    const runtime = fakeRuntime({ getH3App: fixture.getH3App });
+    runtime.createLocalRootProvider = async () => runtime.provider;
+    const controller = startProjectServices(fixture.nitro, pluginDependencies(fixture, runtime, {
+      loadInstallation: async () => null,
+      environment: { VIVARY_ACCESS_MODE: "local" },
+      requestDrainMs: drain === "timeout" ? 10 : 1000,
+    }));
+    const entered = deferred();
+    const release = deferred();
+    const owner = { userEmail: "owner@local.vivary.test", orgId: "creation-admission-org",
+      appId: "vivary", caller: "frontend" };
+    let active;
+    let closing;
+    let admitted;
+    try {
+      await controller.ready;
+      active = withLocalProjectCreation(owner, async context => {
+        admitted = context;
+        entered.resolve();
+        await release.promise;
+        return getLocalProjectAccess(context);
+      });
+      await entered.promise;
+      closing = controller.close();
+      await assert.rejects(getLocalProjectAccess({ ...admitted }), { statusCode: 503 });
+      await assert.rejects(getLocalProjectAccess(owner), { statusCode: 503 });
+      await assert.rejects(withLocalProjectCreation(owner, async () => assert.fail("new creation admitted during close")),
+        { statusCode: 503 });
+      if (drain === "timeout") {
+        // The existing bounded drain also applies to an admitted operation without an HTTP request.
+        await closing;
+        release.resolve();
+        await assert.rejects(active, { statusCode: 503 });
+      } else {
+        assert.equal((await getLocalProjectAccess(admitted)).code, "catalog");
+        assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 0);
+        release.resolve();
+        assert.equal((await active).code, "catalog");
+        await closing;
+      }
+      await assert.rejects(getLocalProjectAccess(admitted), { statusCode: 503 });
+      assert.equal(runtime.calls.filter(([name]) => name === "provider.close").length, 1);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([active, closing ?? controller.close()]);
+    }
+  });
+}
 
 test("process termination uses the same owned cleanup and removes its signal listeners", async () => {
   const fixture = fakeNitro();
@@ -383,5 +475,50 @@ test("default local startup installs the Node provider without Python configurat
   assert.equal(runtime.calls.some(([name]) => name === "startRootProvider"), false);
   const setup = runtime.calls.find(([name]) => name === "createLocalRootProvider")[1];
   assert.deepEqual(setup, { ownerEmail: "owner@local.vivary.test", defaultFolder: "/srv/projects/alpha" });
+  assert.equal(runtime.calls.find(([name]) => name === "createProjectCatalog")[1].kindEditable, true,
+    "the local host can save a project's kind");
   await controller.close();
+});
+
+test("review regression: expired creation refuses service while provider close is pending", { timeout: 2000 }, async () => {
+  const fixture = fakeNitro();
+  const runtime = fakeRuntime({ getH3App: fixture.getH3App });
+  runtime.createLocalRootProvider = async () => runtime.provider;
+  const closeEntered = deferred();
+  const closeRelease = deferred();
+  runtime.provider.close = async () => {
+    runtime.calls.push(["provider.close"]);
+    closeEntered.resolve();
+    await closeRelease.promise;
+  };
+  const controller = startProjectServices(fixture.nitro, pluginDependencies(fixture, runtime, {
+    loadInstallation: async () => null,
+    environment: { VIVARY_ACCESS_MODE: "local" }, requestDrainMs: 10,
+  }));
+  const entered = deferred();
+  const release = deferred();
+  const owner = { userEmail: "owner@local.vivary.test", orgId: "creation-drain-review",
+    appId: "vivary", caller: "frontend" };
+  let active;
+  let closing;
+  try {
+    await controller.ready;
+    active = withLocalProjectCreation(owner, async context => {
+      entered.resolve();
+      await release.promise;
+      return getLocalProjectAccess(context);
+    });
+    const observed = active.then(value => ({ value }), error => ({ error }));
+    await entered.promise;
+    closing = controller.close();
+    await closeEntered.promise;
+    assert.equal(controller.snapshot().status, "closing");
+    release.resolve();
+    const result = await observed;
+    assert.equal(result.error?.statusCode, 503, "expired creation retained provider access during asynchronous close");
+  } finally {
+    release.resolve();
+    closeRelease.resolve();
+    await Promise.allSettled([active, closing ?? controller.close()]);
+  }
 });

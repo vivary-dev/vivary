@@ -47,6 +47,57 @@ The Electron process starts a local Workbench server, opens its loopback origin,
 
 Workbench composes Agent-Native's application, chat, run, action, and storage owners. Native keeps transcripts and run lifecycle. Workbench keeps project identity and authorized root bindings, then resolves those bindings for actions and sends. The registry uses Native's database with Workbench project, binding, revision, receipt, and mutation tables. See the [project registry](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/project-registry/index.md), [`project-services.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-services.mjs), and [`db/schema.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/db/schema.mjs). An observed path is not by itself a project identity or a write grant.
 
+Each registered project has an owner-chosen kind, Coding or Personal, or null for
+Not set. Registry migration 7 adds the nullable `workspace_kind` column with a
+check on those two values, so existing projects stay Not set. The kind is a
+preference beside the registry contract: the registration decision engine, the
+portable project record, bindings, receipts, and the registry revision do not
+carry it. `vivary-set-project-kind` is an owner-only action (no agent, MCP, or
+chat tool route). [`setLocalProjectKind`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/project-services.mjs)
+admits the owner's project scope and writes only that row, never project files.
+It writes through the local project service, so only the local host can save a
+kind. Its route shares the project's startup gate and bounded shutdown drain,
+so an active kind write keeps the provider open until completion or the drain
+deadline. The action's existing scope and binding revalidation still applies.
+The catalog returns the kind and `kindEditable`, which is true only there,
+and Project details offers the kind control only when it is true. New project asks for it in
+[`WorkspaceKindDialog`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/components/projects/WorkspaceKindDialog.tsx)
+before the form, which fills the matching preset, and saves it after
+registration. The form reports when its connected name input is enabled after
+the pattern catalog loads. New project hands focus there and overrides the
+closing dialog's restoration so a removed trigger cannot take it back. Cancel
+returns to the connected opener, and Change kind focuses the current card while
+retaining the form. Route or project changes, unmount and a later focus move
+cancel a pending handoff. Open folder registers the folder unchanged, asks, then selects the
+project. A repeated Open folder that finds the folder registered asks again while
+its kind is Not set. If the retained editable catalog omits the registered
+project, its kind is uncertain and Open folder asks before selection. This also
+applies when a failed refresh retains the list from before registration.
+A saved kind is written into the cached project list before
+the list is refreshed, so a failed refresh cannot show the stale Not set. While
+chat identity loads, the fallback Code history disables New conversation whenever
+it intends Native chat. It reads the current surface as Native only when the
+route has `runtime=native` and `history` is not `unassigned`, otherwise Code.
+The [conversation surface owner](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/app/lib/conversation-surface.ts)
+maps Personal to API chat and Coding, Not set, and the Personal workspace to Code
+when no surface is requested or saved. New conversation follows a chosen kind
+in the sidebar and in both the Code header and the retained conversation's
+runtime/model notice. In a Personal project's Code view, both controls wait for
+the project chat identity, create a fresh optimistic Native thread ID, and require
+the existing `vivary-chat-draft` action to acknowledge its cleared record before
+opening API chat. They leave the saved Code selection intact. Code and sidebar
+controls share a synchronous admission claim keyed by the server-derived chat
+identity's `storageKey`, including the Personal workspace with no project ID.
+An occupied claim returns immediately. Its owning token releases it only after
+creation and draft initialization settle, including after navigation or unmount.
+This coordination is local to the renderer. A failed acknowledgement leaves Code open with an
+error, and a project or route change or unmount cancels late navigation and
+failure notices. Coding, Not set, and Personal workspace keep Code creation from
+a Code view. Explicit Code history stays open in a Personal project. Both
+conversation kinds remain available in every project. The
+[J06 state chart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#project-kind-coding-or-personal)
+owns the journey.
+
 The selected coding runtime owns execution, tools, model access, and native session continuity. Workbench currently supports Claude Code and Codex through Native Code records and the local Code host. Codex uses its app-server and account-effective model catalog. Workbench relays native approvals, progress, child activity, and Stop. Native provider chat uses Native's chat owner with a project send guard. The [harness adapter contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/harness-adapters.md), [Native owner map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/native-owners.md), and [runtime source map](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/source-map/modules/native-runtime/index.md) describe the distinct owners.
 
 ### Coding model selection and provider routes
@@ -424,6 +475,14 @@ project binding and document, holding the pending request and the saved record.
 
 The original engine remains a package family, not another agent loop. `vivary-core` owns pure validation and projection while callers retain execution, persistence, and human approval. Tropo observes, builds typed graph context, and retrieves. Strato evaluates policy. Ozone verifies evidence and proposes gated repairs. Exo projects claims, dependencies, and handoffs. `create-vivary` creates and adopts workspaces. The optional MCP and semantic-memory adapters are outside the default package path. The `vivary` front door routes ten verbs to their package owners. The Workbench bundles this Python runtime and calls its established commands rather than reimplementing their decisions. See [the command reference](/commands/) and [package manifests](https://github.com/vivary-dev/vivary/tree/dev/packages).
 
+The desktop builder pins build-only pip 26.2.2 and setuptools 84.0.0, verifies
+pip's vendored distlib 0.4.2, and keeps the existing offline build and portable
+wheel checks. The Windows console stub and retained distlib license must match
+their authenticated sizes and hashes before those bytes are written. The
+[desktop packaging contract](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md) owns the exact inputs,
+relative launcher paths and interpreter flags. Python and component versions
+remain unchanged.
+
 ### The shared seam: vivary-core
 
 Core is a library shared by Tropo, Strato, Ozone, and Exo. It owns deterministic
@@ -701,6 +760,77 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 
 ## Delivery and known gaps
 
+Production Node admission is owned by
+[`runtime-security.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/bin/runtime-security.mjs). It
+checks the actual process version, platform, architecture and executable SHA-256,
+and refuses Electron as an ordinary Node substitute. The
+[October 2026 Node advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+sets separate floors of 22.23.4, 24.22.1 and 26.12.1 within those supported major
+lines. The policy records all ten advisory identifiers and their affected lines,
+including CVE-2026-111497 on all three. EOL, unknown and prerelease runtimes fail
+admission. A policy pass for Node 26 does not select it for Vivary or establish
+project compatibility. Dependency audits, engine declarations and version
+markers do not satisfy this gate. Runtime selections remain unchanged, so
+affected selections stay blocked for production work.
+
+Workbench start checks before port probing, user-state creation or server
+import. Workbench and site build commands check the process that imports the
+actual builder. Site Node is a static-site build tool, not a deployed server.
+CI checks after Node selection and before Node package operations. Both npm jobs
+check their own runtime and retain the npm 11.5.1 minimum. Protected publication
+copies one candidate tarball, validates that exact copy, checks its hash again
+in the publisher process and passes that archive to npm. Release tag, commit,
+version, protected environment, dependency success and OIDC gates still apply.
+
+The runner's JavaScript action interpreter has a separate admission boundary.
+The canonical `scripts/check_runner_action_node.py` source is mirrored verbatim
+into a first-step Python mapping in CI and npm publication, then aliased into
+every other job. It needs neither checkout nor selected Node. The owning-Worker
+boundary follows native parent, creation and executable identities from the
+current process through its nearest live `Runner.Worker` ancestor. It validates
+that Worker's bin layout and revalidates every identity in this relevant prefix
+before admission and after the interpreter probe. It does not read executable
+metadata above the owning Worker or claim unique Worker ancestry through PID 1.
+The collector still checks the actual Worker and its runner root's
+`externals/node24/bin/node` or `node.exe`, native x64 binary identities, unchanged
+hashes and a sanitized, bounded absolute version probe. Python applies the
+advisory floors and requires this interpreter to be major 24. PATH Node cannot
+rescue an affected provider interpreter. Missing, unreadable, stale or reused
+relevant process identity, cyclic or overlong relevant ancestry, a bad nearest
+Worker layout, unsupported hosts or containers, changed bytes and unproved
+selection overrides refuse admission. A bad nearest Worker cannot fall back to
+a higher candidate. No provider binary is downloaded, modified, forced or restarted.
+
+First-step placement relies on the exact no-pre action manifests bound in the
+workflow contract checker. The examined runner dispatch source is commit
+`197ca027b90de199464dee3bb9ff198a1db60967`, whose action preparation runs pre
+hooks before ordinary steps. Only the supplied immutable node24 checkout,
+setup-python, setup-node and upload-artifact identities are admitted, including
+their bound main and post paths. Mutable, unknown, composite and Docker actions
+remain held. The orientation upload requires both `!cancelled()` and successful
+bootstrap outcome, preserving its receipt after a later test failure. Each npm
+job checks independently, and publication still requires successful verification.
+The supplied official metadata meets the contributor publication-age rule for
+the newer CI setup-node and upload-artifact identities. Age and GitHub PGP
+signatures do not establish OIDC build attestation or waive another exact-identity
+provenance requirement. This boundary covers the ten enumerated CI/npm jobs,
+not every workflow or independently operated runner. Native runner execution
+and independent review remain necessary to validate its assumptions.
+
+Desktop packaging checks its build process and binds copied Linux Node bytes
+to that process's executable hash. Staged runtime collection requires native
+matching-platform evidence. Windows also requires an authenticated asset binding,
+and the retained affected Windows asset cannot pass. Installer admission
+rechecks the payload manifest and runtime before invoking NSIS. Runtime evidence
+uses the existing build metadata and package manifest. Electron publication
+remains held for every candidate. Version 44.3.0 is unacceptable, and 44.9.3
+declares Node 24.22.0 with incomplete advisory backport evidence. A fixed
+standalone Node or one matched Chromium Brotli fix does not clear that hold.
+These source gates do not establish protection of every runtime, environment
+or vulnerability. Raw PyPI and manual registry publication remain held. No
+tracked PyPI publication workflow exists, and these scripts cannot prevent an
+independently credentialed raw upload.
+
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
 
 Issue #19's five project read reports entered `dev` in PR #89. Its receipt records hosted fake-provider proof and the Windows packages, including the final `e6ccddf5` package, which passed the panel reads and the agent turn. PR #94 recorded that result, and the owner closed issue #19 on 2026-09-26. PR #90 added [route-question research](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/research/tropo-find-route-questions.md) only. It did not change Tropo's public path refusal or MCP privacy rules.
@@ -722,6 +852,225 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+Windows standalone Node binding (2026-10-22). The Windows target and standalone runtime admission now bind the exact official Node 24.22.1 x64 executable, whose separate signed checksum is retained with the approved ZIP checksum. Node ABI 137, better-sqlite3 12.11.1 and all staging and runtime checks remain in place. The retained normal Windows proof records successful signature verification, valid Authenticode and native Node 24.22.1; a separate earlier guard proof records ABI 137 acceptance and refusal of affected or unbound version claims. This source port preserves the current guard annotation and reuses the existing artifact exception. It ports the actual Windows positive and three traced-runtime controls, which stop before downloads. Exact-source tests and native acceptance for this port remain unrun. Electron publication remains held.
+
+CI runtime provisioning and source Node minimum (2026-10-22). The selected parent Python and all four fresh venvs receive the exact verified pip 26.2.2 wheel before actual pip runtime admission. Fresh venvs use --without-pip. The target interpreter runs a fixed standard-library program under -I -B, refuses preloaded pip modules, and puts only the verified wheel first for runpy module execution with alter_sys=True. This preserves -m pip entry semantics with isolated, offline, dependency-free flags and private null-config state; installed old pip never performs bootstrap networking. The standard-library download pins its HTTPS origin, refuses redirects and proxies, and checks exact size and SHA256 before execution. Existing runtime guards still admit the actual parent or venv before package commands. Workbench's Node 22 pin, engine minimum and source instructions now agree on 22.23.4; the runtime guard still rejects affected, EOL and unknown releases. The initial source passed the Linux scoped checks, but private Windows integration correctly refused its direct wheel/pip invocation under pip's self-modification protection, with host and input bytes preserved. That failed candidate and its receipts remain retained. The corrected module entry and inert ZIP regression controls are prepared; corrected platform acceptance remains unrun. The fixed pip artifact's separate cryptographic qualification is retained; actual private-venv acceptance, normal docs sync and hosted CI remain required.
+
+Runner rejected-version diagnostics (2026-10-22). A Node policy refusal may now report the observed version and required Node 24.22.1, but only from the actual node_version code object with selected major 24 and an exact ASCII stable numeric version bounded to 32 characters. A leading v is removed. Malformed, Unicode, oversized, unrelated and forged same-name-frame values retain phase/class-only diagnostics. No exception text, path, environment value or raw frame data is printed. Worker/native/root/hash/probe checks, policy floors, ordering, refusal status and successful output remain unchanged. Hosted jobs on the owning-Worker source reached interpreter-version refusal, establishing progress past metadata admission without exposing their exact Node version. The added redaction controls are prepared but unrun in this reporting-only proposal; a later actual hosted report is still required for the exact version diagnosis.
+
+Owning-Worker admission boundary (2026-10-22). This change narrows the previous whole-ancestry uniqueness proof through PID 1 to the current process and its nearest owning Runner.Worker. Protected service ancestors above that Worker do not select this action's interpreter. The relevant prefix retains native identity, creation time, parent, cycle/depth and before/after checks; Worker layout, native binary identity, same-root Node selection, hashes, version floors and class-only failure diagnostics remain enforced. Controls cover protected upper ancestors, an unrelated higher Worker, unreadable/stale/reused relevant identities, bad nearest layout without fallback, missing/cyclic/deep ancestry and the collector's final revalidation. Platform fixtures exercise this boundary without importing provider binaries. The retained hosted diagnostic identifies denied process metadata before the interpreter probe, but not the denied PID or selected Node version. Actual hosted admission and final CI remain required.
+
+Runner admission diagnostics (2026-10-22). The pre-action guard reports a fixed failure-phase label and exception class when metadata or interpreter admission fails. It records no exception text, paths, arguments, environment values or frame data. Process ancestry, executable identity, version floors, refusal status and publication dependencies are unchanged. The focused controls exercise actual guard failure paths and every inline workflow copy. A failed metadata check does not establish an affected interpreter version.
+
+CI intermediate-key protection (2026-10-22). The release-artifact and orientation jobs select the exact Linux x64 and Windows amd64 uv 0.13.5 wheels, with their published URLs and SHA-256 digests. The actual-runtime guard hashes the selected uv and uvx native executables before executing uv and requires version 0.13.5. Artifact builds invoke that admitted absolute uv path; the orientation proof repeats admission immediately before its existing npm launcher uses uvx. The existing isolated pip admission, platform null configuration, forced wheel-only installation, dependency refusal and failure propagation remain in place. Regressions reject the correctly hashed 0.13.4 wheels and removed, moved or ignored runtime checks. The original [uv advisory](https://github.com/astral-sh/uv/security/advisories/GHSA-hq85-5cpj-mr62) still fixes bundled-root removal at >=0.13.4; [0.13.5](https://github.com/astral-sh/uv/releases/tag/0.13.5) separately adds compromised intermediate-key rejection through rustls-webpki 0.103.16. Published wheel hashes, complete RECORD checks, byte-for-byte native payload matches to cryptographically verified standalone SLSA subjects, and wrapper matches to immutable upstream source support artifact identity. Direct wheel attestation remains unavailable. Source contract and regression checks passed before source delivery. Separate Windows isolated installation reported version 0.13.5 with all native and wrapper bytes preserved; Linux isolated acceptance and final CI remain unverified. Updating uv does not replace existing Python interpreters, ensurepip or virtual-environment pip; their runtime admission remains separate. Desktop boundaries and publication holds are unchanged.
+
+Executed pip admission (2026-10-22). CI admits the actual pip loaded by the selected isolated Python before network access, requiring stable pip 26.2.2 or later and matching module, distribution and executable-entrypoint evidence. Stable two- and three-component versions are normalized for comparison. Each fresh MCP venv is checked with its own interpreter before its index install, and subsequent pip calls retain that interpreter and isolated import mode. Missing or old pip fails closed; an unchecked network self-upgrade cannot clear admission. The workflow contract binds unconditional checks and their ordering while preserving the exact uv URLs, SHA-256 bindings, platform null config and isolated forced wheel-only installation. This changes CI runtime enforcement without changing desktop runtime boundaries or granting publication authority.
+
+CI acquisition configuration (2026-10-22). Each owning uv step selects the platform null configuration file and uses pip isolated mode with forced reinstallation and the existing exact wheel URL and SHA-256 bindings. File configuration and pip option environment variables cannot silently turn that step into a dry run. The workflow checker rejects inherited PIP_CONFIG_FILE and binds the step's environment and command. Artifact admission, actual runtime checks and publication refusals remain separate requirements. This changes CI acquisition enforcement, not the desktop product or its supported runtime boundaries.
+
+Creation admission expiry (2026-10-22). Finishing a request or reaching the bounded drain deadline revokes admitted creation contexts synchronously, before asynchronous provider cleanup. A continuation cannot obtain service access after the deadline while provider close is still pending. The exact context-to-service binding and completion before the deadline remain unchanged. The regression holds provider close pending to exercise this lifecycle boundary.
+
+CI security follow-through (PR #260). The project-kind branch now carries the same canonical pre-JavaScript runner checks and strict automation tests as the runtime branch. Its two uv acquisitions bind the exact Linux and Windows 0.13.4 wheel URLs and SHA-256 values, without dependency or source-distribution fallback. The shared contract rejects inherited shell defaults and pip dry-run settings that could skip acquisition. This port preserves the creation/shutdown regression and project-kind UI tests in the existing CI list. Wheel provenance admission, exact-final-head CI, independent review, Electron evidence and desktop acceptance remain separate requirements; this source update grants no installation or publication clearance.
+
+Project creation shutdown (PR #260 review). The create action now joins the project-service request drain and admits its owner operation while the service is open. A private immutable context binds that creation to its exact local service, so it can finish registration and its chosen-kind save during closing. Fresh owner contexts, copies of the admitted context, and new creation admissions remain refused. The operation shares the existing bounded request drain; when that deadline expires, the provider closes and the continuation loses service access. Focused tests cover shutdown after the kind setter has entered and after registration has committed but before the setter begins. Their integration fixture calls the actual create action through the service request-hook/middleware seam, runs the real Python thin-workspace creator, registration and kind setter, and checks the saved SQLite row. Separate service tests cover copied-context rejection and bounded timeout. This fixture does not establish full HTTP transport or packaged desktop acceptance; final verification remains pending.
+
+The runtime security guard uses six documented credential-scanner annotations for the installed npm executable search path and isolated test fixture marker paths and rejection switch. These reads do not select user credentials. The annotations leave runtime admission, archive validation, publication checks, and environment access unchanged. The existing trust boundaries still apply.
+
+2026-10-21 PR #260 runtime security port. The frozen tested security sources add
+actual Node admission at build, start, package, installer and protected npm
+boundaries. The canonical Python bootstrap runs before JavaScript actions in
+all eight CI jobs and both npm jobs. The CI port applies only the tested security
+hunks, retaining PR260's existing commands and test lists. Both inline bootstrap
+payloads match the canonical source, action identities are immutable, and the
+orientation upload retains its successful-bootstrap conjunction. Package changes
+replace only the two build commands, preserving other scripts and dependencies.
+
+The project-kind, focus and pip/distlib repairs and their 97-test/typecheck
+receipts remain intact. Those results precede this port and do not validate the
+combined candidate. The port's focused branch-specific tests, runtime evidence,
+final-head server CI, independent review and remaining packaging and acceptance
+gates remain pending. No tests, probes, builds or reviews ran during this source
+port. Runtime pins, Electron publication and raw registry holds are unchanged.
+
+2026-10-21 PR #260 CI pip acquisition correction. The workbench CI tooling
+install now pins `pip==26.2.2` to match the existing build-only asset and backend
+tuple. Product behavior and runtime security gates are unchanged. This correction
+awaits focused validation and independent review with the combined candidate.
+
+2026-10-21 Project kind shutdown, New project focus and packaging repair (PR #260). The exact
+`vivary-set-project-kind` route now joins the existing project-action gate and
+bounded request drain. The provider's shutdown owner and the action's
+authorization checks are unchanged. The build-only pip tuple, Python backend
+validator and isolated-environment checks now agree on pip 26.2.2 and vendored
+distlib 0.4.2. The existing ScriptMaker, relative launcher and RECORD cleanup
+paths remain. License staging now checks size and digest before creating its
+destination and writes the same authenticated bytes. The console stub also
+retains its authenticated bytes through launcher construction.
+
+The old-source coordinator batch ended on 2026-10-21 at 18:34:26 UTC with raw
+exit 1. Project services passed 9 of 10 tests, with the held kind route observing
+provider close before release. Existing catalog drain and bounded shutdown
+controls passed. The actual-form component file passed 15 of 17 tests. Both
+Coding Enter and Personal Space left the connected, enabled name input
+unfocused. That fixture models keyboard activation explicitly and does not
+exercise Radix close restoration or Windows keyboard behavior. The source now
+forwards Toolkit's typed close-autofocus boundary to navigation. A one-shot
+request coordinates it with the real form's enabled input, prevents later
+restoration to the removed trigger and stops after focus is delivered or the
+context changes. Cancel restores the connected opener, and Change kind keeps
+the form and selected-card focus. Existing keyboard, pending-save and error
+handling remains in its owners.
+
+The preceding partial source turn ended at 18:55:31 UTC with native exit 0 and
+at 18:55:33 UTC with wrapper exit 11 because the required focus edits were absent.
+A separate reconciliation verified the eight completed edits and the other
+original scope and helper invariants. The original `scope-after.json` remains
+absent. That reconciliation is not green test evidence. The subsequent focus
+source continuation ended with wrapper exit 0 and native exit 0, bound by
+matching source input, scope and native receipts.
+
+Desktop tests passed 13 of 17. The pip asset tuple, real backend validator,
+altered-license copy boundary and installed-vendor launcher/RECORD case failed.
+Exact-license and stub controls, unknown-vendor refusal and altered-stub refusal
+passed. Vendor normalization occurs only in the retained boundary fixtures.
+All three old-source stages returned raw exit 1 with result, scope and helper
+guards passing. The two Workbench regression files are retained unchanged.
+The desktop test changes only its obsolete expected pip tuple.
+
+The coordinator's focused working-tree batch ended on 2026-10-21 at 19:23:03 UTC
+with raw exit 0. Each stage returned raw exit 0: `project-services` passed 10/10,
+`workspace-kind-dialog` passed 17/17, `desktop-original-runtime` passed 17/17,
+`new-conversation-controls` passed 53/53, and Workbench `typecheck` completed.
+All four test stages recorded zero failures, cancellations, skips or todos.
+Preflight passed 10/10, all result, scope and helper guards passed, and every
+guarded stage receipt reported no reserve stop. Typecheck still emitted the
+existing production-configuration diagnostics that `BETTER_AUTH_SECRET` is
+unset. Its raw exit 0 does not establish production or deployment readiness.
+
+The historical `new-conversation-controls` command retains `--test-force-exit`,
+so its pass does not establish graceful teardown. Linkedom's explicit activation
+and the Toolkit dialog stub leave actual Radix close restoration, real browser
+focus behavior and Windows keyboard acceptance unproven. The desktop fixture
+suite verifies its recorded packaging and authentication boundaries, not a
+Windows installer or release. Final exact-head server CI, required independent
+reviews, remaining packaging gates, actual UI and provider journeys, and packaged
+Windows acceptance remain pending. The earlier raw CI and old-source failures remain retained
+evidence. This documentation update reruns no validation.
+
+2026-10-21 Shared Native creation and loading fallback (PR #260 findings
+4331832605 and 4331832608). Code and sidebar owners now claim the same chat
+identity before allocating an optimistic Native ID. Only the owning token
+releases the claim in `finally`, after the pending creation and draft write settle.
+Each owner's existing stale-navigation and acknowledgement checks remain intact.
+The Code-only loading fallback now derives the current surface from the route,
+matching SessionHistory, and disables creation when it intends Native. A terminal
+coordinator run on the prior product source passed preflight 10/10 with 48 of 53
+tests passing. Both control orders observed two IDs instead of one, and both
+Not set and Personal workspace Native routes opened Code drafts before identity
+resolved. The four behavioral cases and their parent accounted for all five
+failures. Existing Code-intent
+controls passed. These real-owner component cases use mocked host boundaries.
+Earlier fixture-only request failures did not reach these product assertions.
+The focused coordinator batch ended on 2026-10-21 at 16:44:04 UTC with raw wrapper
+exit 0. On the uncommitted repair candidate, all 53 component tests passed with
+zero failures, cancellations, skips or todos. Workbench typecheck returned raw
+exit 0 while emitting existing production-configuration diagnostics that
+`BETTER_AUTH_SECRET` is unset. Scope, helper and result guards passed. Production
+and deployment readiness remain unverified.
+
+The earlier source turn recorded native exit 0 and wrapper exit 11 because its
+raw index-byte check failed. A separate immutable reconciliation verified logical
+index entries, ordinary flags, an empty cached diff and the remaining source
+guards. Final exact-head CI and required reviews, actual UI and provider journeys,
+and packaged Windows acceptance remain pending.
+
+2026-10-20 Open folder retry (PR #260 finding 4330742974). The shared kind decision
+now asks before selection when a valid editable catalog omits the registered
+project, including an already-registered retry. Known Coding and Personal kinds
+and the editability gate keep their existing behavior. The actual ProjectProvider
+and navigation regression in `tests/workspace-kind-dialog-component.test.mjs`
+failed against the prior source with one selection persisted before the choice.
+That coordinator run passed test preflight 10/10 and the other 14 component cases.
+Registration and lost host replies are mocked boundaries. The regression retains
+the stale catalog and checks Personal saving before selection and dialog closure.
+The coordinator's post-fix working-tree run passed all 15 component tests with no
+failures, skips, or cancellations, and the Workbench typecheck exited 0. Test
+preflight passed 10/10, input checks passed, and neither guarded receipt reported
+a reserve stop.
+
+2026-10-21 Site gate follow-up for PR #260 Open folder retry. GitHub's site job at
+`a0c9269f` passed `npm ci` and failed `npm audit --audit-level=high` on inherited
+Vite 8.1.3 launch-editor advisories, independently of documentation dirtiness.
+Vite 8.1.6 fixes the affected range for
+[GHSA-587h-7wmj-h5pm](https://github.com/vitejs/launch-editor/security/advisories/GHSA-587h-7wmj-h5pm)
+and related GHSA-698v-4r3x-3vcv and GHSA-r825-w8mm-5pxw. The repair changes exactly
+18 existing site lock records: Vite 8.1.3 to 8.1.6, Rolldown 1.1.4 to 1.1.5, its
+15 existing platform bindings to 1.1.5, and `@oxc-project/types` 0.138.0 to 0.139.0.
+The manifest, other lockfiles, top-level lock values, record set and unrelated
+records remain unchanged, as do the project-kind owners and transport boundaries.
+
+The first validation guard incorrectly assumed an existing root `node_modules`
+and exited 7 before heavy admission, archive acquisition or installation. The
+corrected guard preserved the absent root and existing Workbench dependency tree.
+All 18 changed archives passed frozen SRI and declaration inspection before
+installation. Their versions were older than 72 hours. Attestation bundles remain
+cryptographically unverified.
+
+The corrected coordinator job ended at 00:13:43 UTC with job and final scope exit 0
+on local Node 24.20.0 and npm 11.19.0. All nine steps exited 0: archive inspection,
+owned-cache preparation, `npm ci`, Linux x64 GNU Rolldown selection, high-threshold
+audit, site tests, build, generated-doc verification and built-link checking.
+Node's spec reporter recorded 22/22 tests passing with no failures, cancellations,
+skips or todo cases. The audit still reported 10 moderate vulnerabilities. The link
+check verified 3,051 local references and 1,715 anchors across 35 HTML files with
+zero failures. Input checks preserved the candidate lock and all 1,107 other
+tracked files. No reserve stop occurred.
+
+These local build, generated-doc and link receipts cover the documentation before
+this follow-up. GitHub CI selects Node 22. Final-head CI, the required final Opus
+review, any final Codex gate, actual UI and provider journeys, and packaged Windows
+acceptance remain pending.
+
+2026-10-20 PR #260 integration with dev at `2cac9444`. The combined design
+preserves Code controls that follow the project kind and acknowledged Native
+draft creation alongside PR #262's reply recording and handoff rendering and
+PR #259's table and footnote repairs. The coordinator completed the frozen offline
+Core and Toolkit patch transition with scripts disabled. The 1,112-package and
+1,112-snapshot graph and merged lockfile stayed unchanged. The full Core reverse
+patch check and exact Markdown-renderer and footnotes blob checks passed, followed
+by merged-state test preflight 10/10. On the uncommitted merged working tree,
+47/47 actual parent component tests, 23/23 Markdown reader tests, and the Workbench
+typecheck passed. Source and index identities stayed intact through these checks.
+Full final-head server CI and the required final Opus and Codex gates remain
+pending. Real UI screenshots, provider turns, and packaged Windows acceptance
+also remain pending.
+
+2026-10-20 Code view New conversation (PR #260 finding 4324767366). The header and
+retained runtime/model notice shared a callback that always created a Code draft,
+even in a Personal project. The callback now uses `newConversationSurface` and
+Native's existing identity and optimistic thread hook, then follows
+ProjectHistory's cleared-draft acknowledgement contract before navigation. A
+single-flight guard and navigation generation protect pending creation without
+changing the retained Code selection. System structure describes this flow.
+The two actual-parent regression cases in `tests/native-chat-components.test.mjs`
+failed with missing draft initialization against the previous production source
+in a terminal coordinator run. The file also covers failed acknowledgements and
+retry, duplicate controls, identity loading, and completion after route changes,
+project changes, and unmount. A terminal coordinator run passed all 47 component
+tests and the Workbench typecheck with test preflight 10/10. Full CI on the
+integrated head, real UI testing, and packaged Windows acceptance remain pending.
+
+2026-10-20 Project kind second review fixes (PR #260 review). `setLocalProjectKind`
+used the workspace resolver, which requires exactly one binding, so a project the
+catalog lists from two same-scope bindings refused every kind save with 409. It
+now checks the owner and the current scope and requires at least one binding in
+that scope, the rule the catalog lists projects by, and still rechecks the scope
+before the write. An unknown project now gets 404. New project also clears the
+previous new project's kind before its dialog opens, so nothing is preselected.
+The project kind description in System structure still holds. Evidence: the
+two-binding case in `tests/local-root-provider.test.mjs` and the New project case
+in `tests/workspace-kind-dialog-component.test.mjs`.
 
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff
@@ -803,6 +1152,49 @@ note 1 existed. `focusFootnote` now handles only the link inside
 every other `#fn-` link keeps its normal handling. The design below still holds.
 Evidence: `tests/markdown-reader.test.mjs` adds an ordinary `#fn-1` link beside a
 rendered note 1, and that assertion fails with the previous selector.
+
+2026-10-19 Project kind review fixes (PR #260 review). The kind action writes
+only through the local project service, so a configured installation refused it
+while Project details still offered the control. The catalog now carries
+`kindEditable`, set from the local mode in `project-services.mjs`, and the control
+shows only when it is true. A failed project list refetch after a saved kind
+kept the stale Not set, so the save hook writes the kind into the cached list
+first. A repeated Open folder now asks while the kind is Not set. The fallback
+Code history disables New conversation in a Personal project while chat identity
+loads. System structure above describes each. Evidence:
+`tests/project-services.test.mjs`, `tests/local-root-provider.test.mjs`,
+`tests/project-catalog.test.mjs`, and `tests/workspace-kind-dialog-component.test.mjs`.
+
+2026-10-19 Project kind save after creation (PR #260 review). New project saves
+the kind after its files are applied and the folder is registered. When that
+save fails, `createManagedProject` now returns the created registration with
+`kindSaved: false` instead of failing the action. The form selects the project,
+and the project list tells the owner the kind shows Not set and can be set in
+Project details. The project kind description in System structure still holds:
+the kind is saved only on the registry row, after registration. Evidence: the
+failed-save case in `tests/managed-projects.test.mjs`.
+
+2026-10-19 Sidebar mark (owner request of the same date). The sidebar header's
+letter tile now shows the approved Vivary mark from a byte-identical copy of
+`site/src/assets/vivary-mark.png`, which `packages/desktop/README.md` names as the
+source of `vivary.ico`. The two site SVGs are different, unreferenced artwork and
+were not used. This is a presentational change inside the existing Workbench
+client, so the system structure, data owners, and trust boundaries described
+here still hold. Evidence: `tests/sidebar-mark-component.test.mjs` checks the
+image, its alt text, the link's accessible name, and that the bundled bytes match
+the site mark.
+
+2026-10-19 Project kind (owner decision of the same date). New project and Open
+folder now ask Coding or Personal. System structure describes the new owner:
+registry migration 7, the owner-only `vivary-set-project-kind` action, the catalog
+field, the dialog, and the default conversation surface. The registry decision
+engine, portable record, bindings, receipts, and revision are unchanged, so the
+registration and custody descriptions still hold. Open folder still writes no
+project files. Evidence: the migration upgrade and storage cases in
+`tests/registry-store.test.mjs`, the folder and scope cases in
+`tests/local-root-provider.test.mjs`, `tests/managed-projects.test.mjs`,
+`tests/conversation-surface.test.mjs`, and
+`tests/workspace-kind-dialog-component.test.mjs`.
 
 2026-10-19 Footnote review fixes (PR #259 review). Four parser and link cases in
 the read-only footnote support were wrong, and the design described below still
@@ -3839,3 +4231,16 @@ the owning Core, Exo, front-door, capability-status, and MCP contracts. Those
 references replace line ranges invalidated by this consolidation. The linked
 contracts and dispatch source confirm the same package boundaries. This reference
 repair changes no runtime behavior or acceptance claim.
+
+The October 23, 2026 CI pin review selects Node 24.22.1 explicitly in each build
+job, matching the already qualified Linux and Windows runtime archives. The
+actual-runtime guard still runs immediately after selection and before package
+work. Source support starts at Node 22.23.4. Per-job mutation controls reject
+floating, affected, and wrong-line selections while retaining independent runner
+Node admission. Existing PR260 test commands, permissions, and triggers are
+preserved.
+
+The checker and mutation-test delta is identical to the focused source controls
+accepted on the Inbox branch. This source backport does not establish a new
+PR260 final-head CI or product-acceptance result. Existing Electron, merge, and
+artifact-publication holds remain in force.

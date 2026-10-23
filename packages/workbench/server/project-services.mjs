@@ -56,9 +56,12 @@ export const PROJECT_ACTION_PATHS = Object.freeze([
   "/_agent-native/actions/vivary-project-runtime-activity",
   "/_agent-native/actions/vivary-preview-managed-project-reconnection",
   "/_agent-native/actions/vivary-confirm-managed-project-reconnection",
+  "/_agent-native/actions/vivary-set-project-kind",
+  "/_agent-native/actions/vivary-create-new-project",
 ]);
 
 const controllers = new WeakMap();
+const admittedCreations = new WeakMap();
 const LOCAL_SERVICE = Symbol.for("vivary.local-project-services.v1");
 const LOCAL_VERIFICATION = "local-stat-revalidated-v1";
 const deepFreeze = value => {
@@ -192,6 +195,7 @@ export function startProjectServices(nitroApp, dependencies) {
 
   const snapshot = () => Object.freeze({ status, failure });
   const finishRequest = event => {
+    admittedCreations.delete(event);
     if (!activeRequests.delete(event) || activeRequests.size !== 0) return;
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
@@ -208,6 +212,7 @@ export function startProjectServices(nitroApp, dependencies) {
       new Promise(resolve => { timer = setTimeout(resolve, drainMs); }),
     ]);
     clearTimeout(timer);
+    for (const event of activeRequests) admittedCreations.delete(event);
     activeRequests.clear();
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
@@ -316,6 +321,8 @@ export function startProjectServices(nitroApp, dependencies) {
         locationLabels: local ? provider.locationLabels : installation.locationLabels,
         canReconnect: local
           ? () => true : undefined,
+        // vivary-set-project-kind writes through the local service only. A configured installation has none.
+        kindEditable: local,
       });
       const readiness = runtime.createProjectRuntimeReadiness({
         readScope: registry.readScope,
@@ -333,7 +340,20 @@ export function startProjectServices(nitroApp, dependencies) {
       runtime.mountProjectCatalog(nitroApp, { catalog, auth });
       runtime.mountProjectRuntimeReadiness(nitroApp, { readiness, auth });
       runtime.mountProjectRuntimeActivity(nitroApp, { activity, auth });
-      if (local) globalThis[LOCAL_SERVICE] = { controller, provider, registry, catalog };
+      if (local) globalThis[LOCAL_SERVICE] = {
+        controller, provider, registry, catalog,
+        async runCreation(context, run) {
+          if (status !== "open") {
+            throw Object.assign(new Error("Local project folders are not ready."), { statusCode: 503 });
+          }
+          activeRequests.add(context);
+          try {
+            return await run(context);
+          } finally {
+            finishRequest(context);
+          }
+        },
+      };
       status = "open";
       return snapshot();
     } catch (error) {
@@ -363,7 +383,10 @@ const CHAT_CATALOG = Symbol("chat catalog");
 // matchChatProject, or the project matchChatProject admitted it for.
 function localService(context, tool) {
   const service = globalThis[LOCAL_SERVICE];
-  if (!service || service.controller.snapshot().status !== "open") {
+  const status = service?.controller.snapshot().status;
+  // Only the exact creation admitted before close may finish its registration and kind save.
+  const finishingCreation = status === "closing" && admittedCreations.get(context) === service;
+  if (!service || (status !== "open" && !finishingCreation)) {
     throw Object.assign(new Error("Local project folders are not ready."), { statusCode: 503 });
   }
   const chatTool = context?.caller === "tool" && tool !== undefined
@@ -379,6 +402,18 @@ function localService(context, tool) {
   // stays "tool" everywhere outside this module.
   return { service, owner: Object.freeze({ userEmail: context.userEmail, orgId: context.orgId,
     appId: "workbench", caller: chatTool ? "http" : context.caller }) };
+}
+
+/** Keep one admitted owner creation usable until its files, registration and kind save settle. */
+export async function withLocalProjectCreation(context, run) {
+  const { service } = localService(context);
+  const admitted = Object.freeze({ ...context });
+  admittedCreations.set(admitted, service);
+  try {
+    return await service.runCreation(admitted, run);
+  } finally {
+    admittedCreations.delete(admitted);
+  }
 }
 
 /**
@@ -443,13 +478,19 @@ export async function connectLocalProjectFolder(context, folder, displayName) {
   return Object.freeze({ ...result, locationRef: selected.locationRef, displayName: name });
 }
 
-async function resolveLocalProjectBinding(context, projectId) {
+/** The owner's current project scope, for a project id that is well formed. */
+async function readLocalProjectScope(context, projectId) {
   const { service, owner } = localService(context, projectId);
   if (!identifier.safeParse(projectId).success) {
     throw Object.assign(new Error("Choose a registered project."), { statusCode: 400 });
   }
   const scope = await service.registry.readScope(owner);
   if (!scope) throw Object.assign(new Error("Project folder access changed."), { statusCode: 403 });
+  return { service, owner, scope };
+}
+
+async function resolveLocalProjectBinding(context, projectId) {
+  const { service, owner, scope } = await readLocalProjectScope(context, projectId);
   const [{ getDb }, { bindings, projects }, { and, eq, inArray }] = await Promise.all([
     import("./db/index.mjs"), import("./db/schema.mjs"), import("@agent-native/core/db/schema"),
   ]);
@@ -480,6 +521,35 @@ export async function resolveLocalProjectHistory(context, projectId) {
   return Object.freeze({ label: binding.label, projectId,
     bindingId: binding.bindingId, rootId: binding.rootId,
     bindingRevision: binding.bindingRevision });
+}
+
+/**
+ * Saves the owner's Coding or Personal choice for one registered project in
+ * the owner's scope. It writes only the registry row, never project files, and
+ * does not need the folder to be available. The project needs at least one
+ * binding in the owner's current scope, the same rule the catalog lists it by,
+ * so a project with several same-scope bindings can be saved as well.
+ */
+export async function setLocalProjectKind(context, projectId, kind) {
+  // Only the owner chooses. An admitted chat tool may read its project but never change this preference.
+  if (context?.caller === "tool") {
+    throw Object.assign(new Error("Local project access is unavailable."), { statusCode: 403 });
+  }
+  const { service, owner, scope } = await readLocalProjectScope(context, projectId);
+  const [{ getDb }, { bindings }, { and, eq, inArray }] = await Promise.all([
+    import("./db/index.mjs"), import("./db/schema.mjs"), import("@agent-native/core/db/schema"),
+  ]);
+  const listed = await getDb().select({ bindingId: bindings.bindingId }).from(bindings)
+    .where(and(eq(bindings.projectId, projectId), eq(bindings.actorId, scope.actorId),
+      eq(bindings.collectionId, scope.collectionId), eq(bindings.deviceId, scope.deviceId),
+      inArray(bindings.locationRef, scope.locationRefs))).limit(1);
+  if (listed.length === 0) throw Object.assign(new Error("Choose a registered project."), { statusCode: 404 });
+  const { updateProjectWorkspaceKind } = await import("./registry-store.mjs");
+  await requireCurrentProjectScope(service, owner, scope);
+  if (!await updateProjectWorkspaceKind(projectId, kind)) {
+    throw Object.assign(new Error("Choose a registered project."), { statusCode: 404 });
+  }
+  return Object.freeze({ projectId, workspaceKind: kind });
 }
 
 /** Resolves local access for Native execution. This is not a held-custody execution grant. */

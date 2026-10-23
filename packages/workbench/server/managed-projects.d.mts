@@ -32,7 +32,8 @@ export function previewManagedProject(
 export function createManagedProject(
   context: ActionRunContext | undefined,
   input: { name: string; displayName?: string; acceptedPlanSha256: string;
-    patternChoices?: WorkspacePatternChoice[]; preset?: WorkspacePreset },
+    patternChoices?: WorkspacePatternChoice[]; preset?: WorkspacePreset;
+    workspaceKind?: import("../shared/workspace-kind").WorkspaceKind },
   dependencies?: Record<string, unknown>,
 ): Promise<
   | { code: "plan-changed" }
@@ -41,6 +42,8 @@ export function createManagedProject(
       target: string;
       planSha256: string;
       registration: Record<string, unknown>;
+      /** Present when a kind was requested. False when the project exists but its kind was not saved. */
+      kindSaved?: boolean;
     }
 >;
 

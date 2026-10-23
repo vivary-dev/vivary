@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readClientAppState } from "@agent-native/core/client/hooks";
 import { useAppStateWriter } from "@/lib/native-state";
 import { registerSelectionCloseFlush, trackSelectionWrite, useOrphanedDrafts } from "@/lib/chat-draft";
-import { conversationSurfaceStateKey, requestedConversationSurface, restoredConversationSurface, savedNativeHistoryKind, type NativeHistoryKind } from "@/lib/conversation-surface";
+import { conversationSurfaceStateKey, defaultConversationSurface, requestedConversationSurface, restoredConversationSurface, savedNativeHistoryKind, type NativeHistoryKind } from "@/lib/conversation-surface";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { Button, ResizableHandle, ResizablePanel, ResizablePanelGroup, Skeleton } from "@agent-native/toolkit/ui";
 import { IconArrowsMaximize, IconArrowsMinimize, IconFiles, IconInfoCircle, IconSearch, IconWorld, IconX } from "@tabler/icons-react";
@@ -14,6 +14,7 @@ import { ProjectAdoption } from "../projects/ProjectAdoption";
 import { ProjectMemoryPanel } from "../projects/ProjectMemoryPanel";
 import { ProjectReadPanel } from "../projects/ProjectReadPanel";
 import { ProjectEvaluatePanel } from "../projects/ProjectEvaluatePanel";
+import { ProjectKindDetail, WorkspaceKindDialog, useSaveProjectKind } from "../projects/WorkspaceKindDialog";
 import FilesView from "../../routes/files";
 import CodeConversation from "./CodeConversation";
 import NativeConversation from "./NativeConversation";
@@ -114,16 +115,28 @@ export function Workspace() {
       return next;
     }, { replace: true });
   }, [explicitSurface, projectRouteReady, surfaceQuery.isSuccess, savedSurface, stored?.historyKind, setParams]);
+  // Nothing requested or saved: the project's kind picks the first surface. Personal opens API chat through the
+  // same route a request uses, which then saves it. Coding, Not set and the Personal workspace save Code.
+  const defaultSurface = defaultConversationSurface(activeProject?.workspaceKind);
   useEffect(() => {
     if (explicitSurface || !surfaceKey || !catalog?.scopeKey || !projectRouteReady
       || !surfaceQuery.isSuccess || restoredSurface) return;
+    if (defaultSurface === "native") {
+      setParams(current => {
+        const next = new URLSearchParams(current);
+        next.set("runtime", "native");
+        next.set("history", "project");
+        return next;
+      }, { replace: true });
+      return;
+    }
     pendingSurfaces.current.set(surfaceKey, { key: surfaceKey, scopeKey: catalog.scopeKey,
       projectId, surface: "code", historyKind: "project" });
     void saveSurface().catch(() => {});
   }, [explicitSurface, surfaceKey, catalog?.scopeKey, projectId, projectRouteReady,
-    surfaceQuery.isSuccess, restoredSurface, saveSurface]);
+    surfaceQuery.isSuccess, restoredSurface, saveSurface, defaultSurface, setParams]);
   const openingSurface = !projectRouteReady || !surfaceKey || (!explicitSurface &&
-    (surfaceQuery.isPending || (surfaceQuery.isSuccess && restoredSurface === "native")));
+    (surfaceQuery.isPending || (surfaceQuery.isSuccess && (restoredSurface ?? defaultSurface) === "native")));
   const unassigned = native && params.get("history") === "unassigned";
   const opened = surface(params.get("panel"));
   const narrow = useNarrowLayout();
@@ -155,6 +168,8 @@ export function Workspace() {
   ]);
   const [searchVisited, setSearchVisited] = useState(opened === "search");
   const [fileTreeOpen, setFileTreeOpen] = useState(true);
+  const [choosingKind, setChoosingKind] = useState(false);
+  const saveProjectKind = useSaveProjectKind();
   const fullPage = opened === "preview" && maximized;
   const showOnlySurface = Boolean(opened) && (narrow || maximized || (splitWidth > 0 && splitWidth < 620));
 
@@ -317,6 +332,8 @@ export function Workspace() {
               <h3>{activeProject?.displayName ?? "Personal workspace"}</h3>
               <dl><dt>Execution</dt><dd>The connected Vivary host</dd>
                 <dt>Project folder</dt><dd>{activeProject ? workspaceAvailable ? "Connected and available" : "Unavailable" : "Personal host workspace"}</dd>
+                {activeProject && <ProjectKindDetail kind={activeProject.workspaceKind}
+                  editable={catalog?.kindEditable === true} onChange={() => setChoosingKind(true)} />}
                 <dt>Files and history</dt><dd>Stay on this host. Opening a file does not send it to a model.</dd></dl>
               {activeProject && <ProjectMemoryPanel projectId={activeProject.projectId} disabled={!workspaceAvailable}
                 visible={opened === "details"} />}
@@ -326,6 +343,10 @@ export function Workspace() {
               <p>Open Files to read a document. Choose Edit when you want to change it.</p>
               <Button variant="outline" size="sm" onClick={() => navigate("/settings/runtimes")}>Runtime settings</Button>
               {!catalog && <p>Project details could not be loaded. Use Retry project.</p>}
+              {activeProject && <WorkspaceKindDialog open={choosingKind} current={activeProject.workspaceKind}
+                description="This changes the defaults for new conversations in this project. Existing conversations and files stay as they are."
+                onChoose={async kind => { await saveProjectKind(activeProject.projectId, kind); setChoosingKind(false); }}
+                onCancel={() => setChoosingKind(false)} />}
             </div>
           </aside>
         </ResizablePanel>
