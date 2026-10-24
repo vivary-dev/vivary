@@ -6,7 +6,8 @@ from pathlib import Path
 WORKFLOW = Path(".github/workflows/ci.yml")
 REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 AUXILIARY_WORKFLOWS = ((Path(".github/workflows/steward.yml"), ("daily-health-check",)),
-                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)))
+                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)),
+                       (Path(".github/workflows/desktop-release.yml"), ("build", "draft")))
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -215,6 +216,8 @@ ACTION_MANIFESTS = {
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9": {"using": "node24", "main": "dist/upload/index.js"},
+    # v8.0.2 action.yml, read at this SHA on 2026-10-24: node24, dist/index.js, no pre or post.
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333": {"using": "node24", "main": "dist/index.js"},
 }
 
 
@@ -246,7 +249,7 @@ CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
 
 def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, auxiliary=False) -> None:
     if auxiliary:
-        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",)),
+        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",), ("build", "draft")),
                 "auxiliary bootstrap requires an exact owned job inventory")
     jobs = text.split("\njobs:\n", 1)[-1]
     headers = re.findall(r"(?m)^  ([\w-]+):\s*$", jobs)

@@ -126,6 +126,10 @@ entry, compiled Workbench output, startup scripts, ordinary Node, the original
 Vivary runtime, licenses, and build metadata. It does not copy a source
 checkout, runtime data, credentials, or the development preview service.
 
+The `desktop release` workflow builds the release files in CI. The
+[release workflow](../../docs/RELEASE-WORKFLOW.md#desktop-release-build) lists
+them.
+
 The version in `package.json` sets the release channel in `build.json`.
 `release-version.mjs` accepts `major.minor.patch`, on the `stable` channel, and
 `major.minor.patch-beta.N`, on the `beta` channel, and refuses any other form.
