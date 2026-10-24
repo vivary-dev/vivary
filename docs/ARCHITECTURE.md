@@ -719,6 +719,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Automated restart test for runs and approvals (beta ticket 07). This change adds a test and no server
+code. `tests/local-code-restart.test.ts` runs a first host in a child process until its run waits on a Codex
+request, then kills that process with SIGKILL, the way a crash or a forced quit ends a host. A fresh host in the test
+process must mark the run Interrupted, mark the request Expired with the `host-restart` reason and one notice, offer
+no answer, refuse a late denial, and start no second launch and no second user message. The restart recovery that
+J05 and step 3 describe still holds, because this change touches no server file. Evidence: the test fails on `dev`
+at `2cac9444`, before tickets 05 and 06, because that host recorded no request to expire. It passes three runs in a
+row here, with no `transition-refused` line and no worker left running. It joins the serial server group in `ci.yml`.
+
 2026-10-24 One transition table for Code status and phase (beta ticket 06). The workbench server wrote a Code run's
 `status` and `phase` from ten places in `server/local-code-agent.ts` and one in `server/linked-conversations.ts`,
 with no rule on which change may follow which. `server/code-run-transitions.ts` now holds nine edges, each with its target pair and the statuses it accepts.
