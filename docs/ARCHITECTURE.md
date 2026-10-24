@@ -742,6 +742,11 @@ publish-workflow checker also refuses compact `- run: python` and
 prefetch tests now assert the derived wheel, the refusal source and the cached
 trailer reuse they describe. No runtime behavior changes.
 
+2026-10-23 Undici advisories GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and
+GHSA-f72v-6w45-q472. The internal site's build-time undici, pulled in by unifont,
+moves from 8.10.2 to 8.12.3, whose npm provenance names its release tag commit.
+The site lock changes only that entry. No site runtime behavior changes.
+
 2026-10-23 Zod advisory GHSA-mrhx-c7xc-m3w5. Workbench and the internal site move
 zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
 which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
