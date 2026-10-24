@@ -6,10 +6,11 @@ import { fail, type ActionRunContext } from "@agent-native/core/action";
 import { getDbExec } from "@agent-native/core/db";
 import { isOrgMember } from "@agent-native/core/org";
 import { createThread, deleteThread, getThread, updateThreadData, getRequestOrgId, getRequestRunContext, type ChatThread } from "@agent-native/core/server";
-import { codeAgentRunsDir, codeAgentRunTranscriptPath, createCodeAgentRunRecord, getCodeAgentRunRecord,
+import { codeAgentRunsDir, codeAgentRunTranscriptPath, getCodeAgentRunRecord,
   updateCodeAgentRunRecord, listCodeAgentTranscriptEvents, type CodeAgentRunRecord } from "@agent-native/core/code-agents";
 import { z } from "zod";
 import { createVivaryChatIdentity, threadBelongsToChatIdentity } from "./chat-identity";
+import { createCodeRun } from "./code-run-transitions";
 import { PROJECT_CHAT_SCOPE_PREFIX } from "./chat-project-scope.mjs";
 import { changeChatDraft, chatDraftKey, createCodeDraftIdentity, type ChatDraftRecord } from "./chat-draft";
 import { compareAndSetAppState } from "@agent-native/core/application-state";
@@ -438,8 +439,8 @@ export function createLinkedConversationService(dependencies: Dependencies = def
     } else {
       const draftThreadId = `vivary-code:${input.projectId ? "project:" + input.projectId + ":" : ""}${targetId}`;
       // Paused has no startRequested, pendingLaunch, prompt, transcript or provider session.
-      const run = createCodeAgentRunRecord({ id: targetId, goalId: "vivary-local-code", title,
-        status: "paused", phase: "linked-inactive", needsApproval: false, permissionMode: "auto-edit", cwd: workspace!.root,
+      const run = createCodeRun("linkInactive", { id: targetId, goalId: "vivary-local-code", title,
+        needsApproval: false, permissionMode: "auto-edit", cwd: workspace!.root,
         metadata: { app: "vivary-workbench-local-code", ownerEmail: identity.owner, orgId: identity.orgId,
           engine: input.target.engine, model, workspaceRoot: workspace!.root,
           ...(identity.history ? { ...identity.history } : {}), draftThreadId, linkedHistoryId: linkId, linkedCreationPending: true } });

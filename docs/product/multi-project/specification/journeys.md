@@ -113,7 +113,6 @@ stateDiagram-v2
   Running --> Failed: observed error
   Running --> Interrupted: host restart
   AwaitingToolApproval --> Interrupted: host restart, request expired
-  Interrupted --> Running: next send starts a new turn
 ```
 
 ### Codex tool request
@@ -132,7 +131,7 @@ stateDiagram-v2
   Expired --> [*]
 ```
 
-An expired request cannot be answered. Its conversation and the host strip say "Vivary restarted before this request was answered". The host strip shows Interrupted for a run that a restart interrupted, and any request that expired with it, until the next send on that run. A send after Interrupted starts a new turn that resumes the provider session where the runtime supports it. Nothing replays the interrupted turn.
+An expired request cannot be answered. Its conversation and the host strip say "Vivary restarted before this request was answered". The host strip shows Interrupted for a run that a restart interrupted, and any request that expired with it, until the next send on that run. A send after Interrupted starts a new turn that resumes the provider session where the runtime supports it. Nothing replays the interrupted turn. The workbench server writes every Code status and phase through one transition table, `packages/workbench/server/code-run-transitions.ts`, which refuses and logs any other change. A send moves an interrupted run to Queued, a state this chart does not draw, and Core's executor then marks it running. A permission request that arrives before Core marks the run running moves it from Queued to Awaiting tool approval.
 
 ### Cancellation
 

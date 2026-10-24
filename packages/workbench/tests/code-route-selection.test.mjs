@@ -43,6 +43,9 @@ function fixture() {
     buildVivaryCodeExecutionPrompt: (run, engine, message) => message,
     appendCodeAgentTranscriptEvent: event => { writes.push("transcript"); events.push(event); },
     updateCodeAgentRunRecord: (id, change) => { writes.push("record"); const run = records.get(id); records.set(id, { ...run, ...change, metadata: { ...run.metadata, ...change.metadata } }); },
+    // The send path takes only the queue edge, so these fakes write its pair.
+    createCodeRun: (edge, input) => owners.createCodeAgentRunRecord({ ...input, status: "queued", phase: "queued" }),
+    transitionCodeRun: (id, edge, change) => { owners.updateCodeAgentRunRecord(id, { ...change, status: "queued", phase: "queued" }); return records.get(id); },
     startVivaryCodeRun: input => { launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
     recordProjectContextLoad() { writes.push("context"); },

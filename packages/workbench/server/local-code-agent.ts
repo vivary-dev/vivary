@@ -12,7 +12,6 @@ import { fail, type ActionRunContext } from "@agent-native/core/action";
 import {
   appendCodeAgentTranscriptEvent,
   codeAgentRunTranscriptPath,
-  createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   isActiveCodeAgentRun,
   listCodeAgentRunRecords,
@@ -23,6 +22,7 @@ import {
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
+import { createCodeRun, transitionCodeRun } from "./code-run-transitions";
 
 import { getCodexModels, type CodexModelCatalog } from "./codex-models";
 import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
@@ -331,9 +331,7 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
           reason: "host-restart",
         },
       });
-      updateCodeAgentRunRecord(run.id, {
-        status: "paused",
-        phase: "interrupted",
+      transitionCodeRun(run.id, "interrupt", {
         needsApproval: false,
         metadata: { pendingLaunch: undefined },
         progress: {
@@ -565,10 +563,9 @@ function recordCleanupCheck(refusal: CleanupRefusal, check: CleanupCheck): void 
  */
 function writeCleanupRefusal(refusal: CleanupRefusal, failure?: { executionError: string }): void {
   try {
-    const written = updateCodeAgentRunRecord(refusal.runId, record => ({
-      ...(failure ? { status: "errored" as const, phase: "cleanup-unverified" as const } : { updatedAt: record.updatedAt }),
-      metadata: { cleanupRefusal: storedCleanupRefusal(refusal), ...failure },
-    }));
+    const metadata = { cleanupRefusal: storedCleanupRefusal(refusal), ...failure };
+    const written = failure ? transitionCodeRun(refusal.runId, "cleanupUnverified", { metadata })
+      : updateCodeAgentRunRecord(refusal.runId, record => ({ updatedAt: record.updatedAt, metadata }));
     if (!written) throw new Error("The run record is missing.");
     hostState.unsaved.delete(refusal.runId);
   } catch (error) {
@@ -1065,11 +1062,9 @@ export async function sendVivaryCodeMessage(input: {
 
   // Claim the host slot synchronously after all runtime and project checks.
   assertCodeHostAvailable();
-  const run = existing ?? createCodeAgentRunRecord({
+  const run = existing ?? createCodeRun("queue", {
     goalId: VIVARY_CODE_GOAL_ID,
     title: titleFromMessage(input.message),
-    status: "queued",
-    phase: "queued",
     needsApproval: false,
     permissionMode: "auto-edit",
     cwd: workspace.root,
@@ -1106,7 +1101,7 @@ export async function sendVivaryCodeMessage(input: {
     input.recordProjectContext?.(input.projectContext);
   }
   // A new turn starts a new answer channel, so an expired request from an earlier turn leaves the record.
-  updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
+  transitionCodeRun(run.id, "queue", { needsApproval: false,
     metadata: { pendingLaunch: undefined, pendingApprovals: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
@@ -1245,9 +1240,7 @@ async function resolveCodexRequest(input: {
   active.requests.delete(input.requestId);
   appendCodeAgentTranscriptEvent({ runId: input.runId, kind: "status", message: decision.allow ? "Codex request allowed." : "Codex request declined.",
     metadata: { requestId: input.requestId, method: pending.request.method } });
-  updateCodeAgentRunRecord(input.runId, run => ({ needsApproval: active.requests.size > 0,
-    status: active.requests.size ? "needs-approval" : "running", phase: active.requests.size ? "action-approval" : "running",
-    metadata: { pendingApprovals: withoutRecordedApproval(run, input.requestId) } }));
+  recordRequestSettled(input.runId, input.requestId, active.requests.size, true);
   pending.resolve(response);
   return getVivaryCodeState(input.ownerEmail, input.runId, active.workspace, input.orgId);
 }
@@ -1305,10 +1298,12 @@ async function executeVivaryCodeRun(input: {
         if (input.activeRun.controller.signal.aborted) throw new Error("This run is stopping.");
         return new Promise(resolve => {
           input.activeRun.requests.set(request.requestId, { request, resolve });
-          updateCodeAgentRunRecord(input.runId, run => ({ status: "needs-approval", phase: "action-approval", needsApproval: true,
-            metadata: { pendingApprovals: [...recordedApprovals(run).filter(approval => approval.requestId !== request.requestId),
-              { requestId: request.requestId, method: request.method, summary: approvalSummary(request),
-                requestedAt: new Date().toISOString() }] } }));
+          const listed = (run: CodeAgentRunRecord) => ({ metadata: { pendingApprovals: [...recordedApprovals(run)
+            .filter(approval => approval.requestId !== request.requestId), { requestId: request.requestId,
+              method: request.method, summary: approvalSummary(request), requestedAt: new Date().toISOString() }] } });
+          // A refused move still lists the request, so a shutdown can expire it.
+          if (!transitionCodeRun(input.runId, "awaitApproval", run => ({ needsApproval: true, ...listed(run) })))
+            updateCodeAgentRunRecord(input.runId, listed);
         });
       },
       onRequestResolved: requestId => {
@@ -1316,11 +1311,8 @@ async function executeVivaryCodeRun(input: {
         // A stopping executor reports every pending request resolved in its teardown. The record keeps them, so final
         // settlement can expire them on shutdown.
         if (input.activeRun.controller.signal.aborted) return;
-        const settled = getCodeAgentRunRecord(input.runId)?.phase === "action-approval";
-        updateCodeAgentRunRecord(input.runId, run => ({
-          ...(settled ? { status: input.activeRun.requests.size ? "needs-approval" : "running",
-            phase: input.activeRun.requests.size ? "action-approval" : "running", needsApproval: input.activeRun.requests.size > 0 } : {}),
-          metadata: { pendingApprovals: withoutRecordedApproval(run, requestId) } }));
+        recordRequestSettled(input.runId, requestId, input.activeRun.requests.size,
+          getCodeAgentRunRecord(input.runId)?.phase === "action-approval");
       },
       onStopFailed: ({ step, target }) => {
         stopRefusedAt = new Date().toISOString();
@@ -1365,9 +1357,7 @@ async function executeVivaryCodeRun(input: {
       message: `The local code run failed: ${message}`,
       metadata: { status: "errored", phase: "error" },
     });
-    updateCodeAgentRunRecord(input.runId, {
-      status: "errored",
-      phase: "error",
+    transitionCodeRun(input.runId, "fail", {
       metadata: {
         executionError: message,
         executionErroredAt: new Date().toISOString(),
@@ -1404,6 +1394,18 @@ function approvalSummary(request: CodexActionRequest): string | null {
       : typeof reason === "string" ? reason : "";
   const line = String(redactCredentialsInValue(text)).replace(/\s+/g, " ").trim();
   return line ? line.slice(0, 200) : null;
+}
+
+/**
+ * Takes an answered or withdrawn request off its run. When the run sits in Vivary's approval phase, it also moves the
+ * run on, to the next waiting request or back to running. A move the table refuses still takes the request off and
+ * sets the approval flag.
+ */
+function recordRequestSettled(runId: string, requestId: string, remaining: number, moveOn: boolean): void {
+  const unlisted = (run: CodeAgentRunRecord) => ({ ...(moveOn ? { needsApproval: remaining > 0 } : {}),
+    metadata: { pendingApprovals: withoutRecordedApproval(run, requestId) } });
+  if (moveOn && transitionCodeRun(runId, remaining ? "awaitApproval" : "resumeAfterApproval", unlisted)) return;
+  updateCodeAgentRunRecord(runId, unlisted);
 }
 
 /**
@@ -1713,9 +1715,7 @@ function recordPausedRun(
     message,
     metadata: { status: "paused", ...metadata },
   });
-  updateCodeAgentRunRecord(runId, {
-    status: "paused",
-    phase: typeof metadata.phase === "string" ? metadata.phase : "paused",
+  transitionCodeRun(runId, "pause", {
     progress: {
       label: "Paused",
       completed: 0,
@@ -1737,9 +1737,7 @@ function recordStoppingRun(
     message,
     metadata: { status: "running", phase: "stopping", reason },
   });
-  updateCodeAgentRunRecord(runId, {
-    status: "running",
-    phase: "stopping",
+  transitionCodeRun(runId, "stop", {
     progress: {
       label: "Stopping",
       completed: 0,
