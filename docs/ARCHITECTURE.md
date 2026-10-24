@@ -732,6 +732,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Undici advisories in the Workbench and desktop locks. GHSA-xjj6-f33q-929c,
+GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472 affect the Workbench's undici 6.28.1 (through
+@ai-sdk/provider-utils) and 7.29.1 (through @agent-native/core), and the desktop build's
+7.29.1 (through @electron/get). They move to 6.29.1 and 7.30.1, which every dependent's
+range admits, and the pre-install advisory gate now floors undici 6.x, 7.x and 8.x.
+Only undici lock entries change.
+
 2026-10-24 CI provisioning and release-guard review fixes. The pip bootstrap removes a
 failed or partial download, as the Python bootstrap already does. The npm publish
 checker allows only an exact set of steps before Python admission, and the Workbench
