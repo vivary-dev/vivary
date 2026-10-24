@@ -61,6 +61,8 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "permissions:\n"
         "  contents: read\n"
         "  pull-requests: read\n"
+        "env:\n"
+        "  PIP_USE_DEPRECATED: legacy-certs\n"
         "jobs:\n"
         "  changes:\n"
         "    steps:\n"
@@ -118,11 +120,14 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         f"          PIP_CONFIG_FILE: {UV_DIGEST_PIP_CONFIG_FILE}\n"
         "        run: |\n"
         f"          {UV_DIGEST_COMMANDS['test']}\n"
+        "      - name: actual uv runtime admission\n"
+        "        run: python -I -B scripts/check_uv_runtime.py\n"
         "      - name: release artifact contract tests\n"
         "        run: python scripts/tests/test_release_artifacts.py\n"
         "      - name: release artifact license contract\n"
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
+        "          uv=\"$(python -I -B scripts/check_uv_runtime.py)\" || exit $?\n"
         + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
         + "          \"$RUNNER_TEMP/vivary-build-tools/bin/npm\" pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
@@ -183,6 +188,10 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         f"          PIP_CONFIG_FILE: {UV_DIGEST_PIP_CONFIG_FILE}\n"
         "        run: |\n"
         f"          {UV_DIGEST_COMMANDS['orientation-proof']}\n"
+        "      - name: actual uv runtime admission\n"
+        "        run: python -I -B scripts/check_uv_runtime.py\n"
+        "      - name: run disposable orientation proof\n"
+        "        run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json\n"
         "\n"
         "  review:\n"
         "    needs: changes\n"
@@ -252,11 +261,11 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         host = '' if name == 'site' else '    runs-on: ubuntu-latest\n'
         if name == 'orientation-proof':
             host = '    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n'
-            block_with_upload = block + (
+            block_with_upload = block.rstrip("\n") + "\n" + (
                 '      - name: preserve orientation receipt\n'
                 "        if: ${{ !cancelled() && steps.runner_action_node.outcome == 'success' }}\n"
                 '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n'
-            )
+            ) + "\n"
         else:
             block_with_upload = block
         if '    steps: []\n' in block_with_upload:
@@ -589,8 +598,7 @@ def test_required_check_must_fail_closed_when_dispatch_validation_fails():
         "        run: exit 1\n",
     ):
         message = _run(workflow.replace(contract, "", 1))
-        assert message, "a validation failure must reach a required failing check"
-        assert "must" in message.lower()
+        assert message and "dispatch validation" in message, message
 
 
 def test_dispatch_base_sha_must_reach_diff_hygiene():
@@ -673,19 +681,24 @@ def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
     guard_step = '      - name: actual Node security admission\n        run: ' + module.NODE_GUARD + '\n'
     for name in module.NODE_JOBS:
         block = module.job_block(text, name)
+        expected = 'site' if name == 'site' else 'Node guard'
         missing = text.replace(block, block.replace(guard_step, '', 1), 1)
-        assert _run(missing), name
+        message = _run(missing)
+        assert message and expected in message, (name, message)
         unrelated = missing + '\n  unrelated:\n    steps:\n' + guard_step
-        assert _run(unrelated), name
+        message = _run(unrelated)
+        assert message and expected in message, (name, message)
         for alteration in (
             guard_step.replace('        run:', '        if: false\n        run:'),
             guard_step.replace('        run:', '        continue-on-error: true\n        run:'),
             guard_step.replace(module.NODE_GUARD, module.NODE_GUARD + ' || true'),
             guard_step.replace(module.NODE_GUARD, module.NODE_GUARD + '; exit 0'),
         ):
-            assert _run(text.replace(block, block.replace(guard_step, alteration, 1), 1)), (name, alteration)
+            message = _run(text.replace(block, block.replace(guard_step, alteration, 1), 1))
+            assert message and 'Node guard' in message, (name, alteration, message)
         delayed = block.replace(guard_step, '', 1) + '      - run: echo before delayed admission\n' + guard_step
-        assert _run(text.replace(block, delayed, 1)), name
+        message = _run(text.replace(block, delayed, 1))
+        assert message and (expected in message or 'Node' in message), (name, message)
 
 
 def test_node_guard_cannot_follow_install_or_an_unguarded_direct_build():
@@ -695,17 +708,21 @@ def test_node_guard_cannot_follow_install_or_an_unguarded_direct_build():
     guard_step = '      - name: actual Node security admission\n        run: ' + module.NODE_GUARD + '\n'
     for command in ('npm install', 'pnpm install', 'agent-native build', 'astro build'):
         mutation = block.replace(guard_step, '      - run: ' + command + '\n' + guard_step, 1)
-        assert _run(text.replace(block, mutation, 1)), command
+        message = _run(text.replace(block, mutation, 1))
+        assert message and 'Node' in message, (command, message)
     for command in ('agent-native build', 'astro build'):
-        assert _run(text.replace(block, block + '      - run: ' + command + '\n', 1)), command
+        message = _run(text.replace(block, block + '      - run: ' + command + '\n', 1))
+        assert message and ('Node' in message or 'build' in message), (command, message)
 
 
 def test_node_guard_suites_and_required_changes_success_cannot_be_removed():
     text = _workflow(INSTALL + AUDIT)
     for command in ('node --test packages/workbench/tests/runtime-security.test.mjs',
                     'python scripts/tests/test_npm_trusted_publish_workflow.py'):
-        assert _run(text.replace(command, 'echo skipped', 1)), command
-    assert _run(text.replace('    needs: changes\n', '', 1))
+        message = _run(text.replace(command, 'echo skipped', 1))
+        assert message and 'must run' in message, (command, message)
+    message = _run(text.replace('    needs: changes\n', '', 1))
+    assert message and 'dispatch validation' in message, message
 
 
 
@@ -1611,6 +1628,12 @@ def test_site_job_must_run_its_behavior_tests_before_the_build():
                     text.replace(step, step.replace("        run:", "        if: false\n        run:"), 1)):
         message = _run(mutated)
         assert message and "site behavior tests must run before the build" in message, message
+
+
+def test_synthetic_workflow_fixture_passes_the_contract():
+    # Every mutation test below starts from this fixture, so it must pass on its own,
+    # or each mutation would be refused for an unrelated reason.
+    assert _run(_workflow(INSTALL + AUDIT)) is None
 
 
 if __name__ == "__main__":

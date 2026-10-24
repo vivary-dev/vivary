@@ -57,6 +57,22 @@ def assert_certificate_overrides():
             refuse("certificate override must contain only the qualified certifi bundle")
 
 
+RISKY_PIP_OPTIONS = ("trusted-host", "index-url", "extra-index-url", "find-links", "client-cert", "cert")
+
+
+def assert_pip_configuration(configuration_module):
+    # Later pip commands run without --isolated, so they read PIP_* variables and pip config
+    # files. Load them the way pip does and refuse anything that can change which hosts and
+    # indexes pip trusts or which certificate it verifies against. PIP_CERT from the
+    # environment is admitted separately, by assert_certificate_overrides.
+    configuration = configuration_module.Configuration(isolated=False)
+    configuration.load()
+    for key, _ in configuration.items():
+        section, _, option = key.partition(".")
+        if option in RISKY_PIP_OPTIONS and not (section == ":env:" and option == "cert"):
+            refuse("pip configuration cannot change trusted hosts, indexes or certificates: " + key)
+
+
 def assert_pip_runtime():
     # Later pip commands must use the same executable, cwd and -I invocation.
     # This check alone cannot admit a differently resolved later interpreter.
@@ -89,6 +105,7 @@ def assert_pip_runtime():
             or hashlib.sha256(ca.read_bytes()).hexdigest() != CA_POLICY["CERTIFI_CA_SHA256"]):
         refuse("pip must load the qualified certifi 2026.10.23 bundle from its own distribution")
     assert_certificate_overrides()
+    assert_pip_configuration(importlib.import_module("pip._internal.configuration"))
     return {"python": str(executable), "pip": actual, "module": str(module), "main": str(main),
             "certifi": certifi.__version__, "ca": str(ca)}
 

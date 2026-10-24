@@ -360,9 +360,14 @@ class RunnerBootstrapTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "linux", "full ELF runner fixture uses native Linux paths")
     def test_failed_actual_inline_bootstrap_admits_no_action_or_publisher_markers(self):
         for workflow in WORKFLOWS:
-            module = load_source(inline_source(workflow.read_text()))
-            with tempfile.TemporaryDirectory() as directory, controlled_runner(module, directory, "v24.22.0"):
-                with contextlib.redirect_stderr(io.StringIO()): result = module.main()
+            # The step runs the repair wrapper, which embeds the admission as `admission`.
+            wrapper = types.ModuleType("fixture_inline_wrapper")
+            exec(compile(inline_source(workflow.read_text()), "fixture-inline-wrapper.py", "exec"), wrapper.__dict__)
+            with tempfile.TemporaryDirectory() as directory, controlled_runner(wrapper.admission, directory, "v24.22.0"), \
+                    mock.patch.object(wrapper, "download", side_effect=AssertionError("no download")) as download, \
+                    mock.patch.object(wrapper.sys, "argv", ["runner-action-node-admission"]):
+                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()): result = wrapper.main()
+                download.assert_not_called()
                 # A non-zero step result is what keeps every later action from running.
                 self.assertEqual(result, 1)
 

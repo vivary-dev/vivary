@@ -70,7 +70,18 @@ class PipRuntimeTests(unittest.TestCase):
         self.ca = self.certifi_module.with_name("cacert.pem")
         self.ca.write_bytes(b"inert qualified CA fixture")
         self.certifi = SimpleNamespace(__version__="2026.10.23", __file__=str(self.certifi_module), where=lambda: str(self.ca))
-        self.import_pip = mock.Mock(side_effect=lambda name: self.pip if name == "pip" else self.certifi)
+        self.config_items = []
+        loaded = self
+        class FakeConfiguration:
+            def __init__(self, isolated):
+                loaded.config_isolated = isolated
+            def load(self):
+                pass
+            def items(self):
+                return list(loaded.config_items)
+        self.configuration = SimpleNamespace(Configuration=FakeConfiguration)
+        modules = {"pip": self.pip, "pip._internal.configuration": self.configuration}
+        self.import_pip = mock.Mock(side_effect=lambda name: modules.get(name, self.certifi))
         policy = mock.patch.dict(guard.CA_POLICY, CERTIFI_CA_SHA256=guard.hashlib.sha256(self.ca.read_bytes()).hexdigest())
         policy.start()
         self.addCleanup(policy.stop)
@@ -97,9 +108,23 @@ class PipRuntimeTests(unittest.TestCase):
             "module": str(self.module.resolve()), "main": str(self.main_module.resolve()),
             "certifi": "2026.10.23", "ca": str(self.ca),
         })
-        self.assertEqual(self.import_pip.call_args_list, [mock.call("pip"), mock.call("pip._vendor.certifi")])
+        self.assertEqual(self.import_pip.call_args_list, [mock.call("pip"), mock.call("pip._vendor.certifi"),
+                                                          mock.call("pip._internal.configuration")])
+        self.assertIs(self.config_isolated, False)
         self.find_distribution.assert_called_once_with("pip")
         self.main_spec.assert_called_once_with("pip.__main__")
+
+    def test_pip_configuration_cannot_change_trusted_hosts_indexes_or_certificates(self):
+        for key in (":env:.trusted-host", "global.index-url", "install.extra-index-url", ":env:.find-links",
+                    ":env:.client-cert", "global.cert", "user.cert"):
+            self.config_items = [(":env:.use-deprecated", "legacy-certs"), (key, "fixture")]
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "pip configuration cannot change"):
+                guard.assert_pip_runtime()
+
+    def test_environment_cert_and_unrelated_pip_configuration_are_admitted(self):
+        self.config_items = [(":env:.cert", "validated by the override check"), (":env:.use-deprecated", "legacy-certs"),
+                             (":env:.config-file", "/dev/null"), ("global.timeout", "60")]
+        guard.assert_pip_runtime()
 
     def test_old_or_altered_vendored_certifi_is_refused(self):
         for variant in ("old-version", "changed-ca", "foreign-path"):

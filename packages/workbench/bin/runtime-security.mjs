@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants, createReadStream, realpathSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdtemp, readFile, realpath, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -190,7 +190,14 @@ export async function publishNpmArchive(candidateDirectory) {
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === helper) {
+// Node resolves the main module through symlinks, so compare real paths. A symlinked
+// invocation must still run the guard, never fall through and exit 0.
+function invokedAsCli() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(path.resolve(process.argv[1])) === helper; } catch { return false; }
+}
+
+if (invokedAsCli()) {
   try {
     const [command, ...args] = process.argv.slice(2);
     if (command === "collect" && args.length === 0) console.log(JSON.stringify(await collectCurrentNode()));

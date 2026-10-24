@@ -732,6 +732,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Runtime guard and pip admission hardening. The Node runtime guard CLI now
+compares real paths, so a symlinked invocation runs the guard instead of exiting 0.
+CI pip admission now refuses pip configuration, from the environment or any config
+file, that sets trusted hosts, index URLs, find-links, client certificates or a
+file-sourced certificate. The CI contract's synthetic test workflow now passes the
+whole contract, so its mutation tests fail only on the rule they target.
+
 2026-10-24 Workflow checker hardening from the security-unit reviews. The CI contract
 now checks the runner bootstrap in `steward.yml` and `track-stats.yml`, reads an `if:`
 written as a step's first key, and requires the site behavior tests before the build.

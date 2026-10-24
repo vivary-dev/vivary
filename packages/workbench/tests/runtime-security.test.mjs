@@ -72,6 +72,20 @@ test("guard CLI uses actual child facts despite safe engines, build metadata and
   assert.equal(JSON.parse(diagnostic.stdout).versions.node, process.versions.node);
 }));
 
+test("guard CLI still runs when it is invoked through a symlinked path", {
+  skip: process.platform === "win32" ? "directory symlinks need extra privileges on Windows" : false,
+}, () => fixture(async directory => {
+  const linked = path.join(directory, "linked-bin");
+  await symlink(path.dirname(guard), linked, "dir");
+  const viaLink = path.join(linked, path.basename(guard));
+  const diagnostic = child([viaLink, "collect"], { cwd: directory });
+  assert.equal(diagnostic.status, 0, diagnostic.stderr);
+  assert.equal(JSON.parse(diagnostic.stdout).versions.node, process.versions.node);
+  const refused = child([viaLink, "not-a-guard-command"], { cwd: directory });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /unsupported guard command/);
+}));
+
 test("native executable collection refuses missing cross-platform evidence and malformed or failed probes", () => fixture(async directory => {
   await assert.rejects(collectExecutableNode(process.execPath, { platform: process.platform === "win32" ? "linux" : "win32", arch: process.arch }), /matching-platform/);
   if (process.platform === "win32") return; // Shell fixtures below are not Windows executables.
