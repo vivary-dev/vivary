@@ -112,13 +112,14 @@ def check_python_consumers(text: str, contract) -> None:
         steps = re.split(r"(?m)(?=^      - )", contract.job_block(text, name))[1:]
         guard = next(index for index, step in enumerate(steps)
                      if "name: actual Python runtime admission" in step)
+        # Before the guard, only the runner admission, a checkout-only release checkout,
+        # setup-python and the authenticated provisioner run. An exact inventory refuses any
+        # other step, so Python spelled as an absolute path or through env cannot slip in.
+        allowed = (contract.PIP_SETUP_STEP.rstrip("\n"), contract.PYTHON_PROVISIONING_STEP.rstrip("\n"))
         for index, step in enumerate(steps[:guard]):
-            # The first runner admission and authenticated Python provisioner
-            # intentionally run before the newly provisioned Python is exposed.
-            if index == 0 or step.rstrip("\n") == contract.PYTHON_PROVISIONING_STEP.rstrip("\n"):
-                continue
-            # A compact step starts with "- run:" or "- shell:" on its first line.
-            require(not re.search(r"(?m)^\s*(?:-\s+)?(?:(?:run|shell):\s*)?['\"]?python(?:3(?:\.\d+)?)?(?:\s|$)", step),
+            checkout = (step.startswith("      - name: Checkout release tag\n")
+                        and "uses: actions/checkout@" in step and not re.search(r"(?m)^\s+(?:run|shell):", step))
+            require(index == 0 or checkout or step.rstrip("\n") in allowed,
                     f"{name} must admit actual Python before its consumers")
 
 

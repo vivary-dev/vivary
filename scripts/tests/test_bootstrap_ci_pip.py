@@ -64,6 +64,29 @@ class BootstrapTests(unittest.TestCase):
                     bootstrap.download_context()
                 context.assert_not_called()
 
+
+    def test_failed_download_removes_its_partial_file_so_a_retry_can_succeed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            class Response(io.BytesIO):
+                status = 200
+                headers = {}
+                def geturl(self):
+                    return bootstrap.URL
+            failing, good = mock.Mock(), mock.Mock()
+            failing.open.return_value = Response(b"fix")
+            good.open.return_value = Response(b"fixture")
+            with mock.patch.dict(bootstrap.os.environ, {}, clear=True), mock.patch.object(bootstrap, "SIZE", 7), \
+                    mock.patch.object(bootstrap, "SHA256", hashlib.sha256(b"fixture").hexdigest()):
+                with mock.patch.object(bootstrap.urllib.request, "build_opener", return_value=failing):
+                    with self.assertRaises(ValueError):
+                        bootstrap.obtain_wheel(cache)
+                # The shared cache must not keep the truncated bytes, or every retry refuses.
+                self.assertFalse((cache / bootstrap.WHEEL).exists())
+                with mock.patch.object(bootstrap.urllib.request, "build_opener", return_value=good):
+                    self.assertEqual(bootstrap.obtain_wheel(cache), cache / bootstrap.WHEEL)
+            self.assertEqual((cache / bootstrap.WHEEL).read_bytes(), b"fixture")
+
     def test_download_has_fixed_origin_no_proxy_no_redirect_and_exact_byte_bound(self):
         with tempfile.TemporaryDirectory() as directory:
             for mode in ("fixed", "redirect", "status", "oversized", "truncated", "digest", "deadline"):

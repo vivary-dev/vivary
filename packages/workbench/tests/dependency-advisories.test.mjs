@@ -15,6 +15,8 @@ const advisoryFloors = [
   { name: "vite", branch: "8.3.", fixed: "8.3.3", advisories: ["GHSA-rq7h-c2jc-7f22"] },
   { name: "markdown-it", branch: "15.", fixed: "15.0.3", advisories: ["GHSA-gfr2-rv44-r23c"] },
   { name: "@vitest/mocker", branch: "5.", fixed: "5.0.3", advisories: ["GHSA-xp26-3454-mjgp"] },
+  // The 4.x floor leaves the reviewed zod 3.25.76 copy, which only botframework uses, out of scope.
+  { name: "zod", branch: "4.", fixed: "4.6.6", advisories: ["GHSA-mrhx-c7xc-m3w5"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },

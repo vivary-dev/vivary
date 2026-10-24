@@ -205,6 +205,19 @@ def test_guard_or_validation_text_hidden_in_shell_structure_is_refused():
     assert message and "archive validation must be exactly the reviewed step" in message, message
 
 
+def test_python_spelled_as_a_path_or_through_env_cannot_run_before_admission():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        setup = job.index(contract.PIP_SETUP_STEP)
+        for label, step in (("absolute", "      - run: /usr/bin/python3 scripts/check_release_artifacts.py --help\n"),
+                            ("env", "      - run: env python -c 'print(1)'\n"),
+                            ("shell", "      - shell: /usr/bin/python3 {0}\n        run: print(1)\n")):
+            message = check(text.replace(job, job[:setup] + step + job[setup:], 1))
+            assert message and "actual Python before its consumers" in message, (name, label, message)
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     failed = 0

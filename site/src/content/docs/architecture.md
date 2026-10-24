@@ -736,6 +736,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 CI provisioning and release-guard review fixes. The pip bootstrap removes a
+failed or partial download, as the Python bootstrap already does. The npm publish
+checker allows only an exact set of steps before Python admission, and the Workbench
+pre-install gate now floors zod 4.x at 4.6.6 for GHSA-mrhx-c7xc-m3w5. Two tests now
+reach the rules they name. No runtime behavior changes beyond the download cleanup.
+
 2026-10-24 Runtime guard and pip admission hardening. The Node runtime guard CLI now
 compares real paths, so a symlinked invocation runs the guard instead of exiting 0.
 CI pip admission now refuses pip configuration, from the environment or any config

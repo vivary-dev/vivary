@@ -505,19 +505,15 @@ class WorkflowBootstrapTests(unittest.TestCase):
         self.assertIn("if: ${{ " + condition + " }}", module.job_block(text, "orientation-proof"))
         with self.assertRaises(SystemExit):
             module.check_runner_action_bootstrap(text.replace(condition, "!cancelled()", 1), module.CI_JOBS)
-        # Interpret only the exact admitted expression. This is an offline condition
-        # boundary test, not execution of GitHub's runner or artifact action.
-        terms = {"!cancelled()": True, "steps.runner_action_node.outcome == 'success'": True}
-        with tempfile.TemporaryDirectory() as directory:
-            marker = Path(directory) / "orientation-upload"
-            later_test_failed = True
-            if all(terms[part.strip()] for part in condition.split("&&")): marker.write_text("uploaded")
-            self.assertTrue(later_test_failed)
-            self.assertTrue(marker.exists())
-            marker.unlink()
-            terms["steps.runner_action_node.outcome == 'success'"] = False
-            if all(terms[part.strip()] for part in condition.split("&&")): marker.write_text("uploaded")
-            self.assertFalse(marker.exists())
+        # The exact condition sits on the upload step itself. !cancelled() keeps the receipt
+        # upload running after a later test step fails, and the contract refuses losing it.
+        steps = re.split(r"(?m)(?=^      - )", module.job_block(text, "orientation-proof"))
+        uploads = [step for step in steps if "uses: actions/upload-artifact@" in step]
+        self.assertEqual(len(uploads), 1)
+        self.assertIn("        if: ${{ " + condition + " }}\n", uploads[0])
+        dropped = text.replace("if: ${{ " + condition + " }}", "if: ${{ steps.runner_action_node.outcome == 'success' }}", 1)
+        with self.assertRaises(SystemExit):
+            module.check_runner_action_bootstrap(dropped, module.CI_JOBS)
 
 
 
