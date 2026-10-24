@@ -17,6 +17,10 @@ const advisoryFloors = [
   { name: "@vitest/mocker", branch: "5.", fixed: "5.0.3", advisories: ["GHSA-xp26-3454-mjgp"] },
   // The 4.x floor leaves the reviewed zod 3.25.76 copy, which only botframework uses, out of scope.
   { name: "zod", branch: "4.", fixed: "4.6.6", advisories: ["GHSA-mrhx-c7xc-m3w5"] },
+  // undici 2026-10-23 advisories. Each line has its own patched release.
+  { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
+  { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
