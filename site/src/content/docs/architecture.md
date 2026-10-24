@@ -736,6 +736,42 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Desktop release build workflow. The new `desktop release` workflow builds
+the Windows release once on an Ubuntu runner from the checked-out commit: the
+package with `--windows-x64 --build-workbench`, then the installer, then the new
+`packages/desktop/release-assets.mjs`. That script refuses a payload unless
+`build.json` records the commit, the desktop version and its channel, a clean
+source and `sourceCommitVerified: true`, and unless the installer receipt names the
+same commit and version. It refuses profile and credential file names. It writes the
+portable ZIP and its `.sha256`, a licenses ZIP, `BUILD-INFO.json`,
+`RUNTIME-INVENTORY.json` and `SHA256SUMS`. A manual run, or a push to a
+`release-dry-run/` branch, keeps them as a workflow artifact only. GitHub starts a
+manual run only for a workflow on the default branch, so the branch push is the dry
+run until this workflow reaches `main`. A pushed `v*.*.*-beta.*` tag that names the
+desktop version also creates a draft prerelease with Latest off, in the only job
+with `contents: write`. Both jobs start with the runner action Node admission from
+`ci.yml`. The build job then uses `ci.yml`'s steps: Python 3.12.15 provisioning and
+admission, setup-node v7.1.0 with Node 24.22.1 followed by the Node security
+admission, `bootstrap_build_tools.py` and `build_go_tools.py` for the isolated npm,
+pnpm 10.34.7 and compilers, the Workbench dependency admission, and locked installs
+with `--ignore-scripts` for Workbench and the desktop. No global package client is
+installed. `scripts/check_ci_workflow.py` lists the workflow beside the other
+auxiliary workflows, so it checks the admission step, each pinned Action and the
+setup-node pin. Its action table gains `download-artifact` v8.0.2, read from that
+Action's `action.yml` at the pinned SHA. `scripts/check_desktop_release_workflow.py`
+takes the Python, Node and build tool steps from `check_ci_workflow.py` instead of
+restating them, and fails when `ci.yml`, `bootstrap_build_tools.py`,
+`windows-target.mjs` and this workflow name different Node versions. It also guards
+the triggers, permissions and draft-only release, and `tests + checks` runs it with
+its test. While Electron publication is held, `package.mjs` refuses before it stages
+anything, so a run on this base stops at the package step and keeps no release
+files. The desktop runtime, packaged layout, installer and user data are unchanged,
+so the desktop descriptions above still hold. The release build is a delivery step
+around the same package. `tests/release-assets.test.mjs` joins the desktop Node test
+list. It checks each refusal, the license selection, the inventory, the checksum
+format, and, where `zip` is installed, the full set of release files and their
+archive contents.
+
 2026-10-24 Desktop beta version and channel. `packages/desktop/package.json` moves
 from `0.0.0` to `0.1.0-beta.1`. The new `release-version.mjs` maps a version to its
 channel (`beta` for `major.minor.patch-beta.N`, `stable` for `major.minor.patch`)
