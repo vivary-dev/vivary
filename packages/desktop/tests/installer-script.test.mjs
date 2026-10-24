@@ -518,6 +518,13 @@ test("registry access stays in the current user's uninstall key", () => {
   assert.ok(lines.includes('!define DISPLAY_VERSION "${APP_VERSION}+${PAYLOAD_COMMIT_SHORT}"'));
 });
 
+test("file properties take the numeric Windows version, so a beta version builds", () => {
+  assert.ok(lines.includes("!insertmacro REQUIRE_DEFINE APP_WINDOWS_VERSION"));
+  assert.ok(lines.includes('VIProductVersion "${APP_WINDOWS_VERSION}"'));
+  assert.ok(lines.includes('VIFileVersion "${APP_WINDOWS_VERSION}"'));
+  assert.ok(lines.includes('VIAddVersionKey "ProductVersion" "${DISPLAY_VERSION}"'));
+});
+
 test("setup never stops processes and never blocks silent mode", () => {
   assert.doesNotMatch(code, /taskkill|nsProcess|KillProc|FindProcDLL|TerminateProcess|nsExec|ExecWait/i);
   const running = functionBody("${PREFIX}RequireVivaryClosed");

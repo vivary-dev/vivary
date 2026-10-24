@@ -77,8 +77,8 @@ pnpm --dir packages/workbench build
 npm --prefix packages/desktop ci
 ```
 
-Packaging the original runtime also requires host Python 3.12 with `venv` and
-`ensurepip`. It does not require global setuptools. The first package build
+Packaging the original runtime also requires qualified host Python 3.12 with `venv`.
+It does not execute the host's `ensurepip` or require global setuptools. The first package build
 needs outbound HTTPS for the hash-pinned runtime and build-tool wheels; verified
 downloads are reused from the desktop package's `.tmp` cache.
 
@@ -86,8 +86,16 @@ Packaging captures the recorded Git commit and tracked working-tree changes
 before downloads and wheel construction. Stage new source files with `git add`
 first; untracked files are excluded. Later checkout edits cannot change the
 captured inputs. `build.json` records whether that snapshot matches the commit.
-The existing Workbench `.output` is copied once and labeled `prebuilt`; its
-compilation from the recorded commit is not asserted.
+By default the existing Workbench `.output` is copied once and labeled
+`prebuilt`, with `sourceCommitVerified: false`, because nothing ties it to the
+recorded commit. With `--build-workbench`, the packager deletes `.output`, runs
+`pnpm --dir packages/workbench run build` itself, and labels the output
+`built-from-source`. It refuses to start the build unless the checkout has no
+tracked or untracked changes, and refuses to package if the build changed the
+checkout or HEAD moved. Only then, with a snapshot that matches the commit, does
+`build.json` record `sourceCommitVerified: true`. Ignored files, such as
+installed dependencies, are outside this check. The option runs `pnpm` from
+`PATH`, so it suits Linux and macOS build hosts.
 
 Set `VIVARY_DESKTOP_NODE` to the absolute path of ordinary Node, then run:
 
@@ -109,21 +117,34 @@ projects.
 npm --prefix packages/desktop run package
 ```
 
+While Electron publication is held, this command refuses before it stages anything,
+because no Electron release is admitted. The rest of this section describes what it
+does once one is.
+
 The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
 Vivary runtime, licenses, and build metadata. It does not copy a source
 checkout, runtime data, credentials, or the development preview service.
 
+The version in `package.json` sets the release channel in `build.json`.
+`release-version.mjs` accepts `major.minor.patch`, on the `stable` channel, and
+`major.minor.patch-beta.N`, on the `beta` channel, and refuses any other form.
+The current version is `0.1.0-beta.1`. Windows file properties need four
+numbers, so the packager and the installer write the beta number as the fourth:
+`0.1.0-beta.1` reads `0.1.0.1` there, and `0.1.0` would read `0.1.0.0`. Windows
+therefore orders a beta above the release it precedes. The readable product
+version keeps the full string.
+
 ### Bundled original runtime
 
-The desktop bundles CPython 3.12.14 from the
-[python-build-standalone `20260901` release](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901).
+The desktop bundles CPython 3.12.15 from the
+[python-build-standalone `20261021` release](https://github.com/astral-sh/python-build-standalone/releases/tag/20261021).
 The runtime archives are fixed inputs:
 
 | Target | Archive | SHA-256 |
 | --- | --- | --- |
-| Linux x64 | `cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c` |
-| Windows x64 | `cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz` | `7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14` |
+| Linux x64 | `cpython-3.12.15+20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz` | `6d7521138fd33afddc1ccd08abb007d9a2829e38117c2576f9efdc0ec73ce772` |
+| Windows x64 | `cpython-3.12.15+20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz` | `aac5d331fc3307343f95928fdbea4583f0d53973d08c7e1d081884fbd229a0e1` |
 
 Package-time downloads stay under `packages/desktop/.tmp/original-runtime` and
 are reused only after their hashes match. This includes the following build-only
@@ -131,14 +152,17 @@ Python tools:
 
 | Tool | Version | SHA-256 |
 | --- | --- | --- |
-| [pip](https://pypi.org/project/pip/26.0.1/) | 26.0.1 | `bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b` |
-| [setuptools](https://pypi.org/project/setuptools/84.0.0/) | 84.0.0 | `51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670` |
+| [pip](https://pypi.org/project/pip/26.2.2/) | 26.2.2 | `fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70` |
+| [setuptools](https://pypi.org/project/setuptools/84.1.0/) | 84.1.0 | `5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9` |
+| [certifi](https://pypi.org/project/certifi/2026.10.23/) | 2026.10.23 | `e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1` |
 
 Each build then:
 
-1. Creates a temporary isolated build environment under the same `.tmp`
-   directory, installs only the verified local pip and setuptools wheels, and
-   checks that pip vendors distlib 0.4.0.
+1. Creates a temporary isolated build environment without invoking ensurepip,
+   derives the authenticated certifi overlay before the first pip execution,
+   installs only the verified local backend wheels offline, and checks distlib
+   0.4.2 and the actual certifi version/CA digest. The retained ensurepip seed
+   receives the same derived pip bytes.
 2. Builds fresh pure-Python wheels from the owned `vivary`, `create-vivary`,
    `core`, `tropo`, `strato`, `ozone`, and `exo` sources without an
    index or build isolation.
@@ -159,12 +183,12 @@ adopt, doctor, capabilities, check, find, decide, review, impact, and control.
 Its logs and email-draft helpers remain available through the bundled CLI.
 
 Linux component commands resolve the bundled sibling `python3`. Windows uses
-pip's vendored distlib 0.4.0 console launcher and its supported
+pip's vendored distlib 0.4.2 console launcher and its supported
 `<launcher_dir>` interpreter path. Every standalone and component launcher
 passes `-I -X utf8 -B` so redirected Unicode output has the same encoding
 contract as the application adapter. See the first-party
-[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.0/PC/launcher.c).
-The packaged runtime omits pip and Python bytecode caches. It retains distlib's
+[distlib launcher source](https://github.com/pypa/distlib/blob/0.4.2/PC/launcher.c).
+The packaged runtime omits installed pip from site-packages and Python bytecode caches. It retains distlib's
 license at `licenses/LICENSE.distlib` for the copied Windows launcher stubs.
 Electron Packager copies the staged Python tree with verbatim relative symlinks.
 
@@ -172,7 +196,7 @@ The manifest records the target, source revision, interpreter and component
 versions, wheel hashes, launchers, bridge hash, and license paths. The package
 includes each component's MIT license, the repository MIT license for the
 bridge, CPython and distlib licenses, and the release-pinned
-[python-build-standalone aggregate licenses](https://github.com/astral-sh/python-build-standalone/blob/20260901/python-licenses.rst).
+[python-build-standalone aggregate licenses](https://github.com/astral-sh/python-build-standalone/blob/20261021/python-licenses.rst).
 That aggregate is 105,875 bytes with SHA-256
 `e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab`.
 
@@ -236,16 +260,18 @@ and its limits belong to the [issue receipt](../../docs/product/multi-project/re
 
 ## Windows x64 portable preview
 
-A Linux build host can also assemble the unsigned Windows x64 folder:
+The Windows x64 packaging entry is:
 
 ```console
 npm --prefix packages/desktop run package -- --windows-x64
 ```
 
-This mode requires Workbench output built with Node 24.20.0 (ABI 137) and
-`better-sqlite3` 12.11.1. It verifies pinned official Windows Node and SQLite
-assets, replaces the binding only in the staged copy, and asks Electron Packager
-for Windows x64. It uses the build host's `tar` command for the one SQLite entry.
+This mode requires Workbench output built with Node 24.22.1 (ABI 137) and
+`better-sqlite3` 13.0.3. It verifies the pinned official Windows Node asset and
+the bundled `prebuilds/win32-x64.node` in the staged copy. That N-API binding must
+match SHA-256 `e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a`.
+It remains at the path selected by the 13.x loader; staging does not download or
+extract a separate ABI-specific SQLite archive. The source Workbench output is unchanged.
 The source checkout and its installed native modules stay intact.
 
 This mode also writes `package-file-manifest.json` beside the `Vivary-win32-x64`
@@ -253,11 +279,13 @@ folder in the dated `dist/` directory. It maps each file's path relative to that
 folder, with forward slashes, to its lowercase SHA-256. The
 [Windows installer](#windows-installer) build takes it as `--manifest`.
 
-[Node checksums](https://nodejs.org/dist/v24.20.0/SHASUMS256.txt) and the
-[SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.11.1)
+[Node checksums](https://nodejs.org/dist/v24.22.1/SHASUMS256.txt) and the
+[SQLite release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v13.0.3)
 are the asset authorities. [Electron Packager](https://github.com/electron/packager/blob/v20.3.0/README.md)
-supports cross-platform packaging. A successful package build establishes an
-artifact, not Windows runtime acceptance.
+supports cross-platform assembly, but Vivary's mandatory native runtime
+collector requires matching Windows x64 evidence and refuses that collection
+on Linux. Electron publication remains held because standalone Node admission
+does not resolve its incomplete advisory backport evidence.
 
 `vivary.exe` carries the Vivary name and icon. The icon is
 `assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`
@@ -303,6 +331,10 @@ npm --prefix packages/desktop run package -- --windows-x64
 npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
+While Electron publication is held, both commands refuse: the packager before it
+stages anything, and the installer build at its runtime check. The rest of this
+section describes them once an Electron release is admitted.
+
 The first command writes the dated `<dist>/<time>/` folder, which holds both the
 `Vivary-win32-x64` payload and its `package-file-manifest.json`.
 
@@ -322,7 +354,8 @@ longest file and folder paths, and the script passes their lengths to setup as
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
-`build-installer.mjs`, `assets/vivary.ico`, and the repository `LICENSE`, so the
+`build-installer.mjs`, `release-version.mjs`, `assets/vivary.ico`,
+`packages/workbench/bin/runtime-security.mjs` and the repository `LICENSE`, so the
 installer commit it records holds every source file the build used. It also refuses
 an existing installer, `.sha256`, or `.receipt.json` at the output path.
 
@@ -420,3 +453,23 @@ the manifest check, the installer commit check, the list order, and the cleanup
 after a failed build, which uses a stand-in `makensis`. It builds a small fixture
 installer when the real `makensis` is available and skips that build otherwise.
 The installer is not code signed.
+
+
+### Python trust bundles
+
+The builder authenticates the official pip 26.2.2 and certifi 2026.10.23 wheels
+before executing pip. Because upstream pip still vendors certifi 2026.10.19,
+`scripts/certifi_bundle.py` derives a narrowly changed wheel: only certifi's
+version module and CA bundle, the vendor pin and wheel RECORD change. All other
+pip bytes, including vendored import rewrites and distlib, remain unchanged.
+Original input and derived output hashes are recorded separately in the runtime
+manifest; this is a Vivary overlay, not an upstream pip release.
+
+The same derived wheel supplies the offline builder and replaces the retained,
+authenticated Linux/Windows ensurepip seed. Fresh default venvs therefore inherit
+the qualified bundle instead of restoring the older one. The seven shipped
+Vivary packages remain the runtime closure; no standalone certifi dependency is
+added to that closure. C1/C3 removal follows certifi's release and does not
+establish exploitation. Existing published ZIPs and user installations are not
+modified by these source changes. Native Windows and Electron qualification
+remain required before publishing a replacement desktop package.
