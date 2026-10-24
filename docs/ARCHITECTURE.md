@@ -301,3 +301,52 @@ The vertical column is named by altitude: `tropo` (troposphere, ground-hugging
 and dense) → `strato` (stratosphere, stable) → `ozone` (the protective layer) →
 `exo` (exosphere, the boundary to space). A *vivary* contains its own atmosphere,
 so the metaphor nests cleanly: the world (Vivary) and its layers (the strata).
+
+
+## 7. Runtime and build security
+
+The source security baseline preserves this branch's original CLI contracts,
+component versions and Core 0.176.5 patch. It does not promote the later dev
+feature history or add an installer. The desktop/start/build boundaries and CI
+admit the actual executable before affected tools run. Ordinary Node uses the
+October branch floors 22.23.4, 24.22.1 and 26.12.1; CI selects 24.22.1. The packaged
+Windows Node and SQLite 13.0.3 N-API binding are authenticated inputs. No Electron
+release is currently admitted, so packaging refuses before loading its packager.
+Historical desktop acceptance does not establish this candidate's native behavior.
+
+CI retains its six existing jobs and feature tests. Its first native step repairs
+only authenticated known-old worker Node bytes and then runs the complete
+worker-bound admission guard before JavaScript actions. The isolated Python
+provisioner authenticates CPython 3.12.15/OpenSSL 3.5.9 and corrects its retained
+ensurepip seed before exporting it. Each fresh venv omits the old seed, provisions
+the authenticated pip 26.2.2/certifi 2026.10.23 overlay, and admits that interpreter
+and loaded pip before use. Pip and Requests certificate overrides must match all
+118 authenticated certifi roots exactly; pip's supported legacy-certs mode keeps
+host stores out of that context. Python clients that pass the bundle as `cafile`
+and Node descendants instead use filtered task-local host bundles, retaining other
+eligible roots while excluding the existing G3 and removed C1/C3 roots. On Windows,
+a Python default context without `cafile` also loads the CryptoAPI CA and ROOT
+stores, so the filtered bundle does not narrow that code's trust. No host-global
+trust store changes.
+
+[Isolated build tools](https://github.com/vivary-dev/vivary/blob/main/docs/BUILD-TOOLS.md) own the authenticated package clients,
+Go 1.26.10 compilers, archive checks and certificate behavior. Workbench's known
+security dependency closure retains its feature dependency keys and Core patch;
+metadata admission precedes dependency installation and compiler execution.
+Compatibility tests exercise UUID exports, selector ASTs and SQLite transactions.
+The optional stdio MCP adapter keeps protocol 2026-07-28 and component identity 0.1.3
+while the unpublished source dependency/schema bindings move to SDK 2.2.0. This
+source change does not alter the published 0.1.3 artifact or claim conformance.
+
+The internal site pins Astro 7.3.5 to its inspected remote-image caller, including the
+patched JSX/MDX and View Transitions fixes absent from 7.3.1.
+Its private no-cache policy implements only the two methods that caller uses and
+assigns zero freshness to new or revalidated image bytes. It does not remove
+Astro's stored bytes, validators, preexisting fresh entries or stale-on-error
+behavior. The actual caller never invokes upstream max-stale cache-reuse logic;
+no exploit through that caller is asserted. The local replacement avoids treating
+a disputed advisory's version range as evidence of a fix. Astro's compiler 0.5.1 and descendant WASM runtime 1.2.4 are scoped to the
+already qualified native dependency closure. The site retains its blocking audit,
+exact local-edge admission and actual-caller regression tests.
+Main-specific installed compatibility, Linux/Windows CI, independent review and
+release acceptance remain distinct gates; implementation alone is not a pass.

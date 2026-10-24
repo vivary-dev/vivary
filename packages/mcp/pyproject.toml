@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "vivary-tropo>=0.5.3",
-    "mcp==2.0.0",
+    "mcp==2.2.0",
 ]
 
 [project.urls]
