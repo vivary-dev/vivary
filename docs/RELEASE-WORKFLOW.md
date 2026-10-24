@@ -277,7 +277,10 @@ every package that depends on it. Publish `vivary-tropo` next; then the eligible
 `create-vivary` artifacts after their declared floors exist. Publish the `vivary`
 meta-package only after all five of its component floors are available. Publish
 `create-vivary` on PyPI before the same-version `@vivary/create` npm launcher, because
-the launcher installs the PyPI distribution at run time. Optional memory and MCP do not
+the launcher installs the PyPI distribution at run time. Publish a `vivary-mcp` that pins
+`mcp==2.2.0` before any `create-vivary` release built from source whose doctor requires
+SDK 2.2.0. Otherwise every install of the published `vivary-mcp` 0.1.3, which pins
+`mcp==2.0.0`, reports `sdk_compatible: false` with no fix available. Optional memory and MCP do not
 become meta-package dependencies merely because they ride the same train. The
 [package dependency map](ARCHITECTURE.md#package-dependency-map) owns the edges.
 

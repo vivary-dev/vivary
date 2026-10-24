@@ -359,10 +359,11 @@ def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
         missing = text.replace(block, block.replace(guard_step, '', 1), 1)
         message = _run(missing)
         assert message and expected in message, (name, message)
-        unrelated = missing + '\n  unrelated:\n    steps:\n' + guard_step
-        message = _run(unrelated)
-        # main also refuses any added job, which refuses an unrelated guard copy too.
-        assert message and (expected in message or "existing jobs" in message), (name, message)
+        review = module.job_block(missing, 'review')
+        decoy = missing.replace(review, review.rstrip('\n') + '\n' + guard_step, 1)
+        message = _run(decoy)
+        # A guard in a job that does not own it cannot stand in for the owning job's guard.
+        assert message and expected in message, (name, message)
         for alteration in (
             guard_step.replace('        run:', '        if: false\n        run:'),
             guard_step.replace('        run:', '        continue-on-error: true\n        run:'),
@@ -757,64 +758,6 @@ PIP_WINDOWS_MCP_GUARD = (
     '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
     '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission failed" }\n'
 )
-PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
-         '        shell: bash\n'
-         '        run: |\n'
-         '          python -m venv --without-pip "$smoke/venv"\n'
-         '          venv_python="$smoke/venv/bin/python"\n'
-         '          export PATH="$smoke/venv/bin:$PATH"\n'
-         '          unset PYTHONPATH\n'
-         '          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?\n'
-         '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
-         '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary\n'
-         '      - name: fresh venv pip fixture\n'
-         '        shell: bash\n'
-         '        run: |\n'
-         '          python -m venv --without-pip "$mcp_venv"\n'
-         '          mcp_python="$mcp_venv/bin/python"\n'
-         '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
-         '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
- 'governed-platform-proof': '      - name: fresh venv pip fixture\n'
-                            '        shell: pwsh\n'
-                            '        run: |\n'
-                            '          python -m venv --without-pip (Join-Path $smoke "venv")\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
-                            '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
-                            '          $python = Join-Path $scripts "python.exe"\n'
-                            '          & $python -I -B scripts/check_python_runtime.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }\n'
-                            '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
-                            '}\n'
-                            '          & $python -I -B scripts/check_pip_runtime.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
-                            'failed" }\n'
-                            '          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links '
-                            '$wheelhouse vivary\n'
-                            '      - name: fresh venv pip fixture\n'
-                            '        shell: pwsh\n'
-                            '        run: |\n'
-                            '          python -m venv --without-pip $mcpVenv\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation failed" '
-                            '}\n'
-                            '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
-                            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
-                            '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
-                            '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
-                            'failed" }\n'
-                            '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
-                            'failed" }\n'
-                            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
-                            '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
-                            'failed" }\n'}
-
-
 def test_actual_workflow_requires_pip_runtime_admission():
     before = REAL_WORKFLOW.read_bytes()
     workflow = before.decode("utf-8")
