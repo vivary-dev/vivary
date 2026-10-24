@@ -8199,6 +8199,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Approval continuation outcomes (#205, slice 2). The maintained Core
+patch gains an appended section for `jobs/background-automation-runner.js`, and
+its hash moves from `12751b66` to `8b39e3e5`. The approved replay no longer
+reports every result other than completion as an unconfirmed outcome. When the
+approval store refuses the grant, for example because it expired after the
+decision, the action did not run, the replay writes no new ask or wait, and the
+run fails with `automation_approval_unconsumed`. An approved tool that ran and
+returned an error continues the run, so the model sees the error. The runner logs a
+failed readiness write after a saved wait, and the run still returns waiting,
+because the owner's decision and the expiry sweep recover readiness. A rejected
+Native finalization now also clears the run's in-process hold, and Native's run
+status still guards a row left running. The background runner and its approval
+owners keep the roles described above, so the descriptions hold. The approval
+statechart in `journeys.md` gains the refused-grant edge. Four cases in
+`tests/automation-approval-continuation.test.mjs` failed on the previous patch
+and pass on this one, and reverting each fix alone fails its case.
+
 2026-10-24 Approval settlement sweeps (#205, slice 1). The maintained Core
 patch gains appended sections for `jobs/run-history.js`, its declaration file,
 `jobs/background-automation-runner.js`, `jobs/scheduler.js` and
