@@ -732,6 +732,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Approval asks and waits that never ended (#205, slice 3). The
+maintained Core patch gains appended sections for `jobs/run-history.js`, its
+declaration file and `jobs/background-automation-runner.js`. Its hash moves from
+`8b39e3e5` to `c955c126`. Reconciliation of a finished run now declines an ask
+that it left pending, so no ask outlives its run or its deleted automation. An
+owner can decline, and the expiry sweep can end, a wait whose turn cannot be
+recovered because its Native run row is gone or its turn stopped, once no run
+can still save it. Approval still needs the saved turn. A new sweep step
+recovers an owner's decision claim that a crash left resuming after the claim
+lease. A declined ask ends it declined, a consumed ask ends it interrupted, and
+a pending ask returns it to waiting, so an expired wait then expires in the same
+pass. The background runner and its approval owners keep the roles
+described above, so the descriptions hold. `journeys.md` describes the new
+recovery paths. Eight cases in `tests/automation-approval-stuck.test.mjs` failed
+on the previous patch, apart from the in-lease control, and pass on this one.
+
 2026-10-24 Approval continuation outcomes (#205, slice 2). The maintained Core
 patch gains an appended section for `jobs/background-automation-runner.js`, and
 its hash moves from `12751b66` to `8b39e3e5`. The approved replay no longer
