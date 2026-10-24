@@ -93,6 +93,10 @@ with a launcher (`codex.exe` or `codex.cmd`) in PATH order, as a terminal does. 
 not read `.com` or `.bat` wrappers. It also skips a `codex.cmd` or `claude.cmd` that
 names no recognized package entry and has no npm package beside it. So a custom
 wrapper can lead it to a different copy than your terminal runs.
+Vivary supports Claude Code 2.1.286 or later and Codex 0.160.0 or later. For an older
+copy, Settings > Coding runtimes shows Update required with the installed version, and
+Vivary sends no message on that runtime until you update it and select Refresh.
+When Vivary cannot read the installed version, it does not apply this check.
 Use your existing runtime subscription, tools, skills, and configured connections.
 Bundling Vivary does not include model-provider credentials or paid service access.
 Later builds offer no Builder.io account or credits. To use Native chat, add your own

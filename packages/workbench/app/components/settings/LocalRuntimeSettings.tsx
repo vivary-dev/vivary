@@ -39,6 +39,7 @@ const permissionModes: readonly CodePermissionMode[] = ["normal", "read-only", "
 const statusLabels: Record<VivaryRuntimeStatus["status"], string> = {
   ready: "Signed in",
   "sign-in-required": "Sign-in required",
+  "update-required": "Update required",
   "not-installed": "Not installed",
   unavailable: "Check needed",
 };
@@ -152,7 +153,7 @@ export function LocalRuntimeSettings() {
               <li>
                 <a className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4"
                   href={runtime.installUrl} target="_blank" rel="noopener noreferrer">
-                  Install {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
+                  {current?.status === "update-required" ? "Update" : "Install"} {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
                 </a>{" "}using the official instructions.
               </li>
               <li>
