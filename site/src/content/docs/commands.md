@@ -199,7 +199,9 @@ Standard output is reserved for MCP JSON-RPC. `--observability` writes bounded,
 sanitized diagnostics to standard error: none in `off`, refusal/cancellation/timeout
 events in `errors`, or all bounded lifecycle events in `json`.
 
-The package pins protocol `2026-07-28` and official SDK `mcp==2.0.0`. External
+This unpublished source candidate pins protocol `2026-07-28` and official SDK
+`mcp==2.2.0` with `mcp-types==2.2.0`. Published `vivary-mcp` 0.1.3 still has the
+older SDK dependency; these source changes do not update that artifact. External
 conformance remains unproven. [MCP.md](/mcp/) owns the tool schemas, privacy and
 process boundaries, passive Doctor report, and verification procedure.
 
@@ -1134,11 +1136,12 @@ or competing import artifact.
 A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
 rows include ordered install hints.
 
-The MCP row is optional and `not-installed` by default. A compatible row requires the
-recorded `vivary-mcp` entry point, its exact `mcp==2.0.0` dependency declaration, the
-matching SDK version, local standard-input/output transport, and the exact four tool
-names. Doctor reports external conformance as `unproven`; it does not import or start
-the adapter.
+The MCP row is optional and `not-installed` by default. In this unpublished source
+candidate, a compatible row requires the recorded `vivary-mcp` entry point, its
+exact `mcp==2.2.0` dependency declaration, the matching SDK version, local
+standard-input/output transport, and the exact four tool names. Published 0.1.3
+retains its older SDK binding. Doctor reports external conformance as `unproven`;
+it does not import or start the adapter.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then

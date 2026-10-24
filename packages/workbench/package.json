@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Unreleased Vivary workbench shell and project application services.",
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1 <27"
   },
   "dependencies": {
     "@agent-native/core": "0.176.5",
@@ -17,14 +17,14 @@
     "react-dom": "19.2.8",
     "react-router": "8.3.1",
     "h3": "2.0.1-rc.31",
-    "zod": "4.5.4",
+    "zod": "4.6.7",
     "next-themes": "0.4.6"
   },
   "scripts": {
     "test:registry": "node --test tests/registry-store.test.mjs",
     "test:registry-actions": "node --test tests/registry-actions.test.mjs",
     "test:registry-http": "node --test tests/registry-http.test.mjs",
-    "build": "agent-native build",
+    "build": "node bin/runtime-security.mjs run ./node_modules/@agent-native/core/package.json agent-native build",
     "dev": "agent-native dev",
     "start": "node bin/start.mjs",
     "typecheck": "agent-native typecheck",
@@ -39,8 +39,8 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "@types/node": "25.9.5",
-    "vite": "8.1.0",
-    "vitest": "4.1.11",
+    "vite": "8.1.6",
+    "vitest": "4.1.12",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "esbuild": "0.28.2"

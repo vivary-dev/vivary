@@ -1,0 +1,1256 @@
+name: review gate
+
+# The required review gate runs only for pull requests, so pushes to long-lived
+# branches never publish its check. It runs the gate script from the pull request's
+# base commit, so edits to that script take effect only after review and merge.
+# Only while the base has no gate script does it fetch and run the script from the
+# commit pinned below. For PR #193, which introduced the gate, that is its own reviewed
+# commit; after that merge it is in dev's history, and main uses it until main has the script.
+# A pull request can still edit this workflow file, so .github changes need owner review.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  review-gate:
+    name: required review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - &runner_action_node_bootstrap
+        name: runner action Node admission
+        id: runner_action_node
+        shell: python -I -B {0}
+        run: |
+          import types
+
+          RUNNER_ADMISSION_SOURCE = r'''"""Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
+
+          import ctypes
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          import platform
+          import re
+          import struct
+          import subprocess
+          import sys
+          import threading
+
+
+          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+          # Checked by the controller on 2026-10-21. CVE-2026-111497 is a Brotli
+          # out-of-bounds write / RCE on all three lines. This is known-advisory coverage,
+          # not a zero-vulnerability claim or permission to select another project runtime.
+          FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
+          MAX_ANCESTORS = 64
+          PROBE_TIMEOUT = 10
+          KNOWN_SELECTION_FLAGS = {
+              "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
+              "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION",
+              "ACTIONS_RUNNER_FORCED_INTERNAL_NODE_VERSION",
+          }
+
+
+          def refuse(message):
+              raise RuntimeError("Runner action Node: " + message)
+
+
+          def node_version(value, selected_major=None):
+              if not isinstance(value, str) or not re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value):
+                  refuse("malformed or prerelease version")
+              major, minor, patch = map(int, value.removeprefix("v").split("."))
+              if major not in FLOORS or (minor, patch) < FLOORS[major]:
+                  refuse("EOL, unknown or advisory-affected Node release")
+              if selected_major is not None and major != selected_major:
+                  refuse("the action interpreter must actually be Node 24")
+              return f"{major}.{minor}.{patch}"
+
+
+          def check_selection_overrides(environment):
+              # Examined runner dispatch leaves explicit node24 on node24 for the known
+              # migration flags. Internal-function selection does not select action Node.
+              for name, value in environment.items():
+                  if value and "NODE" in name and name.startswith(("ACTIONS_", "FORCE_JAVASCRIPT_")) and name not in KNOWN_SELECTION_FLAGS:
+                      refuse("unproved selection override " + name)  # Report names, never values.
+
+
+          def check_host(system, machine, environment, container=False):
+              if system not in ("linux", "win32") or machine.lower() not in ("x86_64", "amd64") or struct.calcsize("P") != 8:
+                  refuse("only native Linux/Windows x64 hosts are supported")
+              if environment.get("RUNNER_ARCH", "X64") != "X64" or environment.get("RUNNER_OS", {"linux": "Linux", "win32": "Windows"}[system]) != {"linux": "Linux", "win32": "Windows"}[system]:
+                  refuse("runner OS/architecture disagrees with the native host")
+              if container:
+                  refuse("container execution is unsupported")
+              check_selection_overrides(environment)
+
+
+          def container_host(system):
+              if any(os.environ.get(name) for name in ("CONTAINER_SANDBOX_MOUNT_POINT", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_RUNNING_IN_CONTAINERS")):
+                  return True
+              if system == "linux":
+                  if any(Path(name).exists() for name in ("/.dockerenv", "/run/.containerenv", "/run/systemd/container")):
+                      return True
+                  return bool(re.search(r"docker|kubepods|containerd|lxc", Path("/proc/1/cgroup").read_text()))
+              return False
+
+
+          def parse_linux_stat(text):
+              pid, separator, rest = text.partition(" (")
+              name, closing, tail = rest.rpartition(") ")
+              fields = tail.split()
+              if not separator or not closing or not pid.isdecimal() or len(fields) < 20 or fields[0] in ("Z", "X"):
+                  refuse("unreadable Linux process identity")
+              try:
+                  return {"pid": int(pid), "ppid": int(fields[1]), "created": int(fields[19])}
+              except ValueError:
+                  refuse("malformed Linux process identity")
+
+
+          def linux_process(pid):
+              folder = Path("/proc") / str(pid)
+              before = parse_linux_stat((folder / "stat").read_text())
+              executable = os.readlink(folder / "exe")
+              after = parse_linux_stat((folder / "stat").read_text())
+              if before != after or before["pid"] != pid or executable.endswith(" (deleted)") or not Path(executable).is_absolute():
+                  refuse("Linux process disappeared, changed or reused its PID")
+              return {**before, "exe": str(Path(executable).resolve(strict=True))}
+
+
+          def windows_process(pid):
+              from ctypes import wintypes
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              ntdll = ctypes.WinDLL("ntdll")
+
+              class BasicInformation(ctypes.Structure):
+                  _fields_ = [("reserved", ctypes.c_void_p), ("peb", ctypes.c_void_p),
+                              ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_size_t), ("parent", ctypes.c_size_t)]
+
+              kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+              kernel.OpenProcess.restype = wintypes.HANDLE
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+              kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+              kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+              kernel.WaitForSingleObject.restype = wintypes.DWORD
+              ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
+              ntdll.NtQueryInformationProcess.restype = wintypes.LONG
+              handle = kernel.OpenProcess(0x1000 | 0x100000, False, pid)
+              if not handle:
+                  refuse("unreadable Windows process identity")
+              try:
+                  info = BasicInformation()
+                  size = wintypes.ULONG()
+                  if ntdll.NtQueryInformationProcess(handle, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(size)) != 0:
+                      refuse("Windows parent identity is unavailable")
+                  times = [wintypes.FILETIME() for _ in range(4)]
+                  if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+                      refuse("Windows creation identity is unavailable")
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = wintypes.DWORD(len(buffer))
+                  if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)) or info.pid != pid or kernel.WaitForSingleObject(handle, 0) != 258:
+                      refuse("Windows process disappeared or reused its PID")
+                  return {"pid": pid, "ppid": int(info.parent), "created": (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime, "exe": buffer.value}
+              finally:
+                  kernel.CloseHandle(handle)
+
+
+          def discover_worker(pid, read_process, system):
+              # The nearest owning Worker selects this action's interpreter. Its own
+              # service ancestors are outside that execution boundary.
+              chain = []
+              seen = set()
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
+              worker = None
+              while pid:
+                  if pid in seen or len(chain) >= MAX_ANCESTORS:
+                      refuse("cyclic or overlong process ancestry")
+                  seen.add(pid)
+                  item = read_process(pid)
+                  if item["pid"] != pid or item["created"] <= 0 or item["ppid"] < 0 or not paths(item["exe"]).is_absolute():
+                      refuse("missing process identity")
+                  chain.append(item)
+                  if item["ppid"] in seen:
+                      refuse("cyclic or overlong process ancestry")
+                  name = paths(item["exe"]).name
+                  if len(chain) > 1 and (name.lower() if system == "win32" else name) == expected:
+                      runner_paths(item, system)
+                      worker = item
+                      break
+                  pid = item["ppid"]
+              if worker is None:
+                  refuse("an owning Runner.Worker ancestor is required")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("ancestry changed or reused a process identity")
+              return worker, chain
+
+
+          def runner_paths(worker, system):
+              paths = PureWindowsPath if system == "win32" else PurePosixPath
+              executable = paths(worker["exe"])
+              directory = executable.parent.name.lower() if system == "win32" else executable.parent.name
+              if not executable.is_absolute() or directory != "bin" or ".." in executable.parts:
+                  refuse("Worker is not in the runner root's bin directory")
+              root = executable.parent.parent
+              node = root / "externals" / "node24" / "bin" / ("node.exe" if system == "win32" else "node")
+              return str(root), str(node)
+
+
+          def binary_x64(file, system):
+              with open(file, "rb") as stream:
+                  header = stream.read(64)
+                  if system == "linux":
+                      if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 62:
+                          refuse("expected a Linux x64 ELF executable")
+                  else:
+                      if len(header) != 64 or header[:2] != b"MZ":
+                          refuse("expected a Windows x64 PE executable")
+                      offset = struct.unpack_from("<I", header, 60)[0]
+                      if not 64 <= offset <= 1024 * 1024:
+                          refuse("malformed PE header")
+                      stream.seek(offset)
+                      pe = stream.read(26)
+                      if len(pe) != 26 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664 or struct.unpack_from("<H", pe, 24)[0] != 0x20b:
+                          refuse("expected a Windows x64 PE32+ executable")
+
+
+          def sha256(file):
+              digest = hashlib.sha256()
+              with open(file, "rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+
+          def sanitized_environment(system):
+              environment = {"LANG": "C", "LC_ALL": "C"}
+              if system == "win32":
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  buffer = ctypes.create_unicode_buffer(32768)
+                  length = kernel.GetWindowsDirectoryW(buffer, len(buffer))
+                  if not 0 < length < len(buffer):
+                      refuse("Windows directory is unavailable")
+                  environment["SystemRoot"] = buffer.value
+              return environment
+
+
+          def probe_version(executable, environment):
+              # Bound output as well as elapsed time, without running any JavaScript guard.
+              process = subprocess.Popen([str(executable), "--version"], stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
+                                         cwd=str(executable.parent), shell=False)
+              output = []
+              def read_output():
+                  try:
+                      output.append(process.stdout.read(129))
+                  except OSError:
+                      output.append(b"")
+              reader = threading.Thread(target=read_output, daemon=True)
+              reader.start()
+              try:
+                  reader.join(PROBE_TIMEOUT)
+                  if reader.is_alive() or not output or len(output[0]) > 128:
+                      refuse("interpreter probe timed out or exceeded its output bound")
+                  try:
+                      status = process.wait(timeout=2)
+                  except subprocess.TimeoutExpired:
+                      refuse("interpreter probe timed out")
+                  if status != 0:
+                      refuse("interpreter probe failed")
+                  try:
+                      text = output[0].decode("ascii")
+                  except UnicodeDecodeError:
+                      refuse("interpreter probe returned malformed output")
+                  if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:\r?\n)?", text):
+                      refuse("interpreter probe returned malformed output")
+                  return text.rstrip("\r\n")
+              finally:
+                  if process.poll() is None:
+                      process.kill()
+                  process.wait(timeout=2)
+                  reader.join(2)
+                  # A failed probe may leave an inherited pipe open. Never block on a
+                  # buffered close while the bounded daemon reader still owns that pipe.
+                  if not reader.is_alive():
+                      process.stdout.close()
+
+
+          def check_runner_action_node():
+              system = sys.platform
+              check_host(system, platform.machine(), os.environ, container_host(system))
+              if system == "win32":
+                  # Refuse x64 emulation on ARM even when the Python process reports AMD64.
+                  from ctypes import wintypes
+                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                  kernel.GetCurrentProcess.restype = wintypes.HANDLE
+                  kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
+                  process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
+                  if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
+                      refuse("native Windows x64 identity is required")
+              read_process = windows_process if system == "win32" else linux_process
+              worker, chain = discover_worker(os.getpid(), read_process, system)
+              root, selected = runner_paths(worker, system)
+              interpreter = Path(selected)
+              if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
+                  refuse("missing interpreter or a path outside the discovered runner root")
+              binary_x64(worker["exe"], system)
+              binary_x64(interpreter, system)
+              worker_hash, before = sha256(worker["exe"]), sha256(interpreter)
+              version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
+              if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
+                  refuse("Worker or interpreter bytes changed during the probe")
+              for item in chain:
+                  if read_process(item["pid"]) != item:
+                      refuse("Worker ancestry changed or reused a process identity")
+              return {"worker": worker, "workerSha256": worker_hash, "root": root,
+                      "interpreter": str(interpreter), "sha256": before, "version": version,
+                      "platform": system, "architecture": "x64"}
+
+
+          def admission_failure(error):
+              phases = {
+                  "container_host": "container-detection", "check_host": "host-policy",
+                  "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
+                  "linux_process": "process-identity", "windows_process": "process-identity",
+                  "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+                  "binary_x64": "binary-identity", "sha256": "binary-hash",
+                  "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
+                  "node_version": "interpreter-version",
+              }
+              phase = "admission"
+              observed = None
+              trace = error.__traceback__
+              while trace is not None:
+                  frame = trace.tb_frame
+                  phase = phases.get(frame.f_code.co_name, phase)
+                  if isinstance(error, RuntimeError) and frame.f_code is node_version.__code__:
+                      value = frame.f_locals.get("value")
+                      selected = frame.f_locals.get("selected_major")
+                      if (type(value) is str and len(value) <= 32 and type(selected) is int and selected == 24
+                              and re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)):
+                          observed = value.removeprefix("v")
+                  trace = trace.tb_next
+              detail = f", observedNode={observed}, requiredNode=24.22.1" if observed is not None else ""
+              return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__}{detail})"
+
+
+          def main():
+              try:
+                  print(json.dumps(check_runner_action_node(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
+                  # Report only owned labels and validated numeric versions, never raw exception text.
+                  print(admission_failure(error), file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          '''
+          admission = types.ModuleType('runner_node_admission')
+          exec(compile(RUNNER_ADMISSION_SOURCE, 'runner-node-admission.py', 'exec'), admission.__dict__)
+
+          """Repair only the owning runner's known-affected action Node, then admit it.
+
+          Runner externals are an internal compatibility dependency, not a vendor API.
+          No old Node runs during repair. Unknown bytes get only the unchanged admission.
+          """
+
+          import ctypes
+          import errno
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+          import sys
+          import tarfile
+          import tempfile
+
+
+          if "admission" not in globals():
+              spec = importlib.util.spec_from_file_location("runner_node_admission", Path(__file__).with_name("check_runner_action_node.py"))
+              admission = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(admission)
+
+          # New bytes match official runner 2.338.1 and Node 24.22.1; the old allowlist
+          # contains only Node 24.21.0 from authenticated official runner 2.338.0 archives.
+          ARTIFACTS = {
+              "linux": {
+                  "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz",
+                  "size": 32026916,
+                  "sha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+                  "member": "node-v24.22.1-linux-x64/bin/node", "node_size": 126879696,
+                  "node_sha256": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+                  "old_sha256": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+              },
+              "win32": {
+                  "url": "https://nodejs.org/dist/v24.22.1/win-x64/node.exe",
+                  "size": 93915464, "node_size": 93915464, "member": None,
+                  "sha256": "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
+                  "node_sha256": "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
+                  "old_sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+              },
+          }
+
+
+          class RepairRefusal(RuntimeError):
+              pass
+
+
+          def refuse(message):
+              raise RepairRefusal("Runner Node repair: " + message)
+
+
+          def filesystem_failure(operation, error):
+              code = error.errno if type(error.errno) is int else 0
+              windows = getattr(error, "winerror", 0)
+              windows = windows if type(windows) is int else 0
+              reason = "filesystem-unavailable"
+              if code == errno.ETXTBSY:
+                  reason = "selected-node-busy"
+              elif windows in (32, 33):
+                  reason = "image-sharing-lock"
+              elif code in (errno.EACCES, errno.EPERM, errno.EROFS):
+                  reason = "same-user-write-unavailable"
+              return f"{operation}: {reason} (errno={code}, winerror={windows})"
+
+
+          def native_windows():
+              from ctypes import wintypes
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              kernel.GetCurrentProcess.restype = wintypes.HANDLE
+              kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
+              process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
+              if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
+                  refuse("native Windows x64 identity is required before repair")
+
+
+          def plain(path, directory=False, role="artifact"):
+              # Report only owned role/reason names and numeric filesystem evidence. The
+              # unchanged admission also requires the interpreter's canonical spelling.
+              if role not in ("root", "externals", "node24", "bin", "interpreter", "worker", "artifact", "stage"):
+                  role = "artifact"
+              try:
+                  info = path.lstat()
+                  attributes = getattr(info, "st_file_attributes", 0)
+                  reason = None
+                  if stat.S_ISLNK(info.st_mode):
+                      reason = "symlink"
+                  elif attributes & 0x400:
+                      reason = "reparse-point"
+                  elif not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+                      reason = "unexpected-type"
+                  elif not directory and info.st_nlink != 1:
+                      reason = "nonexclusive-file-links"
+                  elif os.path.normcase(str(path.resolve(strict=True))) != os.path.normcase(str(path)):
+                      reason = "canonical-spelling-mismatch"
+              except OSError as error:
+                  refuse(filesystem_failure("path-" + role, error))
+              if reason:
+                  refuse(f"plain canonical runner paths are required (role={role}, reason={reason}, "
+                         f"mode={info.st_mode & 0xffff}, attributes={attributes & 0xffffffff}, links={min(info.st_nlink, 0x7fffffff)})")
+              return info
+
+
+          def identity(info):
+              return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_nlink)
+
+
+          def context():
+              system = sys.platform
+              admission.check_host(system, admission.platform.machine(), os.environ, admission.container_host(system))
+              if system == "win32":
+                  native_windows()
+              read = admission.windows_process if system == "win32" else admission.linux_process
+              worker, chain = admission.discover_worker(os.getpid(), read, system)
+              root, selected = admission.runner_paths(worker, system)
+              interpreter = Path(selected)
+              folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
+              directories = []
+              for role, path in zip(("root", "externals", "node24", "bin"), folders):
+                  info = plain(path, directory=True, role=role)
+                  directories.append((path, (info.st_dev, info.st_ino)))
+              original = plain(interpreter, role="interpreter")
+              if original.st_mode & (stat.S_ISUID | stat.S_ISGID):
+                  refuse("privileged interpreter modes are not admitted")
+              plain(Path(worker["exe"]), role="worker")
+              admission.binary_x64(worker["exe"], system)
+              admission.binary_x64(interpreter, system)
+              result = {"system": system, "worker": worker, "chain": chain, "root": root,
+                        "interpreter": interpreter, "directories": directories, "original": identity(original),
+                        "mode": stat.S_IMODE(original.st_mode), "oldSha256": admission.sha256(interpreter),
+                        "workerSha256": admission.sha256(worker["exe"])}
+              verify_context(result, result["oldSha256"])
+              return result
+
+
+          def verify_context(current, expected_sha=None):
+              system = current["system"]
+              read = admission.windows_process if system == "win32" else admission.linux_process
+              for item in current["chain"]:
+                  if read(item["pid"]) != item:
+                      refuse("Worker ancestry changed")
+              if admission.runner_paths(current["worker"], system) != (current["root"], str(current["interpreter"])):
+                  refuse("runner layout changed")
+              if admission.sha256(current["worker"]["exe"]) != current["workerSha256"]:
+                  refuse("Worker bytes changed")
+              for role, (path, expected) in zip(("root", "externals", "node24", "bin"), current["directories"]):
+                  info = plain(path, directory=True, role=role)
+                  if (info.st_dev, info.st_ino) != expected:
+                      refuse("runner directory changed")
+              info = plain(current["interpreter"], role="interpreter")
+              if expected_sha == current["oldSha256"] and identity(info) != current["original"]:
+                  refuse("original interpreter identity changed")
+              if expected_sha is not None and admission.sha256(current["interpreter"]) != expected_sha:
+                  refuse("selected interpreter bytes changed")
+              admission.binary_x64(current["interpreter"], system)
+
+
+          def windows_node_processes():
+              from ctypes import wintypes
+              class Entry(ctypes.Structure):
+                  _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                              ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                              ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                              ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+              kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+              kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+              kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              handle = kernel.CreateToolhelp32Snapshot(2, 0)
+              if handle == ctypes.c_void_p(-1).value:
+                  refuse("process snapshot unavailable")
+              try:
+                  entry = Entry()
+                  entry.dwSize = ctypes.sizeof(entry)
+                  if not kernel.Process32FirstW(handle, ctypes.byref(entry)):
+                      refuse("process snapshot unreadable")
+                  while True:
+                      if entry.szExeFile.lower() == "node.exe":
+                          yield int(entry.th32ProcessID)
+                      if not kernel.Process32NextW(handle, ctypes.byref(entry)):
+                          if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                              refuse("process snapshot incomplete")
+                          break
+              finally:
+                  kernel.CloseHandle(handle)
+
+
+          def assert_quiescent(current):
+              if current["system"] == "linux":
+                  info = os.fstat(current["lease"])
+                  if (info.st_dev, info.st_ino) != current["original"][:2]:
+                      refuse("the original Node write lease changed")
+              else:
+                  for pid in windows_node_processes():
+                      try:
+                          process = admission.windows_process(pid)
+                      except (OSError, RuntimeError):
+                          refuse("a potential Node process cannot be inspected")
+                      if os.path.normcase(process["exe"]) == os.path.normcase(str(current["interpreter"])):
+                          refuse("the selected Node is still running")
+
+
+          def acquire_write_lease(current):
+              # Linux refuses O_WRONLY with ETXTBSY for an executing inode. Holding this
+              # non-truncating descriptor also prevents new execs of the old inode across
+              # rename, for every UID, without depending on /proc visibility.
+              try:
+                  descriptor = os.open(current["interpreter"], os.O_WRONLY | os.O_NOFOLLOW)
+              except OSError as error:
+                  refuse(filesystem_failure("write-lease", error))
+              try:
+                  if identity(os.fstat(descriptor)) != current["original"]:
+                      refuse("the original Node changed before its write lease")
+              except BaseException:
+                  os.close(descriptor)
+                  raise
+              return descriptor
+
+
+          def curl_path():
+              if sys.platform == "linux":
+                  return "/usr/bin/curl"
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              directory = ctypes.create_unicode_buffer(32768)
+              length = kernel.GetWindowsDirectoryW(directory, len(directory))
+              if not 0 < length < len(directory):
+                  refuse("native Windows directory is unavailable")
+              return str(Path(directory.value) / "System32/curl.exe")
+
+
+          def download(artifact, path):
+              # Preserve the host's existing TLS/proxy policy; discard executable injection
+              # and user curl configuration without logging environment or curl diagnostics.
+              keep = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                      "https_proxy", "http_proxy", "all_proxy", "no_proxy", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+              environment = {key: value for key, value in os.environ.items() if key in keep}
+              before = identity(plain(path))
+              try:
+                  subprocess.run([curl_path(), "--disable", "--fail", "--silent", "--show-error",
+                                  "--proto", "=https", "--proto-redir", "=https", "--location", "--max-redirs", "0",
+                                  "--connect-timeout", "10", "--max-time", "90", "--max-filesize", str(artifact["size"]),
+                                  "--output", str(path), artifact["url"]], env=environment, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=95, check=True)
+              except subprocess.CalledProcessError as error:
+                  refuse("download failed (curlReturnCode=" + str(error.returncode) + ")")
+              except subprocess.TimeoutExpired:
+                  refuse("download exceeded its deadline")
+              after = plain(path)
+              if (after.st_dev, after.st_ino) != before[:2] or after.st_size != artifact["size"] or admission.sha256(path) != artifact["sha256"]:
+                  refuse("download size, identity or SHA256 mismatch")
+
+
+          def stage_node(artifact, downloaded, node_dir, mode):
+              if plain(downloaded).st_size != artifact["size"] or admission.sha256(downloaded) != artifact["sha256"]:
+                  refuse("artifact must be authenticated before parsing")
+              fd, name = tempfile.mkstemp(prefix=".vivary-node-stage-", dir=node_dir)
+              staged = Path(name)
+              try:
+                  with os.fdopen(fd, "wb") as output:
+                      if artifact["member"] is None:
+                          with downloaded.open("rb") as source:
+                              copy_node(source, output, artifact)
+                      else:
+                          with tarfile.open(downloaded, "r:xz") as archive:
+                              matches = [item for item in archive if item.name == artifact["member"]]
+                              if len(matches) != 1 or not matches[0].isreg() or matches[0].size != artifact["node_size"]:
+                                  refuse("one exact regular Node archive member is required")
+                              with archive.extractfile(matches[0]) as source:
+                                  copy_node(source, output, artifact)
+                      output.flush()
+                      os.fsync(output.fileno())
+                  os.chmod(staged, mode & 0o777)
+                  if admission.sha256(staged) != artifact["node_sha256"]:
+                      refuse("staged Node SHA256 mismatch")
+                  admission.binary_x64(staged, sys.platform)
+                  plain(staged, role="stage")
+                  return staged
+              except BaseException:
+                  staged.unlink(missing_ok=True)
+                  raise
+
+
+          def copy_node(source, output, artifact):
+              total = 0
+              while True:
+                  chunk = source.read(min(65536, artifact["node_size"] + 1 - total))
+                  if not chunk:
+                      break
+                  total += len(chunk)
+                  if total > artifact["node_size"]:
+                      refuse("Node member exceeded its exact byte bound")
+                  output.write(chunk)
+              if total != artifact["node_size"]:
+                  refuse("Node member is incomplete")
+
+
+          def repair_runner_action_node():
+              current = context()
+              artifact = ARTIFACTS[current["system"]]
+              outcome = "already-qualified"
+              staged = None
+              lease = None
+              try:
+                  if current["oldSha256"] not in (artifact["node_sha256"], artifact["old_sha256"]):
+                      # Preserve future patched workers without blindly downgrading unknown bytes.
+                      outcome = "admitted-unmodified"
+                  elif current["oldSha256"] == artifact["old_sha256"]:
+                      if current["system"] == "linux":
+                          lease = current["lease"] = acquire_write_lease(current)
+                      assert_quiescent(current)
+                      with tempfile.TemporaryDirectory(prefix="vivary-runner-node-") as directory:
+                          # Windows TEMP may use a short alias. Resolve only this newly
+                          # owned temporary root; runner paths retain their custody checks.
+                          downloaded = Path(directory).resolve(strict=True) / "artifact"
+                          with downloaded.open("xb"):
+                              pass
+                          downloaded.chmod(0o600)
+                          download(artifact, downloaded)
+                          staged = stage_node(artifact, downloaded, current["interpreter"].parent, current["mode"])
+                          staged_identity = identity(plain(staged, role="stage"))
+                          verify_context(current, current["oldSha256"])
+                          assert_quiescent(current)
+                          if identity(plain(staged, role="stage")) != staged_identity or admission.sha256(staged) != artifact["node_sha256"]:
+                              refuse("staged interpreter changed before replacement")
+                          verify_context(current, current["oldSha256"])
+                          try:
+                              os.replace(staged, current["interpreter"])
+                          except OSError as error:
+                              refuse(filesystem_failure("atomic-replacement", error))
+                          staged = None
+                          verify_context(current, artifact["node_sha256"])
+                          assert_quiescent(current)
+                          outcome = "repaired"
+                  # Full, unchanged admission independently rediscovers and probes this same Node.
+                  result = admission.check_runner_action_node()
+                  result["repair"] = {"outcome": outcome, "previousSha256": current["oldSha256"],
+                                      "artifact": artifact["url"] if outcome == "repaired" else None,
+                                      "artifactSha256": artifact["sha256"] if outcome == "repaired" else None}
+                  return result
+              finally:
+                  if staged is not None:
+                      staged.unlink(missing_ok=True)
+                  if lease is not None:
+                      os.close(lease)
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("arguments and caller-supplied runtime facts are not admitted")
+                  print(json.dumps(repair_runner_action_node(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, tarfile.TarError, subprocess.SubprocessError) as error:
+                  if type(error) is RepairRefusal:
+                      message = str(error)
+                  elif isinstance(error, RuntimeError):
+                      message = admission.admission_failure(error)
+                  elif isinstance(error, OSError):
+                      message = "Runner Node repair: " + filesystem_failure("filesystem", error)
+                  else:
+                      message = "Runner Node repair: refused (exception=" + type(error).__name__ + ")"
+                  print(message, file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: find the base commit's gate script
+        id: base
+        run: |
+          if [ -f base/scripts/check_review_gate.py ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ steps.base.outputs.missing == 'true' && steps.runner_action_node.outcome == 'success' }}
+        with:
+          ref: 80370e094248c84c55da663d977efc7601d17e84
+          path: bootstrap
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12.15"
+      - name: verified Python runtime provisioning
+        shell: python -I -B {0}
+        run: |
+          CERTIFI_POLICY_SOURCE = r'''"""Authenticated certifi CA update and narrowly derived pip wheel.
+
+          The derived wheel is a Vivary overlay, not an upstream pip release. Keep pip's
+          vendored import rewrites and all other packages unchanged. No network or install.
+          """
+
+          import base64
+          import csv
+          import hashlib
+          import io
+          from pathlib import Path
+          import re
+          import ssl
+          import sys
+          import zipfile
+
+          CERTIFI_VERSION = "2026.10.23"
+          CERTIFI_WHEEL = "certifi-2026.10.23-py3-none-any.whl"
+          CERTIFI_URL = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/" + CERTIFI_WHEEL
+          CERTIFI_SIZE = 135082
+          CERTIFI_SHA256 = "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1"
+          CERTIFI_CA_SHA256 = "2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b"
+          PIP_WHEEL = "pip-26.2.2-py3-none-any.whl"
+          PIP_SHA256 = "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+          # G3 retains the existing policy. C1/C3 follow certifi's October 23 removal;
+          # their removal is not a claim of compromise or exploitation.
+          EXCLUDED_CA_SHA256 = frozenset({
+              "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b",
+              "125609aa301da0a249b97a8239cb6a34216f44dcac9f3954b14292f2e8c8608f",
+              "bc4d809b15189d78db3e1d8cf4f9726a795da1643ca5f1358e1ddb0edc0d7eb3",
+          })
+
+
+          def filtered_ca_bytes(source):
+              pems = re.findall(rb"-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----", source)
+              kept = [pem for pem in pems
+                      if hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem.decode("ascii"))).hexdigest()
+                      not in EXCLUDED_CA_SHA256]
+              if not kept:
+                  raise ValueError("CA bundle must retain certificates")
+              return b"\n".join(kept) + b"\n"
+
+
+          def host_ca_bytes(source=None):
+              """Export existing eligible host anchors with removal-only task policy.
+
+              Windows CA is an intermediate store, so it must not become a PEM anchor
+              source. ROOT eligibility follows the server-auth purpose returned by
+              enum_certificates, with explicit Disallowed entries taking precedence.
+              This function never changes a host store or writes a bundle.
+              """
+              if sys.platform != "win32":
+                  path = Path(source) if source is not None else Path("/etc/ssl/certs/ca-certificates.crt")
+                  return filtered_ca_bytes(path.read_bytes())
+              if source is not None:
+                  raise ValueError("Windows trust anchors must come from the existing ROOT store")
+              denied = {hashlib.sha256(der).hexdigest()
+                        for der, encoding, _ in ssl.enum_certificates("Disallowed") if encoding == "x509_asn"}
+              denied.update(EXCLUDED_CA_SHA256)
+              roots = {}
+              for der, encoding, trust in ssl.enum_certificates("ROOT"):
+                  eligible = trust is True or (isinstance(trust, (set, frozenset)) and ssl.Purpose.SERVER_AUTH.oid in trust)
+                  if encoding != "x509_asn" or not eligible:
+                      continue
+                  digest = hashlib.sha256(der).hexdigest()
+                  if digest not in denied:
+                      roots[digest] = ssl.DER_cert_to_PEM_cert(der).encode("ascii")
+              if not roots:
+                  raise ValueError("Windows has no eligible server-auth trust anchors")
+              return b"".join(roots[key] for key in sorted(roots))
+
+
+          def verify_certifi(data):
+              if len(data) != CERTIFI_SIZE or hashlib.sha256(data).hexdigest() != CERTIFI_SHA256:
+                  raise ValueError("certifi wheel differs from the authenticated 2026.10.23 artifact")
+
+
+          def certifi_ca_bytes(data):
+              verify_certifi(data)
+              with zipfile.ZipFile(io.BytesIO(data)) as certifi:
+                  bundle = certifi.read("certifi/cacert.pem")
+              if hashlib.sha256(bundle).hexdigest() != CERTIFI_CA_SHA256:
+                  raise ValueError("certifi CA differs from the authenticated 2026.10.23 bundle")
+              return bundle
+
+
+          def patched_pip_bytes(pip_bytes, certifi_bytes):
+              if hashlib.sha256(pip_bytes).hexdigest() != PIP_SHA256:
+                  raise ValueError("pip input differs from the authenticated upstream wheel")
+              verify_certifi(certifi_bytes)
+              with zipfile.ZipFile(io.BytesIO(pip_bytes)) as pip, zipfile.ZipFile(io.BytesIO(certifi_bytes)) as certifi:
+                  members = {item.filename: pip.read(item) for item in pip.infolist()}
+                  if len(members) != len(pip.infolist()):
+                      raise ValueError("Duplicate wheel member")
+                  for name in ("__init__.py", "cacert.pem"):
+                      members["pip/_vendor/certifi/" + name] = certifi.read("certifi/" + name)
+                  vendor = "pip/_vendor/vendor.txt"
+                  if members[vendor].count(b"certifi==2026.10.19") != 1:
+                      raise ValueError("Unexpected pip certifi vendor pin")
+                  members[vendor] = members[vendor].replace(b"certifi==2026.10.19", b"certifi==2026.10.23")
+                  record = "pip-26.2.2.dist-info/RECORD"
+                  rows = []
+                  for name, data in members.items():
+                      digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+                      rows.append((name, "", "") if name == record else (name, "sha256=" + digest, str(len(data))))
+                  output = io.StringIO(newline="")
+                  csv.writer(output, lineterminator="\n").writerows(rows)
+                  members[record] = output.getvalue().encode("utf-8")
+                  result = io.BytesIO()
+                  with zipfile.ZipFile(result, "w") as derived:
+                      derived.comment = pip.comment
+                      for item in pip.infolist():
+                          derived.writestr(item, members[item.filename])
+                  return result.getvalue()
+
+
+          def prepare_pip(pip_wheel, certifi_wheel, target):
+              pip_wheel, certifi_wheel, target = map(Path, (pip_wheel, certifi_wheel, target))
+              data = patched_pip_bytes(pip_wheel.read_bytes(), certifi_wheel.read_bytes())
+              if target.is_symlink() or (target.exists() and not target.is_file()):
+                  raise ValueError("Derived pip destination must be a regular file")
+              if target.exists():
+                  if target.read_bytes() != data:
+                      raise ValueError("Refusing changed derived pip wheel")
+              else:
+                  with target.open("xb") as output:
+                      output.write(data)
+              return target
+          '''
+          CA_POLICY = {}
+          exec(compile(CERTIFI_POLICY_SOURCE, 'certifi-policy.py', 'exec'), CA_POLICY)
+
+          """Provision authenticated task-local CPython and patch its retained pip seed.
+
+          The setup-python interpreter only extracts authenticated bytes and runs native
+          curl. The next unchanged runtime guard admits the provisioned Python/OpenSSL.
+          """
+
+          import ctypes
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import posixpath
+          import re
+          import runpy
+          import shutil
+          import stat
+          import struct
+          import subprocess
+          import sys
+          import tarfile
+          import tempfile
+
+
+          if "CA_POLICY" not in globals():
+              CA_POLICY = runpy.run_path(str(Path(__file__).with_name("certifi_bundle.py")))
+
+          ASSETS = {
+              "linux": {
+                  "file": "cpython-3.12.15+20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+                  "size": 34479606, "sha256": "6d7521138fd33afddc1ccd08abb007d9a2829e38117c2576f9efdc0ec73ce772",
+                  "executable": "python/bin/python3.12",
+                  "executable_sha256": "0a97d28d3635c7dfd143de6d00b09c0cb382249c020b28ee33fb4002db1efb9c",
+              },
+              "win32": {
+                  "file": "cpython-3.12.15+20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+                  "size": 21990627, "sha256": "aac5d331fc3307343f95928fdbea4583f0d53973d08c7e1d081884fbd229a0e1",
+                  "executable": "python/python.exe",
+                  "executable_sha256": "651e2230e6f02b233b46c0f829f08df95864d8155e41802c4609fc4aab45c843",
+              },
+          }
+          RELEASE = "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/"
+          MAX_EXPANDED = 256 * 1024 * 1024
+
+
+          def refuse(message):
+              raise ValueError("CI Python provisioning: " + message)
+
+
+          def plain(path, directory=False):
+              info = path.lstat()
+              if (stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400
+                      or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+                      or (not directory and info.st_nlink != 1)):
+                  refuse("plain task-owned paths are required")
+              return info
+
+
+          def sha256(path):
+              with path.open("rb") as stream:
+                  return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+          def verify(path, size, digest):
+              if plain(path).st_size != size or sha256(path) != digest:
+                  refuse("artifact size or SHA256 mismatch")
+
+
+          def native_x64(executable, system):
+              with executable.open("rb") as stream:
+                  header = stream.read(64)
+                  if system == "linux":
+                      if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 62:
+                          refuse("Linux Python must be a native x64 ELF executable")
+                  else:
+                      if len(header) != 64 or header[:2] != b"MZ":
+                          refuse("Windows Python must be a native x64 PE executable")
+                      offset = struct.unpack_from("<I", header, 60)[0]
+                      if not 64 <= offset <= 1024 * 1024:
+                          refuse("invalid Python PE header")
+                      stream.seek(offset)
+                      pe = stream.read(26)
+                      if len(pe) != 26 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664 or struct.unpack_from("<H", pe, 24)[0] != 0x20b:
+                          refuse("Windows Python must be a native x64 PE32+ executable")
+
+
+          def curl_path():
+              if sys.platform == "linux":
+                  return "/usr/bin/curl"
+              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+              directory = ctypes.create_unicode_buffer(32768)
+              length = kernel.GetWindowsDirectoryW(directory, len(directory))
+              if not 0 < length < len(directory):
+                  refuse("native Windows directory is unavailable")
+              return str(Path(directory.value) / "System32/curl.exe")
+
+
+          def download(url, target, size, digest):
+              if target.exists():
+                  verify(target, size, digest)
+                  return target
+              with target.open("xb"):
+                  pass
+              target.chmod(0o600)
+              try:
+                  before = plain(target)
+                  keep = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                          "https_proxy", "http_proxy", "all_proxy", "no_proxy", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+                  environment = {name: value for name, value in os.environ.items() if name in keep}
+                  try:
+                      subprocess.run([curl_path(), "--disable", "--fail", "--silent", "--show-error", "--proto", "=https",
+                                      "--proto-redir", "=https", "--location", "--max-redirs", "3", "--connect-timeout", "10",
+                                      "--max-time", "120", "--max-filesize", str(size), "--output", str(target), url],
+                                     env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, timeout=125, check=True)
+                  except subprocess.CalledProcessError as error:
+                      refuse("download failed (curlReturnCode=" + str(error.returncode) + ")")
+                  except subprocess.TimeoutExpired:
+                      refuse("download exceeded its deadline")
+                  after = plain(target)
+                  if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                      refuse("download destination changed")
+                  verify(target, size, digest)
+              except BaseException:
+                  # A failed or partial download must not stay in a shared cache, where it
+                  # would make every later attempt refuse on its size or SHA256.
+                  target.unlink(missing_ok=True)
+                  raise
+              return target
+
+
+          def unpack(archive, destination, asset, system):
+              verify(archive, asset["size"], asset["sha256"])
+              plain(destination, directory=True)
+              with tarfile.open(archive, "r:gz") as package:
+                  members = package.getmembers()
+                  if len(members) > 40000 or sum(item.size for item in members) > MAX_EXPANDED:
+                      refuse("archive exceeds its extraction bounds")
+                  seen, links = set(), set()
+                  for item in members:
+                      parts = PurePosixPath(item.name).parts
+                      if (not parts or parts[0] != "python" or item.name.startswith("/")
+                              or "\\" in item.name or ":" in item.name or ".." in parts
+                              or any(part in ("", ".") for part in item.name.split("/"))
+                              or not (item.isdir() or item.isreg() or item.issym())
+                              or (system == "win32" and any(part.rstrip(" .") != part for part in parts))):
+                          refuse("unsupported archive path or member type")
+                      key = item.name.casefold() if system == "win32" else item.name
+                      if key in seen:
+                          refuse("duplicate archive destination")
+                      seen.add(key)
+                      if item.issym():
+                          target = PurePosixPath(posixpath.normpath(str(PurePosixPath(item.name).parent / item.linkname)))
+                          if (not item.linkname or "\\" in item.linkname or ":" in item.linkname
+                                  or item.linkname.startswith("/") or target.parts[0] != "python" or ".." in target.parts):
+                              refuse("archive link escapes the runtime")
+                          links.add(item.name)
+                  for item in members:
+                      if any(str(parent) in links for parent in PurePosixPath(item.name).parents):
+                          refuse("archive cannot write through a link")
+                  # CPython 3.12.15's data filter also refuses filesystem escapes, devices,
+                  # and privileged metadata. Only the authenticated archive reaches it.
+                  package.extractall(destination, members=members, filter="data")
+              root = destination.resolve(strict=True)
+              for name in links:
+                  if not (destination / name).resolve(strict=True).is_relative_to(root):
+                      refuse("extracted link escapes the runtime")
+              executable = destination / asset["executable"]
+              if sha256(executable) != asset["executable_sha256"]:
+                  refuse("extracted Python differs from the qualified executable")
+              native_x64(executable, system)
+              return executable
+
+
+          def patch_seed(runtime, temporary, system):
+              library = runtime / "python" / ("Lib" if system == "win32" else "lib/python3.12")
+              bundled = library / "ensurepip/_bundled"
+              seed = bundled / CA_POLICY["PIP_WHEEL"]
+              plain(seed)
+              if (re.findall(r'^_PIP_VERSION = "([^"]+)"$', (library / "ensurepip/__init__.py").read_text(), re.MULTILINE) != ["26.2.2"]
+                      or sorted(path.name for path in bundled.glob("*.whl")) != [CA_POLICY["PIP_WHEEL"]]
+                      or sha256(seed) != CA_POLICY["PIP_SHA256"]):
+                  refuse("retained ensurepip seed is not the authenticated pip 26.2.2 wheel")
+              cache = temporary / "vivary-pip-26.2.2"
+              cache.mkdir(mode=0o700, exist_ok=True)
+              plain(cache, directory=True)
+              upstream = cache / CA_POLICY["PIP_WHEEL"]
+              if not upstream.exists():
+                  with upstream.open("xb") as output:
+                      output.write(seed.read_bytes())
+              verify(upstream, 1819850, CA_POLICY["PIP_SHA256"])
+              certifi = download(CA_POLICY["CERTIFI_URL"], cache / CA_POLICY["CERTIFI_WHEEL"],
+                                 CA_POLICY["CERTIFI_SIZE"], CA_POLICY["CERTIFI_SHA256"])
+              derived = cache / "certifi-2026.10.23"
+              derived.mkdir(mode=0o700, exist_ok=True)
+              plain(derived, directory=True)
+              wheel = CA_POLICY["prepare_pip"](upstream, certifi, derived / CA_POLICY["PIP_WHEEL"])
+              replacement = bundled / ".vivary-qualified-pip-seed"
+              with replacement.open("xb") as output:
+                  output.write(wheel.read_bytes())
+                  output.flush()
+                  os.fsync(output.fileno())
+              replacement.chmod(stat.S_IMODE(seed.stat().st_mode) & 0o777)
+              os.replace(replacement, seed)
+              if seed.read_bytes() != wheel.read_bytes():
+                  refuse("retained pip seed differs from the authenticated certifi overlay")
+              return sha256(seed)
+
+
+          def provision_python():
+              if (sys.platform not in ASSETS or sys.implementation.name != "cpython"
+                      or tuple(sys.version_info) != (3, 12, 15, "final", 0) or not sys.flags.isolated or not sys.flags.dont_write_bytecode):
+                  refuse("isolated setup CPython 3.12.15 is required for authenticated extraction")
+              temporary = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
+              path_file = Path(os.environ["GITHUB_PATH"]).resolve(strict=True)
+              environment_file = Path(os.environ["GITHUB_ENV"]).resolve(strict=True)
+              if any(character in str(temporary) + str(path_file) + str(environment_file) for character in "\r\n"):
+                  refuse("runner command paths cannot contain line breaks")
+              plain(temporary, directory=True)
+              plain(path_file)
+              plain(environment_file)
+              if path_file == environment_file:
+                  refuse("runner path and environment command files must be distinct")
+              prefix = Path(tempfile.mkdtemp(prefix="vivary-python-3.12.15-", dir=temporary))
+              try:
+                  asset = ASSETS[sys.platform]
+                  archive = download(RELEASE + asset["file"].replace("+", "%2B"), prefix / "python.tar.gz", asset["size"], asset["sha256"])
+                  runtime = prefix / "runtime"
+                  runtime.mkdir(mode=0o700)
+                  executable = unpack(archive, runtime, asset, sys.platform)
+                  seed = patch_seed(runtime, temporary, sys.platform)
+                  trust = prefix / "qualified-ca.pem"
+                  with trust.open("xb") as output:
+                      output.write(CA_POLICY["host_ca_bytes"]())
+                  trust.chmod(0o600)
+                  pip_trust = prefix / "pip-certifi-ca.pem"
+                  certifi = temporary / "vivary-pip-26.2.2" / CA_POLICY["CERTIFI_WHEEL"]
+                  plain(certifi)
+                  with pip_trust.open("xb") as output:
+                      output.write(CA_POLICY["certifi_ca_bytes"](certifi.read_bytes()))
+                  pip_trust.chmod(0o600)
+                  empty_ca = prefix / "empty-ca-directory"
+                  empty_ca.mkdir(mode=0o700)
+                  paths = [executable.parent]
+                  if sys.platform == "win32":
+                      scripts = executable.parent / "Scripts"
+                      scripts.mkdir(exist_ok=True)
+                      plain(scripts, directory=True)
+                      paths.append(scripts)
+                  trust_names = ("SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO")
+                  with environment_file.open("a", encoding="utf-8", newline="\n") as output:
+                      output.write("".join(name + "=" + str(trust) + "\n" for name in trust_names)
+                                   + "".join(name + "=" + str(pip_trust) + "\n" for name in ("PIP_CERT", "REQUESTS_CA_BUNDLE"))
+                                   + "SSL_CERT_DIR=" + str(empty_ca) + "\n")
+                  with path_file.open("a", encoding="utf-8", newline="\n") as output:
+                      output.write("".join(str(path) + "\n" for path in paths))
+                  return {"python": str(executable), "archiveSha256": asset["sha256"], "seedSha256": seed,
+                          "trustSha256": sha256(trust), "pipTrustSha256": sha256(pip_trust)}
+              except BaseException:
+                  shutil.rmtree(prefix)
+                  raise
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("arguments and caller-supplied artifact facts are not admitted")
+                  print(json.dumps(provision_python(), sort_keys=True))
+                  return 0
+              except (OSError, ValueError, KeyError, AttributeError, tarfile.TarError, subprocess.SubprocessError) as error:
+                  message = str(error) if type(error) is ValueError and str(error).startswith("CI Python provisioning: ") else "CI Python provisioning failed (exception=" + type(error).__name__ + ")"
+                  print(message, file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          """Admit the executing CI Python and its loaded OpenSSL before network use."""
+
+          import json
+          from pathlib import Path
+          import re
+          import ssl
+          import sys
+
+
+          PYTHON = (3, 12, 15, "final", 0)
+          OPENSSL = ["OpenSSL", "3.5.9"]
+
+
+          class PythonRuntimeRefusal(RuntimeError):
+              pass
+
+
+          def refuse(message):
+              raise PythonRuntimeRefusal("Python runtime admission: " + message)
+
+
+          def observed_runtime():
+              # Emit only bounded runtime version facts, never exception text, paths,
+              # environment values, or the remainder of an OpenSSL build description.
+              implementation = getattr(getattr(sys, "implementation", None), "name", None)
+              if type(implementation) is not str or implementation not in ("cpython", "pypy", "graalpy", "ironpython", "jython", "micropython"):
+                  implementation = "unknown"
+              version = getattr(sys, "version_info", ())
+              version = version if isinstance(version, tuple) and len(version) == 5 else (None,) * 5
+              numeric = lambda value: str(value) if type(value) is int and 0 <= value <= 9999 else "unknown"
+              python = ".".join(numeric(value) for value in version[:3])
+              release = version[3] if type(version[3]) is str and version[3] in ("alpha", "beta", "candidate", "final") else "unknown"
+              description = getattr(ssl, "OPENSSL_VERSION", None)
+              tokens = description.split()[:2] if type(description) is str and len(description) <= 256 else []
+              openssl = "unknown"
+              if (len(tokens) == 2 and tokens[0] in ("OpenSSL", "LibreSSL", "BoringSSL")
+                      and re.fullmatch(r"[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}(?:[a-z]|-(?:dev|alpha[0-9]{0,4}|beta[0-9]{0,4}|rc[0-9]{0,4}))?", tokens[1])):
+                  openssl = " ".join(tokens)
+              return (f"observedImplementation={implementation}, observedPython={python}, "
+                      f"observedRelease={release}, observedSerial={numeric(version[4])}, observedOpenSSL={openssl}")
+
+
+          def assert_python_runtime():
+              # Read the current process, never caller-supplied version or environment facts.
+              if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
+                  refuse("invoke this guard with Python -I -B")
+              if sys.implementation.name != "cpython" or tuple(sys.version_info) != PYTHON:
+                  refuse("the qualified CPython 3.12.15 final runtime is required")
+              # Match the separately qualified build-tool baseline, including the library
+              # actually loaded by ssl rather than an executable's declared dependency.
+              if ssl.OPENSSL_VERSION.split()[:2] != OPENSSL:
+                  refuse("the loaded OpenSSL library must be the qualified 3.5.9 release")
+              executable = Path(sys.executable).resolve(strict=True)
+              if not executable.is_file():
+                  refuse("the executing Python must resolve to a regular file")
+              return {"python": str(executable), "implementation": "CPython",
+                      "version": "3.12.15", "openssl": ssl.OPENSSL_VERSION}
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("this guard accepts no caller-supplied runtime facts or arguments")
+                  print(json.dumps(assert_python_runtime(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as error:
+                  message = str(error) if type(error) is PythonRuntimeRefusal else "Python runtime admission: actual runtime evidence is unavailable"
+                  print(message + " (" + observed_runtime() + ")", file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+      - name: wait for completed reviews and resolved threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gate=base/scripts/check_review_gate.py
+          if [ ! -f "$gate" ]; then
+            echo "required review gate: base has no gate script; using the pinned bootstrap script"
+            gate=bootstrap/scripts/check_review_gate.py
+          fi
+          python "$gate" --wait-seconds 2400 --interval 30
