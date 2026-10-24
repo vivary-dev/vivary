@@ -183,10 +183,18 @@ class PipRuntimeTests(unittest.TestCase):
         alias.symlink_to(copy)
         hardlink = self.root / "qualified-hardlink.pem"
         os.link(copy, hardlink)
-        for path in (Path("relative.pem"), self.root, alias, hardlink, self.root / "missing.pem"):
+        for path in (self.root, alias, hardlink, self.root / "missing.pem"):
             with self.subTest(path=path.name), mock.patch.dict(os.environ, PIP_CERT=str(path)):
                 with self.assertRaisesRegex(RuntimeError, "certificate override"):
                     guard.assert_pip_runtime()
+        # A relative path to a real, unlinked qualified copy must fail on the absolute-path rule itself.
+        (self.root / "relative-qualified.pem").write_bytes(self.ca.read_bytes())
+        previous = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
+        with mock.patch.dict(os.environ, PIP_CERT="relative-qualified.pem"):
+            with self.assertRaisesRegex(RuntimeError, "plain absolute CA file"):
+                guard.assert_pip_runtime()
 
     def test_equivalent_stable_two_component_versions_pass(self):
         self.pip.__version__ = "26.3"

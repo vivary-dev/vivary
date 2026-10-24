@@ -70,10 +70,13 @@ def download_context():
 
 def obtain_artifact(cache, filename, url, size, digest):
     wheel = cache / filename
-    if not wheel.exists():
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
-                                            urllib.request.HTTPSHandler(context=download_context()))
-        deadline = time.monotonic() + 30
+    if wheel.exists():
+        verify_wheel(wheel, size, digest)
+        return wheel
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                        urllib.request.HTTPSHandler(context=download_context()))
+    deadline = time.monotonic() + 30
+    try:
         with opener.open(urllib.request.Request(url, headers={"User-Agent": "Vivary-CI-pip-bootstrap"}), timeout=10) as response:
             if response.status != 200 or response.geturl() != url:
                 raise ValueError("unexpected pip wheel response")
@@ -92,7 +95,12 @@ def obtain_artifact(cache, filename, url, size, digest):
                     if total > size:
                         raise ValueError("pip wheel exceeded its byte bound")
                     output.write(chunk)
-    verify_wheel(wheel, size, digest)
+        verify_wheel(wheel, size, digest)
+    except BaseException:
+        # A failed or partial download must not stay in the shared cache, where it
+        # would make every later attempt in the job refuse on its size or SHA256.
+        wheel.unlink(missing_ok=True)
+        raise
     return wheel
 
 
