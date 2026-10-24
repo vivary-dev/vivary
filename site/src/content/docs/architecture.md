@@ -736,6 +736,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Review fixes for the security units. `bootstrap_ci_python.py` now removes a
+failed or partial download, so a transient network error no longer leaves a file in the
+shared runner cache that makes every later attempt refuse. The review gate's inline copy is
+regenerated from it. The desktop README states that packaging and the installer build
+refuse while Electron publication is held, and the installer-manifest test now matches only
+the manifest recheck error. No runtime behavior changes beyond the download cleanup.
+
 2026-10-24 Site CI path coverage. The `changes` job now also runs the site build when
 the scripts that build calls change: `packages/workbench/bin/runtime-security.mjs`,
 `scripts/bootstrap_ci_python.py` and `scripts/check_python_runtime.py`, where the site job
