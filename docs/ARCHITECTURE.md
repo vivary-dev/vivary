@@ -1471,6 +1471,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-23 Undici advisories GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and
+GHSA-f72v-6w45-q472. The internal site's build-time undici, pulled in by unifont,
+moves from 8.10.2 to 8.12.3, whose npm provenance names its release tag commit.
+The site lock changes only that entry. No site runtime behavior changes.
+
 2026-10-24 Certificate-fix review corrections. The certificate bundle entry no
 longer says every Windows Python client is limited to the filtered bundle: only
 clients that pass it as `cafile` are, because a default context on Windows also
