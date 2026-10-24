@@ -8,8 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { getCodeAgentRunRecord, listCodeAgentTranscriptEvents } from "@agent-native/core/code-agents";
 
 // Beta ticket 05. Quitting the app shuts the host down while Codex waits for an answer. The answer channel ends with
-// the host, so the request expires visibly instead of vanishing. Shutdown closes the host for this process, so the
-// test has a file of its own.
+// the host, so the request expires visibly instead of vanishing, even though the executor's teardown reports it
+// resolved first. Shutdown closes the host for this process, so the test has a file of its own.
 test("a Codex request pending at shutdown expires visibly", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-shutdown-request-"));
   const server = path.join(fixture, ".output", "server");
@@ -25,9 +25,17 @@ if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') proc
 process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
   await writeFile(path.join(server, "vivary-code-worker.mjs"), `
+let runId;
 process.on("message", message => {
+ if (message.type === "vivary:code-worker:abort") {
+  // The real executor's teardown clears every pending request, and the worker forwards each one before it finishes.
+  process.send({ type: "vivary:code-worker:resolved", runId, requestId: "request-quit" });
+  process.send({ type: "vivary:code-worker:done", runId });
+  return;
+ }
  if (message.type !== "vivary:code-worker:start") return;
- process.send({ type: "vivary:code-worker:request", runId: message.runId, request: { requestId: "request-quit",
+ runId = message.runId;
+ process.send({ type: "vivary:code-worker:request", runId, request: { requestId: "request-quit",
   method: "item/commandExecution/requestApproval", params: { command: "pnpm test" } } });
 });
 process.send({type:"vivary:code-worker:ready"});

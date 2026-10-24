@@ -123,7 +123,7 @@ stateDiagram-v2
   direction LR
   [*] --> Pending: Codex asks, listed on the run record
   Pending --> Answered: owner allows or declines
-  Pending --> Withdrawn: Codex resolves it
+  Pending --> Withdrawn: Codex resolves it while the run goes on
   Pending --> Cancelled: Stop or run failure
   Pending --> Expired: host shutdown or restart
   Answered --> [*]

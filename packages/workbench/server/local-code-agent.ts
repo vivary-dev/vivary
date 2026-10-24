@@ -1313,7 +1313,10 @@ async function executeVivaryCodeRun(input: {
       },
       onRequestResolved: requestId => {
         if (!input.activeRun.requests.delete(requestId)) return;
-        const settled = !input.activeRun.controller.signal.aborted && getCodeAgentRunRecord(input.runId)?.phase === "action-approval";
+        // A stopping executor reports every pending request resolved in its teardown. The record keeps them, so final
+        // settlement can expire them on shutdown.
+        if (input.activeRun.controller.signal.aborted) return;
+        const settled = getCodeAgentRunRecord(input.runId)?.phase === "action-approval";
         updateCodeAgentRunRecord(input.runId, run => ({
           ...(settled ? { status: input.activeRun.requests.size ? "needs-approval" : "running",
             phase: input.activeRun.requests.size ? "action-approval" : "running", needsApproval: input.activeRun.requests.size > 0 } : {}),
