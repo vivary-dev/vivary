@@ -124,9 +124,10 @@ def environment(root):
                GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org",
                GOFLAGS="-mod=readonly", CGO_ENABLED="0", GOOS="windows" if bootstrap.windows_host() else "linux", GOARCH="amd64",
                SSL_CERT_FILE=str(root / "ca.pem"), SSL_CERT_DIR=str(root / "empty-ca"),
-               GIT_SSL_CAINFO=str(root / "ca.pem"), GIT_SSL_NO_VERIFY="false",
+               GIT_SSL_CAINFO=str(root / "ca.pem"),
                GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                XDG_CONFIG_HOME=str(root / "config"))
+    # Git turns verification off when GIT_SSL_NO_VERIFY is present with any value, so it is never set.
     if bootstrap.windows_host():
         env.update(GOPROXY=(root / "go-proxy").as_uri(), GOSUMDB="off", GOVCS="*:off")
     return env

@@ -238,7 +238,7 @@ class BuildToolsTest(unittest.TestCase):
             env = GO["environment"](Path("/tmp/owned"))
         self.assertEqual(env["GOTOOLCHAIN"], "local")
         self.assertEqual(env["GOPROXY"], "https://proxy.golang.org")
-        self.assertEqual(env["GIT_SSL_NO_VERIFY"], "false")
+        self.assertNotIn("GIT_SSL_NO_VERIFY", env)
         self.assertEqual(env["GOENV"], "off")
         self.assertNotIn("GIT_CONFIG_COUNT", env)
 

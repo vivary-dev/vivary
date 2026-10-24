@@ -8199,6 +8199,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Bot Framework zod and git TLS. GHSA-mrhx-c7xc-m3w5 covers every zod release
+below 4.6.6, so botframework-schema and botframework-connector 4.23.3 move from zod 3.25.76
+to 4.6.7 by override, and the Workbench advisory floor now applies to every zod line. A test
+validates and refuses Activities through botframework-schema on 4.6.7. `build_go_tools.py`
+no longer sets `GIT_SSL_NO_VERIFY`, because git disables certificate checks when the
+variable is present with any value, including "false".
+
 2026-10-24 Pip configuration guard reads real pip configuration. Pip 26.2.2's
 `Configuration.items()` yields one (source, values) pair per config file and one
 for `:env:`. Only the values are keyed by `section.option`, so the guard never saw
@@ -8281,11 +8288,11 @@ The site lock changes only that entry. No site runtime behavior changes.
 2026-10-23 Zod advisory GHSA-mrhx-c7xc-m3w5. Workbench and the internal site move
 zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
 which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
-issue collection in the v4 core array parser. The 3.25.76 copy stays because its
-only dependents, Core's botframework-connector and botframework-schema 4.23.3,
-require zod 3 and import only the package root, whose CJS and ESM entries load
-the v3 build and never the v4 core. No schema or runtime behavior is otherwise
-changed.
+issue collection in array validation, in every release below 4.6.6, 3.x included.
+Core's botframework-connector and botframework-schema 4.23.3 therefore move from
+zod 3.25.76 to 4.6.7 by override, because no patched 3.x exists. They use zod's v3
+API, including single-argument `record()`, which 4.6.7 keeps. No schema or runtime
+behavior is otherwise changed.
 
 2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
 select the already authenticated task-local pnpm package through the real preview
