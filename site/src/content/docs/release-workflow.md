@@ -269,6 +269,12 @@ the create-vivary release checks, builds the npm tarball, and verifies its packa
 identity plus exact MIT license payload. Leave `publish=false` for the verification-only
 gate; rerun with `publish=true` only after the npm publish gate is approved.
 
+Both jobs run their CI Python bootstrap and admission scripts
+(`scripts/bootstrap_ci_python.py` and `scripts/check_python_runtime.py`) from the
+release tag checkout, as they already run `scripts/check_release_artifacts.py`.
+Tag a commit that contains those scripts. A tag cut from an older commit fails at
+the Python provisioning step, before any npm setup or publication.
+
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
 every package that depends on it. Publish `vivary-tropo` next; then the eligible
 `vivary-strato`, `vivary-ozone`, `vivary-exo`, `vivary-memory-cognee`, `vivary-mcp`, and

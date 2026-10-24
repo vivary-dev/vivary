@@ -734,6 +734,8 @@ jobs:
               sys.exit(main())
       - name: Checkout release tag
         # actions/checkout v7.0.1 pinned to an immutable commit SHA.
+        # The release tag supplies the CI Python bootstrap and admission scripts
+        # run below. A tag cut from a commit without them fails before publication.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.release_tag }}
@@ -831,6 +833,8 @@ jobs:
       - *runner_action_node_bootstrap
       - name: Checkout release tag
         # actions/checkout v7.0.1 pinned to an immutable commit SHA.
+        # The release tag supplies the CI Python bootstrap and admission scripts
+        # run below. A tag cut from a commit without them fails before publication.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.release_tag }}

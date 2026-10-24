@@ -322,9 +322,12 @@ ensurepip seed before exporting it. Each fresh venv omits the old seed, provisio
 the authenticated pip 26.2.2/certifi 2026.10.23 overlay, and admits that interpreter
 and loaded pip before use. Pip and Requests certificate overrides must match all
 118 authenticated certifi roots exactly; pip's supported legacy-certs mode keeps
-host stores out of that context. General Python and Node descendants instead use
-filtered task-local host bundles, retaining other eligible roots while excluding
-the existing G3 and removed C1/C3 roots. No host-global trust store changes.
+host stores out of that context. Python clients that pass the bundle as `cafile`
+and Node descendants instead use filtered task-local host bundles, retaining other
+eligible roots while excluding the existing G3 and removed C1/C3 roots. On Windows,
+a Python default context without `cafile` also loads the CryptoAPI CA and ROOT
+stores, so the filtered bundle does not narrow that code's trust. No host-global
+trust store changes.
 
 [Isolated build tools](https://github.com/vivary-dev/vivary/blob/main/docs/BUILD-TOOLS.md) own the authenticated package clients,
 Go 1.26.10 compilers, archive checks and certificate behavior. Workbench's known
