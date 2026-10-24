@@ -3422,6 +3422,36 @@ findings concern the approved continuation in `background-automation-runner.js`.
 four cases failed against the previous patch and pass with this one. The other
 #205 findings remain open.
 
+### Approval asks and waits that never ended
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 3. Three
+findings concern waits and asks that no decision or sweep could end.
+
+- `reconcileAutomationApprovalOutcome` declines the exact ask of a finished run
+  when it is still `pending`, before task and resource settlement. No decision
+  can reach a finished run. Before this change, a terminal error left the ask
+  pending, also after someone deleted the automation. A consumed or declined ask
+  stays as it is.
+- A decline no longer needs the saved turn. `readyWaitForDecline` recovers a
+  recoverable turn for the transcript, then requires only that no run can save
+  the wait: the run ID is not held in this process and its Native row is gone
+  or not running. Its owner can therefore decline, and the expiry sweep can
+  end, a wait whose run row the pruner removed or whose turn stopped.
+  `claimAutomationApprovalDecision` takes `requireReady` false for declines.
+  Approval still claims only a ready wait.
+- `listStaleApprovalClaims` lists owners' decision claims older than the claim
+  lease. The sweep runs before expiry and applies `decideAutomationApproval`'s
+  resuming recovery when no run holds the claim. A declined ask finishes it as
+  declined, a consumed ask finishes it as interrupted, and a pending ask
+  restores the wait. The expiry pass then declines a restored wait whose ask
+  expired. A claim inside its lease, a claim with a retained known outcome and the
+  expiry sweep's own claims are left to their existing owners.
+
+`tests/automation-approval-stuck.test.mjs` owns its SQLite database. Its cases
+failed against the previous patch, apart from the in-lease control, and pass
+with this one. Maintained cases that asserted a pending ask after reconciliation
+now assert a declined ask. Only the PostgreSQL cleanup finding of #205 remains.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a

@@ -18720,3 +18720,225 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              if (hardAbortTimer) {
                  clearTimeout(hardAbortTimer);
                  hardAbortTimer = null;
+diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
+--- a/dist/jobs/run-history.js
++++ b/dist/jobs/run-history.js
+@@ -561,11 +561,16 @@
+         throw new Error("The webhook task has conflicting approval history owners.");
+     return result.rows.length ? getAutomationContinuation(String(result.rows[0].id)) : null;
+ }
+-export async function claimAutomationApprovalDecision(id, askId, resumeRunId) {
++/**
++ * Vivary #205: an approval needs the saved turn, so it claims only a ready wait. A
++ * decline executes nothing, so it passes `requireReady` false and can end a wait
++ * whose turn can no longer be saved.
++ */
++export async function claimAutomationApprovalDecision(id, askId, resumeRunId, requireReady = true) {
+     const result = await getDbExec().execute({
+         sql: `UPDATE automation_runs SET status = 'resuming', decision_at = ?, resume_run_id = ?
+           WHERE id = ? AND pending_ask_id = ? AND status = 'waiting_approval'
+-            AND approval_ready = 1 AND finished_at IS NULL`,
++            ${requireReady ? "AND approval_ready = 1" : ""} AND finished_at IS NULL`,
+         args: [Date.now(), resumeRunId, id, askId],
+     });
+     return result.rowsAffected === 1;
+@@ -663,6 +668,23 @@
+ function sweepPage(result) {
+     return (result.rows ?? []).map(row => ({ id: String(row.id), at: Number(row.sweep_at) }));
+ }
++/**
++ * Vivary #205: owners' decision claims older than the claim lease, so their
++ * continuation has ended or never started. The expiry sweep's own claims are
++ * listed with the expired waits.
++ */
++export async function listStaleApprovalClaims(appId, now = Date.now(), after = null) {
++    await ensureTable();
++    const result = await getDbExec().execute({
++        sql: `SELECT id, decision_at AS sweep_at FROM ${TABLE} WHERE finished_at IS NULL AND status = 'resuming'
++          AND approval_context IS NOT NULL AND resume_run_id NOT LIKE 'automation-expire-%'
++          AND decision_at <= ? ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (decision_at > ? OR (decision_at = ? AND id > ?))' : ''}
++          ORDER BY decision_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [now - automationRunClaimLeaseMs(), ...(appId ? [appId] : []), ...sweepCursorArgs(after)],
++    });
++    return sweepPage(result);
++}
+ /** Unfinished approval history bound to this exact resource. */
+ export async function listBoundApprovalWaits(resource) {
+     await ensureTable();
+diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
+--- a/dist/jobs/run-history.d.ts
++++ b/dist/jobs/run-history.d.ts
+@@ -136,7 +136,7 @@
+     outcomeReconciled: boolean; resumeRunId: string | null; context: AutomationApprovalContext | null;
+ } | null>;
+ export declare function getAutomationContinuationForWebhookTask(taskId: string): Promise<Awaited<ReturnType<typeof getAutomationContinuation>>>;
+-export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string): Promise<boolean>;
++export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string, requireReady?: boolean): Promise<boolean>;
+ export declare function restoreUnconsumedAutomationApproval(id: string, askId: string, resumeRunId: string): Promise<boolean>;
+ export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
+ export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
+@@ -145,6 +145,7 @@
+ export interface ApprovalSweepRow { id: string; at: number }
+ export declare const APPROVAL_SWEEP_PAGE_SIZE: number;
+ export declare function listExpiredApprovalWaits(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
++export declare function listStaleApprovalClaims(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function listUnreconciledAutomationApprovalRuns(appId?: string, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
+ export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1104,6 +1104,33 @@
+         !await isTurnAborted(pending.threadId, pending.turnId) &&
+         (await readAgentToolApproval(pending))?.status === "pending";
+ }
++/**
++ * Vivary #205: a wait whose turn cannot be recovered, because its Native run row
++ * is gone or its turn was stopped, is still over once no run can save it.
++ */
++async function waitRunEnded(pending) {
++    if (_activeBackgroundRunIds.has(pending.runId))
++        return false;
++    const native = await getRunById(pending.runId);
++    return !native || native.status !== "running";
++}
++/**
++ * Prepare a wait for a decline, which executes nothing and so needs no saved
++ * turn. A recoverable turn is still recovered for the transcript. False while a
++ * run may still save the wait.
++ */
++async function readyWaitForDecline(state) {
++    const pending = state.context;
++    if (!state.run.approvalReady && await canRecoverWaitingTurn(pending))
++        await recoverWaitingTurn(state);
++    if (!await waitRunEnded(pending))
++        return false;
++    if (!state.run.approvalReady && pending.options.webhookTaskId) {
++        const { restoreAutomationApprovalTaskWait } = await import("../integrations/pending-tasks-store.js");
++        await restoreAutomationApprovalTaskWait(pending.options.webhookTaskId, state.run.appId ?? undefined);
++    }
++    return true;
++}
+ async function recoverWaitingTurn(state) {
+     const pending = state.context;
+     if (!await canRecoverWaitingTurn(pending))
+@@ -1171,6 +1198,10 @@
+         automationHistoryOwner(context.resourceOwner, { userEmail: context.ownerEmail, orgId: context.orgId }) !== run.owner || context.resourcePath !== run.path ||
+         (context.orgId ?? null) !== (run.orgId ?? null))
+         throw new Error("The terminal approval history binding changed.");
++    // Vivary #205: no decision can reach a finished run, so an ask it left pending
++    // is declined. A consumed or declined ask stays as it is.
++    if ((await readAgentToolApproval(context))?.status === "pending")
++        await declineAgentToolApproval(context);
+     if (context.options.webhookTaskId) {
+         const { settleAutomationApprovalTask } = await import("../integrations/pending-tasks-store.js");
+         await settleAutomationApprovalTask(context, run);
+@@ -1251,14 +1282,11 @@
+             _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
+             return;
+         if (!staleClaim) {
+-            // A wait saved before its turn was marked ready is recovered as an
+-            // owner's decision recovers it. A run that can still save it is left.
+-            if (!state.run.approvalReady) {
+-                if (!await canRecoverWaitingTurn(pending))
+-                    return;
+-                await recoverWaitingTurn(state);
+-            }
+-            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
++            // A wait saved before its turn was marked ready is prepared as an
++            // owner's decline prepares it. A run that can still save it is left.
++            if (!await readyWaitForDecline(state))
++                return;
++            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire"), false))
+                 return;
+         }
+         if (ask.status === "pending" && !await declineAgentToolApproval(pending))
+@@ -1296,8 +1324,55 @@
+     }
+     _approvalSweepCursors.set(key, after);
+ }
++async function recoverStaleApprovalClaims(appId) {
++    const { listStaleApprovalClaims } = await import("./run-history.js");
++    await sweepApprovalRows("claims", appId, after => listStaleApprovalClaims(appId, Date.now(), after), recoverStaleApprovalClaim);
++}
++/**
++ * Vivary #205: an owner's claim whose process ended before its continuation
++ * settled blocked its job until the owner came back. The sweep applies the
++ * decision path's recovery once the claim lease has passed and no run holds it:
++ * declined when the ask was declined, interrupted when it was consumed, and back
++ * to waiting while it is pending, so the expiry pass can end an expired wait.
++ */
++async function recoverStaleApprovalClaim(id) {
++    try {
++        const state = await getAutomationContinuation(id);
++        const pending = state?.context;
++        if (!pending || pending.terminalOutcome || state.storedStatus !== "resuming" || state.run.finishedAt ||
++            !state.resumeRunId || state.resumeRunId.startsWith("automation-expire-") ||
++            Date.now() - state.decisionAt <= automationRunClaimLeaseMs())
++            return;
++        if (_activeBackgroundRunIds.has(state.resumeRunId) || await getRunStatus(state.resumeRunId) === "running")
++            return;
++        const ask = await readAgentToolApproval(pending);
++        if (ask?.status === "declined") {
++            await finishAutomationRun(id, "declined", "The owner declined the pending action. It did not execute.",
++                "automation_approval_declined", { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "declined");
++            return;
++        }
++        if (ask?.status !== "pending") {
++            await finishAutomationRun(id, "interrupted", "An approved action has an unconfirmed outcome. It will not be dispatched again.",
++                INTERRUPTED_RUN_ERROR_CODE, { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "interrupted", "The approved action has an unconfirmed outcome.");
++            return;
++        }
++        await restoreUnconsumedAutomationApproval(id, pending.askId, state.resumeRunId);
++    }
++    catch (error) {
++        console.error("[automations] approval claim recovery failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++    }
++}
+ export async function reconcileAutomationApprovalOutcomes(appId) {
+-    // Expiry first, so a wait that ends here settles in this same pass.
++    // Stale claims first, so a wait they restore can expire in this same pass.
++    try {
++        await recoverStaleApprovalClaims(appId);
++    }
++    catch (error) {
++        console.error("[automations] approval claim scan failed:", redactText(error instanceof Error ? error.message : String(error)));
++    }
++    // Expiry next, so a wait that ends here settles in this same pass.
+     try {
+         await expireAutomationApprovalWaits(appId);
+     }
+@@ -1420,18 +1495,24 @@
+     else if (state.storedStatus !== "waiting_approval") {
+         throw approvalDecisionRefusal("The automation is no longer waiting for approval.");
+     }
+-    if (!state.run.approvalReady)
+-        await recoverWaitingTurn(state);
+-    const nativeStatus = await getRunStatus(pending.runId);
+-    if (_activeBackgroundRunIds.has(pending.runId) || !nativeStatus || nativeStatus === "running" || !state.run.approvalReady)
+-        throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    if (input.decision === "decline") {
++        if (!await readyWaitForDecline(state))
++            throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    }
++    else {
++        if (!state.run.approvalReady)
++            await recoverWaitingTurn(state);
++        const nativeStatus = await getRunStatus(pending.runId);
++        if (_activeBackgroundRunIds.has(pending.runId) || !nativeStatus || nativeStatus === "running" || !state.run.approvalReady)
++            throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    }
+     if (!ask || ask.status !== "pending")
+         throw approvalDecisionRefusal("The exact pending approval is unavailable.");
+     const validity = await validateAutomationRunIdentity(pending.ownerEmail, pending.orgId ?? undefined);
+     if (!validity.ok && !departedOwner)
+         throw approvalDecisionRefusal("The approval owner identity is no longer valid.");
+     if (input.decision === "decline") {
+-        if (!await claimAutomationApprovalDecision(input.historyId, pending.askId, createRunId("automation-decline")))
++        if (!await claimAutomationApprovalDecision(input.historyId, pending.askId, createRunId("automation-decline"), false))
+             throw approvalDecisionRefusal("Another decision already claimed this approval.");
+         if (!await declineAgentToolApproval(pending))
+             throw approvalDecisionRefusal("The exact approval could not be declined.");
