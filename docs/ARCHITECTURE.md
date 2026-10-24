@@ -737,6 +737,7 @@ it, and the PR template asks for diff bytes and hand-written lines. Each PR keep
 whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
 1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
 behavior changes, so the existing design description still holds.
+
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
 runner bootstrap contract and its action count. Every step-level key in an admitted job
