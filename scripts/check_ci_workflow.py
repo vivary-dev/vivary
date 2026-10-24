@@ -54,336 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - &runner_action_node_bootstrap
-        name: runner action Node admission
-        id: runner_action_node
-        shell: python -I -B {0}
-        run: |
-          """Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
-
-          import ctypes
-          import hashlib
-          import json
-          import os
-          from pathlib import Path, PurePosixPath, PureWindowsPath
-          import platform
-          import re
-          import struct
-          import subprocess
-          import sys
-          import threading
-
-
-          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
-          # Checked by the controller on 2026-10-21. CVE-2026-111497 is a Brotli
-          # out-of-bounds write / RCE on all three lines. This is known-advisory coverage,
-          # not a zero-vulnerability claim or permission to select another project runtime.
-          FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
-          MAX_ANCESTORS = 64
-          PROBE_TIMEOUT = 10
-          KNOWN_SELECTION_FLAGS = {
-              "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
-              "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION",
-              "ACTIONS_RUNNER_FORCED_INTERNAL_NODE_VERSION",
-          }
-
-
-          def refuse(message):
-              raise RuntimeError("Runner action Node: " + message)
-
-
-          def node_version(value, selected_major=None):
-              if not isinstance(value, str) or not re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value):
-                  refuse("malformed or prerelease version")
-              major, minor, patch = map(int, value.removeprefix("v").split("."))
-              if major not in FLOORS or (minor, patch) < FLOORS[major]:
-                  refuse("EOL, unknown or advisory-affected Node release")
-              if selected_major is not None and major != selected_major:
-                  refuse("the action interpreter must actually be Node 24")
-              return f"{major}.{minor}.{patch}"
-
-
-          def check_selection_overrides(environment):
-              # Examined runner dispatch leaves explicit node24 on node24 for the known
-              # migration flags. Internal-function selection does not select action Node.
-              for name, value in environment.items():
-                  if value and "NODE" in name and name.startswith(("ACTIONS_", "FORCE_JAVASCRIPT_")) and name not in KNOWN_SELECTION_FLAGS:
-                      refuse("unproved selection override " + name)  # Report names, never values.
-
-
-          def check_host(system, machine, environment, container=False):
-              if system not in ("linux", "win32") or machine.lower() not in ("x86_64", "amd64") or struct.calcsize("P") != 8:
-                  refuse("only native Linux/Windows x64 hosts are supported")
-              if environment.get("RUNNER_ARCH", "X64") != "X64" or environment.get("RUNNER_OS", {"linux": "Linux", "win32": "Windows"}[system]) != {"linux": "Linux", "win32": "Windows"}[system]:
-                  refuse("runner OS/architecture disagrees with the native host")
-              if container:
-                  refuse("container execution is unsupported")
-              check_selection_overrides(environment)
-
-
-          def container_host(system):
-              if any(os.environ.get(name) for name in ("CONTAINER_SANDBOX_MOUNT_POINT", "DOTNET_RUNNING_IN_CONTAINER", "DOTNET_RUNNING_IN_CONTAINERS")):
-                  return True
-              if system == "linux":
-                  if any(Path(name).exists() for name in ("/.dockerenv", "/run/.containerenv", "/run/systemd/container")):
-                      return True
-                  return bool(re.search(r"docker|kubepods|containerd|lxc", Path("/proc/1/cgroup").read_text()))
-              return False
-
-
-          def parse_linux_stat(text):
-              pid, separator, rest = text.partition(" (")
-              name, closing, tail = rest.rpartition(") ")
-              fields = tail.split()
-              if not separator or not closing or not pid.isdecimal() or len(fields) < 20 or fields[0] in ("Z", "X"):
-                  refuse("unreadable Linux process identity")
-              try:
-                  return {"pid": int(pid), "ppid": int(fields[1]), "created": int(fields[19])}
-              except ValueError:
-                  refuse("malformed Linux process identity")
-
-
-          def linux_process(pid):
-              folder = Path("/proc") / str(pid)
-              before = parse_linux_stat((folder / "stat").read_text())
-              executable = os.readlink(folder / "exe")
-              after = parse_linux_stat((folder / "stat").read_text())
-              if before != after or before["pid"] != pid or executable.endswith(" (deleted)") or not Path(executable).is_absolute():
-                  refuse("Linux process disappeared, changed or reused its PID")
-              return {**before, "exe": str(Path(executable).resolve(strict=True))}
-
-
-          def windows_process(pid):
-              from ctypes import wintypes
-              kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-              ntdll = ctypes.WinDLL("ntdll")
-
-              class BasicInformation(ctypes.Structure):
-                  _fields_ = [("reserved", ctypes.c_void_p), ("peb", ctypes.c_void_p),
-                              ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_size_t), ("parent", ctypes.c_size_t)]
-
-              kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-              kernel.OpenProcess.restype = wintypes.HANDLE
-              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-              kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-              kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-              kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-              kernel.WaitForSingleObject.restype = wintypes.DWORD
-              ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
-              ntdll.NtQueryInformationProcess.restype = wintypes.LONG
-              handle = kernel.OpenProcess(0x1000 | 0x100000, False, pid)
-              if not handle:
-                  refuse("unreadable Windows process identity")
-              try:
-                  info = BasicInformation()
-                  size = wintypes.ULONG()
-                  if ntdll.NtQueryInformationProcess(handle, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(size)) != 0:
-                      refuse("Windows parent identity is unavailable")
-                  times = [wintypes.FILETIME() for _ in range(4)]
-                  if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
-                      refuse("Windows creation identity is unavailable")
-                  buffer = ctypes.create_unicode_buffer(32768)
-                  length = wintypes.DWORD(len(buffer))
-                  if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)) or info.pid != pid or kernel.WaitForSingleObject(handle, 0) != 258:
-                      refuse("Windows process disappeared or reused its PID")
-                  return {"pid": pid, "ppid": int(info.parent), "created": (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime, "exe": buffer.value}
-              finally:
-                  kernel.CloseHandle(handle)
-
-
-          def discover_worker(pid, read_process, system):
-              # The nearest owning Worker selects this action's interpreter. Its own
-              # service ancestors are outside that execution boundary.
-              chain = []
-              seen = set()
-              paths = PureWindowsPath if system == "win32" else PurePosixPath
-              expected = "runner.worker.exe" if system == "win32" else "Runner.Worker"
-              worker = None
-              while pid:
-                  if pid in seen or len(chain) >= MAX_ANCESTORS:
-                      refuse("cyclic or overlong process ancestry")
-                  seen.add(pid)
-                  item = read_process(pid)
-                  if item["pid"] != pid or item["created"] <= 0 or item["ppid"] < 0 or not paths(item["exe"]).is_absolute():
-                      refuse("missing process identity")
-                  chain.append(item)
-                  if item["ppid"] in seen:
-                      refuse("cyclic or overlong process ancestry")
-                  name = paths(item["exe"]).name
-                  if len(chain) > 1 and (name.lower() if system == "win32" else name) == expected:
-                      runner_paths(item, system)
-                      worker = item
-                      break
-                  pid = item["ppid"]
-              if worker is None:
-                  refuse("an owning Runner.Worker ancestor is required")
-              for item in chain:
-                  if read_process(item["pid"]) != item:
-                      refuse("ancestry changed or reused a process identity")
-              return worker, chain
-
-
-          def runner_paths(worker, system):
-              paths = PureWindowsPath if system == "win32" else PurePosixPath
-              executable = paths(worker["exe"])
-              directory = executable.parent.name.lower() if system == "win32" else executable.parent.name
-              if not executable.is_absolute() or directory != "bin" or ".." in executable.parts:
-                  refuse("Worker is not in the runner root's bin directory")
-              root = executable.parent.parent
-              node = root / "externals" / "node24" / "bin" / ("node.exe" if system == "win32" else "node")
-              return str(root), str(node)
-
-
-          def binary_x64(file, system):
-              with open(file, "rb") as stream:
-                  header = stream.read(64)
-                  if system == "linux":
-                      if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 62:
-                          refuse("expected a Linux x64 ELF executable")
-                  else:
-                      if len(header) != 64 or header[:2] != b"MZ":
-                          refuse("expected a Windows x64 PE executable")
-                      offset = struct.unpack_from("<I", header, 60)[0]
-                      if not 64 <= offset <= 1024 * 1024:
-                          refuse("malformed PE header")
-                      stream.seek(offset)
-                      pe = stream.read(26)
-                      if len(pe) != 26 or pe[:4] != b"PE\0\0" or struct.unpack_from("<H", pe, 4)[0] != 0x8664 or struct.unpack_from("<H", pe, 24)[0] != 0x20b:
-                          refuse("expected a Windows x64 PE32+ executable")
-
-
-          def sha256(file):
-              digest = hashlib.sha256()
-              with open(file, "rb") as stream:
-                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                      digest.update(chunk)
-              return digest.hexdigest()
-
-
-          def sanitized_environment(system):
-              environment = {"LANG": "C", "LC_ALL": "C"}
-              if system == "win32":
-                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-                  buffer = ctypes.create_unicode_buffer(32768)
-                  length = kernel.GetWindowsDirectoryW(buffer, len(buffer))
-                  if not 0 < length < len(buffer):
-                      refuse("Windows directory is unavailable")
-                  environment["SystemRoot"] = buffer.value
-              return environment
-
-
-          def probe_version(executable, environment):
-              # Bound output as well as elapsed time, without running any JavaScript guard.
-              process = subprocess.Popen([str(executable), "--version"], stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
-                                         cwd=str(executable.parent), shell=False)
-              output = []
-              def read_output():
-                  try:
-                      output.append(process.stdout.read(129))
-                  except OSError:
-                      output.append(b"")
-              reader = threading.Thread(target=read_output, daemon=True)
-              reader.start()
-              try:
-                  reader.join(PROBE_TIMEOUT)
-                  if reader.is_alive() or not output or len(output[0]) > 128:
-                      refuse("interpreter probe timed out or exceeded its output bound")
-                  try:
-                      status = process.wait(timeout=2)
-                  except subprocess.TimeoutExpired:
-                      refuse("interpreter probe timed out")
-                  if status != 0:
-                      refuse("interpreter probe failed")
-                  try:
-                      text = output[0].decode("ascii")
-                  except UnicodeDecodeError:
-                      refuse("interpreter probe returned malformed output")
-                  if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:\r?\n)?", text):
-                      refuse("interpreter probe returned malformed output")
-                  return text.rstrip("\r\n")
-              finally:
-                  if process.poll() is None:
-                      process.kill()
-                  process.wait(timeout=2)
-                  reader.join(2)
-                  # A failed probe may leave an inherited pipe open. Never block on a
-                  # buffered close while the bounded daemon reader still owns that pipe.
-                  if not reader.is_alive():
-                      process.stdout.close()
-
-
-          def check_runner_action_node():
-              system = sys.platform
-              check_host(system, platform.machine(), os.environ, container_host(system))
-              if system == "win32":
-                  # Refuse x64 emulation on ARM even when the Python process reports AMD64.
-                  from ctypes import wintypes
-                  kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-                  kernel.GetCurrentProcess.restype = wintypes.HANDLE
-                  kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT), ctypes.POINTER(wintypes.USHORT)]
-                  process_machine, native_machine = wintypes.USHORT(), wintypes.USHORT()
-                  if not kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process_machine), ctypes.byref(native_machine)) or native_machine.value != 0x8664 or process_machine.value not in (0, 0x8664):
-                      refuse("native Windows x64 identity is required")
-              read_process = windows_process if system == "win32" else linux_process
-              worker, chain = discover_worker(os.getpid(), read_process, system)
-              root, selected = runner_paths(worker, system)
-              interpreter = Path(selected)
-              if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
-                  refuse("missing interpreter or a path outside the discovered runner root")
-              binary_x64(worker["exe"], system)
-              binary_x64(interpreter, system)
-              worker_hash, before = sha256(worker["exe"]), sha256(interpreter)
-              version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
-              if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
-                  refuse("Worker or interpreter bytes changed during the probe")
-              for item in chain:
-                  if read_process(item["pid"]) != item:
-                      refuse("Worker ancestry changed or reused a process identity")
-              return {"worker": worker, "workerSha256": worker_hash, "root": root,
-                      "interpreter": str(interpreter), "sha256": before, "version": version,
-                      "platform": system, "architecture": "x64"}
-
-
-          def admission_failure(error):
-              phases = {
-                  "container_host": "container-detection", "check_host": "host-policy",
-                  "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
-                  "linux_process": "process-identity", "windows_process": "process-identity",
-                  "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
-                  "binary_x64": "binary-identity", "sha256": "binary-hash",
-                  "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
-                  "node_version": "interpreter-version",
-              }
-              phase = "admission"
-              observed = None
-              trace = error.__traceback__
-              while trace is not None:
-                  frame = trace.tb_frame
-                  phase = phases.get(frame.f_code.co_name, phase)
-                  if isinstance(error, RuntimeError) and frame.f_code is node_version.__code__:
-                      value = frame.f_locals.get("value")
-                      selected = frame.f_locals.get("selected_major")
-                      if (type(value) is str and len(value) <= 32 and type(selected) is int and selected == 24
-                              and re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)):
-                          observed = value.removeprefix("v")
-                  trace = trace.tb_next
-              detail = f", observedNode={observed}, requiredNode=24.22.1" if observed is not None else ""
-              return f"Runner action Node: admission failed (phase={phase}, exception={type(error).__name__}{detail})"
-
-
-          def main():
-              try:
-                  print(json.dumps(check_runner_action_node(), sort_keys=True))
-                  return 0
-              except (RuntimeError, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
-                  # Report only owned labels and validated numeric versions, never raw exception text.
-                  print(admission_failure(error), file=sys.stderr)
-                  return 1
-
-
-          if __name__ == "__main__":
-              sys.exit(main())
+      - __RUNNER_BOOTSTRAP__
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -405,7 +76,84 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.11"
+          python-version: "3.12.15"
+      - __PYTHON_PROVISIONING__
+      - name: actual Python runtime admission
+        shell: python -I -B {0}
+        run: |
+          """Admit the executing CI Python and its loaded OpenSSL before network use."""
+
+          import json
+          from pathlib import Path
+          import re
+          import ssl
+          import sys
+
+
+          PYTHON = (3, 12, 15, "final", 0)
+          OPENSSL = ["OpenSSL", "3.5.9"]
+
+
+          class PythonRuntimeRefusal(RuntimeError):
+              pass
+
+
+          def refuse(message):
+              raise PythonRuntimeRefusal("Python runtime admission: " + message)
+
+
+          def observed_runtime():
+              # Emit only bounded runtime version facts, never exception text, paths,
+              # environment values, or the remainder of an OpenSSL build description.
+              implementation = getattr(getattr(sys, "implementation", None), "name", None)
+              if type(implementation) is not str or implementation not in ("cpython", "pypy", "graalpy", "ironpython", "jython", "micropython"):
+                  implementation = "unknown"
+              version = getattr(sys, "version_info", ())
+              version = version if isinstance(version, tuple) and len(version) == 5 else (None,) * 5
+              numeric = lambda value: str(value) if type(value) is int and 0 <= value <= 9999 else "unknown"
+              python = ".".join(numeric(value) for value in version[:3])
+              release = version[3] if type(version[3]) is str and version[3] in ("alpha", "beta", "candidate", "final") else "unknown"
+              description = getattr(ssl, "OPENSSL_VERSION", None)
+              tokens = description.split()[:2] if type(description) is str and len(description) <= 256 else []
+              openssl = "unknown"
+              if (len(tokens) == 2 and tokens[0] in ("OpenSSL", "LibreSSL", "BoringSSL")
+                      and re.fullmatch(r"[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}(?:[a-z]|-(?:dev|alpha[0-9]{0,4}|beta[0-9]{0,4}|rc[0-9]{0,4}))?", tokens[1])):
+                  openssl = " ".join(tokens)
+              return (f"observedImplementation={implementation}, observedPython={python}, "
+                      f"observedRelease={release}, observedSerial={numeric(version[4])}, observedOpenSSL={openssl}")
+
+
+          def assert_python_runtime():
+              # Read the current process, never caller-supplied version or environment facts.
+              if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
+                  refuse("invoke this guard with Python -I -B")
+              if sys.implementation.name != "cpython" or tuple(sys.version_info) != PYTHON:
+                  refuse("the qualified CPython 3.12.15 final runtime is required")
+              # Match the separately qualified build-tool baseline, including the library
+              # actually loaded by ssl rather than an executable's declared dependency.
+              if ssl.OPENSSL_VERSION.split()[:2] != OPENSSL:
+                  refuse("the loaded OpenSSL library must be the qualified 3.5.9 release")
+              executable = Path(sys.executable).resolve(strict=True)
+              if not executable.is_file():
+                  refuse("the executing Python must resolve to a regular file")
+              return {"python": str(executable), "implementation": "CPython",
+                      "version": "3.12.15", "openssl": ssl.OPENSSL_VERSION}
+
+
+          def main():
+              try:
+                  if len(sys.argv) != 1:
+                      refuse("this guard accepts no caller-supplied runtime facts or arguments")
+                  print(json.dumps(assert_python_runtime(), sort_keys=True))
+                  return 0
+              except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as error:
+                  message = str(error) if type(error) is PythonRuntimeRefusal else "Python runtime admission: actual runtime evidence is unavailable"
+                  print(message + " (" + observed_runtime() + ")", file=sys.stderr)
+                  return 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
       - name: wait for completed reviews and resolved threads
         env:
           GH_TOKEN: ${{ github.token }}
@@ -428,6 +176,7 @@ def check_review_workflow(text: str) -> None:
         raise SystemExit(f"{REVIEW_WORKFLOW}: must match the canonical required review gate workflow "
                          "in scripts/check_ci_workflow.py (pull requests only, base-revision or pinned bootstrap script, real wait)")
     check_runner_action_bootstrap(text, ("review-gate",), auxiliary=True)
+    check_python_runtime(text, ("review-gate",), inline=True)
 
 
 def job_block(text: str, name: str) -> str:
@@ -449,6 +198,7 @@ NODE_GUARD = "node packages/workbench/bin/runtime-security.mjs"
 NODE_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "site")
 CI_JOBS = ("changes", "test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "review", "site")
 RUNNER_BOOTSTRAP = Path(__file__).resolve().with_name("check_runner_action_node.py")
+RUNNER_REPAIR = Path(__file__).resolve().with_name("bootstrap_runner_action_node.py")
 BOOTSTRAP_ANCHOR = "runner_action_node_bootstrap"
 BOOTSTRAP_ALIAS = "      - *" + BOOTSTRAP_ANCHOR + "\n"
 
@@ -475,12 +225,22 @@ def validate_action_manifest(reference: str, runs: dict) -> None:
 def runner_bootstrap_step() -> str:
     source = RUNNER_BOOTSTRAP.read_text(encoding="utf-8").replace("\r\n", "\n")
     require(source.endswith("\n") and "\r" not in source, "canonical runner bootstrap must use LF and a final newline")
+    repair = RUNNER_REPAIR.read_text(encoding="utf-8")
+    require(repair.endswith("\n") and "\r" not in repair, "canonical runner repair must use LF and a final newline")
+    require("'''" not in source, "runner admission cannot close its inline source literal")
+    body = ("import types\n\nRUNNER_ADMISSION_SOURCE = r'''" + source + "'''\n"
+            "admission = types.ModuleType('runner_node_admission')\n"
+            "exec(compile(RUNNER_ADMISSION_SOURCE, 'runner-node-admission.py', 'exec'), admission.__dict__)\n\n"
+            + repair)
     return ("      - &" + BOOTSTRAP_ANCHOR + "\n"
             "        name: runner action Node admission\n"
             "        id: runner_action_node\n"
             "        shell: python -I -B {0}\n"
-            "        run: |\n" + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
+            "        run: |\n" + "".join("          " + line + "\n" if line else "\n" for line in body.splitlines()))
 
+
+CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
+    "      - __RUNNER_BOOTSTRAP__\n", runner_bootstrap_step(), 1)
 
 def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, auxiliary=False) -> None:
     if auxiliary:
@@ -556,9 +316,9 @@ UV_WINDOWS_WHEEL = (
 )
 UV_PIP_CONFIG_FILE = "${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}"
 UV_INSTALLS = {
-    "test": 'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_LINUX_WHEEL + '"',
+    "test": 'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_LINUX_WHEEL + '"',
     "orientation-proof": (
-        'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
+        'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
         "runner.os == 'Linux' && '" + UV_LINUX_WHEEL
         + "' || runner.os == 'Windows' && '" + UV_WINDOWS_WHEEL + "' || '' }}\""
     ),
@@ -603,7 +363,7 @@ def _check_uv_inherited_controls(header: str, pad: str, owner: str) -> None:
 def check_uv_acquisition(text: str) -> None:
     _check_uv_inherited_controls(text.split("\njobs:\n", 1)[0], "", "workflow")
     acquisition = re.compile(
-        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--isolated\s+)?install\b[^\n]*\buv\b"
+        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--use-deprecated=legacy-certs\s+)?(?:--isolated\s+)?install\b[^\n]*\buv\b"
     )
     for name in UV_JOBS:
         job = job_block(text, name)
@@ -662,7 +422,7 @@ def check_uv_acquisition(text: str) -> None:
         )
 
 
-PIP_JOBS = ("test", "workbench", "governed-platform-proof", "orientation-proof")
+PIP_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof")
 PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '        shell: python -I -B {0}\n'
  '        run: |\n'
@@ -670,44 +430,144 @@ PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")\n')
 PIP_SETUP_STEP = ('      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
  '        with:\n'
- '          python-version: "3.11"\n')
+ '          python-version: "3.12.15"\n')
+PYTHON_JOBS = (*PIP_JOBS, "review", "site")
+PYTHON_PROVISIONING_SOURCE = Path(__file__).resolve().with_name("bootstrap_ci_python.py")
+PYTHON_PROVISIONING_STEP = (
+    "      - name: verified Python runtime provisioning\n"
+    "        shell: python -I -B {0}\n"
+    "        run: |\n"
+    "          import runpy\n"
+    '          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")\n'
+)
+WINDOWS_PYTHON_PROVISIONING_STEP = (
+    "      - name: verified Windows Python runtime provisioning\n"
+    "        shell: pwsh\n"
+    "        run: ./scripts/bootstrap_ci_python_windows.ps1\n"
+)
+
+
+def python_admission_prefix(name, inline=False):
+    guard = python_runtime_step(inline)
+    if name == "governed-platform-proof":
+        return [WINDOWS_PYTHON_PROVISIONING_STEP, guard]
+    if name == "orientation-proof":
+        def when(step, condition):
+            first, rest = step.split("\n", 1)
+            return first + "\n        if: " + condition + "\n" + rest
+        return [when(PIP_SETUP_STEP, "${{ runner.os != 'Windows' && steps.runner_action_node.outcome == 'success' }}"),
+                when(PYTHON_PROVISIONING_STEP, "runner.os != 'Windows'"),
+                when(WINDOWS_PYTHON_PROVISIONING_STEP, "runner.os == 'Windows'"), guard]
+    return [PIP_SETUP_STEP, python_provisioning_step(inline), guard]
+
+
+def python_provisioning_step(inline=False) -> str:
+    if not inline:
+        return PYTHON_PROVISIONING_STEP
+    policy = PYTHON_PROVISIONING_SOURCE.with_name("certifi_bundle.py").read_text(encoding="utf-8")
+    source = PYTHON_PROVISIONING_SOURCE.read_text(encoding="utf-8")
+    require(all(item.endswith("\n") and "\r" not in item for item in (policy, source))
+            and "'''" not in policy,
+            "canonical Python provisioning requires LF and a final newline")
+    body = ("CERTIFI_POLICY_SOURCE = r'''" + policy + "'''\n"
+            "CA_POLICY = {}\n"
+            "exec(compile(CERTIFI_POLICY_SOURCE, 'certifi-policy.py', 'exec'), CA_POLICY)\n\n" + source)
+    return ("      - name: verified Python runtime provisioning\n"
+            "        shell: python -I -B {0}\n"
+            "        run: |\n"
+            + "".join("          " + line + "\n" if line else "\n" for line in body.splitlines()))
+
+
+CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
+    "      - __PYTHON_PROVISIONING__\n", python_provisioning_step(inline=True), 1)
+
+PYTHON_RUNTIME_SOURCE = Path(__file__).resolve().with_name("check_python_runtime.py")
+PYTHON_RUNTIME_STEP = (
+    "      - name: actual Python runtime admission\n"
+    "        shell: python -I -B {0}\n"
+    "        run: |\n"
+    "          import runpy\n"
+    '          runpy.run_path("scripts/check_python_runtime.py", run_name="__main__")\n'
+)
+
+
+def python_runtime_step(inline=False) -> str:
+    if not inline:
+        return PYTHON_RUNTIME_STEP
+    # The review gate checks out only the base and pinned fallback gate scripts.
+    # Bind its inline admission to this helper without adding a head checkout.
+    source = PYTHON_RUNTIME_SOURCE.read_text(encoding="utf-8")
+    require(source.endswith("\n") and "\r" not in source,
+            "canonical Python runtime guard requires LF and a final newline")
+    return ("      - name: actual Python runtime admission\n"
+            "        shell: python -I -B {0}\n"
+            "        run: |\n"
+            + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
+
+
+def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
+    for name in names:
+        steps = re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]
+        setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
+        guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
+        contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
+        require(len(setups) == (0 if name == "governed-platform-proof" else 1)
+                and len(guards) == 1, contract)
+        guard = guards[0]
+        prefix = python_admission_prefix(name, inline)
+        first = guard - len(prefix) + 1
+        require(first >= 0 and [step.rstrip("\n") for step in steps[first:guard + 1]]
+                == [step.rstrip("\n") for step in prefix], contract)
+        require(sum("name: verified Python runtime provisioning" in step
+                    or "name: verified Windows Python runtime provisioning" in step for step in steps)
+                == (2 if name == "orientation-proof" else 1), contract)
+        require(not re.search(r"scripts/(?:bootstrap_ci_pip|check_pip_runtime|bootstrap_build_tools|build_go_tools)\.py|\s-m\s+pip\b",
+                              "".join(steps[:guard])), contract)
+
+
 PIP_VENV_BLOCKS = {'test': ('          python -m venv --without-pip "$smoke/venv"\n'
           '          venv_python="$smoke/venv/bin/python"\n'
           '          export PATH="$smoke/venv/bin:$PATH"\n'
           '          unset PYTHONPATH\n'
+          '          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?\n'
           '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-          '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" '
+          '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" '
           'vivary\n',
           '          python -m venv --without-pip "$mcp_venv"\n'
           '          mcp_python="$mcp_venv/bin/python"\n'
+          '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
           '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
           '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-          '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'),
+          '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'),
  'governed-platform-proof': ('          python -m venv --without-pip (Join-Path $smoke "venv")\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
                              '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
                              '          $python = Join-Path $scripts "python.exe"\n'
+                             '          & $python -I -B scripts/check_python_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }\n'
                              '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
                              '}\n'
                              '          & $python -I -B scripts/check_pip_runtime.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
                              'failed" }\n'
-                             '          & $python -I -m pip install --no-index --find-links '
+                             '          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links '
                              '$wheelhouse vivary\n',
                              '          python -m venv --without-pip $mcpVenv\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP venv creation '
                              'failed" }\n'
                              '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
                              '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                             '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                             '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                              '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                              'failed" }\n'
                              '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime '
                              'admission failed" }\n'
-                             '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                             '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                              '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                              'failed" }\n')}
 PIP_RUNTIME_STEP = (
@@ -718,22 +578,29 @@ PIP_RUNTIME_STEP = (
     '          runpy.run_path("scripts/check_pip_runtime.py", run_name="__main__")\n'
 )
 PIP_MCP_BLOCKS = {'test': '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+         '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
  'governed-platform-proof': '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                             'failed" }\n'
                             '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
                             'failed" }\n'
-                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                             'failed" }\n'}
 
 
 def check_pip_runtime(text: str) -> None:
+    try:
+        check_python_runtime(text, names=PIP_JOBS)
+    except SystemExit as error:
+        raise SystemExit("pip provisioning prerequisite: " + str(error)) from error
     for name in PIP_JOBS:
         job = job_block(text, name)
         header = job.split("    steps:\n", 1)[0]
@@ -742,17 +609,16 @@ def check_pip_runtime(text: str) -> None:
             require(not re.search(r"(?m)^    (?:defaults|'defaults'|\"defaults\"):", header),
                     f"{name} pip runtime admission cannot inherit run defaults")
         steps = re.split(r"(?m)(?=^      - )", job)[1:]
-        setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
+        python_guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual pip runtime admission" in step]
-        require(len(setups) == len(guards) == 1,
-                f"{name} needs exactly one setup-python and actual pip runtime admission")
-        setup, guard = setups[0], guards[0]
-        require(steps[setup].rstrip("\n") == PIP_SETUP_STEP.rstrip("\n"),
-                f"{name} pip provisioning requires exact setup-python without old-pip options")
-        require(guard == setup + 2 and steps[setup + 1].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
+        require(len(python_guards) == len(guards) == 1,
+                f"{name} needs exactly one actual Python and pip runtime admission")
+        python_guard, guard = python_guards[0], guards[0]
+        require(guard == python_guard + 2
+                and steps[python_guard + 1].rstrip("\n") == PIP_BOOTSTRAP_STEP.rstrip("\n")
                 and steps[guard].rstrip("\n") == PIP_RUNTIME_STEP.rstrip("\n"),
-                f"{name} verified pip provisioning and admission must immediately follow setup-python unconditionally")
-        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:setup + 1])),
+                f"{name} verified pip provisioning and admission must immediately follow actual Python admission unconditionally")
+        require(not re.search(r"\b(?:pip|pip3)\b", "".join(steps[:python_guard])),
                 f"{name} must admit the selected pip before package operations")
         if name in PIP_VENV_BLOCKS:
             expected_venvs = PIP_VENV_BLOCKS[name]
@@ -761,7 +627,7 @@ def check_pip_runtime(text: str) -> None:
             for required in expected_venvs:
                 require(job.count(required) == 1,
                         f"{name} fresh venv requires --without-pip, exact-target provisioning and runtime admission before pip")
-                install = next(line.strip() for line in required.splitlines() if " -I -m pip install " in line)
+                install = next(line.strip() for line in required.splitlines() if " -I -m pip --use-deprecated=legacy-certs install " in line)
                 prefix = install.split(" install ", 1)[0] + " "
                 require(not any(line.strip().startswith(prefix) for line in job[:job.index(required)].splitlines()),
                         f"{name} fresh venv pip cannot run before its provisioning and admission")
@@ -775,7 +641,7 @@ def check_pip_runtime(text: str) -> None:
             require(not re.search(r'(?m)^\s*(?:"\$mcp_python"|& \$mcpPython)\s+(?:-I\s+)?-m\s+pip\b',
                                   job[:job.index(block)]),
                     f"{name} MCP pip cannot run before its venv admission")
-            network_install = next(line.strip() for line in block.splitlines() if " -I -m pip install " in line)
+            network_install = next(line.strip() for line in block.splitlines() if " -I -m pip --use-deprecated=legacy-certs install " in line)
             mcp_pip = network_install.split(" install ", 1)[0] + " "
             wheelhouse = '\"$wheelhouse\"' if name == "test" else "$wheelhouse"
             offline_install = mcp_pip + "install --no-index --find-links " + wheelhouse + " vivary-mcp create-vivary"
@@ -795,12 +661,15 @@ def check_pip_runtime(text: str) -> None:
 
 
 def check_pip_commands(text: str) -> None:
+    require(re.search(r"(?m)^  PIP_USE_DEPRECATED: legacy-certs$", text.split("\njobs:\n", 1)[0])
+            and text.count("PIP_USE_DEPRECATED") == 1,
+            "pip build-isolation children must inherit the qualified certifi-only trust policy")
     for name in PIP_JOBS:
-        prefixes = ("python -I -m pip ",)
+        prefixes = ("python -I -m pip --use-deprecated=legacy-certs ",)
         if name == "test":
-            prefixes += ('"$venv_python" -I -m pip ', '"$mcp_python" -I -m pip ')
+            prefixes += ('"$venv_python" -I -m pip --use-deprecated=legacy-certs ', '"$mcp_python" -I -m pip --use-deprecated=legacy-certs ')
         elif name == "governed-platform-proof":
-            prefixes += ("& $python -I -m pip ", "& $mcpPython -I -m pip ")
+            prefixes += ("& $python -I -m pip --use-deprecated=legacy-certs ", "& $mcpPython -I -m pip --use-deprecated=legacy-certs ")
         for step in re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]:
             run = re.search(r"(?m)^(?:      - |        )run: ([^\n]*)$", step)
             if run is None:
@@ -817,7 +686,7 @@ def check_pip_commands(text: str) -> None:
                 require(not re.search(r"\binstall\s+(?:-\S+\s+)*pip(?:[<=>!~\[]|\s|$)", command),
                         f"{name} cannot use a network pip self-upgrade to clear runtime admission")
                 if command.startswith(('"$venv_python"', "& $python ")):
-                    require(" -m pip check" in command or " install --no-index " in command,
+                    require(" -m pip --use-deprecated=legacy-certs check" in command or " install --no-index " in command,
                             f"{name} unadmitted offline venv pip cannot access the network")
             if pip_commands:
                 require(not re.search(r"(?m)^        (?:if|continue-on-error|working-directory):", step),
@@ -882,6 +751,120 @@ def check_site_dependencies(text: str) -> None:
     require(steps[builds[0]].rstrip("\n") == SITE_BUILD_STEP.rstrip("\n"), contract)
 
 
+WORKBENCH_TOOLS_STEP = (
+    '      - name: qualified workbench build tools\n'
+    '        shell: bash\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" --typescript || exit $?\n'
+    '          printf \'%s/vivary-build-tools/bin\\n\' "$RUNNER_TEMP" >> "$GITHUB_PATH"\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
+
+WORKBENCH_INSTALL_STEP = (
+    '      - name: install workbench dependencies\n'
+    '        shell: bash\n'
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts\'\n'
+)
+
+WORKBENCH_DEPENDENCY_STEP = (
+    '      - name: known workbench dependency admission\n'
+    '        shell: bash\n'
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\'\n'
+)
+
+WINDOWS_WORKBENCH_TOOLS_STEP = (
+    '      - name: qualified workbench build tools\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }\n'
+    '          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n'
+    '          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append\n'
+    '          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append\n'
+)
+
+WINDOWS_WORKBENCH_INSTALL_STEP = (
+    '      - name: install workbench dependencies\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }\n'
+)
+
+WINDOWS_WORKBENCH_DEPENDENCY_STEP = (
+    '      - name: known workbench dependency admission\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }\n'
+)
+
+WORKBENCH_TYPECHECK = (
+    '          pnpm --dir packages/workbench exec react-router typegen\n'
+    '          "$RUNNER_TEMP/vivary-build-tools/typescript-7.0.2-go1.26.10/tsc" --noEmit --project packages/workbench/tsconfig.json\n'
+)
+
+
+TEST_CLIENTS_STEP = (
+    '      - name: qualified release package clients\n'
+    '        shell: bash\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'%s/vivary-build-tools/bin\\n\' "$RUNNER_TEMP" >> "$GITHUB_PATH"\n'
+)
+TEST_PACK_COMMAND = '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"'
+REPAIR_TEST_STEP = (
+    '      - name: runner action Node repair tests\n'
+    '        env:\n'
+    '          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n'
+    '        run: python -I -B scripts/tests/test_bootstrap_runner_action_node.py\n'
+)
+BUILD_TEST_STEP = (
+    '      - name: isolated build tool tests\n'
+    '        env:\n'
+    '          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n'
+    '          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools\n'
+    '        run: python -I -B scripts/tests/test_build_tools.py\n'
+)
+
+
+def check_release_package_clients(text: str) -> None:
+    job = job_block(text, "test")
+    steps = re.split(r"(?m)(?=^      - )", job)[1:]
+    tools = [i for i, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step]
+    node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
+    pack = [i for i, step in enumerate(steps) if TEST_PACK_COMMAND in step]
+    contract = "test must provision isolated package clients before packing release artifacts"
+    require(len(tools) == len(node) == len(pack) == 1 and node[0] < tools[0] < pack[0], contract)
+    require(steps[tools[0]].rstrip("\n") == TEST_CLIENTS_STEP.rstrip("\n"), contract)
+    require(not re.search(r"(?m)^\s*(?:run:\s*)?npm\s", job), contract)
+
+
+def check_workbench_build_tools(text: str) -> None:
+    for name in ("workbench", "workbench-maintained", "governed-platform-proof"):
+        job = job_block(text, name)
+        contract = f"{name} must provision isolated clients and rebuilt Go compilers before dependencies"
+        steps = re.split(r"(?m)(?=^      - )", job)[1:]
+        tools = [i for i, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step]
+        installs = [i for i, step in enumerate(steps) if "- name: install workbench dependencies" in step]
+        dependencies = [i for i, step in enumerate(steps) if "- name: known workbench dependency admission" in step]
+        node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
+        require(len(tools) == len(installs) == len(node) == len(dependencies) == 1, contract)
+        require(node[0] < tools[0] and tools[0] + 1 == dependencies[0] and dependencies[0] + 1 == installs[0], contract)
+        windows = name == "governed-platform-proof"
+        expected = (WINDOWS_WORKBENCH_TOOLS_STEP, WINDOWS_WORKBENCH_DEPENDENCY_STEP, WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
+        require(all(steps[index].rstrip("\n") == value.rstrip("\n") for index, value in zip((tools[0], dependencies[0], installs[0]), expected)), contract)
+        require(not re.search(r"(?m)^\s*(?:run:\s*)?(?:npm|pnpm|corepack)\s", "".join(steps[:tools[0]])), contract)
+        require("npm install --global" not in job, contract)
+    workbench = job_block(text, "workbench")
+    require(WORKBENCH_TYPECHECK in workbench,
+            "workbench must retain route type generation and use the rebuilt TypeScript compiler")
+    require("pnpm --dir packages/workbench typecheck" not in workbench,
+            "workbench cannot execute the package's unqualified TypeScript binary")
+
+
 def check_runtime_security(text: str) -> None:
     for name in NODE_JOBS:
         job = job_block(text, name)
@@ -917,6 +900,7 @@ def check_runtime_security(text: str) -> None:
 def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     check_pip_runtime(text)
+    check_python_runtime(text)
     changes_job = job_block(text, "changes")
     test_job = job_block(text, "test")
     workbench_job = job_block(text, "workbench")
@@ -935,7 +919,7 @@ def main() -> None:
     require("HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}" in test_job,
             "HLDD review must use the actual PR head, not the synthetic merge")
 
-    runner_install = "python -I -m pip install pytest packaging"
+    runner_install = "python -I -m pip --use-deprecated=legacy-certs install pytest packaging"
     first_pytest = "python -m pytest"
     contract_tests = "python scripts/tests/test_ci_workflow.py"
     source_navigation_check = "python -B scripts/check-source-navigation.py --check"
@@ -1092,7 +1076,7 @@ def main() -> None:
     for command in (
         artifact_test,
         *release_build_commands(),
-        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        TEST_PACK_COMMAND,
         artifact_check,
     ):
         require(command in test_job, f"tests job must run {command}")
@@ -1149,19 +1133,29 @@ def main() -> None:
 
     check_site_dependencies(text)
     check_runtime_security(text)
+    check_workbench_build_tools(text)
+    check_release_package_clients(text)
     check_uv_acquisition(text)
     check_pip_commands(text)
     require("python -I -B scripts/tests/test_pip_runtime.py" in test_job,
             "tests job must run pip runtime admission regressions")
+    require("python -I -B scripts/tests/test_bootstrap_ci_python.py" in test_job,
+            "tests job must run verified Python provisioning regressions")
+    require("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py" in test_job,
+            "tests job must run native Windows Python bootstrap regressions")
+    require("python -I -B scripts/tests/test_python_runtime.py" in test_job,
+            "tests job must run Python runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
             "tests job must run verified pip provisioning regressions")
     require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
             "tests job must run known site dependency admission regressions")
-    require("python -I -B scripts/tests/test_build_tools.py" in test_job,
+    require(test_job.count(BUILD_TEST_STEP) == 1,
             "tests job must run isolated build tool regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
     require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
             "tests job must run the runner action bootstrap regressions")
+    require(test_job.count(REPAIR_TEST_STEP) == 1,
+            "tests job must run the runner action repair regressions")
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
     print(f"{WORKFLOW}: CI workflow contract passed")
 

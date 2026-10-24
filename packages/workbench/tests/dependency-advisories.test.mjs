@@ -140,9 +140,9 @@ test("xlsx resolves only from the reviewed SheetJS archive and its integrity", (
 
 // The two major-version overrides must retain the APIs their actual consumers use.
 const require = createRequire(import.meta.url);
-const coreRequire = createRequire(require.resolve("@agent-native/core"));
 
 test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM exports", async () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
   const connectorRequire = createRequire(coreRequire.resolve("botframework-connector"));
   const msalPath = connectorRequire.resolve("@azure/msal-node");
   const schemaPath = connectorRequire.resolve("botframework-schema");
@@ -173,6 +173,7 @@ test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM
 });
 
 test("Typography retains selector AST behavior with the patched parser", () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
   const { commonTrailingPseudos } = coreRequire("@tailwindcss/typography/src/utils.js");
   for (const [input, expected] of [
     ["p::before, a::before", ["::before", "p, a"]],
@@ -184,6 +185,7 @@ test("Typography retains selector AST behavior with the patched parser", () => {
 });
 
 test("Core's SQLite binding includes maintenance fixes and preserves transactions and stored values", () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
   const locked = lockedVersions("better-sqlite3");
   assert.ok(locked.length > 0, "better-sqlite3 is missing from the committed lockfiles");
   assert.ok(locked.every(({ version }) => isAtLeast(version, "13.0.3")));

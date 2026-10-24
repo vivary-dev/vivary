@@ -41,6 +41,29 @@ class BootstrapTests(unittest.TestCase):
                  mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")):
                 self.assertEqual(bootstrap.obtain_wheel(cache), wheel)
 
+    def test_exported_filtered_ca_is_explicit_and_cannot_union_or_change_host_anchors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "task-ca.pem"
+            bundle.write_bytes(b"inert eligible host anchor fixture")
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(bundle)), \
+                    mock.patch.dict(bootstrap.CA_POLICY, host_ca_bytes=lambda: bundle.read_bytes()), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                self.assertIs(bootstrap.download_context(), context.return_value)
+                context.assert_called_once_with(cafile=str(bundle))
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(bundle)), \
+                    mock.patch.dict(bootstrap.CA_POLICY, host_ca_bytes=lambda: b"other host anchors"), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                with self.assertRaisesRegex(ValueError, "eligible filtered host anchors"):
+                    bootstrap.download_context()
+                context.assert_not_called()
+            alias = Path(directory) / "alias.pem"
+            alias.symlink_to(bundle)
+            with mock.patch.dict(os.environ, SSL_CERT_FILE=str(alias)), \
+                    mock.patch.object(bootstrap.ssl, "create_default_context") as context:
+                with self.assertRaises(ValueError):
+                    bootstrap.download_context()
+                context.assert_not_called()
+
     def test_download_has_fixed_origin_no_proxy_no_redirect_and_exact_byte_bound(self):
         with tempfile.TemporaryDirectory() as directory:
             for mode in ("fixed", "redirect", "status", "oversized", "truncated", "digest", "deadline"):
@@ -55,6 +78,7 @@ class BootstrapTests(unittest.TestCase):
                 opener = mock.Mock()
                 opener.open.return_value = Response(data)
                 with self.subTest(mode=mode), contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.dict(bootstrap.os.environ, {}, clear=True))
                     stack.enter_context(mock.patch.object(bootstrap, "SIZE", 7))
                     stack.enter_context(mock.patch.object(bootstrap, "SHA256", hashlib.sha256(b"fixture").hexdigest() if mode != "digest" else "0" * 64))
                     factory = stack.enter_context(mock.patch.object(bootstrap.urllib.request, "build_opener", return_value=opener))
@@ -81,10 +105,12 @@ class BootstrapTests(unittest.TestCase):
             wheel.write_bytes(b"inert verified fixture")
             fixture_size = wheel.stat().st_size
             fixture_sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            derived = wheel.parent / "certifi-2026.10.23" / bootstrap.WHEEL
             environment = {"RUNNER_TEMP": str(temporary), "PIP_INDEX_URL": "PRIVATE", "PIP_CONFIG_FILE": "PRIVATE",
                            "HTTPS_PROXY": "PRIVATE", "PYTHONPATH": "PRIVATE", "SECRET_TOKEN": "PRIVATE"}
             with mock.patch.object(bootstrap.sys, "argv", [str(SOURCE)]), \
                  mock.patch.dict(bootstrap.os.environ, environment, clear=True), \
+                 mock.patch.object(bootstrap, "obtain_derived_pip", return_value=derived) as derive, \
                  mock.patch.object(bootstrap, "SIZE", fixture_size), \
                  mock.patch.object(bootstrap, "SHA256", fixture_sha), \
                  mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")), \
@@ -92,16 +118,19 @@ class BootstrapTests(unittest.TestCase):
                  mock.patch.object(bootstrap.subprocess, "run") as child, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(bootstrap.main(), 0)
             argv = child.call_args.args[0]
-            self.assertEqual(argv, [sys.executable, "-I", "-B", "-c", bootstrap.WHEEL_ENTRY, str(wheel), "install", "--isolated",
+            # The derived certifi-overlay wheel, not the upstream download, runs and installs.
+            self.assertEqual(argv, [sys.executable, "-I", "-B", "-c", bootstrap.WHEEL_ENTRY, str(derived), "install", "--isolated",
                                    "--no-index", "--no-deps", "--only-binary=:all:", "--no-cache-dir",
-                                   "--disable-pip-version-check", "--no-input", "--force-reinstall", str(wheel)])
+                                   "--disable-pip-version-check", "--no-input", "--force-reinstall", str(derived)])
+            self.assertEqual(child.call_count, 1)
+            self.assertEqual(derive.call_args_list, [mock.call(wheel.parent, wheel)] * 2)
             clean = child.call_args.kwargs["env"]
             self.assertFalse(any(name in clean for name in ("PIP_INDEX_URL", "HTTPS_PROXY", "PYTHONPATH", "SECRET_TOKEN")))
             self.assertEqual(clean["PIP_CONFIG_FILE"], os.devnull)
             self.assertEqual(child.call_args.kwargs["stdin"], subprocess.DEVNULL)
             self.assertTrue(child.call_args.kwargs["check"])
             self.assertEqual(child.call_args.kwargs["timeout"], 60)
-            self.assertEqual(verify.call_args_list, [mock.call(wheel), mock.call(wheel)])
+            self.assertEqual(verify.call_args_list, [mock.call(wheel, fixture_size, fixture_sha)])
 
     def test_failed_verification_or_installer_refuses_without_further_action(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -114,6 +143,7 @@ class BootstrapTests(unittest.TestCase):
                 wheel.write_bytes(b"PRIVATE old wheel" if failure == "artifact" else fixed)
                 with self.subTest(failure=failure), mock.patch.object(bootstrap.sys, "argv", [str(SOURCE)]), \
                      mock.patch.dict(bootstrap.os.environ, {"RUNNER_TEMP": str(temporary)}, clear=True), \
+                     mock.patch.object(bootstrap, "obtain_derived_pip", return_value=cache / "certifi-2026.10.23" / bootstrap.WHEEL) as derive, \
                      mock.patch.object(bootstrap, "SIZE", len(fixed)), \
                      mock.patch.object(bootstrap, "SHA256", hashlib.sha256(fixed).hexdigest()), \
                      mock.patch.object(bootstrap.urllib.request, "build_opener", side_effect=AssertionError("no network")), \
@@ -122,7 +152,8 @@ class BootstrapTests(unittest.TestCase):
                     self.assertEqual(bootstrap.main(), 1)
                 self.assertNotIn("PRIVATE", stderr.getvalue())
                 self.assertEqual(child.call_count, int(failure == "installer"))
-                self.assertEqual(verify.call_args_list, [mock.call(wheel)], "failed installation must not reach the post-install verification")
+                self.assertEqual(derive.call_count, int(failure == "installer"))
+                self.assertEqual(verify.call_args_list, [mock.call(wheel, len(fixed), hashlib.sha256(fixed).hexdigest())], "failed installation must not reach the post-install verification")
 
 
     def inert_pip_wheel(self, temporary):

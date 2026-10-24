@@ -77,8 +77,8 @@ pnpm --dir packages/workbench build
 npm --prefix packages/desktop ci
 ```
 
-Packaging the original runtime also requires host Python 3.12 with `venv` and
-`ensurepip`. It does not require global setuptools. The first package build
+Packaging the original runtime also requires qualified host Python 3.12 with `venv`.
+It does not execute the host's `ensurepip` or require global setuptools. The first package build
 needs outbound HTTPS for the hash-pinned runtime and build-tool wheels; verified
 downloads are reused from the desktop package's `.tmp` cache.
 
@@ -108,6 +108,10 @@ projects.
 ```console
 npm --prefix packages/desktop run package
 ```
+
+While Electron publication is held, this command refuses before it stages anything,
+because no Electron release is admitted. The rest of this section describes what it
+does once one is.
 
 The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
@@ -146,9 +150,15 @@ Each build then:
 
 1. Creates a temporary isolated build environment under the same `.tmp`
    directory without running the host's ensurepip seed. It authenticates the local
-   pip and setuptools wheel bytes again, bootstraps from that pip wheel with isolated
-   imports and package-client configuration, and
-   checks that pip vendors distlib 0.4.2.
+   pip, setuptools and certifi wheel bytes again. Before executing pip, the shared
+   certificate helper derives a local pip 26.2.2 wheel with certifi 2026.10.23.
+   It changes only certifi's version and CA data, its vendoring declaration and
+   wheel RECORD; the vendored import rewrites and distlib stay unchanged. Bootstrap
+   uses that derived wheel with isolated imports and package-client configuration,
+   then checks the actual vendored certifi bundle and distlib 0.4.2.
+   The same derived wheel replaces the staged interpreter's authenticated
+   ensurepip seed, so a later fresh venv cannot restore the older bundle. An
+   unknown or additional seed, or a mismatched ensurepip version, refuses packaging.
 2. Builds fresh pure-Python wheels from the owned `vivary`, `create-vivary`,
    `core`, `tropo`, `strato`, `ozone`, and `exo` sources without an
    index or build isolation.
@@ -160,10 +170,18 @@ Each build then:
 6. Copies and hashes the reviewed managed-project bridge.
 7. Writes the runtime manifest and license inventory.
 
-The build tools remain package-time inputs. The pip wheel is
+The authenticated upstream pip input is
 `pip-26.2.2-py3-none-any.whl`, with 1,819,850 authenticated bytes and the digest
-above. Setuptools moves to 84.1.0, which fixes the Windows legacy wheel-to-egg traversal advisory. These inputs do not add a first-launch
-installer or a new runtime dependency.
+above. The overlay input is the official certifi 2026.10.23 wheel, 135,082 bytes,
+SHA256 `e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1`.
+Its CA bundle removes emSign C1/C3 and preserves the other 118 roots. The derived
+pip wheel is a Vivary modification, not an upstream pip release; `manifest.json`
+records both upstream inputs and the derived seed's path and SHA256. Installed
+pip remains excluded from the shipped site-packages. Its standard ensurepip
+seed remains available with the same corrected vendored certifi bytes; standalone
+certifi is not added to the seven owned packages. No first-launch installation
+or TLS verification bypass is introduced. Setuptools remains 84.1.0, including
+the Windows legacy wheel-to-egg traversal fix.
 
 The distributed application needs no global Python, source checkout, or
 first-launch install. The existing `vivary_cli` router continues to own create,
@@ -176,7 +194,7 @@ pip's vendored distlib 0.4.2 console launcher and its supported
 passes `-I -X utf8 -B` so redirected Unicode output has the same encoding
 contract as the application adapter. See the first-party
 [distlib launcher source](https://github.com/pypa/distlib/blob/0.4.2/PC/launcher.c).
-The packaged runtime omits pip and Python bytecode caches. It retains distlib's
+The packaged runtime omits installed pip from site-packages and Python bytecode caches. It retains distlib's
 license at `licenses/LICENSE.distlib` for the copied Windows launcher stubs.
 The builder requires the authenticated 108,032-byte `t64.exe` with SHA-256
 `81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7`.
@@ -357,6 +375,10 @@ npm --prefix packages/desktop run package -- --windows-x64
 npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
+While Electron publication is held, both commands refuse: the packager before it
+stages anything, and the installer build at its runtime check. The rest of this
+section describes them once an Electron release is admitted.
+
 The first command writes the dated `<dist>/<time>/` folder, which holds both the
 `Vivary-win32-x64` payload and its `package-file-manifest.json`.
 
@@ -376,7 +398,8 @@ longest file and folder paths, and the script passes their lengths to setup as
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
-`build-installer.mjs`, `assets/vivary.ico`, and the repository `LICENSE`, so the
+`build-installer.mjs`, `assets/vivary.ico`, `packages/workbench/bin/runtime-security.mjs`
+and the repository `LICENSE`, so the
 installer commit it records holds every source file the build used. It also refuses
 an existing installer, `.sha256`, or `.receipt.json` at the output path.
 

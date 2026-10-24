@@ -96,7 +96,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "          python scripts/tests/test_hldd.py\n"
         "          python scripts/check_hldd.py --base \"$BASE_SHA\" --head \"$HEAD_SHA\"\n"
         "      - name: install Python test runner\n"
-        "        run: python -I -m pip install pytest packaging\n"
+        "        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging\n"
         "      - name: CI workflow contract\n"
         "        run: python scripts/check_ci_workflow.py\n"
         "      - name: CI workflow contract tests\n"
@@ -124,7 +124,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         "        run: |\n"
         "          artifacts=\"$(mktemp -d)\"\n"
         + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
-        + "          npm pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        + "          \"$RUNNER_TEMP/vivary-build-tools/bin/npm\" pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
         "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
         "      - name: installed route parity contract tests\n"
         "        run: python scripts/tests/test_installed_route_parity.py\n"
@@ -210,27 +210,40 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
         if name == "workbench":
             setup += '      - run: node --test packages/workbench/tests/runtime-security.test.mjs\n'
         if name == "test":
+            setup += module.TEST_CLIENTS_STEP
             setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
             setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
+            setup += module.REPAIR_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
-            setup += '      - run: python -I -B scripts/tests/test_build_tools.py\n'
+            setup += module.BUILD_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_python.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_ci_python_windows_bootstrap.py\n'
+        if name in ("workbench", "workbench-maintained", "governed-platform-proof"):
+            windows = name == "governed-platform-proof"
+            setup += (module.WINDOWS_WORKBENCH_TOOLS_STEP + module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+                      + module.WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (
+                          module.WORKBENCH_TOOLS_STEP + module.WORKBENCH_DEPENDENCY_STEP + module.WORKBENCH_INSTALL_STEP)
+            if name == "workbench":
+                setup += '      - name: fixture route and type check\n        run: |\n' + module.WORKBENCH_TYPECHECK
         if '    steps: []\n' in block:
             updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
         else:
             updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
         text = text.replace(block, updated, 1)
-    for name in ("test", "workbench", "governed-platform-proof", "orientation-proof"):
+    for name in module.PYTHON_JOBS:
         block = module.job_block(text, name)
-        setup = (
-            '      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
-            '        with:\n          python-version: "3.11"\n'
-            + PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
-        )
+        setup = "".join(module.python_admission_prefix(name))
+        if name in module.PIP_JOBS:
+            setup += PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
         if name in PIP_MCP_FIXTURES:
             block += PIP_MCP_FIXTURES[name]
-        updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
+        if '    steps: []\n' in block:
+            updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
+        else:
+            updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
         original = module.job_block(text, name)
         text = text.replace(original, updated, 1)
     for index, name in enumerate(module.CI_JOBS):
@@ -408,7 +421,7 @@ def test_release_artifact_contract_and_real_archives_must_run():
         UV_DIGEST_COMMANDS["test"],
         ARTIFACT_TEST_COMMAND,
         *RELEASE_BUILD_COMMANDS,
-        'npm pack packages/create-vivary/npm --pack-destination "$artifacts"',
+        '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
     ):
         message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
@@ -485,9 +498,17 @@ def test_missing_site_audit_gate_fails():
 
 
 def test_isolated_build_tool_regressions_must_run():
-    workflow = REAL_WORKFLOW.read_text(encoding="utf-8").replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1)
-    message = _run(workflow)
-    assert message and "isolated build tool regressions" in message
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    step = module.BUILD_TEST_STEP
+    for mutation in (
+        step.replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1),
+        step.replace("/node/bin/node", "/bin/node", 1),
+        step.replace('          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools\n', "", 1),
+    ):
+        assert mutation != step
+        message = _run(workflow.replace(step, mutation, 1))
+        assert message and "isolated build tool regressions" in message
 
 
 def test_build_tool_changes_select_the_site_job():
@@ -739,9 +760,9 @@ UV_ROOT_REMOVAL_ONLY_WHEELS = (
 )
 UV_DIGEST_PIP_CONFIG_FILE = "${{ runner.os == 'Windows' && 'nul' || '/dev/null' }}"
 UV_DIGEST_COMMANDS = {
-    "test": 'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_DIGEST_LINUX_WHEEL + '"',
+    "test": 'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "' + UV_DIGEST_LINUX_WHEEL + '"',
     "orientation-proof": (
-        'python -I -m pip --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
+        'python -I -m pip --use-deprecated=legacy-certs --isolated install --force-reinstall --no-deps --only-binary=:all: "${{ '
         "runner.os == 'Linux' && '" + UV_DIGEST_LINUX_WHEEL
         + "' || runner.os == 'Windows' && '" + UV_DIGEST_WINDOWS_WHEEL + "' || '' }}\""
     ),
@@ -756,7 +777,7 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
     block = module.job_block(workflow, job_name)
     steps = re.split(r"(?m)(?=^      - )", block)[1:]
     installs = [step for step in steps if re.search(
-        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--isolated\s+)?install\b[^\n]*\buv\b", step
+        r"\b(?:python(?:3)?\s+(?:-I\s+)?-m\s+pip|pip(?:3)?)\s+(?:--use-deprecated=legacy-certs\s+)?(?:--isolated\s+)?install\b[^\n]*\buv\b", step
     )]
     assert len(installs) == 1, (job_name, "expected one actual uv install step")
     step = installs[0]
@@ -767,11 +788,11 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
     fixed_env = "        env:\n          PIP_CONFIG_FILE: " + UV_DIGEST_PIP_CONFIG_FILE + "\n"
     fixed_step = name_line + "\n" + fixed_env + fixed_run
     cases = {
-        "affected": name_line + "\n        run: python -m pip install uv==0.11.21\n",
+        "affected": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.11.21\n",
         "missing": "",
-        "unpinned": name_line + "\n        run: python -m pip install uv\n",
-        "last_affected": name_line + "\n        run: python -m pip install uv==0.13.3\n",
-        "pin_only": name_line + "\n        run: python -m pip install uv==0.13.5\n",
+        "unpinned": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv\n",
+        "last_affected": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.13.3\n",
+        "pin_only": name_line + "\n        run: python -m pip --use-deprecated=legacy-certs install uv==0.13.5\n",
         "conditional": fixed_step.replace(fixed_run, "        if: false\n" + fixed_run, 1),
         "ignored": fixed_step.replace(fixed_run, "        continue-on-error: true\n" + fixed_run, 1),
         "environment": fixed_step.replace(fixed_env, fixed_env + "          PIP_NO_VERIFY: 1\n", 1),
@@ -789,8 +810,8 @@ def _assert_owned_uv_acquisition(job_name: str, first_case: str) -> None:
         "without_force_reinstall": fixed_step.replace(" --force-reinstall", "", 1),
         "without_no_deps": fixed_step.replace(" --no-deps", "", 1),
         "without_wheel_only": fixed_step.replace(" --only-binary=:all:", "", 1),
-        "second_affected": fixed_step + "      - run: python -m pip install uv==0.11.21\n",
-        "second_isolated_affected": fixed_step + "      - run: python -I -m pip --isolated install uv==0.11.21\n",
+        "second_affected": fixed_step + "      - run: python -m pip --use-deprecated=legacy-certs install uv==0.11.21\n",
+        "second_isolated_affected": fixed_step + "      - run: python -I -m pip --use-deprecated=legacy-certs --isolated install uv==0.11.21\n",
         "duplicate_fixed": fixed_step + fixed_step,
     }
     wheels = (UV_DIGEST_LINUX_WHEEL,) if job_name == "test" else (
@@ -1048,17 +1069,19 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
          '          venv_python="$smoke/venv/bin/python"\n'
          '          export PATH="$smoke/venv/bin:$PATH"\n'
          '          unset PYTHONPATH\n'
+         '          "$venv_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$venv_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$venv_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$venv_python" -I -m pip install --no-index --find-links "$wheelhouse" vivary\n'
+         '          "$venv_python" -I -m pip --use-deprecated=legacy-certs install --no-index --find-links "$wheelhouse" vivary\n'
          '      - name: fresh venv pip fixture\n'
          '        shell: bash\n'
          '        run: |\n'
          '          python -m venv --without-pip "$mcp_venv"\n'
          '          mcp_python="$mcp_venv/bin/python"\n'
+         '          "$mcp_python" -I -B scripts/check_python_runtime.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/bootstrap_ci_pip.py || exit $?\n'
          '          "$mcp_python" -I -B scripts/check_pip_runtime.py || exit $?\n'
-         '          "$mcp_python" -I -m pip install "mcp==2.2.0"\n',
+         '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n',
  'governed-platform-proof': '      - name: fresh venv pip fixture\n'
                             '        shell: pwsh\n'
                             '        run: |\n'
@@ -1066,13 +1089,15 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }\n'
                             '          $scripts = Join-Path $smoke "venv\\Scripts"\n'
                             '          $python = Join-Path $scripts "python.exe"\n'
+                            '          & $python -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "Python runtime admission failed" }\n'
                             '          & $python -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "pip provisioning failed" '
                             '}\n'
                             '          & $python -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "pip runtime admission '
                             'failed" }\n'
-                            '          & $python -I -m pip install --no-index --find-links '
+                            '          & $python -I -m pip --use-deprecated=legacy-certs install --no-index --find-links '
                             '$wheelhouse vivary\n'
                             '      - name: fresh venv pip fixture\n'
                             '        shell: pwsh\n'
@@ -1082,13 +1107,15 @@ PIP_MCP_FIXTURES = {'test': '      - name: fresh venv pip fixture\n'
                             '}\n'
                             '          $mcpScripts = Join-Path $mcpVenv "Scripts"\n'
                             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n'
+                            '          & $mcpPython -I -B scripts/check_python_runtime.py\n'
+                            '          if ($LASTEXITCODE -ne 0) { throw "MCP Python runtime admission failed" }\n'
                             '          & $mcpPython -I -B scripts/bootstrap_ci_pip.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip provisioning '
                             'failed" }\n'
                             '          & $mcpPython -I -B scripts/check_pip_runtime.py\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP pip runtime admission '
                             'failed" }\n'
-                            '          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+                            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
                             '          if ($LASTEXITCODE -ne 0) { throw "MCP dependency install '
                             'failed" }\n'}
 
@@ -1102,9 +1129,9 @@ def test_actual_workflow_requires_pip_runtime_admission():
         block = job_block(workflow, name)
         assert block.count(PIP_RUNTIME_STEP) == 1, name
         assert block.count(PIP_BOOTSTRAP_STEP) == 1, (name, "verified pip provisioning missing")
-        unchecked = '      - run: python -I -m pip install pip==26.2.2\n'
+        unchecked = '      - run: python -I -m pip --use-deprecated=legacy-certs install pip==26.2.2\n'
         cases = {
-            "setup_old_pip_network": block.replace('          python-version: "3.11"\n', '          python-version: "3.11"\n          pip-version: "26.2.2"\n', 1),
+            "setup_old_pip_network": block.replace('          python-version: "3.12.15"\n', '          python-version: "3.12.15"\n          pip-version: "26.2.2"\n', 1),
             "missing_provisioning": block.replace(PIP_BOOTSTRAP_STEP, "", 1),
             "provisioning_after_guard": block.replace(PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP, PIP_RUNTIME_STEP + PIP_BOOTSTRAP_STEP, 1),
             "conditional_provisioning": block.replace(PIP_BOOTSTRAP_STEP, PIP_BOOTSTRAP_STEP.replace("        shell:", "        if: false\n        shell:"), 1),
@@ -1119,13 +1146,19 @@ def test_actual_workflow_requires_pip_runtime_admission():
             "redirected_guard": block.replace(PIP_RUNTIME_STEP, PIP_RUNTIME_STEP.replace(
                 "        shell:", "        working-directory: other\n        shell:", 1), 1),
         }
+        if name == "governed-platform-proof":
+            cases["setup_old_pip_network"] = block.replace(_load().WINDOWS_PYTHON_PROVISIONING_STEP,
+                _load().PIP_SETUP_STEP.replace('          python-version: "3.12.15"\n',
+                    '          python-version: "3.12.15"\n          pip-version: "26.2.2"\n', 1)
+                + _load().WINDOWS_PYTHON_PROVISIONING_STEP, 1)
         for label, changed in cases.items():
+            assert changed != block, (name, label)
             message = _run(workflow.replace(block, changed, 1))
             assert message and name in message and "pip" in message, (name, label, message)
     # This uses only the preexisting full-checker entrypoint. On old code the
     # missing-admission rejection assertion fails because the workflow is accepted.
     unsafe = workflow.replace(PIP_RUNTIME_STEP, "").replace(PIP_LINUX_MCP_GUARD, "").replace(PIP_WINDOWS_MCP_GUARD, "")
-    unsafe = unsafe.replace(" -I -m pip ", " -m pip ")
+    unsafe = unsafe.replace(" -I -m pip --use-deprecated=legacy-certs ", " -m pip --use-deprecated=legacy-certs ")
     unsafe = unsafe.replace('      - name: pip runtime admission tests\n        run: python -I -B scripts/tests/test_pip_runtime.py\n', "")
     message = _run(unsafe)
     assert message and "pip runtime admission" in message, ("pre-admission workflow must be refused", message)
@@ -1139,34 +1172,34 @@ def test_actual_workflow_binds_mcp_pip_interpreters_and_later_isolation():
     cases = {
         "early_linux_network": workflow.replace(
             '          mcp_python="$mcp_venv/bin/python"\n',
-            '          mcp_python="$mcp_venv/bin/python"\n          "$mcp_python" -I -m pip install "mcp==2.2.0"\n'
+            '          mcp_python="$mcp_venv/bin/python"\n          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
             '          mcp_python="$mcp_venv/bin/python"\n', 1),
         "early_windows_network": workflow.replace(
             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n',
-            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n          & $mcpPython -I -m pip install "mcp==2.2.0"\n'
+            '          $mcpPython = Join-Path $mcpScripts "python.exe"\n          & $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"\n'
             '          $mcpPython = Join-Path $mcpScripts "python.exe"\n', 1),
         "reassigned_linux_network_after_admission": workflow.replace(
-            '          "$mcp_python" -I -m pip check\n',
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check\n',
             '          mcp_python="/path/to/old/python"\n'
-            '          "$mcp_python" -I -m pip install example\n'
-            '          "$mcp_python" -I -m pip check\n', 1),
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs install example\n'
+            '          "$mcp_python" -I -m pip --use-deprecated=legacy-certs check\n', 1),
         "reassigned_windows_network_after_admission": workflow.replace(
-            '          & $mcpPython -I -m pip check\n',
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs check\n',
             '          $mcpPython = "C:\\old\\python.exe"\n'
-            '          & $mcpPython -I -m pip install example\n'
-            '          & $mcpPython -I -m pip check\n', 1),
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs install example\n'
+            '          & $mcpPython -I -m pip --use-deprecated=legacy-certs check\n', 1),
         "missing_linux_venv_admission": workflow.replace(PIP_LINUX_MCP_GUARD, "", 1),
         "missing_windows_venv_admission": workflow.replace(PIP_WINDOWS_MCP_GUARD, "", 1),
         "linux_host_instead_of_venv": workflow.replace(PIP_LINUX_MCP_GUARD, PIP_LINUX_MCP_GUARD.replace('"$mcp_python"', "python", 1), 1),
         "windows_host_instead_of_venv": workflow.replace(PIP_WINDOWS_MCP_GUARD, PIP_WINDOWS_MCP_GUARD.replace("& $mcpPython", "python", 1), 1),
         "ignored_linux_venv": workflow.replace(PIP_LINUX_MCP_GUARD, PIP_LINUX_MCP_GUARD.replace("exit $?", "true", 1), 1),
         "ignored_windows_venv": workflow.replace(PIP_WINDOWS_MCP_GUARD, PIP_WINDOWS_MCP_GUARD.splitlines(keepends=True)[0], 1),
-        "nonisolated_linux_network": workflow.replace('"$mcp_python" -I -m pip install "mcp==2.2.0"', '"$mcp_python" -m pip install "mcp==2.2.0"', 1),
-        "nonisolated_windows_network": workflow.replace('& $mcpPython -I -m pip install "mcp==2.2.0"', '& $mcpPython -m pip install "mcp==2.2.0"', 1),
-        "nonisolated_later_linux_pip": workflow.replace('"$mcp_python" -I -m pip check', '"$mcp_python" -m pip check', 1),
-        "nonisolated_later_windows_pip": workflow.replace('& $mcpPython -I -m pip check', '& $mcpPython -m pip check', 1),
-        "different_linux_network_interpreter": workflow.replace('"$mcp_python" -I -m pip install "mcp==2.2.0"', 'python -I -m pip install "mcp==2.2.0"', 1),
-        "different_windows_network_interpreter": workflow.replace('& $mcpPython -I -m pip install "mcp==2.2.0"', 'python -I -m pip install "mcp==2.2.0"', 1),
+        "nonisolated_linux_network": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', '"$mcp_python" -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "nonisolated_windows_network": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', '& $mcpPython -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "nonisolated_later_linux_pip": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs check', '"$mcp_python" -m pip --use-deprecated=legacy-certs check', 1),
+        "nonisolated_later_windows_pip": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs check', '& $mcpPython -m pip --use-deprecated=legacy-certs check', 1),
+        "different_linux_network_interpreter": workflow.replace('"$mcp_python" -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 'python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
+        "different_windows_network_interpreter": workflow.replace('& $mcpPython -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 'python -I -m pip --use-deprecated=legacy-certs install "mcp==2.2.0"', 1),
     }
     for label, mutation in cases.items():
         assert mutation != workflow, label
@@ -1289,6 +1322,254 @@ def test_site_lock_admission_precedes_install_and_build():
         else:
             raise AssertionError(label + " bypassed site dependency admission")
     assert REAL_WORKFLOW.read_text(encoding="utf-8") == workflow
+
+
+def test_pip_network_cannot_reintroduce_host_truststore_roots():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    assert _run(workflow) is None
+    for mutation in (workflow.replace(" --use-deprecated=legacy-certs", ""),
+                     workflow.replace("  PIP_USE_DEPRECATED: legacy-certs\n", ""),
+                     workflow.replace("  PIP_USE_DEPRECATED: legacy-certs", "  PIP_USE_DEPRECATED: other")):
+        assert mutation != workflow
+        message = _run(mutation)
+        assert message and "pip" in message, message
+
+
+def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_python_runtime(workflow)
+    guard = module.PYTHON_RUNTIME_STEP
+    for name in module.PYTHON_JOBS:
+        block = module.job_block(workflow, name)
+        prefix = module.python_admission_prefix(name)
+        provision = prefix[-2]
+        entry = prefix[0]
+        cases = {
+            "old_python": block.replace('python-version: "3.12.15"', 'python-version: "3.11"', 1),
+            "floating_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12"', 1),
+            "future_python": block.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1),
+            "missing_provisioning": block.replace(provision, "", 1),
+            "conditional_provisioning": block.replace(provision,
+                                                     provision.replace("        shell:", "        if: false\n        shell:"), 1),
+            "wrong_provisioning": block.replace(provision,
+                                               provision.replace("bootstrap_ci_python", "bootstrap_ci_pip"), 1),
+            "provisioning_after_admission": block.replace(provision + guard,
+                                                         guard + provision, 1),
+            "missing_guard": block.replace(guard, "", 1),
+            "conditional_guard": block.replace(guard, guard.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_guard": block.replace(guard, guard.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "nonisolated_guard": block.replace(guard, guard.replace("python -I -B", "python -B"), 1),
+            "bytecode_guard": block.replace(guard, guard.replace("python -I -B", "python -I"), 1),
+            "wrong_guard": block.replace(guard, guard.replace("check_python_runtime.py", "check_pip_runtime.py"), 1),
+            "early_pip": block.replace(guard, '      - run: python -m pip install anything\n' + guard, 1),
+            "early_tools": block.replace(entry,
+                                        '      - run: python scripts/bootstrap_build_tools.py --root /tmp/tools\n' + entry, 1),
+        }
+        if name == "governed-platform-proof":
+            for label in ("old_python", "floating_python", "future_python"):
+                del cases[label]
+            cases["unqualified_image_python"] = block.replace(provision,
+                "      - run: python scripts/bootstrap_ci_python.py\n", 1)
+        if name == "orientation-proof":
+            linux_provision = prefix[1]
+            cases["missing_linux_provision"] = block.replace(linux_provision, "", 1)
+            cases["wrong_platform_condition"] = block.replace("runner.os == 'Windows'", "runner.os != 'Windows'", 1)
+            cases["unconditional_linux_setup"] = block.replace(
+                "        if: ${{ runner.os != 'Windows' && steps.runner_action_node.outcome == 'success' }}\n", "", 1)
+        for label, mutation in cases.items():
+            assert mutation != block, (name, label)
+            try:
+                module.check_python_runtime(workflow.replace(block, mutation, 1))
+            except SystemExit as error:
+                assert name in str(error) and "Python" in str(error), (name, label, error)
+            else:
+                raise AssertionError((name, label, "bypassed actual Python/OpenSSL admission"))
+
+
+def test_python_runtime_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_python_runtime.py", "echo skipped", 1))
+    assert message and "Python runtime admission regressions" in message
+
+
+def test_python_provisioning_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_ci_python.py", "echo skipped", 1))
+    assert message and "verified Python provisioning regressions" in message
+
+
+def test_windows_python_bootstrap_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py", "echo skipped", 1))
+    assert message and "native Windows Python bootstrap regressions" in message
+
+
+def test_runner_node_repair_regressions_must_run():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    step = module.REPAIR_TEST_STEP
+    for mutation in (
+        step.replace("python -I -B scripts/tests/test_bootstrap_runner_action_node.py", "echo skipped", 1),
+        step.replace("/node/bin/node", "/bin/node", 1),
+        step.replace('        env:\n          VIVARY_TEST_NODE: ${{ runner.temp }}/vivary-build-tools/node/bin/node\n', "", 1),
+    ):
+        assert mutation != step
+        message = _run(workflow.replace(step, mutation, 1))
+        assert message and "runner action repair regressions" in message
+
+
+def test_fresh_venvs_admit_their_actual_python_before_pip_provisioning():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    for name, blocks in module.PIP_VENV_BLOCKS.items():
+        for required in blocks:
+            lines = required.splitlines(keepends=True)
+            guard = next(line for line in lines if "scripts/check_python_runtime.py" in line)
+            seed = next(line for line in lines if "scripts/bootstrap_ci_pip.py" in line)
+            assert lines.index(guard) < lines.index(seed)
+            failure = guard if "exit $?" in guard else lines[lines.index(guard) + 1]
+            mutations = {
+                "missing_python_admission": required.replace(guard, "", 1),
+                "wrong_python_target": required.replace(guard, guard.replace('"$venv_python"', "python").replace('"$mcp_python"', "python").replace("& $mcpPython", "python").replace("& $python", "python"), 1),
+                "python_after_pip_seed": required.replace(guard, "", 1).replace(seed, seed + guard, 1),
+                "ignored_python_failure": required.replace(failure, failure.replace("exit $?", "true").replace("$LASTEXITCODE -ne 0", "$false"), 1),
+            }
+            for label, mutation in mutations.items():
+                assert mutation != required, (name, label)
+                message = _run(workflow.replace(required, mutation, 1))
+                assert message and "pip" in message, (name, label, message)
+
+
+def test_review_python_admission_remains_bound_to_the_helper_after_canonical_edits():
+    module = _load()
+    canonical = module.CANONICAL_REVIEW_WORKFLOW
+    guard = module.python_runtime_step(inline=True)
+    for mutation in (canonical.replace(guard, "", 1),
+                     canonical.replace(guard, guard.replace('OPENSSL = ["OpenSSL", "3.5.9"]',
+                                                           'OPENSSL = ["OpenSSL", "3.5.8"]'), 1),
+                     canonical.replace('python-version: "3.12.15"', 'python-version: "3.12.16"', 1)):
+        assert mutation != canonical
+        module.CANONICAL_REVIEW_WORKFLOW = mutation
+        try:
+            module.check_review_workflow(mutation)
+        except SystemExit as error:
+            assert "Python" in str(error), error
+        else:
+            raise AssertionError("canonical edits bypassed the actual review Python admission")
+
+
+def test_review_python_provisioning_remains_bound_to_the_helper_and_ca_policy():
+    module = _load()
+    canonical = module.CANONICAL_REVIEW_WORKFLOW
+    step = module.python_provisioning_step(inline=True)
+    for mutation in (canonical.replace(step, "", 1),
+                     canonical.replace(step, step.replace('"size": 34479606', '"size": 34479607'), 1),
+                     canonical.replace(step, step.replace('CERTIFI_VERSION = "2026.10.23"',
+                                                         'CERTIFI_VERSION = "2026.10.19"'), 1)):
+        assert mutation != canonical
+        module.CANONICAL_REVIEW_WORKFLOW = mutation
+        try:
+            module.check_review_workflow(mutation)
+        except SystemExit as error:
+            assert "Python" in str(error), error
+        else:
+            raise AssertionError("canonical edits bypassed authenticated review Python provisioning")
+
+
+def test_linux_workbench_jobs_cannot_restore_unqualified_clients_or_compilers():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    module.check_workbench_build_tools(workflow)
+    for name in ("workbench", "workbench-maintained"):
+        block = module.job_block(workflow, name)
+        tools, install, dependencies = module.WORKBENCH_TOOLS_STEP, module.WORKBENCH_INSTALL_STEP, module.WORKBENCH_DEPENDENCY_STEP
+        mutations = {
+            "missing_tools": block.replace(tools, "", 1),
+            "conditional_tools": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_tools": block.replace(tools, tools.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "masked_failure": block.replace(tools, tools.replace("|| exit $?", "|| true", 1), 1),
+            "unrebuilt_typescript": block.replace(tools, tools.replace(" --typescript", ""), 1),
+            "late_tools": block.replace(tools + dependencies + install, dependencies + install + tools, 1),
+            "missing_dependency_admission": block.replace(dependencies, "", 1),
+            "late_dependency_admission": block.replace(dependencies + install, install + dependencies, 1),
+            "global_client": block.replace(install, install + "      - run: npm install --global pnpm@10.33.2\n", 1),
+            "lifecycle_install": block.replace(install, install.replace(" --ignore-scripts", ""), 1),
+            "floating_lock": block.replace(install, install.replace(" --frozen-lockfile", ""), 1),
+            "wrong_client": block.replace(install, install.replace('"$RUNNER_TEMP/vivary-build-tools/bin/pnpm"', "pnpm"), 1),
+        }
+        for label, mutation in mutations.items():
+            assert mutation != block, (name, label)
+            try:
+                module.check_workbench_build_tools(workflow.replace(block, mutation, 1))
+            except SystemExit as error:
+                assert name in str(error), (name, label, error)
+            else:
+                raise AssertionError((name, label, "bypassed Workbench client/compiler admission"))
+    for mutation in (
+        workflow.replace(module.WORKBENCH_TYPECHECK, "          pnpm --dir packages/workbench typecheck\n", 1),
+        workflow.replace('          pnpm --dir packages/workbench exec react-router typegen\n', '', 1),
+    ):
+        try:
+            module.check_workbench_build_tools(mutation)
+        except SystemExit as error:
+            assert "TypeScript" in str(error), error
+        else:
+            raise AssertionError("unqualified TypeScript bypassed Workbench compiler admission")
+
+
+def test_windows_workbench_rejects_unqualified_clients_and_compilers():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    block = module.job_block(workflow, "governed-platform-proof")
+    tools = module.WINDOWS_WORKBENCH_TOOLS_STEP
+    dependencies = module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+    install = module.WINDOWS_WORKBENCH_INSTALL_STEP
+    mutations = {
+        "missing_tools": block.replace(tools, "", 1),
+        "conditional_tools": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+        "ignored_tools": block.replace(tools, tools.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+        "missing_exit_check": block.replace('          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n', "", 1),
+        "unrebuilt_compiler": block.replace(tools, tools.replace(" --typescript", ""), 1),
+        "late_tools": block.replace(tools + dependencies + install, dependencies + install + tools, 1),
+        "missing_admission": block.replace(dependencies, "", 1),
+        "cmd_metacharacter_expansion": block.replace(" --% --test", " --test", 1),
+        "global_client": block.replace(install, install + "      - run: npm install --global pnpm@10.33.2\n", 1),
+        "lifecycle_install": block.replace(install, install.replace(" --ignore-scripts", ""), 1),
+        "unfrozen_install": block.replace(install, install.replace(" --frozen-lockfile", ""), 1),
+        "unqualified_client": block.replace('"$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd"', '"pnpm"', 1),
+        "wrong_platform_binary": block.replace("esbuild-0.28.2-go1.26.10.exe", "esbuild-0.28.2-go1.26.10", 1),
+    }
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_workbench_build_tools(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "governed-platform-proof" in str(error), (label, error)
+        else:
+            raise AssertionError((label, "bypassed Windows client/compiler admission"))
+
+
+def test_release_pack_cannot_use_the_unqualified_image_client():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    block = module.job_block(workflow, "test")
+    tools = module.TEST_CLIENTS_STEP
+    mutations = {
+        "missing_client_setup": block.replace(tools, "", 1),
+        "conditional_client_setup": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+        "ignored_failure": block.replace(tools, tools.replace("|| exit $?", "|| true"), 1),
+        "late_client_setup": block.replace(tools, "", 1) + tools,
+        "image_client": block.replace(module.TEST_PACK_COMMAND, 'npm pack packages/create-vivary/npm --pack-destination "$artifacts"', 1),
+    }
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_release_package_clients(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "package clients" in str(error), (label, error)
+        else:
+            raise AssertionError((label, "release packaging bypassed qualified clients"))
 
 
 if __name__ == "__main__":

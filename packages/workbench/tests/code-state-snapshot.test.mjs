@@ -88,9 +88,9 @@ function stateFixture(overrides = {}) {
   };
   // Keep the actual summary owner too, so identity assertions cannot hide new sidebar work behind a fake mapper.
   owners.toRunSummary = compileFunction(summary.code + "\nreturn toRunSummary;",
-    ["activeRuns", "isActiveCodeAgentRun", "engineFromRun", "engineLabelFromRun", "modelFromRun", "runDraftThreadId", "pendingSwitchFromRun"])(
+    ["activeRuns", "isActiveCodeAgentRun", "engineFromRun", "engineLabelFromRun", "modelFromRun", "runDraftThreadId", "pendingSwitchFromRun", "queuePlace"])(
     new Map(), run => run.status === "running", owners.engineFromRun, owners.engineLabelFromRun, owners.modelFromRun,
-    () => null, () => null);
+    () => null, () => null, () => null);
   return compileFunction(code + "\nreturn getVivaryCodeState;", Object.keys(owners))(...Object.values(owners));
 }
 

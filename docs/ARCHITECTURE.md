@@ -1471,6 +1471,146 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Review fixes for the security units. `bootstrap_ci_python.py` now removes a
+failed or partial download, so a transient network error no longer leaves a file in the
+shared runner cache that makes every later attempt refuse. The review gate's inline copy is
+regenerated from it. The desktop README states that packaging and the installer build
+refuse while Electron publication is held, and the installer-manifest test now matches only
+the manifest recheck error. No runtime behavior changes beyond the download cleanup.
+
+2026-10-24 Site CI path coverage. The `changes` job now also runs the site build when
+the scripts that build calls change: `packages/workbench/bin/runtime-security.mjs`,
+`scripts/bootstrap_ci_python.py` and `scripts/check_python_runtime.py`, where the site job
+runs them. Before this, a change to only those files skipped `site build`. No runtime
+behavior changes.
+
+2026-10-24 Zod advisory GHSA-mrhx-c7xc-m3w5 in the Workbench. The Workbench's direct
+zod moves from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit, with
+the four test pins that assert the inspected version. Every zod peer range in the lock
+admits 4.6.7. The lock changes only zod entries and references. No schema or runtime
+behavior is otherwise changed.
+
+2026-10-24 Build-tool launcher verification. On Windows, `bootstrap_build_tools.py`
+now runs each published `bin\*.cmd` launcher after its direct pinned-client check,
+and requires the node launcher's `process.execPath` to be the pinned `node.exe`.
+Later CI steps call those launchers, so a broken one now fails during provisioning.
+The CA-policy comment now names the shared `EXCLUDED_CA_SHA256` set (G3 plus C1/C3)
+instead of one revoked root. Linux verification and the trust anchors are unchanged.
+
+2026-10-24 Zod advisory GHSA-mrhx-c7xc-m3w5 on the internal site. The site's
+build-time zod, pulled in by astro and @astrojs/sitemap, moves from 4.5.4 to
+4.6.7, whose npm provenance names its release tag commit. Both dependents'
+ranges admit 4.6.7. The site lock changes only that entry. No site runtime
+behavior changes.
+
+2026-10-23 Undici advisories GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and
+GHSA-f72v-6w45-q472. The internal site's build-time undici, pulled in by unifont,
+moves from 8.10.2 to 8.12.3, whose npm provenance names its release tag commit.
+The site lock changes only that entry. No site runtime behavior changes.
+
+2026-10-24 Certificate-fix review corrections. The certificate bundle entry no
+longer says every Windows Python client is limited to the filtered bundle: only
+clients that pass it as `cafile` are, because a default context on Windows also
+loads the CryptoAPI CA and ROOT stores. The npm publish workflow's tag checkout
+now states that release tags must contain the CI Python scripts it runs, the
+publish-workflow checker also refuses compact `- run: python` and
+`- shell: python` steps before runtime admission, and the pip, Python and Go
+prefetch tests now assert the derived wheel, the refusal source and the cached
+trailer reuse they describe. No runtime behavior changes.
+
+2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
+select the already authenticated task-local pnpm package through the real preview
+resolver, with an explicit tool root and matching physical Node executable. They
+derive the version from the build bootstrap pin, so removing global npm/pnpm
+setup cannot silently restore an unqualified client. The real pnpm, command-shell,
+preview and descendant ownership checks and cleanup deadlines remain unchanged.
+Portable layout/refusal checks are distinct from native process-chain acceptance.
+
+2026-10-23 Artifact transfer diagnostics. Build clients and rebuilt Go tools still
+require the original pinned hashes before parsing or execution. Their downloader
+now requests identity encoding, refuses partial or non-200 responses, checks
+response length, and enforces the official Go archive sizes on new and cached
+bytes. Rejections expose only bounded byte-count, algorithm, digest and status
+facts, without response bodies, URLs or foreign exception diagnostics. One
+hosted Go checksum refusal motivated these controls; its exact transport cause
+is unknown, and official metadata still matches the retained pins. No automatic
+retry, hash replacement, TLS change or admission exception is introduced.
+
+2026-10-23 Windows Python bootstrap and publishing admission. Windows' actual
+setup-python manifest lacks 3.12.15, so its native PowerShell step authenticates
+the existing standalone archive before .NET extraction and invokes the same
+seed-correcting provisioner without an installer or old pip. The temporary
+bootstrap interpreter is never exported. Linux and Windows matrix paths are
+explicit and still converge on the unchanged actual Python/OpenSSL admission
+before pip or build use. The npm publishing jobs now use that admitted Linux
+runtime for their metadata and launcher checks, closing their retained 3.11
+selection without adding an unnecessary pip consumer. Certificate policy,
+source-review custody and product runtime behavior stay unchanged. Native Windows
+bootstrap, final hosted checks and release acceptance remain separate evidence.
+The workbench job keeps every test and per-test deadline and now allows twenty
+minutes for authenticated compiler provisioning plus the existing sequential
+suite: both ten-minute hosted runs were still emitting passing cases when
+canceled. This is the bounded job deadline, not a changed product latency budget.
+
+2026-10-23 Private artifact paths. The action-Node bootstrap canonicalizes its
+newly created private temporary directory before creating the download, retaining
+all path, hash and owning-Worker checks. This handles Windows temporary-directory
+aliases without changing runner custody. Kernel lease tests select the explicit
+physical qualified Node binary, then authenticate its hash before execution;
+package-client wrappers cannot stand in for the fixture executable. The selected
+runner's complete admission guard remains unchanged. Live package-client probes
+also receive that executable and the provisioned tool root, so hosted CI runs
+their identity, child-certificate and lifecycle assertions rather than skipping
+those probes.
+
+2026-10-23 CI runtime closure. Hosted jobs provision authenticated standalone
+CPython 3.12.15 with OpenSSL 3.5.9 after the native bootstrap interpreter; the
+loaded-runtime guard remains required before package use. The retained ensurepip
+seed receives the same narrow certifi overlay before the new runtime is exposed,
+so later default venvs cannot restore the older bundle. Build-client setup also
+owns Windows Node/package-client launchers and a task-local eligible-root bundle;
+Windows Go module acquisition uses the qualified Python HTTPS client and
+checksum-bound offline compilation because Go's native Windows trust path does
+not honor the PEM override. These are build prerequisites, not product release
+acceptance. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) owns provisioning details.
+
+2026-10-23 Action interpreter provisioning. The native first step now binds the
+owning Worker's selected Node path and can replace only authenticated known-old
+bytes with the qualified 24.22.1 executable before JavaScript actions. Same-user
+staging, atomic replacement and provenance checks preserve the existing full
+post-provisioning runner admission. Unknown binaries must pass that admission
+without replacement; failed checks never authorize a path override or rollback
+to affected bytes. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) distinguishes this
+guarded runner-internal compatibility dependency from a vendor update API and
+keeps actual native job evidence separate from source and fixture review.
+
+2026-10-23 Hosted Python prerequisite. CI selects CPython 3.12.15 and checks
+the executing interpreter and OpenSSL 3.5.9 before pip or build-tool use,
+including fresh environments. This closes the mismatch between a floating
+Python 3.11 selection and the build bootstrap's qualified runtime contract.
+Unknown hosted toolcache builds fail admission; selecting a version does not
+establish a passing runtime or hosted check. Runner action-interpreter admission
+and the certificate-store boundaries remain unchanged.
+
+2026-10-23 Certificate bundle coherence. CI bootstrap and desktop packaging now
+share an authenticated certifi 2026.10.23 overlay for pip 26.2.2, retaining pip's
+vendored import rewrites and distlib. The same derived wheel supplies build pip
+and retained ensurepip seeds, so a new venv does not restore the older CA bundle.
+Actual pip admission binds the loaded vendor path, version and CA digest, and
+rejects broader effective pip/Requests certificate overrides. Provisioning binds
+both clients to a separate authenticated copy of the exact certifi anchors;
+Python clients that pass `cafile`, native and build clients retain the filtered
+host-derived bundle. On Windows, a Python default context without `cafile` also
+loads the CryptoAPI CA and ROOT stores. CI pip
+commands explicitly use the verified certifi store without adding host truststore
+roots, including Windows CryptoAPI, while retaining TLS verification. Private
+build-client bundles exclude C1/C3 alongside the existing G3 exclusion while
+preserving other roots, TLS verification and host-global trust. C1/C3 removal is
+not evidence of exploitation. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md) owns the
+artifact and migration details. Packaging, real fresh-venv and unchanged-member
+regressions cover the source change; existing public artifacts are not rewritten
+and Windows-native release acceptance remains separate.
+
 2026-10-23 Reproducible tool setup integration. The reviewed PR270 setup scripts,
 qualified site provisioning and changed-path selection compose with this merged
 application. PR260's project-creation shutdown test remains in CI. The tool

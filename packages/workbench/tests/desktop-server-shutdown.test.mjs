@@ -53,26 +53,34 @@ async function until(check, description, timeoutMs = 3000) {
   }
 }
 
+async function previewFixtureTools() {
+  const bootstrap = await readFile(new URL("../../../scripts/bootstrap_build_tools.py", import.meta.url), "utf8");
+  const pins = [...bootstrap.matchAll(/^PNPM = "(\d+\.\d+\.\d+)"$/gm)];
+  assert.equal(pins.length, 1, "the fixture derives the single qualified pnpm pin");
+  // guard:allow-env-credential - Explicit admitted task-local tools, never a global package-manager fallback.
+  const configuredRoot = process.env.VIVARY_TEST_TOOL_ROOT;
+  assert.ok(configuredRoot && path.isAbsolute(configuredRoot), "preview fixture requires explicit VIVARY_TEST_TOOL_ROOT");
+  const root = await realpath(configuredRoot);
+  const node = await realpath(path.join(root, "node", nativeWindows ? "node.exe" : "bin/node"));
+  assert.equal(await realpath(process.execPath), node, "preview fixture runs the qualified tool root's actual Node");
+  const installedPnpm = path.join(root, "pnpm");
+  const manifest = JSON.parse(await readFile(path.join(installedPnpm, "package.json"), "utf8"));
+  assert.equal(manifest.name, "pnpm");
+  assert.equal(manifest.version, pins[0][1], "installed pnpm matches the qualified bootstrap pin");
+  const searchDir = await realpath(path.join(installedPnpm, "dist"));
+  const entrypoint = await realpath(path.join(searchDir, "pnpm.cjs"));
+  return { root, version: pins[0][1], searchDir, entrypoint };
+}
+
 if (role === "preview-service-server") {
   const root = process.argv[3];
   const url = process.argv[4];
+  const tools = await previewFixtureTools();
+  assert.equal(process.argv[5], tools.root, "the child retains the parent's qualified tool root");
   const { createProjectPreviewService, resolveLauncher } = await import("../server/project-preview.ts");
-  // CI already installs pnpm globally. Scope the real resolver to that installation,
-  // since the Node distribution's sibling Corepack shim would need a network fetch.
-  const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  const prefixResult = spawnSync(process.execPath, [npmCli, "prefix", "--global"], {
-    encoding: "utf8", timeout: 5000, windowsHide: true,
-  });
-  assert.equal(prefixResult.status, 0, prefixResult.error?.message || prefixResult.stderr);
-  const globalPrefix = prefixResult.stdout.trim();
-  assert.ok(path.isAbsolute(globalPrefix), "npm reports its existing global installation");
-  const installedPnpm = path.join(globalPrefix, "node_modules", "pnpm");
-  const manifest = JSON.parse(await readFile(path.join(installedPnpm, "package.json"), "utf8"));
-  assert.equal(manifest.version, process.argv[5], "installed pnpm matches the existing CI pin");
-  const entrypoint = await realpath(path.join(installedPnpm, "bin", "pnpm.cjs"));
   const service = createProjectPreviewService({
     mode: () => "local",
-    resolveLauncher: (manager, root) => resolveLauncher(manager, root, [globalPrefix]),
+    resolveLauncher: (manager, root) => resolveLauncher(manager, root, [tools.searchDir]),
     resolveWorkspace: async () => ({
       root, label: "preview-exit", projectId: "preview-exit", actorId: "actor",
       bindingId: "binding", bindingRevision: 1, policyRevision: 1, rootId: "root",
@@ -82,7 +90,7 @@ if (role === "preview-service-server") {
   const owner = { userEmail: "owner@local.vivary.test", orgId: "local", caller: "frontend" };
   const review = await service.run({ operation: "review", projectId: "preview-exit", script: "dev", url }, owner);
   assert.equal(review.code, "review");
-  assert.equal(review.launcher, [process.execPath, entrypoint].join(" "), "the real resolver selects installed pnpm, not Corepack");
+  assert.equal(review.launcher, [process.execPath, tools.entrypoint].join(" "), "the real resolver selects qualified pnpm, not Corepack");
   const started = await service.run({
     operation: "start", projectId: "preview-exit", script: "dev", url,
     requestId: "7fd84cba-a9cc-492f-8bfb-32db6d505ac7",
@@ -593,17 +601,15 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   });
   for (const ending of ["server death", "Stop", "command exit"]) {
   test("Windows preview chain cleanup after " + ending, { skip: !nativeWindows, timeout: 50000 }, async t => {
+    const tools = await previewFixtureTools();
     const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-preview-server-exit-"));
     const receipt = path.join(directory, "preview-pids.json");
     const portServer = createServer();
     await new Promise(resolve => portServer.listen(0, "127.0.0.1", resolve));
     const port = portServer.address().port;
     await new Promise(resolve => portServer.close(resolve));
-    const workflow = await readFile(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
-    const pnpmVersions = [...workflow.matchAll(/npm install --global pnpm@([\d.]+)/g)].map(match => match[1]);
-    assert.equal(new Set(pnpmVersions).size, 1, "the fixture derives the existing CI pnpm pin");
     await writeFile(path.join(directory, "package.json"), JSON.stringify({
-      name: "vivary-preview-server-exit", private: true, packageManager: "pnpm@" + pnpmVersions[0],
+      name: "vivary-preview-server-exit", private: true, packageManager: "pnpm@" + tools.version,
       scripts: { dev: "node preview.mjs" },
     }));
     await writeFile(path.join(directory, "descendant.mjs"), "setInterval(() => {}, 1000);\n");
@@ -618,7 +624,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       "  createServer((_req, res) => res.end('ready')).listen(Number(process.env.PORT), process.env.HOST);",
       "});",
     ].join("\n"));
-    const server = fork(fileURLToPath(import.meta.url), ["preview-service-server", directory, "http://127.0.0.1:" + port + "/", pnpmVersions[0]], {
+    const server = fork(fileURLToPath(import.meta.url), ["preview-service-server", directory, "http://127.0.0.1:" + port + "/", tools.root], {
       execArgv: ["--import", "tsx"], detached: true, windowsHide: true,
       stdio: ["ignore", "ignore", "pipe", "ipc"],
     });

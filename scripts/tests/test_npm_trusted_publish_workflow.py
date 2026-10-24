@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import re
 import sys
 import tempfile
 
@@ -14,6 +15,13 @@ WORKFLOW = ROOT / ".github/workflows/npm-trusted-publish.yml"
 
 def load():
     spec = importlib.util.spec_from_file_location("npm_publish_contract", ROOT / "scripts/check_npm_trusted_publish_workflow.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def python_contract():
+    spec = importlib.util.spec_from_file_location("ci_workflow_contract", ROOT / "scripts/check_ci_workflow.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -109,6 +117,74 @@ def test_each_job_requires_the_fixed_admitted_node_pin():
             mutation = text[:start] + f'          node-version: "{unsafe}"\n' + text[end:]
             message = check(mutation)
             assert message and "fixed admitted Node 24.22.1" in message, (occurrence, unsafe, message)
+
+
+def test_each_job_requires_its_own_python_provisioning_and_actual_admission():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        provision = contract.PYTHON_PROVISIONING_STEP
+        guard = contract.PYTHON_RUNTIME_STEP
+        mutations = {
+            "missing_provision": job.replace(provision, "", 1),
+            "missing_guard": job.replace(guard, "", 1),
+            "conditional_provision": job.replace(provision, provision.replace("        shell:", "        if: false\n        shell:"), 1),
+            "ignored_guard": job.replace(guard, guard.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "late_guard": job.replace(guard, "", 1) + guard,
+            "changed_provisioner": job.replace('runpy.run_path("scripts/bootstrap_ci_python.py"',
+                                                'runpy.run_path("scripts/bootstrap_ci_pip.py"', 1),
+        }
+        for label, mutation in mutations.items():
+            assert mutation != job, (name, label)
+            message = check(text.replace(job, mutation, 1))
+            assert message and "Python" in message, (name, label, message)
+
+
+def test_each_job_requires_the_exact_python_bootstrap_version():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    pin = '          python-version: "3.12.15"\n'
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        for unsafe in ("3.11", "3.12.14", "3.12", ">=3.12.15"):
+            mutation = job.replace(pin, f'          python-version: "{unsafe}"\n', 1)
+            assert mutation != job, (name, unsafe)
+            message = check(text.replace(job, mutation, 1))
+            assert message and "exact Python selection" in message, (name, unsafe, message)
+
+
+def test_existing_python_consumers_cannot_move_before_runtime_setup():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        match = re.search(r"(?ms)^      - name: (?:Verify|Re-verify) release tag and package versions\n.*?(?=^      - |\Z)", job)
+        assert match, name
+        consumer = match[0]
+        assert "          python - <<'PY'\n" in consumer, name
+        without = job[:match.start()] + job[match.end():]
+        setup = without.index(contract.PIP_SETUP_STEP)
+        mutation = without[:setup] + consumer + without[setup:]
+        assert mutation != job, name
+        message = check(text.replace(job, mutation, 1))
+        assert message and "actual Python before its consumers" in message, (name, message)
+
+
+def test_compact_python_consumers_cannot_move_before_runtime_setup():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    compact = {
+        "run": '      - run: python -c "print(1)"\n',
+        "shell": "      - shell: python {0}\n        run: print(1)\n",
+    }
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        setup = job.index(contract.PIP_SETUP_STEP)
+        for label, step in compact.items():
+            mutation = job[:setup] + step + job[setup:]
+            message = check(text.replace(job, mutation, 1))
+            assert message and "actual Python before its consumers" in message, (name, label, message)
 
 
 if __name__ == "__main__":
