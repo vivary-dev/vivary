@@ -291,8 +291,12 @@ class ActualPipConfigurationTests(unittest.TestCase):
             config.write_text("[global]\ntimeout = 60\n", encoding="utf-8")
             admitted = {"PIP_CONFIG_FILE": str(config), "PIP_CERT": "validated by the override check",
                         "PIP_USE_DEPRECATED": "legacy-certs"}
-            with mock.patch.dict(os.environ, {**clean, **admitted, "PIP_CONFIG_FILE": os.devnull}, clear=True):
+            # The harmless file is really loaded, so a walk that refused every file key would fail here.
+            with mock.patch.dict(os.environ, {**clean, **admitted}, clear=True):
                 guard.assert_pip_configuration(configuration)
+                loaded = configuration.Configuration(isolated=False)
+                loaded.load()
+                self.assertIn((str(config), {"global.timeout": "60"}), list(loaded.items()))
             for name, value in (("PIP_TRUSTED_HOST", "evil.example"), ("PIP_INDEX_URL", "https://evil.example/simple"),
                                 ("PIP_EXTRA_INDEX_URL", "https://evil.example/simple"), ("PIP_FIND_LINKS", "https://evil.example/"),
                                 ("PIP_CLIENT_CERT", "/client.pem")):
