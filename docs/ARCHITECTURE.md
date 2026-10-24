@@ -732,6 +732,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
+escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
+runner bootstrap contract and its action count. Every step-level key in an admitted job
+must now be a plain `key:`, and the count also matches quoted spellings. Block-scalar run
+content is indented deeper and is unaffected. CI contract only.
+
 2026-10-24 Bot Framework zod and git TLS. GHSA-mrhx-c7xc-m3w5 covers every zod release
 below 4.6.6, so botframework-schema and botframework-connector 4.23.3 move from zod 3.25.76
 to 4.6.7 by override, and the Workbench advisory floor now applies to every zod line. A test
