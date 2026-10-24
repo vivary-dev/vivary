@@ -18598,3 +18598,125 @@ diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pe
  function getProcessingStuckAfterMs() {
      if (process.env.NETLIFY ||
          process.env.AWS_LAMBDA_FUNCTION_NAME ||
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -477,12 +477,22 @@
+         if (options.continuation && (definitionRevision !== options.continuation.definitionRevision ||
+             registryFingerprint !== options.continuation.registryFingerprint))
+             throw new BackgroundAutomationRunError("The automation or its tools changed", "automation_approval_changed");
++        // Vivary #205: set when this guard refuses a call, so the approved replay can
++        // tell a refusal before the entry ran from an error the entry returned.
++        let guardRefusedCall = false;
+         const guardedActions = Object.fromEntries(Object.entries(baseActions).map(([name, entry]) => [name, {
+             ...entry, allowPersistentApproval: false,
+             run: async (args, context) => {
+-                const fresh = await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
+-                if (context?.signal?.aborted || await isTurnAborted(context.threadId, context.turnId))
+-                    throw new BackgroundAutomationRunError("The automation was stopped", INTERRUPTED_RUN_ERROR_CODE);
++                let fresh;
++                try {
++                    fresh = await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
++                    if (context?.signal?.aborted || await isTurnAborted(context.threadId, context.turnId))
++                        throw new BackgroundAutomationRunError("The automation was stopped", INTERRUPTED_RUN_ERROR_CODE);
++                }
++                catch (error) {
++                    guardRefusedCall = true;
++                    throw error;
++                }
+                 return fresh.actions[name].run(args, { ...context, caller: "automation" });
+             },
+         }]));
+@@ -521,6 +531,7 @@
+         let approvalStorageFailed = false;
+         let approvalRefusal = null;
+         let consumedApproval = false;
++        let consumeRefused = false;
+         let continuationInterruption = null;
+         let executionSignal;
+         const approvalHooks = {
+@@ -598,6 +609,9 @@
+                     return false;
+                 const consumed = await consumeAgentToolApproval({ ...pending, askId: pending.askId });
+                 consumedApproval ||= consumed;
++                // Vivary #205: the store refused the grant, for example because it
++                // expired after the decision, so the action cannot run under it.
++                consumeRefused ||= !consumed;
+                 return consumed;
+             },
+         };
+@@ -658,17 +672,38 @@
+                         if (options.continuation) {
+                             try {
+                                 const pending = options.continuation;
++                                let replayed = null;
+                                 const single = await executeAgentToolCall({
+                                     actions, name: pending.toolName, input: pending.input, callId: pending.callId,
+                                     ownerEmail, orgId, appId: deps.appId, runId, threadId: thread.id, turnId,
+                                     caller: "automation", automation: options.actionAutomation,
+-                                    signal, approvedToolCalls: [pending.approvalKey], ...approvalHooks,
++                                    signal, approvedToolCalls: [pending.approvalKey],
++                                    // Vivary #205: the replay never asks again. When the store
++                                    // refuses the grant, a new ask and wait would be orphaned by
++                                    // the finish below, so the gate gets no ask to create.
++                                    consumeApproval: approvalHooks.consumeApproval,
++                                    onApprovalRequired: async () => undefined,
+                                     send: (event) => {
+-                                        if (!["text", "thinking", "done", "turn_summary"].includes(event.type))
++                                        if (event.type === "tool_done" && event.tool === pending.toolName)
++                                            replayed = event;
++                                        if (!["text", "thinking", "done", "turn_summary", "approval_required"].includes(event.type))
+                                             send(event);
+                                     },
+                                 });
+-                                if (single.status !== "completed" || signal.aborted)
++                                const stopped = signal.aborted || await isTurnAborted(thread.id, turnId);
++                                if (!stopped && !consumedApproval && consumeRefused) {
++                                    const message = "The approval could not be used, so the pending action did not run";
++                                    send({ type: "tool_done", id: pending.callId, tool: pending.toolName, input: pending.input,
++                                        result: `${message}.`, isError: true, completedSideEffect: false });
++                                    approvalRefusal = new BackgroundAutomationRunError(message, "automation_approval_unconsumed");
++                                    throw approvalRefusal;
++                                }
++                                // A tool that ran and returned an error has a known outcome.
++                                // The model sees it as it sees any failed tool call. A guard
++                                // refusal after consumption stays an unconfirmed outcome.
++                                const failedTool = single.status === "failed" && consumedApproval && replayed?.isError === true &&
++                                    !guardRefusedCall;
++                                if ((single.status !== "completed" && !failedTool) || stopped)
+                                     throw new BackgroundAutomationRunError("The approved action did not confirm completion. Its outcome may be unknown", INTERRUPTED_RUN_ERROR_CODE);
+                                 await persistBackgroundAutomationTurn({ threadId: thread.id, threadTitle, prompt,
+                                     run: getRun(runId), historyId, continuation: true, resolvedAskId: pending.askId });
+@@ -892,8 +927,18 @@
+             const nativeStatus = await getRunStatus(runId);
+             if (!nativeStatus || nativeStatus === "running")
+                 throw new BackgroundAutomationRunError("Native automation terminal storage was not confirmed", "automation_finalization_unconfirmed");
+-            if (pendingApproval)
+-                await markAutomationApprovalReady(historyId, pendingApproval.askId);
++            // Vivary #205: the wait is already saved. A failed readiness write leaves
++            // it unready, and the owner's decision or the expiry sweep recovers it
++            // through recoverWaitingTurn, so the run still returns waiting.
++            if (pendingApproval) {
++                try {
++                    await markAutomationApprovalReady(historyId, pendingApproval.askId);
++                }
++                catch (error) {
++                    console.error("[automations] The approval wait was saved but not marked ready:", historyId,
++                        redactText(error instanceof Error ? error.message : String(error)));
++                }
++            }
+         }
+         catch (error) {
+             throw continuationInterruption ?? callbackError ?? error;
+@@ -901,8 +946,10 @@
+         finally {
+             if (finalizationConfirmed)
+                 _activeBackgroundRunIds.delete(runId);
++            // Vivary #205: a rejected finalization also ends this process's hold.
++            // Native's run status still guards a row that finalization left running.
+             else if (activeRun)
+-                void activeRun.finalized.then(() => _activeBackgroundRunIds.delete(runId), () => { });
++                void activeRun.finalized.then(() => _activeBackgroundRunIds.delete(runId), () => _activeBackgroundRunIds.delete(runId));
+             if (hardAbortTimer) {
+                 clearTimeout(hardAbortTimer);
+                 hardAbortTimer = null;
