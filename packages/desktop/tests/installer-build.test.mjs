@@ -12,6 +12,7 @@ import {
   maxFolderPath, maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 import { writePackageFileManifest } from "../package.mjs";
+import { assertNodeVersion } from "../../workbench/bin/runtime-security.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const installerCommit = "1111111111111111111111111111111111111111";
@@ -375,6 +376,8 @@ test("a failed build leaves no installer, checksum or receipt", { skip: process.
   });
 
 const makensis = (() => { try { return findMakensis(); } catch { return null; } })();
+// The production builder refuses an affected current Node before it checks the payload.
+const admittedNode = (() => { try { assertNodeVersion(process.versions.node); return true; } catch { return false; } })();
 
 test("production installer refuses unverified runtime payloads before invoking NSIS", () => withFixture(async ({ directory, payload, output, manifest }) => {
   const marker = path.join(directory, "nsis-invoked");
@@ -391,12 +394,14 @@ test("production installer refuses unverified runtime payloads before invoking N
   await writeFile(path.join(payload, "resources/node/node.exe"), "synthetic corrupt Windows Node fixture\n");
   await writeManifest(payload, manifest);
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
-  await assert.rejects(buildProductionInstaller(inputs, fake, { installerCommit }), /Runtime security/);
+  await assert.rejects(buildProductionInstaller(inputs, fake, { installerCommit }), admittedNode
+    ? /Windows Node bytes do not match the authenticated asset/ : /Runtime security: Node .* is affected/);
   assert.equal(await lstat(marker).catch(() => null), null, "runtime refusal precedes even makensis -VERSION");
   assert.equal(await lstat(output).catch(() => null), null);
 }));
 
-test("production installer rechecks manifest bytes instead of trusting a previously resolved input", () => withFixture(async ({ directory, payload, output, manifest }) => {
+test("production installer rechecks manifest bytes instead of trusting a previously resolved input",
+  { skip: !admittedNode && "the current Node is not an admitted runtime" }, () => withFixture(async ({ directory, payload, output, manifest }) => {
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
   await writeFile(path.join(payload, "vivary.exe"), "changed after input validation");
   await assert.rejects(buildProductionInstaller(inputs, path.join(directory, "missing-nsis"), { installerCommit }),
