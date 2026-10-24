@@ -9,6 +9,10 @@ import { parseArgs } from "node:util";
 import { assertCurrentNode } from "./runtime-security.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Profile files in the data folder. Every release since the 2026-09-22 preview uses
+// these names, so renaming one would hide an existing profile from an upgrade.
+export const PROFILE_DATABASE = "auth.sqlite";
+export const PROFILE_AUTH_SECRET = "auth-secret";
 
 export function startupOptions(args, environment = process.env) {
   const { values } = parseArgs({ args, options: {
@@ -71,8 +75,9 @@ async function checkPort(port) {
   await new Promise(resolve => probe.close(resolve));
 }
 
-async function authSecret(dataDir) {
-  const secretFile = path.join(dataDir, "auth-secret");
+/** Creates the sign-in secret once, and keeps an existing one so saved sign-ins stay valid. */
+export async function authSecret(dataDir) {
+  const secretFile = path.join(dataDir, PROFILE_AUTH_SECRET);
   try {
     await writeFile(secretFile, randomBytes(32).toString("hex") + "\n", { flag: "wx", mode: 0o600 });
   } catch (error) {
@@ -104,7 +109,7 @@ export async function startVivary(options) {
     }
   }
 
-  const databaseUrl = `file:${path.join(options.dataDir, "auth.sqlite")}`;
+  const databaseUrl = `file:${path.join(options.dataDir, PROFILE_DATABASE)}`;
   // These are process startup settings. User model credentials remain in the CLI's own store.
   Object.assign(process.env, {
     NODE_ENV: "production",

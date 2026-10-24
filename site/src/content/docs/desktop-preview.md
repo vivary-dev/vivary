@@ -135,6 +135,15 @@ Use disposable projects for preview testing.
    installer keeps one version. To return to an earlier one, run that version's
    installer, within the rollback limits below.
 
+To move from the 2026-09-22 portable prerelease to the installer, close the
+portable Vivary first, because two copies must not use one profile at the same
+time. Then run setup. For setup this is a first install into
+`%LOCALAPPDATA%\Programs\Vivary`, and it does not touch the folder you extracted
+the ZIP into. The installed Vivary opens the same profile in
+`%USERPROFILE%\.vivary\workbench`, with the same database file and sign-in secret.
+Confirm your projects and saved conversations as in step 5, then delete the
+extracted ZIP folder yourself.
+
 Backups can contain credentials, private conversations, and project content.
 Keep them private. Never attach them to a GitHub issue or upload them as release assets.
 

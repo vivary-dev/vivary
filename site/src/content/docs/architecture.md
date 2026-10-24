@@ -736,6 +736,29 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Upgrade from the preview profile. The 2026-09-22 preview (source
+`98846706`) was a portable ZIP, so installing this release over it is a first
+install for setup, and the installer script is unchanged. Setup and the uninstaller
+already never name the profile folders, and `installer-script.test.mjs` covers
+upgrade file handling and kept user files. What carries the user's data across is
+the profile: the preview and this release use the same data folder, the same
+`auth.sqlite` and `auth-secret`, and the same `@agent-native/core` 0.176.5. The
+Vivary registry migrations move to `server/db/registry-migrations.mjs`, a list with
+no imports, and `server/db/migrations.mjs` still runs them through core's runner.
+`bin/start.mjs` names its profile files as `PROFILE_DATABASE` and
+`PROFILE_AUTH_SECRET` and exports `authSecret`. The new
+`tests/preview-profile-upgrade.test.mjs`, in the CI list beside `startup.test.mjs`,
+fails when a migration the preview ran changes (it compares the SHA-256 of each),
+when a later migration loses a row from a populated preview-era registry, applied
+with `node:sqlite`, or when the profile's folder, file names or kept secret change.
+The core tables are not tested here: core is the same version, and the core patch
+adds only `automation_runs` columns, whose older rows the automation approval tests
+already cover. The Code and Native draft records are newer than the preview, so they
+have nothing to migrate. The install guide now covers moving from the portable
+prerelease to the installer. Runtime behavior is unchanged, so the descriptions
+above still hold. Windows acceptance on a real preview profile waits for a release
+artifact, which the Electron publication hold blocks.
+
 2026-10-24 Desktop release build workflow. The new `desktop release` workflow builds
 the Windows release once on an Ubuntu runner from the checked-out commit: the
 package with `--windows-x64 --build-workbench`, then the installer, then the new
