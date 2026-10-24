@@ -33,6 +33,7 @@ AllowSkipFiles off
 !insertmacro REQUIRE_DEFINE LICENSE_FILE
 !insertmacro REQUIRE_DEFINE ICON_FILE
 !insertmacro REQUIRE_DEFINE APP_VERSION
+!insertmacro REQUIRE_DEFINE APP_WINDOWS_VERSION
 !insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT
 !insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT_SHORT
 !insertmacro REQUIRE_DEFINE INSTALLER_COMMIT
@@ -73,8 +74,8 @@ ShowInstDetails show
 ShowUninstDetails show
 
 ; Windows requires four numeric parts here. The readable version is below.
-VIProductVersion "${APP_VERSION}.0"
-VIFileVersion "${APP_VERSION}.0"
+VIProductVersion "${APP_WINDOWS_VERSION}"
+VIFileVersion "${APP_WINDOWS_VERSION}"
 VIAddVersionKey "ProductName" "Vivary"
 VIAddVersionKey "CompanyName" "Vivary"
 VIAddVersionKey "FileDescription" "Vivary Setup"
