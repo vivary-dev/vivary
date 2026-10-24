@@ -172,8 +172,13 @@ packages do not gain a standalone certifi dependency. See the
 
 The task-local CA policy also removes the same C1/C3 fingerprints from generated
 system-derived bundles, retaining all other roots and the existing G3 exclusion.
-Python's general SSL context, native downloads and generated Node package-client
-descendants use those filtered task bundles; pip and Requests use only the
-authenticated certifi anchors described above. Updating standalone certifi alone does not update pip's vendor, ensurepip,
+Native downloads and generated Node package-client descendants use those
+filtered task bundles. Python downloaders use them only where they pass the
+bundle as `cafile`: the build-tool and Go module downloaders, and the pip
+bootstrap once `SSL_CERT_FILE` names the bundle. pip and Requests use only the
+authenticated certifi anchors described above. On Windows, Python code that calls
+`ssl.create_default_context()` without `cafile` also loads the Windows `CA` and
+`ROOT` stores alongside `SSL_CERT_FILE`, so the filtered bundle does not narrow
+that code's trust. Updating standalone certifi alone does not update pip's vendor, ensurepip,
 or operating-system trust. No host-global CA store is changed. These source/build
 changes do not modify already published ZIPs or installed user environments.

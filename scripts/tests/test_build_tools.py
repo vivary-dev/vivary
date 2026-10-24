@@ -355,7 +355,11 @@ class BuildToolsTest(unittest.TestCase):
             target = root / "go-proxy/example.com/!module/@v/v1.2.3.zip"
             target.write_bytes(payload + b"tampered ZIP trailer")
             # HashZip authenticates module contents, so harmless ZIP encoding or
-            # trailers do not alter h1; modified source bytes must still refuse.
+            # trailers do not alter h1 and the cached copy is reused offline.
+            with patch("ssl.create_default_context"), patch("urllib.request.build_opener") as network:
+                self.assertEqual(GO["prefetch_modules"](root, pins), (root / "go-proxy").as_uri())
+                network.return_value.open.assert_not_called()
+            # Modified source bytes must still refuse.
             bad = io.BytesIO()
             with zipfile.ZipFile(bad, "w") as archive:
                 for name, data in members.items(): archive.writestr(name, data + b"changed")

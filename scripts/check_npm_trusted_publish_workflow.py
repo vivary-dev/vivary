@@ -93,7 +93,8 @@ def check_python_consumers(text: str, contract) -> None:
             # intentionally run before the newly provisioned Python is exposed.
             if index == 0 or step.rstrip("\n") == contract.PYTHON_PROVISIONING_STEP.rstrip("\n"):
                 continue
-            require(not re.search(r"(?m)^\s*(?:(?:run|shell):\s*)?['\"]?python(?:3(?:\.\d+)?)?(?:\s|$)", step),
+            # A compact step starts with "- run:" or "- shell:" on its first line.
+            require(not re.search(r"(?m)^\s*(?:-\s+)?(?:(?:run|shell):\s*)?['\"]?python(?:3(?:\.\d+)?)?(?:\s|$)", step),
                     f"{name} must admit actual Python before its consumers")
 
 

@@ -196,9 +196,13 @@ class ProvisioningTests(unittest.TestCase):
         environment = self.root / "github-env"
         environment.touch()
         with mock.patch.dict(os.environ, RUNNER_TEMP=str(self.root), GITHUB_PATH=str(export), GITHUB_ENV=str(environment)), \
-                mock.patch.object(self.module, "download", side_effect=ValueError("fixture refusal")):
-            with self.assertRaises(ValueError):
+                mock.patch.object(self.module, "download", side_effect=ValueError("fixture refusal")) as download:
+            with self.assertRaisesRegex(ValueError, "^fixture refusal$"):
                 self.module.provision_python()
+        # The refusal must come from the download, past the runtime guard, and
+        # the private prefix it was writing into must be gone.
+        download.assert_called_once()
+        self.assertFalse(download.call_args.args[1].parent.exists())
         self.assertEqual(export.read_text(), "")
         self.assertEqual(environment.read_text(), "")
         self.assertEqual(list(self.root.glob("vivary-python-3.12.15-*")), [])
