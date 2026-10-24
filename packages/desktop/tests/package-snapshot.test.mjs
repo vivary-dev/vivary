@@ -146,20 +146,22 @@ for (const fixture of [
   });
 }
 
-test("safe build metadata cannot authorize missing or replaced desktop runtime evidence", async () => {
+// Missing runtime evidence is refused by the Linux evidence test below, which stages real Node bytes.
+test("safe build metadata cannot authorize an unbound Node version or replaced Windows Node bytes", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-payload-node-"));
   try {
     await mkdir(path.join(directory, "resources/workbench"), { recursive: true });
     await mkdir(path.join(directory, "resources/node"));
     await writeFile(path.join(directory, "resources/node/node.exe"), "not the authenticated Node bytes");
     const buildFile = path.join(directory, "resources/workbench/build.json");
-    for (const node of ["24.20.0", "24.22.1"]) {
+    for (const [node, reason] of [["24.20.0", /no authenticated Windows asset binding exists/],
+      ["24.22.1", /Windows Node bytes do not match the authenticated asset/]]) {
       await writeFile(buildFile, JSON.stringify({ platform: "win32", architecture: "x64", node,
         runtimeSecurity: { standalone: { sha256: "a".repeat(64), versions: { node: "24.22.1" } } } }));
-      await assert.rejects(assertDesktopPayload(directory), /authenticated/);
+      await assert.rejects(assertDesktopPayload(directory), reason);
     }
     await writeFile(buildFile, JSON.stringify({ platform: "win32", architecture: "x64", node: "24.22.1" }));
-    await assert.rejects(assertDesktopPayload(directory), /Runtime security/);
+    await assert.rejects(assertDesktopPayload(directory), /Windows Node bytes do not match the authenticated asset/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

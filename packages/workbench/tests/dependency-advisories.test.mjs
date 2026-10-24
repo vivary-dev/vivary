@@ -123,7 +123,7 @@ test("the floor comparison follows SemVer precedence and rejects unparsable vers
 });
 
 for (const { name, branch, fixed, advisories } of advisoryFloors) {
-  test(`${name}${branch ? ` ${branch}x` : ""} is locked at or above ${fixed} for ${advisories.join(", ")}`, () => {
+  test(`${name}${branch ? ` ${branch}x` : ""} has no locked copy below ${fixed} for ${advisories.join(", ")}`, () => {
     const locked = lockedVersions(name);
     assert.ok(locked.length > 0, `${name} is missing from the committed lockfiles`);
     assert.deepEqual(locked.filter(({ version }) => (!branch || version.startsWith(branch))

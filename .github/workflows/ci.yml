@@ -43,7 +43,7 @@ jobs:
         run: |
           import types
 
-          RUNNER_ADMISSION_SOURCE = r'''"""Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
+          RUNNER_ADMISSION_SOURCE = r'''"""Pre-JavaScript runner admission, also embedded verbatim in every workflow check_ci_workflow.py admits."""
 
           import ctypes
           import hashlib
@@ -1520,7 +1520,7 @@ jobs:
     needs: changes
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - *runner_action_node_bootstrap
       - name: require changed-path and dispatch validation
@@ -1579,7 +1579,7 @@ jobs:
     name: governed verification (Windows)
     needs: changes
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - *runner_action_node_bootstrap
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -389,7 +389,7 @@ def main():
             entry = [] if name == "node" else [str(args.root / "client.cjs"), name]
             subprocess.run([str(node_executable(args.root)), "--use-openssl-ca", *entry, *command],
                            env=env, check=True, timeout=20, cwd=args.root)
-            # Later CI steps call the published bin\*.cmd launchers, so run each one too, with
+            # Windows callers run the published bin\*.cmd launchers, so run each one too, with
             # arguments that hold no cmd.exe metacharacters.
             launched = subprocess.run([str(launcher(args.root, name)),
                                        *(["-p", "process.execPath"] if name == "node" else command)],

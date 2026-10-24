@@ -8199,6 +8199,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Pip configuration guard reads real pip configuration. Pip 26.2.2's
+`Configuration.items()` yields one (source, values) pair per config file and one
+for `:env:`. Only the values are keyed by `section.option`, so the guard never saw
+an option and admitted any trusted host, index or certificate setting. It now walks
+each source's keys and names the source when it refuses. A test loads the actual pip
+Configuration. The same review also tightened four tests, corrected the runner admission
+docstring in its five embedded copies, and raised the maintained Workbench and Windows
+job budgets to 30 and 25 minutes after measured runs of 17m18s and 13m8s.
+
 2026-10-24 Site advisory floors for undici and zod. The site's pre-install
 admission, `scripts/check_site_dependencies.py`, now admits undici only at 6.29.1,
 7.30.1 or 8.12.2 or later on the same line, and zod only at 4.6.6 or later on 4.x.
