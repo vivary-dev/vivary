@@ -119,7 +119,25 @@ export type VivaryCodePendingApproval = CodexActionRequest & {
 
 export type VivaryCodeRecentRun = Pick<CodeAgentRunRecord, "id" | "status" | "title" | "phase"> & {
   projectId: string | null;
+  /** Beta ticket 05. A request this run was waiting on when the previous host ended. It cannot be answered. */
+  expiredApproval: { method: string; summary: string | null; reason: string } | null;
 };
+
+/**
+ * Beta ticket 05. A Codex request the run waits on, listed in the run record's `metadata.pendingApprovals` until it is
+ * answered or the run ends. A fresh host marks each one still listed Expired, because its answer channel died with
+ * the previous host.
+ */
+type RecordedCodexApproval = {
+  requestId: string;
+  method: string;
+  summary: string | null;
+  requestedAt: string;
+  expiredAt?: string;
+  reason?: "host-restart";
+};
+
+const APPROVAL_EXPIRED_REASON = "Vivary restarted before this request was answered.";
 
 /** Issue #121. The refusal's state for the host strip and the Code panel. The server owns the wording. */
 export type VivaryCodeCleanupView = {
@@ -326,6 +344,11 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
           percent: 0,
         },
       });
+    }
+    // Beta ticket 05. A run can end without clearing its list when the previous host died mid-cleanup, so every run
+    // is checked, not only the interrupted ones.
+    for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
+      if (metadataString(run, "app") === VIVARY_CODE_APP_MARKER) expireRecordedApprovals(run);
     }
     // Issue #121. The oldest persisted refusal is in force before any send. The check that may lift it runs behind it.
     reloadCleanup();
@@ -814,6 +837,7 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
   const active = owned.find(run => activeRuns.has(run.id));
   const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
   const recent = owned.find(run => !activeRuns.has(run.id));
+  const expired = recent ? recordedApprovals(recent).find(approval => approval.expiredAt) : undefined;
   return {
     activeRun: active ? { id: active.id, title: active.title, projectId: metadataString(active, "projectId") } : null,
     // The card shows a redacted copy. The stored request stays as Codex sent it, so the answer matches it.
@@ -824,6 +848,7 @@ function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCode
       status: recent.status,
       phase: recent.phase,
       projectId: metadataString(recent, "projectId"),
+      expiredApproval: expired ? { method: expired.method, summary: expired.summary, reason: APPROVAL_EXPIRED_REASON } : null,
     } : null,
     busy: activeRuns.size > 0,
     // Every user of the host sees the refusal, because it refuses them all.
@@ -1080,8 +1105,9 @@ export async function sendVivaryCodeMessage(input: {
     recordProjectContextLoad(run, input.projectContext);
     input.recordProjectContext?.(input.projectContext);
   }
+  // A new turn starts a new answer channel, so an expired request from an earlier turn leaves the record.
   updateCodeAgentRunRecord(run.id, { status: "queued", phase: "queued", needsApproval: false,
-    metadata: { pendingLaunch: undefined, codexPermissionMode: permissionMode,
+    metadata: { pendingLaunch: undefined, pendingApprovals: undefined, codexPermissionMode: permissionMode,
       ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
   startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
     ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, permissionMode });
@@ -1219,8 +1245,9 @@ async function resolveCodexRequest(input: {
   active.requests.delete(input.requestId);
   appendCodeAgentTranscriptEvent({ runId: input.runId, kind: "status", message: decision.allow ? "Codex request allowed." : "Codex request declined.",
     metadata: { requestId: input.requestId, method: pending.request.method } });
-  updateCodeAgentRunRecord(input.runId, { needsApproval: active.requests.size > 0,
-    status: active.requests.size ? "needs-approval" : "running", phase: active.requests.size ? "action-approval" : "running" });
+  updateCodeAgentRunRecord(input.runId, run => ({ needsApproval: active.requests.size > 0,
+    status: active.requests.size ? "needs-approval" : "running", phase: active.requests.size ? "action-approval" : "running",
+    metadata: { pendingApprovals: withoutRecordedApproval(run, input.requestId) } }));
   pending.resolve(response);
   return getVivaryCodeState(input.ownerEmail, input.runId, active.workspace, input.orgId);
 }
@@ -1278,14 +1305,19 @@ async function executeVivaryCodeRun(input: {
         if (input.activeRun.controller.signal.aborted) throw new Error("This run is stopping.");
         return new Promise(resolve => {
           input.activeRun.requests.set(request.requestId, { request, resolve });
-          updateCodeAgentRunRecord(input.runId, { status: "needs-approval", phase: "action-approval", needsApproval: true });
+          updateCodeAgentRunRecord(input.runId, run => ({ status: "needs-approval", phase: "action-approval", needsApproval: true,
+            metadata: { pendingApprovals: [...recordedApprovals(run).filter(approval => approval.requestId !== request.requestId),
+              { requestId: request.requestId, method: request.method, summary: approvalSummary(request),
+                requestedAt: new Date().toISOString() }] } }));
         });
       },
       onRequestResolved: requestId => {
-        const pending = input.activeRun.requests.delete(requestId);
-        if (pending && !input.activeRun.controller.signal.aborted && getCodeAgentRunRecord(input.runId)?.phase === "action-approval") updateCodeAgentRunRecord(input.runId, {
-          status: input.activeRun.requests.size ? "needs-approval" : "running",
-          phase: input.activeRun.requests.size ? "action-approval" : "running", needsApproval: input.activeRun.requests.size > 0 });
+        if (!input.activeRun.requests.delete(requestId)) return;
+        const settled = !input.activeRun.controller.signal.aborted && getCodeAgentRunRecord(input.runId)?.phase === "action-approval";
+        updateCodeAgentRunRecord(input.runId, run => ({
+          ...(settled ? { status: input.activeRun.requests.size ? "needs-approval" : "running",
+            phase: input.activeRun.requests.size ? "action-approval" : "running", needsApproval: input.activeRun.requests.size > 0 } : {}),
+          metadata: { pendingApprovals: withoutRecordedApproval(run, requestId) } }));
       },
       onStopFailed: ({ step, target }) => {
         stopRefusedAt = new Date().toISOString();
@@ -1340,9 +1372,59 @@ async function executeVivaryCodeRun(input: {
     });
   } finally {
     if (stopRefusedAt !== null) clearStopRefusal(input.runId);
+    try { settleRecordedApprovals(input.runId, input.activeRun.stopReason === "shutdown"); }
+    catch (failure) { console.error(`[vivary-code-host] approval-record-failed run=${input.runId} `
+      + (failure instanceof Error ? failure.name : "unknown")); }
     input.activeRun.requests.clear();
     activeRuns.delete(input.runId);
   }
+}
+
+/** Beta ticket 05. The record store merges metadata one key deep, so every write replaces the whole list. */
+function recordedApprovals(run: CodeAgentRunRecord | null | undefined): RecordedCodexApproval[] {
+  const listed = run?.metadata?.pendingApprovals;
+  return Array.isArray(listed) ? listed.filter((value): value is RecordedCodexApproval => !!value && typeof value === "object"
+    && typeof value.requestId === "string" && typeof value.method === "string" && typeof value.requestedAt === "string") : [];
+}
+
+/** The list without one request. An empty list is undefined, which removes the key from the record. */
+function withoutRecordedApproval(run: CodeAgentRunRecord, requestId: string): RecordedCodexApproval[] | undefined {
+  const rest = recordedApprovals(run).filter(approval => approval.requestId !== requestId);
+  return rest.length ? rest : undefined;
+}
+
+/** What the request asks to run or why, redacted and cut to one short line, for the record and the host strip. */
+function approvalSummary(request: CodexActionRequest): string | null {
+  const { command, reason } = request.params;
+  const text = typeof command === "string" ? command
+    : Array.isArray(command) ? command.filter(part => typeof part === "string").join(" ")
+      : typeof reason === "string" ? reason : "";
+  const line = String(redactCredentialsInValue(text)).replace(/\s+/g, " ").trim();
+  return line ? line.slice(0, 200) : null;
+}
+
+/**
+ * A run that ends forgets what it still waits on, because Stop and failure cancel those requests. A shutdown is a
+ * restart from the owner's view, so its requests expire visibly instead.
+ */
+function settleRecordedApprovals(runId: string, shutdown: boolean): void {
+  const run = getCodeAgentRunRecord(runId);
+  if (!recordedApprovals(run).length) return;
+  if (shutdown) expireRecordedApprovals(run!);
+  else updateCodeAgentRunRecord(runId, { metadata: { pendingApprovals: undefined } });
+}
+
+/** Marks each request the run still waits on Expired and says so once in its conversation. */
+function expireRecordedApprovals(run: CodeAgentRunRecord): void {
+  const waiting = recordedApprovals(run).filter(approval => !approval.expiredAt);
+  if (!waiting.length) return;
+  const expiredAt = new Date().toISOString();
+  for (const approval of waiting) {
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: `Codex request expired. ${APPROVAL_EXPIRED_REASON}`,
+      metadata: { requestId: approval.requestId, method: approval.method, reason: "host-restart" } });
+  }
+  updateCodeAgentRunRecord(run.id, current => ({ needsApproval: false, metadata: { pendingApprovals: recordedApprovals(current)
+    .map(approval => approval.expiredAt ? approval : { ...approval, expiredAt, reason: "host-restart" as const }) } }));
 }
 
 export async function stopVivaryCodeRun(input: {
