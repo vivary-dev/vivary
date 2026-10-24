@@ -8196,6 +8196,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Execution mode labels (beta ticket 09, backlog B33). Settings and the line
+under a Code conversation implied that the Normal, Read only, and YOLO execution mode
+governs every coding runtime. Only Codex launches receive it. `local-code-agent.ts`
+records every run as `auto-edit`, and Core's executor starts Claude Code in
+`acceptEdits` with its file tools, so Claude Code edits files without asking in every
+mode. `app/lib/code-permission-labels.ts` now holds the labels.
+`LocalRuntimeSettings.tsx` says under the mode that it applies to Codex only and that
+Claude Code conversations accept file edits without asking. The conversation footer
+moves into `CodeConversationLimits.tsx`, which says the same for Claude Code and
+keeps the Codex line. Launch, permission storage, and the send boundary are
+unchanged, so the runtime descriptions above still hold. The design document's
+execution mode paragraph states the Claude Code behavior.
+`tests/code-permission-labels.test.mjs` renders the real Settings page in each mode
+and the footer for both runtimes, and runs in `test:native-chat`. Its two label cases
+fail against the earlier text and pass with the change.
+
 2026-10-24 Minimum Claude Code and Codex CLI versions (beta ticket 08, backlog B07).
 An older CLI reached a status probe that failed with "could not report its sign-in
 status" or a run that failed later. `local-runtime-setup.ts` now holds a minimum per
