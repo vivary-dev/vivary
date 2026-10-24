@@ -471,6 +471,20 @@ class WorkflowBootstrapTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 module.check_runner_action_bootstrap(text.replace("CVE-2026-111497", "altered-advisory", 1), names, npm=npm)
 
+    def test_quoted_or_irregular_step_keys_cannot_hide_an_action(self):
+        module = contract()
+        for workflow in WORKFLOWS:
+            text = workflow.read_text()
+            names = module.CI_JOBS if workflow.name == "ci.yml" else ("verify", "publish")
+            npm = workflow.name != "ci.yml"
+            block = module.job_block(text, names[-1])
+            for key in ('"uses"', "'uses'", "uses ", "? uses\n        ", '"\\u0075ses"', '"if"'):
+                value = "${{ always() }}" if "if" in key else "someone/action@main"
+                added = block.rstrip("\n") + "\n      - name: helper\n        " + key + ": " + value + "\n"
+                with self.subTest(workflow=workflow.name, key=key), self.assertRaises(SystemExit):
+                    module.check_runner_action_bootstrap(text.replace(block, added, 1), names, npm=npm)
+            module.check_runner_action_bootstrap(text, names, npm=npm)
+
     def test_exact_action_identities_and_no_pre_main_post_bindings(self):
         module = contract()
         for reference, manifest in module.ACTION_MANIFESTS.items():
