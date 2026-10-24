@@ -1,11 +1,13 @@
 """Network-free tests for the executing interpreter's pip admission."""
 
 from contextlib import redirect_stdout
+import importlib.metadata
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import re
 import ssl
 import sys
 import tempfile
@@ -78,7 +80,8 @@ class PipRuntimeTests(unittest.TestCase):
             def load(self):
                 pass
             def items(self):
-                return list(loaded.config_items)
+                # Real pip groups keys by source: [(source, {"section.option": value})].
+                return [(source, dict(values)) for source, values in loaded.config_items]
         self.configuration = SimpleNamespace(Configuration=FakeConfiguration)
         modules = {"pip": self.pip, "pip._internal.configuration": self.configuration}
         self.import_pip = mock.Mock(side_effect=lambda name: modules.get(name, self.certifi))
@@ -117,13 +120,16 @@ class PipRuntimeTests(unittest.TestCase):
     def test_pip_configuration_cannot_change_trusted_hosts_indexes_or_certificates(self):
         for key in (":env:.trusted-host", "global.index-url", "install.extra-index-url", ":env:.find-links",
                     ":env:.client-cert", "global.cert", "user.cert"):
-            self.config_items = [(":env:.use-deprecated", "legacy-certs"), (key, "fixture")]
+            source = ":env:" if key.startswith(":env:") else "/etc/pip.conf"
+            self.config_items = [(":env:", {":env:.use-deprecated": "legacy-certs"}),
+                                 (source, {"global.timeout": "60", key: "fixture"})]
             with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "pip configuration cannot change"):
                 guard.assert_pip_runtime()
 
     def test_environment_cert_and_unrelated_pip_configuration_are_admitted(self):
-        self.config_items = [(":env:.cert", "validated by the override check"), (":env:.use-deprecated", "legacy-certs"),
-                             (":env:.config-file", "/dev/null"), ("global.timeout", "60")]
+        self.config_items = [("/etc/pip.conf", {"global.timeout": "60"}),
+                             (":env:", {":env:.cert": "validated by the override check",
+                                        ":env:.use-deprecated": "legacy-certs", ":env:.config-file": "/dev/null"})]
         guard.assert_pip_runtime()
 
     def test_old_or_altered_vendored_certifi_is_refused(self):
@@ -267,6 +273,38 @@ class PipRuntimeTests(unittest.TestCase):
             self.assertEqual(guard.main(), 0)
         self.assertEqual(json.loads(output.getvalue())["pip"], "26.2.2")
         self.assertEqual(self.runtime.stderr.getvalue(), "")
+
+
+class ActualPipConfigurationTests(unittest.TestCase):
+    def test_actual_pip_configuration_files_and_variables_are_refused(self):
+        # The real Configuration groups keys by source. A flat fixture cannot prove the walk.
+        try:
+            qualified = importlib.metadata.distribution("pip").version == "26.2.2"
+        except importlib.metadata.PackageNotFoundError:
+            qualified = False
+        if not qualified:
+            self.skipTest("actual pip 26.2.2 is unavailable")
+        configuration = importlib.import_module("pip._internal.configuration")
+        clean = {name: value for name, value in os.environ.items() if not name.startswith("PIP_")}
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "pip.conf"
+            config.write_text("[global]\ntimeout = 60\n", encoding="utf-8")
+            admitted = {"PIP_CONFIG_FILE": str(config), "PIP_CERT": "validated by the override check",
+                        "PIP_USE_DEPRECATED": "legacy-certs"}
+            with mock.patch.dict(os.environ, {**clean, **admitted, "PIP_CONFIG_FILE": os.devnull}, clear=True):
+                guard.assert_pip_configuration(configuration)
+            for name, value in (("PIP_TRUSTED_HOST", "evil.example"), ("PIP_INDEX_URL", "https://evil.example/simple"),
+                                ("PIP_EXTRA_INDEX_URL", "https://evil.example/simple"), ("PIP_FIND_LINKS", "https://evil.example/"),
+                                ("PIP_CLIENT_CERT", "/client.pem")):
+                with self.subTest(variable=name), mock.patch.dict(os.environ, {**clean, "PIP_CONFIG_FILE": os.devnull, name: value},
+                                                                  clear=True):
+                    with self.assertRaisesRegex(RuntimeError, "pip configuration cannot change.* from :env:"):
+                        guard.assert_pip_configuration(configuration)
+            for section, option in (("global", "index-url"), ("install", "trusted-host"), ("global", "cert")):
+                config.write_text(f"[{section}]\n{option} = https://evil.example/\n", encoding="utf-8")
+                with self.subTest(file=f"{section}.{option}"), mock.patch.dict(os.environ, {**clean, **admitted}, clear=True):
+                    with self.assertRaisesRegex(RuntimeError, re.escape(f"{section}.{option} from {config}")):
+                        guard.assert_pip_configuration(configuration)
 
 
 class ActualPipRequestsTests(unittest.TestCase):

@@ -803,34 +803,6 @@ WORKBENCH_DEPENDENCY_STEP = (
     '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\'\n'
 )
 
-WINDOWS_WORKBENCH_TOOLS_STEP = (
-    '      - name: qualified workbench build tools\n'
-    '        shell: pwsh\n'
-    '        run: |\n'
-    '          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"\n'
-    '          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }\n'
-    '          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript\n'
-    '          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n'
-    '          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append\n'
-    '          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append\n'
-)
-
-WINDOWS_WORKBENCH_INSTALL_STEP = (
-    '      - name: install workbench dependencies\n'
-    '        shell: pwsh\n'
-    '        run: |\n'
-    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts\n'
-    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }\n'
-)
-
-WINDOWS_WORKBENCH_DEPENDENCY_STEP = (
-    '      - name: known workbench dependency admission\n'
-    '        shell: pwsh\n'
-    '        run: |\n'
-    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\n'
-    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }\n'
-)
-
 WORKBENCH_TYPECHECK = (
     '          "$RUNNER_TEMP/vivary-build-tools/typescript-7.0.2-go1.26.10/tsc" --noEmit --project packages/workbench/tsconfig.json\n'
 )
@@ -882,8 +854,7 @@ def check_workbench_build_tools(text: str) -> None:
         node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
         require(len(tools) == len(installs) == len(node) == len(dependencies) == 1, contract)
         require(node[0] < tools[0] and tools[0] + 1 == dependencies[0] and dependencies[0] + 1 == installs[0], contract)
-        windows = name == "governed-platform-proof"
-        expected = (WINDOWS_WORKBENCH_TOOLS_STEP, WINDOWS_WORKBENCH_DEPENDENCY_STEP, WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
+        expected = (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
         require(all(steps[index].rstrip("\n") == value.rstrip("\n") for index, value in zip((tools[0], dependencies[0], installs[0]), expected)), contract)
         require(not re.search(r"(?m)^\s*(?:run:\s*)?(?:npm|pnpm|corepack)\s", "".join(steps[:tools[0]])), contract)
         require("npm install --global" not in job, contract)

@@ -366,8 +366,11 @@ class RunnerBootstrapTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory, controlled_runner(wrapper.admission, directory, "v24.22.0"), \
                     mock.patch.object(wrapper, "download", side_effect=AssertionError("no download")) as download, \
                     mock.patch.object(wrapper.sys, "argv", ["runner-action-node-admission"]):
-                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()): result = wrapper.main()
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()): result = wrapper.main()
                 download.assert_not_called()
+                self.assertEqual(stderr.getvalue(), "Runner action Node: admission failed (phase=interpreter-version, "
+                                 "exception=RuntimeError, observedNode=24.22.0, requiredNode=24.22.1)\n", workflow.name)
                 # A non-zero step result is what keeps every later action from running.
                 self.assertEqual(result, 1)
 

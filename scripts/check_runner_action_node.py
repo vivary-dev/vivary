@@ -1,4 +1,4 @@
-"""Pre-JavaScript runner admission, also embedded verbatim in both workflows."""
+"""Pre-JavaScript runner admission, also embedded verbatim in every workflow check_ci_workflow.py admits."""
 
 import ctypes
 import hashlib

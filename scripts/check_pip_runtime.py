@@ -65,12 +65,16 @@ def assert_pip_configuration(configuration_module):
     # files. Load them the way pip does and refuse anything that can change which hosts and
     # indexes pip trusts or which certificate it verifies against. PIP_CERT from the
     # environment is admitted separately, by assert_certificate_overrides.
+    # items() yields one (source, values) pair per config file and one for ":env:", and
+    # each values dict is keyed by "section.option".
     configuration = configuration_module.Configuration(isolated=False)
     configuration.load()
-    for key, _ in configuration.items():
-        section, _, option = key.partition(".")
-        if option in RISKY_PIP_OPTIONS and not (section == ":env:" and option == "cert"):
-            refuse("pip configuration cannot change trusted hosts, indexes or certificates: " + key)
+    for source, values in configuration.items():
+        for key in values:
+            section, _, option = key.partition(".")
+            if option in RISKY_PIP_OPTIONS and not (section == ":env:" and option == "cert"):
+                refuse("pip configuration cannot change trusted hosts, indexes or certificates: "
+                       + key + " from " + source)
 
 
 def assert_pip_runtime():
