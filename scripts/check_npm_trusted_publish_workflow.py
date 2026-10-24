@@ -19,6 +19,26 @@ def require(condition: bool, message: str) -> None:
 
 NODE_GUARD = "node packages/workbench/bin/runtime-security.mjs"
 PUBLISH = NODE_GUARD + ' publish-npm "$RUNNER_TEMP/npm-candidate"'
+# Both jobs run these exact reviewed steps. Text inside a heredoc, an uncalled
+# function or a dead branch can match the old substring checks without running.
+GUARD_STEP = (
+    "      - name: Verify trusted publishing runtime\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          " + NODE_GUARD + "\n"
+    "          node --version\n"
+    "          npm --version\n"
+    "          node -e \"const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');\" \"$(npm --version)\"\n"
+)
+PACK_STEP = (
+    "      - name: Verify npm package contents\n"
+    "        working-directory: packages/create-vivary/npm\n"
+    "        run: |\n"
+    "          mkdir -p \"$RUNNER_TEMP/npm-candidate\"\n"
+    "          npm pack --pack-destination \"$RUNNER_TEMP/npm-candidate\"\n"
+    "          python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts \"$RUNNER_TEMP/npm-candidate\" --scope npm\n"
+)
 
 
 def shell_masks_failure(step: str) -> bool:
@@ -63,6 +83,7 @@ def check_runtime_and_archive(text: str) -> None:
         require(not re.search(r"(?m)^\s+(?:if|continue-on-error|env|working-directory):", guard)
                 and not shell_masks_failure(guard), f"{name} runtime guard cannot be skipped or ignored")
         require("npm 11.5.1+ is required for trusted publishing" in guard, f"{name} must retain npm admission")
+        require(guard.rstrip("\n") == GUARD_STEP.rstrip("\n"), f"{name} runtime guard must be exactly the reviewed step")
         require(not re.search(r"(?m)^\s*(?:run:\s*)?npm\s", "".join(steps[:guards[0]])),
                 f"{name} must guard Node before npm")
         packs = [i for i, step in enumerate(steps) if 'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"' in step]
@@ -71,6 +92,9 @@ def check_runtime_and_archive(text: str) -> None:
         require(not re.search(r"(?m)^\s+(?:if|continue-on-error):", pack) and not shell_masks_failure(pack),
                 f"{name} archive validation cannot be skipped or ignored")
         require('--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm' in pack, f"{name} must validate its exact archive")
+        # Only the step name differs between the two jobs.
+        expected = PACK_STEP if name == "verify" else PACK_STEP.replace("- name: Verify npm", "- name: Re-verify npm", 1)
+        require(pack.rstrip("\n") == expected.rstrip("\n"), f"{name} archive validation must be exactly the reviewed step")
         if name == "publish":
             publishing = [i for i, step in enumerate(steps) if "publish-npm" in step]
             require(len(publishing) == 1 and publishing[0] > packs[0], "publication must follow archive validation")

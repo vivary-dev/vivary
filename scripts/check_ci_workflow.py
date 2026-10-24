@@ -5,6 +5,8 @@ from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/ci.yml")
 REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
+AUXILIARY_WORKFLOWS = ((Path(".github/workflows/steward.yml"), ("daily-health-check",)),
+                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)))
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -282,7 +284,7 @@ def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, 
                 pin = "820762786026740c76f36085b0efc47a31fe5020" if npm else "949feb2413d6458794dcd2491c4babbbce0c15c1"
                 require(reference == "actions/setup-node@" + pin, name + " has the wrong setup-node identity")
             require("continue-on-error:" not in step, name + " cannot ignore an action failure")
-            conditions = re.findall(r"(?m)^        if: (.+)$", step)
+            conditions = re.findall(r"(?m)^(?:      - |        )if: (.+)$", step)
             if conditions:
                 require(len(conditions) == 1, name + " has ambiguous action conditions")
                 expression = conditions[0].removeprefix("${{").removesuffix("}}").strip()
@@ -749,7 +751,16 @@ def check_site_dependencies(text: str) -> None:
     require(steps[guard[1]].rstrip("\n") == SITE_INSTALLED_DEPENDENCY_STEP.rstrip("\n"), contract)
     require(guard[0] + 1 == installs[0] and installs[0] + 1 == guard[1] < audits[0] < builds[0], contract)
     require(steps[builds[0]].rstrip("\n") == SITE_BUILD_STEP.rstrip("\n"), contract)
+    site_tests = [index for index, step in enumerate(steps) if "run test:site" in step]
+    require(len(site_tests) == 1 and steps[site_tests[0]].rstrip("\n") == SITE_TEST_STEP.rstrip("\n")
+            and guard[1] < site_tests[0] < builds[0], contract + ": site behavior tests must run before the build")
 
+
+SITE_TEST_STEP = (
+    "      - name: site behavior and information architecture tests\n"
+    "        run: '\"$RUNNER_TEMP/vivary-build-tools/bin/npm\" run test:site'\n"
+    "        working-directory: site\n"
+)
 
 WORKBENCH_TOOLS_STEP = (
     '      - name: qualified workbench build tools\n'
@@ -1157,6 +1168,8 @@ def main() -> None:
     require(test_job.count(REPAIR_TEST_STEP) == 1,
             "tests job must run the runner action repair regressions")
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
+    for path, names in AUXILIARY_WORKFLOWS:
+        check_runner_action_bootstrap(path.read_text(encoding="utf-8"), names, auxiliary=True)
     print(f"{WORKFLOW}: CI workflow contract passed")
 
 

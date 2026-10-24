@@ -363,12 +363,8 @@ class RunnerBootstrapTests(unittest.TestCase):
             module = load_source(inline_source(workflow.read_text()))
             with tempfile.TemporaryDirectory() as directory, controlled_runner(module, directory, "v24.22.0"):
                 with contextlib.redirect_stderr(io.StringIO()): result = module.main()
+                # A non-zero step result is what keeps every later action from running.
                 self.assertEqual(result, 1)
-                # Controlled action transports obey the workflow's default success admission.
-                for action in ("checkout", "setup", "upload", "publisher"):
-                    marker = Path(directory) / (action + ".marker")
-                    if result == 0: marker.write_text("admitted")
-                    self.assertFalse(marker.exists(), action)
 
 
 class RunnerDiagnosticTests(unittest.TestCase):
@@ -441,7 +437,7 @@ class RunnerDiagnosticTests(unittest.TestCase):
 
 
 class WorkflowBootstrapTests(unittest.TestCase):
-    def test_first_step_and_canonical_mapping_mutations_cover_all_ten_jobs(self):
+    def test_first_step_and_canonical_mapping_mutations_cover_every_ci_and_npm_job(self):
         module = contract()
         for workflow in WORKFLOWS:
             text = workflow.read_text()

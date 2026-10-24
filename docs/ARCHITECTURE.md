@@ -732,6 +732,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Workflow checker hardening from the security-unit reviews. The CI contract
+now checks the runner bootstrap in `steward.yml` and `track-stats.yml`, reads an `if:`
+written as a step's first key, and requires the site behavior tests before the build.
+The npm publish checker requires the exact reviewed guard and archive-validation steps.
+Two tests now reach the payload evidence comparison and the repair wrapper's failure
+formats. No runtime behavior changes.
+
 2026-10-24 Review fixes for the security units. `bootstrap_ci_python.py` now removes a
 failed or partial download, so a transient network error no longer leaves a file in the
 shared runner cache that makes every later attempt refuse. The review gate's inline copy is
