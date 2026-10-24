@@ -736,6 +736,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Certificate-fix review corrections. The certificate bundle entry no
+longer says every Windows Python client is limited to the filtered bundle: only
+clients that pass it as `cafile` are, because a default context on Windows also
+loads the CryptoAPI CA and ROOT stores. The npm publish workflow's tag checkout
+now states that release tags must contain the CI Python scripts it runs, the
+publish-workflow checker also refuses compact `- run: python` and
+`- shell: python` steps before runtime admission, and the pip, Python and Go
+prefetch tests now assert the derived wheel, the refusal source and the cached
+trailer reuse they describe. No runtime behavior changes.
+
 2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
 select the already authenticated task-local pnpm package through the real preview
 resolver, with an explicit tool root and matching physical Node executable. They
@@ -804,8 +814,10 @@ changes only the certificate/version data and corresponding metadata, and binds
 both the offline builder and retained ensurepip seeds. Fresh venvs therefore do
 not restore the older trust bundle. CI provisioning binds pip and Requests to a
 separate authenticated copy of the exact certifi anchors, and actual pip
-admission rejects broader effective certificate overrides. General Python,
-native downloads and build clients retain the filtered host-derived bundle.
+admission rejects broader effective certificate overrides. Python clients that
+pass `cafile`, native downloads and build clients retain the filtered
+host-derived bundle. On Windows, a Python default context without `cafile` also
+loads the CryptoAPI CA and ROOT stores.
 The seven-package runtime closure and profile
 paths are unchanged. C1/C3 removal is not evidence of exploitation. The
 [desktop runtime contract](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md) describes this boundary;

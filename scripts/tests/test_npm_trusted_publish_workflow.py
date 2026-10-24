@@ -171,6 +171,22 @@ def test_existing_python_consumers_cannot_move_before_runtime_setup():
         assert message and "actual Python before its consumers" in message, (name, message)
 
 
+def test_compact_python_consumers_cannot_move_before_runtime_setup():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    contract = python_contract()
+    compact = {
+        "run": '      - run: python -c "print(1)"\n',
+        "shell": "      - shell: python {0}\n        run: print(1)\n",
+    }
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        setup = job.index(contract.PIP_SETUP_STEP)
+        for label, step in compact.items():
+            mutation = job[:setup] + step + job[setup:]
+            message = check(text.replace(job, mutation, 1))
+            assert message and "actual Python before its consumers" in message, (name, label, message)
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     failed = 0
