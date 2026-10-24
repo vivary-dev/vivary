@@ -5,6 +5,8 @@ import shlex
 
 
 WORKFLOW = Path(".github/workflows/npm-trusted-publish.yml")
+SCRIPTS = Path(__file__).resolve().parent
+RUNTIME_SECURITY = SCRIPTS.parent / "packages/workbench/bin/runtime-security.mjs"
 ACTION_PINS = (
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
@@ -18,7 +20,10 @@ def require(condition: bool, message: str) -> None:
 
 
 NODE_GUARD = "node packages/workbench/bin/runtime-security.mjs"
-PUBLISH = NODE_GUARD + ' publish-npm "$RUNNER_TEMP/npm-candidate"'
+TOOLS = '"$RUNNER_TEMP/vivary-build-tools'
+QUALIFIED_NPM = "12.2.1"
+PUBLISH = (TOOLS + '/bin/node" packages/workbench/bin/runtime-security.mjs publish-npm "$RUNNER_TEMP/npm-candidate" '
+           + TOOLS + '"')
 # Both jobs run these exact reviewed steps. Text inside a heredoc, an uncalled
 # function or a dead branch can match the old substring checks without running.
 GUARD_STEP = (
@@ -28,15 +33,24 @@ GUARD_STEP = (
     "          set -euo pipefail\n"
     "          " + NODE_GUARD + "\n"
     "          node --version\n"
-    "          npm --version\n"
-    "          node -e \"const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');\" \"$(npm --version)\"\n"
 )
+# Both jobs provision the qualified client right after the Node guard. No other npm runs.
+CLIENT_STEP = (
+    "      - name: qualified npm client\n"
+    "        # Every npm command in this job runs this client, as in ci.yml.\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          python -I -B scripts/bootstrap_build_tools.py --root \"$RUNNER_TEMP/vivary-build-tools\"\n"
+    "          test \"$(" + TOOLS + "/bin/npm\" --version)\" = \"" + QUALIFIED_NPM + "\"\n"
+)
+PACK = TOOLS + '/bin/npm" pack --pack-destination "$RUNNER_TEMP/npm-candidate"'
 PACK_STEP = (
     "      - name: Verify npm package contents\n"
     "        working-directory: packages/create-vivary/npm\n"
     "        run: |\n"
     "          mkdir -p \"$RUNNER_TEMP/npm-candidate\"\n"
-    "          npm pack --pack-destination \"$RUNNER_TEMP/npm-candidate\"\n"
+    "          " + PACK + "\n"
     "          python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts \"$RUNNER_TEMP/npm-candidate\" --scope npm\n"
 )
 
@@ -53,6 +67,23 @@ def shell_masks_failure(step: str) -> bool:
     return any(token in ("||", "|", ";", "&") for token in tokens) or bool(
         re.search(r"(?m)^\s*(?:set\s+\+e|exit\s+0|true)(?:\s|$)", run)
     )
+
+
+def npm_pins() -> dict:
+    spec = importlib.util.spec_from_file_location("bootstrap_build_tools", SCRIPTS / "bootstrap_build_tools.py")
+    tools = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tools)
+    return {name: version for name, version, _ in tools.NPM_PINS}
+
+
+def check_qualified_client(runtime_source: str, pins: dict) -> None:
+    """The workflow step, the publisher and the provisioner name one client."""
+    match = re.search(r'(?m)^export const QUALIFIED_NPM = Object\.freeze\(\{ npm: "([^"]+)", undici: "([^"]+)", '
+                      r'"ip-address": "([^"]+)" \}\);$', runtime_source)
+    require(match is not None, f"{RUNTIME_SECURITY.name}: missing the qualified npm client pins")
+    publisher = dict(zip(("npm", "undici", "ip-address"), match.groups()))
+    require(publisher == pins and pins.get("npm") == QUALIFIED_NPM,
+            f"qualified npm pins differ: workflow npm {QUALIFIED_NPM}, publisher {publisher}, bootstrap_build_tools {pins}")
 
 
 def check_runtime_and_archive(text: str) -> None:
@@ -82,12 +113,15 @@ def check_runtime_and_archive(text: str) -> None:
                 f"{name} runtime guard must fail closed before npm")
         require(not re.search(r"(?m)^\s+(?:if|continue-on-error|env|working-directory):", guard)
                 and not shell_masks_failure(guard), f"{name} runtime guard cannot be skipped or ignored")
-        require("npm 11.5.1+ is required for trusted publishing" in guard, f"{name} must retain npm admission")
         require(guard.rstrip("\n") == GUARD_STEP.rstrip("\n"), f"{name} runtime guard must be exactly the reviewed step")
-        require(not re.search(r"(?m)^\s*(?:run:\s*)?npm\s", "".join(steps[:guards[0]])),
-                f"{name} must guard Node before npm")
-        packs = [i for i, step in enumerate(steps) if 'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"' in step]
-        require(len(packs) == 1 and packs[0] > guards[0], f"{name} must pack after admission")
+        require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?(?:npm|npx|corepack)\s", job),
+                f"{name} must run npm only through the qualified client")
+        clients = [i for i, step in enumerate(steps) if "scripts/bootstrap_build_tools.py" in step or "vivary-build-tools/bin/npm" in step]
+        require(clients and clients[0] == guards[0] + 1 and steps[clients[0]].rstrip("\n") == CLIENT_STEP.rstrip("\n"),
+                f"{name} must provision the qualified npm client right after the Node guard")
+        packs = [i for i, step in enumerate(steps) if PACK in step]
+        require(len(packs) == 1 and packs[0] > clients[0] and clients[1:] == packs,
+                f"{name} must pack with the qualified client after provisioning it")
         pack = steps[packs[0]]
         require(not re.search(r"(?m)^\s+(?:if|continue-on-error):", pack) and not shell_masks_failure(pack),
                 f"{name} archive validation cannot be skipped or ignored")
@@ -99,11 +133,11 @@ def check_runtime_and_archive(text: str) -> None:
             publishing = [i for i, step in enumerate(steps) if "publish-npm" in step]
             require(len(publishing) == 1 and publishing[0] > packs[0], "publication must follow archive validation")
             step = steps[publishing[0]]
-            require(re.search(r"(?m)^        run: " + re.escape(PUBLISH) + r"\s*$", step) is not None,
-                    "publish must recheck Node and publish only the checked candidate archive")
+            require(re.search(r"(?m)^        run: '" + re.escape(PUBLISH) + r"'\s*$", step) is not None,
+                    "publish must recheck the qualified Node and client and publish only the checked candidate archive")
             require(not re.search(r"(?m)^\s+(?:if|continue-on-error|working-directory|env):", step),
                     "publication admission cannot be skipped or redirected")
-    require(not re.search(r"(?m)^\s*(?:run:\s*)?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
+    require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
 
 
 def check_python_consumers(text: str, contract) -> None:
@@ -137,17 +171,16 @@ def main() -> None:
         "runs-on: ubuntu-latest",
         *ACTION_PINS,
         'node-version: "24.22.1"',
-        'registry-url: "https://registry.npmjs.org"',
         "package-manager-cache: false",
         "Verify trusted publishing runtime",
-        "npm 11.5.1+ is required for trusted publishing",
+        "scripts/bootstrap_build_tools.py",
         "packages/create-vivary/tests/test_create_vivary.py",
         "packages/create-vivary/tests/test_init_thin.py",
         "packages/create-vivary/tests/test_record_workflow.py",
         "packages/create-vivary/tests/test_adopt.py",
         "packages/create-vivary/tests/test_assets_parity.py",
         "packages/create-vivary/tests/test_npm_launcher.js",
-        'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"',
+        PACK,
         "python ../../../scripts/check_release_artifacts.py --repository ../../.. "
         '--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm',
         PUBLISH,
@@ -160,7 +193,7 @@ def main() -> None:
 
     for snippet in (
         'mkdir -p "$RUNNER_TEMP/npm-candidate"',
-        'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"',
+        PACK,
         "python ../../../scripts/check_release_artifacts.py --repository ../../.. "
         '--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm',
     ):
@@ -181,6 +214,8 @@ def main() -> None:
 
     for snippet in forbidden_snippets:
         require(snippet not in text, f"{WORKFLOW}: forbidden token/auth snippet: {snippet}")
+    # The qualified client replaces the user and global npmrc that registry-url would write.
+    require("registry-url:" not in text, f"{WORKFLOW}: registry-url configures an npm that no step runs")
 
     for mutable_ref in (
         "actions/checkout@v",
@@ -222,11 +257,12 @@ def main() -> None:
         f"{WORKFLOW}: OIDC permission must only exist on the publish job",
     )
     require(
-        text.index("run: " + PUBLISH) > publish_job,
+        text.index("run: '" + PUBLISH) > publish_job,
         f"{WORKFLOW}: npm publish must only run inside the publish job",
     )
 
     check_runtime_and_archive(text)
+    check_qualified_client(RUNTIME_SECURITY.read_text(encoding="utf-8"), npm_pins())
     # Shared source/inline/action identity contract, without executing the bootstrap.
     spec = importlib.util.spec_from_file_location("runner_workflow_contract", Path(__file__).with_name("check_ci_workflow.py"))
     contract = importlib.util.module_from_spec(spec)

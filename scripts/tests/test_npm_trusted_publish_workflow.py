@@ -60,8 +60,10 @@ def test_each_job_must_guard_its_own_runtime_before_npm():
     for header in ("        if: false\n", "        continue-on-error: true\n"):
         assert check(text.replace("        shell: bash\n", header + "        shell: bash\n", 1))
     # Leaving the correct command in the job, after npm, is insufficient.
-    assert check(text.replace(command + "          node --version\n          npm --version\n",
-                            "          npm --version\n" + command + "          node --version\n", 1))
+    moved = text.replace(command + "          node --version\n",
+                         '          "$RUNNER_TEMP/vivary-build-tools/bin/npm" --version\n' + command + "          node --version\n", 1)
+    assert moved != text
+    assert check(moved)
 
 
 def test_publication_requires_success_and_the_same_checked_candidate():
@@ -75,6 +77,8 @@ def test_publication_requires_success_and_the_same_checked_candidate():
         (load().PUBLISH, "npm publish packages/create-vivary/npm"),
         (load().PUBLISH, load().PUBLISH.replace("npm-candidate", "different-candidate")),
         (load().PUBLISH, load().PUBLISH + " || true"),
+        (load().PUBLISH, load().PUBLISH.replace(' "$RUNNER_TEMP/vivary-build-tools"', "")),
+        (load().PUBLISH, load().PUBLISH.replace('"$RUNNER_TEMP/vivary-build-tools/bin/node"', "node", 1)),
         ("      - name: Publish @vivary/create with npm trusted publishing\n",
          "      - name: Publish @vivary/create with npm trusted publishing\n        if: false\n"),
         ("      - name: Re-verify npm package contents\n",
@@ -85,6 +89,82 @@ def test_publication_requires_success_and_the_same_checked_candidate():
     # Matching commands in verify do not admit the protected publish job.
     before, publish = text.split("\n  publish:\n", 1)
     assert check(before + "\n  publish:\n" + publish.replace(load().PUBLISH, "echo omitted"))
+
+
+def test_each_job_runs_npm_only_through_the_qualified_client():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    module = load()
+    contract = python_contract()
+    client = module.CLIENT_STEP
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        assert job.count(client) == 1, name
+        pack_name = "Verify npm" if name == "verify" else "Re-verify npm"
+        pack = module.PACK_STEP.replace("Verify npm", pack_name, 1)
+        assert job.count(pack) == 1, name
+        mutations = {
+            "missing_client": job.replace(client, "", 1),
+            "late_client": job.replace(client, "", 1).replace(pack, client + "\n" + pack, 1),
+            "image_npm_pack": job.replace(module.PACK, 'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"', 1),
+            "image_npm_version": job.replace(client, client + "          npm --version\n", 1),
+            "older_client": job.replace('= "12.2.1"', '= "11.19.1"', 1),
+            "unchecked_client": job.replace('          test "$("$RUNNER_TEMP', '          echo "$("$RUNNER_TEMP', 1),
+            "ignored_client": job.replace(client, client.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "npx": job.replace(pack, "      - run: npx --yes pkg\n" + pack, 1),
+            "corepack": job.replace(pack, "      - run: corepack enable\n" + pack, 1),
+            "quoted_npm": job.replace(pack, "      - run: 'npm whoami'\n" + pack, 1),
+            "second_client_use": job.replace(pack, '      - run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" whoami\'\n' + pack, 1),
+            "registry_url": job.replace('          node-version: "24.22.1"\n',
+                                        '          node-version: "24.22.1"\n          registry-url: "https://registry.npmjs.org"\n', 1),
+        }
+        for label, mutation in mutations.items():
+            assert mutation != job, (name, label)
+            assert check(text.replace(job, mutation, 1)), (name, label)
+
+
+def test_workflow_publisher_and_provisioner_name_one_client():
+    module = load()
+    source = module.RUNTIME_SECURITY.read_text(encoding="utf-8")
+    pins = module.npm_pins()
+    assert pins == {"npm": "12.2.1", "undici": "6.29.1", "ip-address": "10.7.4"}
+    module.check_qualified_client(source, pins)
+    for label, mutated_source, mutated_pins in (
+        ("publisher npm", source.replace('npm: "12.2.1"', 'npm: "11.19.1"', 1), pins),
+        ("publisher undici", source.replace('undici: "6.29.1"', 'undici: "6.28.0"', 1), pins),
+        ("publisher missing", source.replace("export const QUALIFIED_NPM", "const QUALIFIED_NPM", 1), pins),
+        ("provisioner ip-address", source, {**pins, "ip-address": "10.5.0"}),
+        ("provisioner npm", source, {**pins, "npm": "12.2.2"}),
+    ):
+        assert mutated_source != source or mutated_pins != pins, label
+        try:
+            module.check_qualified_client(mutated_source, mutated_pins)
+        except SystemExit as error:
+            assert "qualified npm" in str(error), (label, error)
+        else:
+            raise AssertionError(label)
+    # The workflow pin itself is the third name for the client.
+    module.QUALIFIED_NPM = "12.2.2"
+    try:
+        module.check_qualified_client(source, pins)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("workflow pin")
+    # main() reads the publisher's pins from runtime-security.mjs.
+    with tempfile.TemporaryDirectory() as directory:
+        changed = Path(directory) / "runtime-security.mjs"
+        changed.write_text(source.replace('npm: "12.2.1"', 'npm: "11.19.1"', 1), encoding="utf-8")
+        workflow = Path(directory) / "npm.yml"
+        workflow.write_text(WORKFLOW.read_text(encoding="utf-8"), encoding="utf-8")
+        module = load()
+        module.WORKFLOW, module.RUNTIME_SECURITY = workflow, changed
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+        except SystemExit as error:
+            assert "qualified npm pins differ" in str(error), error
+        else:
+            raise AssertionError("main must compare the publisher's pins")
 
 
 def test_publisher_cannot_move_before_archive_validation():

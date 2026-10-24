@@ -761,7 +761,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24.22.1"
-          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
       - name: Verify trusted publishing runtime
@@ -770,8 +769,14 @@ jobs:
           set -euo pipefail
           node packages/workbench/bin/runtime-security.mjs
           node --version
-          npm --version
-          node -e "const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');" "$(npm --version)"
+
+      - name: qualified npm client
+        # Every npm command in this job runs this client, as in ci.yml.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools"
+          test "$("$RUNNER_TEMP/vivary-build-tools/bin/npm" --version)" = "12.2.1"
 
       - name: Verify release tag and package versions
         shell: bash
@@ -812,7 +817,7 @@ jobs:
         working-directory: packages/create-vivary/npm
         run: |
           mkdir -p "$RUNNER_TEMP/npm-candidate"
-          npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"
+          "$RUNNER_TEMP/vivary-build-tools/bin/npm" pack --pack-destination "$RUNNER_TEMP/npm-candidate"
           python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts "$RUNNER_TEMP/npm-candidate" --scope npm
 
       - name: Stop before publish unless explicitly enabled
@@ -860,7 +865,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24.22.1"
-          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
       - name: Verify trusted publishing runtime
@@ -869,8 +873,14 @@ jobs:
           set -euo pipefail
           node packages/workbench/bin/runtime-security.mjs
           node --version
-          npm --version
-          node -e "const version = process.argv[1].split('.').map(Number); if (version[0] < 11 || (version[0] === 11 && (version[1] < 5 || (version[1] === 5 && version[2] < 1)))) throw new Error('npm 11.5.1+ is required for trusted publishing');" "$(npm --version)"
+
+      - name: qualified npm client
+        # Every npm command in this job runs this client, as in ci.yml.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools"
+          test "$("$RUNNER_TEMP/vivary-build-tools/bin/npm" --version)" = "12.2.1"
 
       - name: Re-verify release tag and package versions
         shell: bash
@@ -902,8 +912,8 @@ jobs:
         working-directory: packages/create-vivary/npm
         run: |
           mkdir -p "$RUNNER_TEMP/npm-candidate"
-          npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"
+          "$RUNNER_TEMP/vivary-build-tools/bin/npm" pack --pack-destination "$RUNNER_TEMP/npm-candidate"
           python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts "$RUNNER_TEMP/npm-candidate" --scope npm
 
       - name: Publish @vivary/create with npm trusted publishing
-        run: node packages/workbench/bin/runtime-security.mjs publish-npm "$RUNNER_TEMP/npm-candidate"
+        run: '"$RUNNER_TEMP/vivary-build-tools/bin/node" packages/workbench/bin/runtime-security.mjs publish-npm "$RUNNER_TEMP/npm-candidate" "$RUNNER_TEMP/vivary-build-tools"'
