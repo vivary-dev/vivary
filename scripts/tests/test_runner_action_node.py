@@ -366,8 +366,11 @@ class RunnerBootstrapTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory, controlled_runner(wrapper.admission, directory, "v24.22.0"), \
                     mock.patch.object(wrapper, "download", side_effect=AssertionError("no download")) as download, \
                     mock.patch.object(wrapper.sys, "argv", ["runner-action-node-admission"]):
-                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()): result = wrapper.main()
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()): result = wrapper.main()
                 download.assert_not_called()
+                self.assertEqual(stderr.getvalue(), "Runner action Node: admission failed (phase=interpreter-version, "
+                                 "exception=RuntimeError, observedNode=24.22.0, requiredNode=24.22.1)\n", workflow.name)
                 # A non-zero step result is what keeps every later action from running.
                 self.assertEqual(result, 1)
 
@@ -467,6 +470,20 @@ class WorkflowBootstrapTests(unittest.TestCase):
                     module.check_runner_action_bootstrap(text.replace(block, block.replace(first, "", 1) + first, 1), names, npm=npm)
             with self.assertRaises(SystemExit):
                 module.check_runner_action_bootstrap(text.replace("CVE-2026-111497", "altered-advisory", 1), names, npm=npm)
+
+    def test_quoted_or_irregular_step_keys_cannot_hide_an_action(self):
+        module = contract()
+        for workflow in WORKFLOWS:
+            text = workflow.read_text()
+            names = module.CI_JOBS if workflow.name == "ci.yml" else ("verify", "publish")
+            npm = workflow.name != "ci.yml"
+            block = module.job_block(text, names[-1])
+            for key in ('"uses"', "'uses'", "uses ", "? uses\n        ", '"\\u0075ses"', '"if"'):
+                value = "${{ always() }}" if "if" in key else "someone/action@main"
+                added = block.rstrip("\n") + "\n      - name: helper\n        " + key + ": " + value + "\n"
+                with self.subTest(workflow=workflow.name, key=key), self.assertRaises(SystemExit):
+                    module.check_runner_action_bootstrap(text.replace(block, added, 1), names, npm=npm)
+            module.check_runner_action_bootstrap(text, names, npm=npm)
 
     def test_exact_action_identities_and_no_pre_main_post_bindings(self):
         module = contract()

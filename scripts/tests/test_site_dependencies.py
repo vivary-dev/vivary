@@ -55,6 +55,35 @@ class SiteDependencyTests(unittest.TestCase):
                     lock["packages"]["node_modules/postcss-selector-parser"] = record("postcss-selector-parser", parser)
                     self.assertEqual(len(guard.validate_lock(lock)), 2)
 
+    def test_undici_and_zod_copies_meet_their_advisory_floors(self):
+        for name, version in (("undici", "6.29.1"), ("undici", "7.30.1"), ("undici", "8.12.2"),
+                              ("undici", "8.12.3"), ("undici", "8.13.0"), ("zod", "4.6.6"),
+                              ("zod", "4.6.7"), ("zod", "4.7.0")):
+            with self.subTest(name=name, version=version):
+                lock = fixed_lock()
+                lock["packages"]["node_modules/" + name] = record(name, version)
+                self.assertEqual(guard.validate_lock(lock)["node_modules/" + name],
+                                 {"name": name, "version": version})
+        for name, version in (("undici", "6.29.0"), ("undici", "7.30.0"), ("undici", "8.12.1"),
+                              ("undici", "8.10.2"), ("undici", "5.29.0"), ("undici", "9.0.0"),
+                              ("zod", "4.6.5"), ("zod", "4.5.4"), ("zod", "3.25.76"), ("zod", "5.0.0")):
+            for location in ("node_modules/" + name, "node_modules/outer/node_modules/" + name):
+                with self.subTest(name=name, version=version, location=location):
+                    lock = fixed_lock()
+                    lock["packages"][location] = record(name, version)
+                    with self.assertRaisesRegex(ValueError, "affected or on an unverified major at " + location):
+                        guard.validate_lock(lock)
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory) / "site"
+            lock = fixed_lock()
+            lock["packages"]["node_modules/undici"] = record("undici", "8.12.3")
+            lock["packages"]["node_modules/zod"] = record("zod", "4.6.7")
+            write_installed(site, lock)
+            guard.validate_installed(lock, site)
+            (site / "node_modules/zod/package.json").write_text('{"name":"zod","version":"4.5.4"}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "differs from the admitted lock at node_modules/zod"):
+                guard.validate_installed(lock, site)
+
     def test_fixed_labels_cannot_hide_older_tarball_urls(self):
         for name, old, fixed in (("vite", "8.1.3", "8.1.6"),
                                  ("postcss-selector-parser", "6.1.4", "6.1.5")):

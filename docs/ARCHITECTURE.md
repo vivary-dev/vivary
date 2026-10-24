@@ -819,6 +819,36 @@ fixture build skips.
 The original-runtime launcher test fails there before and after this change,
 because that host's Python has no `pip`.
 
+2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
+escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
+runner bootstrap contract and its action count. Every step-level key in an admitted job
+must now be a plain `key:`, and the count also matches quoted spellings. Block-scalar run
+content is indented deeper and is unaffected. CI contract only.
+
+2026-10-24 Bot Framework zod and git TLS. GHSA-mrhx-c7xc-m3w5 covers every zod release
+below 4.6.6, so botframework-schema and botframework-connector 4.23.3 move from zod 3.25.76
+to 4.6.7 by override, and the Workbench advisory floor now applies to every zod line. A test
+validates and refuses Activities through botframework-schema on 4.6.7. `build_go_tools.py`
+no longer sets `GIT_SSL_NO_VERIFY`, because git disables certificate checks when the
+variable is present with any value, including "false".
+
+2026-10-24 Pip configuration guard reads real pip configuration. Pip 26.2.2's
+`Configuration.items()` yields one (source, values) pair per config file and one
+for `:env:`. Only the values are keyed by `section.option`, so the guard never saw
+an option and admitted any trusted host, index or certificate setting. It now walks
+each source's keys and names the source when it refuses. A test loads the actual pip
+Configuration. The same review also tightened four tests, corrected the runner admission
+docstring in its five embedded copies, and raised the maintained Workbench and Windows
+job budgets to 30 and 25 minutes after measured runs of 17m18s and 13m8s.
+
+2026-10-24 Site advisory floors for undici and zod. The site's pre-install
+admission, `scripts/check_site_dependencies.py`, now admits undici only at 6.29.1,
+7.30.1 or 8.12.2 or later on the same line, and zod only at 4.6.6 or later on 4.x.
+Every other copy is refused. Before this, the undici 8.x and zod 4.x floors lived only in
+the Workbench advisory test, which reads the Workbench and desktop locks, so a
+site lock refresh could reintroduce an affected copy. The site lock already holds
+undici 8.12.3 and zod 4.6.7, so no dependency changes.
+
 2026-10-24 Undici advisories in the Workbench and desktop locks. GHSA-xjj6-f33q-929c,
 GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472 affect the Workbench's undici 6.28.1 (through
 @ai-sdk/provider-utils) and 7.29.1 (through @agent-native/core), and the desktop build's
@@ -884,9 +914,11 @@ The site lock changes only that entry. No site runtime behavior changes.
 2026-10-23 Zod advisory GHSA-mrhx-c7xc-m3w5. Workbench and the internal site move
 zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
 which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
-issue collection in the v4 core array parser. The 3.25.76 copy stays because its
-only consumer, Core's botframework connector, requires zod 3 and does not import
-the v4 core. No schema or runtime behavior is otherwise changed.
+issue collection in array validation, in every release below 4.6.6, 3.x included.
+Core's botframework-connector and botframework-schema 4.23.3 therefore move from
+zod 3.25.76 to 4.6.7 by override, because no patched 3.x exists. They use zod's v3
+API, including single-argument `record()`, which 4.6.7 keeps. No schema or runtime
+behavior is otherwise changed.
 
 2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
 select the already authenticated task-local pnpm package through the real preview

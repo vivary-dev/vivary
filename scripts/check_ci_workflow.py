@@ -277,6 +277,11 @@ def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, 
                     name + " has an unproved step alias or merge")
             require(re.match(r"^      - (?:name|uses|run|if|id|shell|env):", step) is not None,
                     name + " has an unsupported step mapping")
+            # GitHub also accepts quoted, spaced, escaped and complex keys. Refuse them, so `uses`
+            # and `if` cannot hide from the patterns below. Block-scalar content sits deeper.
+            require(all(re.match(r"^        (?:#|[A-Za-z_][\w-]*:(?:[ \t]|$))", line)
+                        for line in step.splitlines()[1:] if re.match(r"^        \S", line)),
+                    name + " has a quoted or unsupported step key")
             uses = re.findall(r"(?m)^(?:      - |        )uses: (\S+)\s*$", step)
             if not uses:
                 continue
@@ -294,7 +299,8 @@ def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, 
                 require("||" not in expression and "steps.runner_action_node.outcome == 'success'" in [part.strip() for part in expression.split("&&")],
                         name + " conditional action must require bootstrap success")
             total_uses += 1
-    require(total_uses == len(re.findall(r"(?m)^\s*(?:-\s+)?uses:", jobs)), "unproved action outside an admitted step")
+    require(total_uses == len(re.findall(r"(?m)^\s*(?:-\s+)?(?:uses|'uses'|\"uses\")\s*:", jobs)),
+            "unproved action outside an admitted step")
     if npm:
         publish = job_block(text, "publish").split("    steps:", 1)[0]
         require("    needs: verify\n" in publish and "    if: ${{ inputs.publish && needs.verify.result == 'success' }}" in publish,
