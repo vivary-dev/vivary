@@ -15,7 +15,9 @@ const advisoryFloors = [
   { name: "vite", branch: "8.3.", fixed: "8.3.3", advisories: ["GHSA-rq7h-c2jc-7f22"] },
   { name: "markdown-it", branch: "15.", fixed: "15.0.3", advisories: ["GHSA-gfr2-rv44-r23c"] },
   { name: "@vitest/mocker", branch: "5.", fixed: "5.0.3", advisories: ["GHSA-xp26-3454-mjgp"] },
-  // The 4.x floor leaves the reviewed zod 3.25.76 copy, which only botframework uses, out of scope.
+  // The 4.x floor leaves the reviewed zod 3.25.76 copy out of scope. Its only dependents,
+  // botframework-connector and botframework-schema, import the zod root, which loads only v3.
+  // The site's pre-install admission floors its own undici and zod copies.
   { name: "zod", branch: "4.", fixed: "4.6.6", advisories: ["GHSA-mrhx-c7xc-m3w5"] },
   // undici 2026-10-23 advisories. Each line has its own patched release.
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
