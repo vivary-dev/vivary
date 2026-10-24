@@ -3392,6 +3392,36 @@ findings from the #201 review concern the sweeps that settle approval history.
 its real scheduler sweep sees only its own jobs. Its five cases failed against
 the previous patch and pass with this one. The other #205 findings remain open.
 
+### Approval continuation outcomes
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 2. Three
+findings concern the approved continuation in `background-automation-runner.js`.
+
+- The replay passes `executeAgentToolCall` the consume hook and an
+  `onApprovalRequired` hook that creates nothing. When the store refuses the
+  grant, for example because it expired between the decision and its
+  consumption, the action did not run. The replay closes the tool call with an
+  error result, and the run fails with `automation_approval_unconsumed`. Before
+  this change, Native's gate wrote a new ask and wait, and the interrupted
+  finish orphaned them.
+- An approved tool that ran and returned an error is a known outcome. The run
+  saves it and continues, so the model sees the error as it sees any failed tool
+  call. A Stop, a stopped turn, a refusal by the runner's own guard after
+  consumption, or any other result still ends the run as interrupted with an
+  unconfirmed outcome.
+- After Native finalization of a waiting run, a failed `markAutomationApprovalReady`
+  write goes to the log and the run returns `waiting_approval`. The wait is already
+  saved, and `recoverWaitingTurn` marks it ready on the owner's decision or the
+  expiry sweep.
+- A rejected `activeRun.finalized` removes the run ID from
+  `_activeBackgroundRunIds`, as a resolved one does. Before this change, recovery
+  and reconciliation treated that run as live for the life of the process.
+  Native's run status still blocks a row that finalization left running.
+
+`tests/automation-approval-continuation.test.mjs` owns its SQLite database. Its
+four cases failed against the previous patch and pass with this one. The other
+#205 findings remain open.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a
