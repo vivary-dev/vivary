@@ -18295,3 +18295,306 @@ new file mode 100644
 +/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
 +export declare function registerUserMessageTextRenderer(renderer: UserMessageTextRenderer): () => void;
 +export declare function userMessageTextRenderer(text: string): UserMessageTextRenderer | undefined;
+diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
+--- a/dist/jobs/run-history.js
++++ b/dist/jobs/run-history.js
+@@ -636,17 +636,32 @@
+  * (resume ids that start with "automation-expire-") that a failed write left
+  * unsettled. No person can approve them any more.
+  */
+-export async function listExpiredApprovalWaits(appId, now = Date.now()) {
++export async function listExpiredApprovalWaits(appId, now = Date.now(), after = null) {
+     await ensureTable();
+     const expiresAt = isPostgres() ? "(approval_context::jsonb ->> 'expiresAt')::bigint"
+         : "CAST(json_extract(approval_context, '$.expiresAt') AS INTEGER)";
+     const result = await getDbExec().execute({
+-        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL
++        sql: `SELECT id, started_at AS sweep_at FROM ${TABLE} WHERE finished_at IS NULL
+           AND (status = 'waiting_approval' OR (status = 'resuming' AND resume_run_id LIKE 'automation-expire-%'))
+-          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''} ORDER BY started_at LIMIT 100`,
+-        args: appId ? [now, appId] : [now],
++          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (started_at > ? OR (started_at = ? AND id > ?))' : ''}
++          ORDER BY started_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [now, ...(appId ? [appId] : []), ...sweepCursorArgs(after)],
+     });
+-    return (result.rows ?? []).map(row => String(row.id));
++    return sweepPage(result);
++}
++/**
++ * Vivary #205: the approval sweeps page through their rows in a stable order, so a
++ * page of rows that a sweep skips or cannot settle cannot hide the rows after it.
++ * Each row comes back with its sort value as `at`, and the last row is the cursor
++ * for the next page.
++ */
++export const APPROVAL_SWEEP_PAGE_SIZE = 100;
++function sweepCursorArgs(after) {
++    return after ? [after.at, after.at, after.id] : [];
++}
++function sweepPage(result) {
++    return (result.rows ?? []).map(row => ({ id: String(row.id), at: Number(row.sweep_at) }));
+ }
+ /** Unfinished approval history bound to this exact resource. */
+ export async function listBoundApprovalWaits(resource) {
+@@ -685,16 +700,20 @@
+ }
+ 
+ /** Terminal approval bookkeeping is retried without another agent execution. */
+-export async function listUnreconciledAutomationApprovalRuns(appId) {
++export async function listUnreconciledAutomationApprovalRuns(appId, after = null) {
+     await ensureTable();
++    // A known outcome can wait without a finish time. It sorts first, as SQLite
++    // sorted a NULL finish time before.
+     const result = await getDbExec().execute({
+-        sql: `SELECT id FROM automation_runs WHERE approval_context IS NOT NULL
++        sql: `SELECT id, COALESCE(finished_at, 0) AS sweep_at FROM automation_runs WHERE approval_context IS NOT NULL
+           AND approval_outcome_reconciled = 0 AND (finished_at IS NOT NULL OR
+             ${isPostgres() ? "approval_context::jsonb -> 'terminalOutcome' IS NOT NULL" : "json_extract(approval_context, '$.terminalOutcome') IS NOT NULL"})
+-          ${appId ? 'AND app_id = ?' : ''} ORDER BY finished_at LIMIT 100`,
+-        args: appId ? [appId] : [],
++          ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (COALESCE(finished_at, 0) > ? OR (COALESCE(finished_at, 0) = ? AND id > ?))' : ''}
++          ORDER BY sweep_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [...(appId ? [appId] : []), ...sweepCursorArgs(after)],
+     });
+-    return result.rows.map(row => String(row.id));
++    return sweepPage(result);
+ }
+ export async function markAutomationApprovalOutcomeReconciled(id) {
+     await getDbExec().execute({
+diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
+--- a/dist/jobs/run-history.d.ts
++++ b/dist/jobs/run-history.d.ts
+@@ -141,7 +141,11 @@
+ export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
+ export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
+ 
+-export declare function listUnreconciledAutomationApprovalRuns(appId?: string): Promise<string[]>;
++/** One row of an approval sweep page. `at` is its sort value, and the last row is the next page's cursor. */
++export interface ApprovalSweepRow { id: string; at: number }
++export declare const APPROVAL_SWEEP_PAGE_SIZE: number;
++export declare function listExpiredApprovalWaits(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
++export declare function listUnreconciledAutomationApprovalRuns(appId?: string, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
+ export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
+ export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1187,41 +1187,67 @@
+  */
+ async function expireAutomationApprovalWaits(appId) {
+     const { listExpiredApprovalWaits } = await import("./run-history.js");
+-    for (const id of await listExpiredApprovalWaits(appId)) {
+-        try {
+-            const state = await getAutomationContinuation(id);
+-            const pending = state?.context;
+-            // This sweep's own claim, left when a write after it failed. It never
+-            // starts a turn, so once its lease passes a later pass settles it.
+-            const staleClaim = state?.storedStatus === "resuming" && Boolean(state.resumeRunId?.startsWith("automation-expire-")) &&
+-                Date.now() - state.decisionAt > automationRunClaimLeaseMs();
+-            if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
+-                continue;
+-            const ask = await readAgentToolApproval(pending);
+-            if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
+-                _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
+-                continue;
+-            if (!staleClaim) {
+-                // A wait saved before its turn was marked ready is recovered as an
+-                // owner's decision recovers it. A run that can still save it is left.
+-                if (!state.run.approvalReady) {
+-                    if (!await canRecoverWaitingTurn(pending))
+-                        continue;
+-                    await recoverWaitingTurn(state);
+-                }
+-                if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
+-                    continue;
++    await sweepApprovalRows("expiry", appId, after => listExpiredApprovalWaits(appId, Date.now(), after), expireApprovalWait);
++}
++async function expireApprovalWait(id) {
++    try {
++        const state = await getAutomationContinuation(id);
++        const pending = state?.context;
++        // This sweep's own claim, left when a write after it failed. It never
++        // starts a turn, so once its lease passes a later pass settles it.
++        const staleClaim = state?.storedStatus === "resuming" && Boolean(state.resumeRunId?.startsWith("automation-expire-")) &&
++            Date.now() - state.decisionAt > automationRunClaimLeaseMs();
++        if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
++            return;
++        const ask = await readAgentToolApproval(pending);
++        if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
++            _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
++            return;
++        if (!staleClaim) {
++            // A wait saved before its turn was marked ready is recovered as an
++            // owner's decision recovers it. A run that can still save it is left.
++            if (!state.run.approvalReady) {
++                if (!await canRecoverWaitingTurn(pending))
++                    return;
++                await recoverWaitingTurn(state);
+             }
+-            if (ask.status === "pending" && !await declineAgentToolApproval(pending))
+-                throw new Error("The expired approval could not be declined.");
+-            await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
+-                "automation_approval_expired", { emitFinished: pending.options.emitFinished });
+-            await recordApprovalExecutionOutcome(pending, "declined");
++            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
++                return;
+         }
+-        catch (error) {
+-            console.error("[automations] approval expiry failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++        if (ask.status === "pending" && !await declineAgentToolApproval(pending))
++            throw new Error("The expired approval could not be declined.");
++        await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
++            "automation_approval_expired", { emitFinished: pending.options.emitFinished });
++        await recordApprovalExecutionOutcome(pending, "declined");
++    }
++    catch (error) {
++        console.error("[automations] approval expiry failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++    }
++}
++/**
++ * Vivary #205: a row that a sweep skips or cannot settle stays listed, so a sweep
++ * that read only its first page let a full page of such rows starve every later
++ * row. Each pass reads up to APPROVAL_SWEEP_PAGES pages and keeps its place for
++ * the next pass in this process, so every listed row is attempted. A row that
++ * keeps failing still costs one attempt per pass.
++ */
++const APPROVAL_SWEEP_PAGES = 5;
++const _approvalSweepCursors = new Map();
++async function sweepApprovalRows(kind, appId, list, visit) {
++    const { APPROVAL_SWEEP_PAGE_SIZE } = await import("./run-history.js");
++    const key = `${kind}:${appId ?? ""}`;
++    let after = _approvalSweepCursors.get(key) ?? null;
++    for (let page = 0; page < APPROVAL_SWEEP_PAGES; page++) {
++        const rows = await list(after);
++        for (const row of rows)
++            await visit(row.id);
++        if (rows.length < APPROVAL_SWEEP_PAGE_SIZE) {
++            _approvalSweepCursors.delete(key);
++            return;
+         }
++        after = rows.at(-1);
+     }
++    _approvalSweepCursors.set(key, after);
+ }
+ export async function reconcileAutomationApprovalOutcomes(appId) {
+     // Expiry first, so a wait that ends here settles in this same pass.
+@@ -1232,10 +1258,10 @@
+         console.error("[automations] approval expiry scan failed:", redactText(error instanceof Error ? error.message : String(error)));
+     }
+     const { listUnreconciledAutomationApprovalRuns } = await import("./run-history.js");
+-    for (const id of await listUnreconciledAutomationApprovalRuns(appId)) {
++    await sweepApprovalRows("terminal", appId, after => listUnreconciledAutomationApprovalRuns(appId, after), async (id) => {
+         try { await reconcileAutomationApprovalOutcome(id); }
+         catch (error) { console.error("[automations] terminal approval reconciliation failed:", id, redactText(error.message)); }
+-    }
++    });
+ }
+ /** Only an authenticated owner decision enters this continuation path. */
+ /**
+diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
+--- a/dist/jobs/scheduler.js
++++ b/dist/jobs/scheduler.js
+@@ -143,15 +143,25 @@
+     if (shouldThrowReleaseError)
+         throw releaseErrorToThrow;
+ }
++/** Null, or the health error for a tick whose approval settlement failed. */
++async function reconcileApprovalOutcomesForTick(appId) {
++    try {
++        const { reconcileAutomationApprovalOutcomes } = await import("./background-automation-runner.js");
++        await reconcileAutomationApprovalOutcomes(appId);
++        return null;
++    }
++    catch (error) {
++        const detail = redactText(error instanceof Error ? error.message : String(error));
++        console.error("[recurring-jobs] Approval reconciliation failed:", detail);
++        return `Approval reconciliation failed: ${detail}`;
++    }
++}
+ /**
+  * Vivary #139: returns the jobs it reserved, which the caller starts after it
+  * releases the lease. Their keys stay in `_activeScheduledJobs` until each
+  * job settles.
+  */
+ async function processRecurringJobsWithLease(deps) {
+-    const { reconcileAutomationApprovalOutcomes } = await import("./background-automation-runner.js");
+-    await reconcileAutomationApprovalOutcomes(deps.appId);
+-
+     subscribeToJobsResourceEvents();
+     // Skip if we recently confirmed there are no job resources to run.
+     const nowMs = Date.now();
+@@ -162,19 +172,23 @@
+         orgIds: [],
+         checkedAt: nowMs,
+     });
++    // Vivary #205: approval settlement runs after the heartbeat, also when there
++    // are no jobs, since a wait can outlive its job. A failure becomes this tick's
++    // health error and the scan still runs the due jobs.
++    let healthError = await reconcileApprovalOutcomesForTick(deps.appId);
+     if (_hasJobsCache === false &&
+         nowMs - _lastJobsCheck < JOBS_CHECK_INTERVAL_MS) {
+         await recordSchedulerHealthForScopes({
+             appId: deps.appId,
+             orgIds: [],
+             checkedAt: nowMs,
++            error: healthError,
+         });
+         return [];
+     }
+     const reservedJobKeys = new Set();
+     const handedOffJobKeys = new Set();
+     const healthOrgIds = new Set();
+-    let healthError = null;
+     let dispatchedAt;
+     try {
+         const jobResources = await resourceListAllOwners("jobs/");
+diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pending-tasks-retry-job.js
+--- a/dist/integrations/pending-tasks-retry-job.js
++++ b/dist/integrations/pending-tasks-retry-job.js
+@@ -128,8 +128,8 @@
+         dispatchFailed: 0,
+     };
+     await ensurePendingTasksTable();
+-    const { reconcileAutomationApprovalOutcomes } = await import("../jobs/background-automation-runner.js");
+-    await reconcileAutomationApprovalOutcomes();
++    if (!options.approvalOutcomesReconciled)
++        await reconcileApprovalOutcomesForSweep();
+     const client = getDbExec();
+     const now = Date.now();
+     const pendingCutoff = now - PENDING_STUCK_AFTER_MS;
+@@ -319,12 +319,33 @@
+             webhookBaseUrl: baseUrl,
+             after: pageEnd,
+             pagesLeft: pagesLeft - 1,
++            approvalOutcomesReconciled: true,
+         });
+         for (const key of Object.keys(result))
+             result[key] += next[key];
+     }
+     return result;
+ }
++/**
++ * Vivary #205: approval settlement belongs to the app whose in-process runner
++ * runs automation webhook tasks here, so several apps can share one database.
++ * A process without that runner settles nothing, and the owning app's scheduler
++ * does it. The sweep's later pages skip it, and its failure never stops the
++ * task retries.
++ */
++async function reconcileApprovalOutcomesForSweep() {
++    const { AUTOMATION_WEBHOOK_PLATFORM } = await import("../triggers/webhook.js");
++    const runner = inProcessIntegrationTaskRunnerFor(AUTOMATION_WEBHOOK_PLATFORM);
++    if (!runner)
++        return;
++    try {
++        const { reconcileAutomationApprovalOutcomes } = await import("../jobs/background-automation-runner.js");
++        await reconcileAutomationApprovalOutcomes(runner.appId ?? undefined);
++    }
++    catch (err) {
++        console.error("[integrations] Approval reconciliation failed during the pending-task sweep:", err);
++    }
++}
+ function getProcessingStuckAfterMs() {
+     if (process.env.NETLIFY ||
+         process.env.AWS_LAMBDA_FUNCTION_NAME ||

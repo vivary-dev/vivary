@@ -3364,6 +3364,34 @@ positives. These successor controls are source-checked and await controller
 runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
 preceding bytes.
 
+### Approval settlement sweeps
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 1. Three
+findings from the #201 review concern the sweeps that settle approval history.
+
+- `listUnreconciledAutomationApprovalRuns` and `listExpiredApprovalWaits`
+  return pages of 100 rows after a cursor, in a stable order: finish time or
+  start time, then ID. A row that a sweep skips or cannot settle stays listed,
+  so a pass that read only the first page let 100 such rows keep every later
+  row from settling. `reconcileAutomationApprovalOutcomes` now reads up to five
+  pages per pass and keeps its cursor in the process between passes, so every
+  listed row is attempted. A row that keeps failing still costs one attempt per
+  pass.
+- The scheduler writes its heartbeat, then reconciles. A failed
+  reconciliation, such as a failed list query, becomes that tick's scheduler
+  health error, and the scan still runs the due jobs. Reconciliation also runs
+  when the jobs cache says there are no jobs, because a wait can outlive its
+  job.
+- The pending-task retry sweep reconciles only for the app of the process's
+  in-process automation webhook runner. A process without that runner
+  reconciles nothing, and the owning app's scheduler does it. The sweep
+  reconciles once, on its first page, and a reconciliation failure does not
+  stop the task retries.
+
+`tests/automation-approval-settlement.test.mjs` owns its SQLite database, so
+its real scheduler sweep sees only its own jobs. Its five cases failed against
+the previous patch and pass with this one. The other #205 findings remain open.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a

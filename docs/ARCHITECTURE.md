@@ -719,6 +719,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Approval settlement sweeps (#205, slice 1). The maintained Core
+patch gains appended sections for `jobs/run-history.js`, its declaration file,
+`jobs/background-automation-runner.js`, `jobs/scheduler.js` and
+`integrations/pending-tasks-retry-job.js`. Its hash moves from `a33d8d26` to
+`12751b66`. The expiry and terminal reconciliation lists page by a stable
+cursor, so rows that a sweep skips or cannot settle no longer keep later rows
+from settling. The scheduler reconciles after its heartbeat and records a
+failure as that tick's health error instead of skipping due jobs. The
+pending-task sweep reconciles only for its in-process webhook runner's app, once
+per sweep, and a failure no longer stops its task retries. The background
+runner, scheduler and pending-task owners keep the roles described above, and
+terminal history still keeps its reconciliation marker until a sweep finishes
+its bookkeeping, so the descriptions hold. Five cases in
+`tests/automation-approval-settlement.test.mjs` failed on the previous patch and
+pass on this one. The other #205 findings remain open.
+
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff
 renderers and Claude reply-once recording. Both shared-renderer application
