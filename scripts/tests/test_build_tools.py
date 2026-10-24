@@ -242,6 +242,41 @@ class BuildToolsTest(unittest.TestCase):
         self.assertEqual(env["GOENV"], "off")
         self.assertNotIn("GIT_CONFIG_COUNT", env)
 
+    def test_windows_main_runs_each_published_launcher_and_binds_node_exec_path(self):
+        main = TOOLS["main"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pinned = root / "node/node.exe"
+            pinned.parent.mkdir(parents=True)
+            pinned.write_bytes(b"MZ pinned fixture")
+            other = root / "other.exe"
+            other.write_bytes(b"MZ other fixture")
+            for reported, accepted in ((pinned, True), (other, False)):
+                calls = []
+                def run(argv, **options):
+                    calls.append(argv)
+                    node_query = argv[1:] == ["-p", "process.execPath"]
+                    return Mock(stdout=(str(reported) if node_query else "1.0.0") + "\r\n")
+                stubs = dict(windows_host=lambda: True, admit_host=lambda: None, plain_directory=lambda path: None,
+                             certificates=lambda root, source=None: None, prepare=lambda root: None,
+                             print=lambda *values, **options: None)
+                with self.subTest(accepted=accepted), patch.dict(main.__globals__, stubs), \
+                        patch.object(subprocess, "run", side_effect=run), \
+                        patch("sys.argv", ["bootstrap_build_tools.py", "--root", str(root)]):
+                    if accepted:
+                        main()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "pinned node.exe"):
+                            main()
+                launched = [argv for argv in calls if argv[0].endswith(".cmd")]
+                node = [str(root / "bin/node.cmd"), "-p", "process.execPath"]
+                if accepted:
+                    self.assertEqual(launched, [node, [str(root / "bin/npm.cmd"), "--version"],
+                                                [str(root / "bin/pnpm.cmd"), "--version"]])
+                    self.assertEqual(len(calls), 6)
+                else:
+                    self.assertEqual(launched, [node])
+
     def test_windows_launchers_bind_actual_node_and_clean_injection_before_startup(self):
         with tempfile.TemporaryDirectory(prefix="vivary windows tools ") as temporary:
             root = Path(temporary)

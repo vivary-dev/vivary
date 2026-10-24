@@ -38,7 +38,8 @@ NPM_PINS = (
     ("undici", "6.29.1", "EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA=="),
     ("ip-address", "10.7.4", "DWBMKyeM25D70nrIiTkgQth59/G+naKOTep6huF9j+GmeK3DMD60Zvxg5d5qQnz+38AHgou6ean2LECX+lrKDg=="),
 )
-# Existing isolated CA policy: remove this revoked root, add no certificates.
+# Shared isolated CA policy: certifi_bundle.py removes its EXCLUDED_CA_SHA256 roots
+# (G3, plus the C1/C3 roots certifi dropped on 2026-10-23) and adds no certificates.
 CA_POLICY = runpy.run_path(str(Path(__file__).with_name("certifi_bundle.py")))
 BLOCKER = '#!/bin/sh\necho "Bundled npm/npx are not admitted; use the isolated npm launcher." >&2\nexit 78\n'
 WINDOWS_BLOCKER = '@echo off\r\necho Bundled npm/npx are not admitted; use the isolated npm launcher. 1>&2\r\nexit /b 78\r\n'
@@ -388,6 +389,14 @@ def main():
             entry = [] if name == "node" else [str(args.root / "client.cjs"), name]
             subprocess.run([str(node_executable(args.root)), "--use-openssl-ca", *entry, *command],
                            env=env, check=True, timeout=20, cwd=args.root)
+            # Later CI steps call the published bin\*.cmd launchers, so run each one too, with
+            # arguments that hold no cmd.exe metacharacters.
+            launched = subprocess.run([str(launcher(args.root, name)),
+                                       *(["-p", "process.execPath"] if name == "node" else command)],
+                                      capture_output=True, text=True, check=True, timeout=20, cwd=args.root)
+            if name == "node":
+                require(os.path.samefile(launched.stdout.strip(), node_executable(args.root)),
+                        "Windows node launcher must run the pinned node.exe")
         else:
             subprocess.run([str(launcher(args.root, name)), *command], check=True, timeout=20, cwd=args.root)
     print("Pinned clients verified. No project install, lifecycle scripts or host settings changed.")

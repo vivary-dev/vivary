@@ -8199,6 +8199,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Build-tool launcher verification. On Windows, `bootstrap_build_tools.py`
+now runs each published `bin\*.cmd` launcher after its direct pinned-client check,
+and requires the node launcher's `process.execPath` to be the pinned `node.exe`.
+Later CI steps call those launchers, so a broken one now fails during provisioning.
+The CA-policy comment now names the shared `EXCLUDED_CA_SHA256` set (G3 plus C1/C3)
+instead of one revoked root. Linux verification and the trust anchors are unchanged.
+
 2026-10-24 Certificate-fix review corrections. The certificate bundle entry no
 longer says every Windows Python client is limited to the filtered bundle: only
 clients that pass it as `cafile` are, because a default context on Windows also
