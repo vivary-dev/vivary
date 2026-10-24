@@ -736,6 +736,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Site advisory floors for undici and zod. The site's pre-install
+admission, `scripts/check_site_dependencies.py`, now admits undici only at 6.29.1,
+7.30.1 or 8.12.2 or later on the same line, and zod only at 4.6.6 or later on 4.x.
+Every other copy is refused. Before this, the undici 8.x and zod 4.x floors lived only in
+the Workbench advisory test, which reads the Workbench and desktop locks, so a
+site lock refresh could reintroduce an affected copy. The site lock already holds
+undici 8.12.3 and zod 4.6.7, so no dependency changes.
+
 2026-10-24 Undici advisories in the Workbench and desktop locks. GHSA-xjj6-f33q-929c,
 GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472 affect the Workbench's undici 6.28.1 (through
 @ai-sdk/provider-utils) and 7.29.1 (through @agent-native/core), and the desktop build's
@@ -802,8 +810,10 @@ The site lock changes only that entry. No site runtime behavior changes.
 zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
 which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
 issue collection in the v4 core array parser. The 3.25.76 copy stays because its
-only consumer, Core's botframework connector, requires zod 3 and does not import
-the v4 core. No schema or runtime behavior is otherwise changed.
+only dependents, Core's botframework-connector and botframework-schema 4.23.3,
+require zod 3 and import only the package root, whose CJS and ESM entries load
+the v3 build and never the v4 core. No schema or runtime behavior is otherwise
+changed.
 
 2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
 select the already authenticated task-local pnpm package through the real preview

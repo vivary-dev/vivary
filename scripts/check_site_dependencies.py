@@ -15,6 +15,10 @@ VENDOR = "vendor/astro-no-cache-policy"
 VENDOR_LINK = {"resolved": VENDOR, "link": True}
 VENDOR_PACKAGE = {"name": "@vivary/astro-no-cache-policy", "version": "1.0.0"}
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+TARGETS = ("vite", "postcss-selector-parser", "undici", "zod")
+# GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472 (2026-10-23) have a
+# separate fixed release on each undici line. Other lines are unverified.
+UNDICI_FIXED = {6: (6, 29, 1), 7: (7, 30, 1), 8: (8, 12, 2)}
 
 
 def refuse(message):
@@ -88,10 +92,10 @@ def validate_lock(lock):
         validate_integrity(entry.get("integrity"))
         location_name = location.rsplit("/node_modules/", 1)[-1].removeprefix("node_modules/")
         name = location_name
-        if name not in ("vite", "postcss-selector-parser"):
+        if name not in TARGETS:
             name = entry.get("name")  # npm aliases retain the actual package name in the lock.
-            if name not in ("vite", "postcss-selector-parser"):
-                name = next((target for target in ("vite", "postcss-selector-parser")
+            if name not in TARGETS:
+                name = next((target for target in TARGETS
                              if url.path.startswith(f"/{target}/-/")), None)
                 if name is None:
                     continue
@@ -104,10 +108,15 @@ def validate_lock(lock):
         # advisory floors (GHSA-rq7h-c2jc-7f22); a greater version alone is unsafe.
         # GHSA-rj75-hqrm-r3gf has separate 6.1.5 and 7.1.6 fixes. Registry bulk
         # currently disagrees about 6.x; this does not suppress its raw finding.
-        fixed = (version[:2] == (8, 1) and version >= (8, 1, 6)) if name == "vite" else (
-            (version[0] == 6 and version >= (6, 1, 5))
-            or (version[0] == 7 and version >= (7, 1, 6))
-        )
+        if name == "vite":
+            fixed = version[:2] == (8, 1) and version >= (8, 1, 6)
+        elif name == "postcss-selector-parser":
+            fixed = (version[0] == 6 and version >= (6, 1, 5)) or (version[0] == 7 and version >= (7, 1, 6))
+        elif name == "undici":
+            fixed = version[0] in UNDICI_FIXED and version >= UNDICI_FIXED[version[0]]
+        else:
+            # GHSA-mrhx-c7xc-m3w5 is in the v4 core, which zod 3.25 also ships as zod/v4.
+            fixed = version[0] == 4 and version >= (4, 6, 6)
         if not fixed:
             refuse(name + " is affected or on an unverified major at " + location)
         if (entry.get("name", name) != name
