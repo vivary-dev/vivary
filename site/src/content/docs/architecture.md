@@ -701,6 +701,19 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 
 ## Delivery and known gaps
 
+Build and publication have a runtime admission boundary separate from the
+application's project and session owners. Native workflow setup binds the actual
+ancestor Worker's action interpreter and retains its complete admission after a
+hash-bound repair of known affected Node bytes. Jobs provision authenticated
+standalone CPython 3.12.15, replace its retained pip seed with the verified
+certificate overlay, export filtered task trust, and admit its loaded OpenSSL
+3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
+isolated package clients and Go 1.26.10 compiler builds before executing
+dependencies; the Workbench lock is checked first and its dev feature
+test lists and Native patch remain intact. The [build-tool contract](https://github.com/vivary-dev/vivary/blob/dev/docs/BUILD-TOOLS.md)
+owns artifact pins, client isolation, and the remaining native verification.
+Standalone Node evidence does not admit Electron or authorize publication.
+
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
 
 Issue #19's five project read reports entered `dev` in PR #89. Its receipt records hosted fake-provider proof and the Windows packages, including the final `e6ccddf5` package, which passed the panel reads and the agent turn. PR #94 recorded that result, and the owner closed issue #19 on 2026-09-26. PR #90 added [route-question research](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/research/tropo-find-route-questions.md) only. It did not change Tropo's public path refusal or MCP privacy rules.
@@ -765,6 +778,184 @@ recent run, which they could not reach before. Architecture step 3 above and J05
 states. Evidence: `tests/local-code-approval-expiry.test.ts`, `tests/local-code-approval-shutdown.test.ts`, a new
 case in `tests/local-code-agent.test.ts`, and three cases in `tests/code-run-control-cleanup-component.test.mjs`
 fail on dev and pass on this branch. The two new files join the server test step in `ci.yml`.
+
+2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
+escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
+runner bootstrap contract and its action count. Every step-level key in an admitted job
+must now be a plain `key:`, and the count also matches quoted spellings. Block-scalar run
+content is indented deeper and is unaffected. CI contract only.
+
+2026-10-24 Bot Framework zod and git TLS. GHSA-mrhx-c7xc-m3w5 covers every zod release
+below 4.6.6, so botframework-schema and botframework-connector 4.23.3 move from zod 3.25.76
+to 4.6.7 by override, and the Workbench advisory floor now applies to every zod line. A test
+validates and refuses Activities through botframework-schema on 4.6.7. `build_go_tools.py`
+no longer sets `GIT_SSL_NO_VERIFY`, because git disables certificate checks when the
+variable is present with any value, including "false".
+
+2026-10-24 Pip configuration guard reads real pip configuration. Pip 26.2.2's
+`Configuration.items()` yields one (source, values) pair per config file and one
+for `:env:`. Only the values are keyed by `section.option`, so the guard never saw
+an option and admitted any trusted host, index or certificate setting. It now walks
+each source's keys and names the source when it refuses. A test loads the actual pip
+Configuration. The same review also tightened four tests, corrected the runner admission
+docstring in its five embedded copies, and raised the maintained Workbench and Windows
+job budgets to 30 and 25 minutes after measured runs of 17m18s and 13m8s.
+
+2026-10-24 Site advisory floors for undici and zod. The site's pre-install
+admission, `scripts/check_site_dependencies.py`, now admits undici only at 6.29.1,
+7.30.1 or 8.12.2 or later on the same line, and zod only at 4.6.6 or later on 4.x.
+Every other copy is refused. Before this, the undici 8.x and zod 4.x floors lived only in
+the Workbench advisory test, which reads the Workbench and desktop locks, so a
+site lock refresh could reintroduce an affected copy. The site lock already holds
+undici 8.12.3 and zod 4.6.7, so no dependency changes.
+
+2026-10-24 Undici advisories in the Workbench and desktop locks. GHSA-xjj6-f33q-929c,
+GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472 affect the Workbench's undici 6.28.1 (through
+@ai-sdk/provider-utils) and 7.29.1 (through @agent-native/core), and the desktop build's
+7.29.1 (through @electron/get). They move to 6.29.1 and 7.30.1, which every dependent's
+range admits, and the pre-install advisory gate now floors undici 6.x, 7.x and 8.x.
+Only undici lock entries change.
+
+2026-10-24 CI provisioning and release-guard review fixes. The pip bootstrap removes a
+failed or partial download, as the Python bootstrap already does. The npm publish
+checker allows only an exact set of steps before Python admission, and the Workbench
+pre-install gate now floors zod 4.x at 4.6.6 for GHSA-mrhx-c7xc-m3w5. Two tests now
+reach the rules they name. No runtime behavior changes beyond the download cleanup.
+
+2026-10-24 Runtime guard and pip admission hardening. The Node runtime guard CLI now
+compares real paths, so a symlinked invocation runs the guard instead of exiting 0.
+CI pip admission now refuses pip configuration, from the environment or any config
+file, that sets trusted hosts, index URLs, find-links, client certificates or a
+file-sourced certificate. The CI contract's synthetic test workflow now passes the
+whole contract, so its mutation tests fail only on the rule they target.
+
+2026-10-24 Workflow checker hardening from the security-unit reviews. The CI contract
+now checks the runner bootstrap in `steward.yml` and `track-stats.yml`, reads an `if:`
+written as a step's first key, and requires the site behavior tests before the build.
+The npm publish checker requires the exact reviewed guard and archive-validation steps.
+Two tests now reach the payload evidence comparison and the repair wrapper's failure
+formats. No runtime behavior changes.
+
+2026-10-24 Review fixes for the security units. `bootstrap_ci_python.py` now removes a
+failed or partial download, so a transient network error no longer leaves a file in the
+shared runner cache that makes every later attempt refuse. The review gate's inline copy is
+regenerated from it. The desktop README states that packaging and the installer build
+refuse while Electron publication is held, and the installer-manifest test now matches only
+the manifest recheck error. No runtime behavior changes beyond the download cleanup.
+
+2026-10-24 Site CI path coverage. The `changes` job now also runs the site build when
+the scripts that build calls change: `packages/workbench/bin/runtime-security.mjs`,
+`scripts/bootstrap_ci_python.py` and `scripts/check_python_runtime.py`, where the site job
+runs them. Before this, a change to only those files skipped `site build`. No runtime
+behavior changes.
+
+2026-10-24 Build-tool launcher verification. On Windows, `bootstrap_build_tools.py`
+now runs each published `bin\*.cmd` launcher after its direct pinned-client check,
+and requires the node launcher's `process.execPath` to be the pinned `node.exe`.
+Later CI steps call those launchers, so a broken one now fails during provisioning.
+The CA-policy comment now names the shared `EXCLUDED_CA_SHA256` set (G3 plus C1/C3)
+instead of one revoked root. Linux verification and the trust anchors are unchanged.
+
+2026-10-24 Certificate-fix review corrections. The certificate bundle entry no
+longer says every Windows Python client is limited to the filtered bundle: only
+clients that pass it as `cafile` are, because a default context on Windows also
+loads the CryptoAPI CA and ROOT stores. The npm publish workflow's tag checkout
+now states that release tags must contain the CI Python scripts it runs, the
+publish-workflow checker also refuses compact `- run: python` and
+`- shell: python` steps before runtime admission, and the pip, Python and Go
+prefetch tests now assert the derived wheel, the refusal source and the cached
+trailer reuse they describe. No runtime behavior changes.
+
+2026-10-23 Undici advisories GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and
+GHSA-f72v-6w45-q472. The internal site's build-time undici, pulled in by unifont,
+moves from 8.10.2 to 8.12.3, whose npm provenance names its release tag commit.
+The site lock changes only that entry. No site runtime behavior changes.
+
+2026-10-23 Zod advisory GHSA-mrhx-c7xc-m3w5. Workbench and the internal site move
+zod from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit and
+which adds only a version bump to the patched 4.6.6. The advisory covers unbounded
+issue collection in array validation, in every release below 4.6.6, 3.x included.
+Core's botframework-connector and botframework-schema 4.23.3 therefore move from
+zod 3.25.76 to 4.6.7 by override, because no patched 3.x exists. They use zod's v3
+API, including single-argument `record()`, which 4.6.7 keeps. No schema or runtime
+behavior is otherwise changed.
+
+2026-10-23 Qualified preview fixture. Native Windows preview cleanup tests now
+select the already authenticated task-local pnpm package through the real preview
+resolver, with an explicit tool root and matching physical Node executable. They
+derive the version from the build bootstrap pin, so removing global npm/pnpm
+setup cannot silently restore an unqualified client. The real pnpm, command-shell,
+preview and descendant ownership checks and cleanup deadlines remain unchanged.
+Portable layout/refusal checks are distinct from native process-chain acceptance.
+
+2026-10-23 Artifact transfer diagnostics. Build clients and rebuilt Go tools still
+require the original pinned hashes before parsing or execution. Their downloader
+now requests identity encoding, refuses partial or non-200 responses, checks
+response length, and enforces the official Go archive sizes on new and cached
+bytes. Rejections expose only bounded byte-count, algorithm, digest and status
+facts, without response bodies, URLs or foreign exception diagnostics. One
+hosted Go checksum refusal motivated these controls; its exact transport cause
+is unknown, and official metadata still matches the retained pins. No automatic
+retry, hash replacement, TLS change or admission exception is introduced.
+
+2026-10-23 Windows Python bootstrap and publishing admission. Windows' actual
+setup-python manifest lacks 3.12.15, so its native PowerShell step authenticates
+the existing standalone archive before .NET extraction and invokes the same
+seed-correcting provisioner without an installer or old pip. The temporary
+bootstrap interpreter is never exported. Linux and Windows matrix paths are
+explicit and still converge on the unchanged actual Python/OpenSSL admission
+before pip or build use. The npm publishing jobs now use that admitted Linux
+runtime for their metadata and launcher checks, closing their retained 3.11
+selection without adding an unnecessary pip consumer. Certificate policy,
+source-review custody and product runtime behavior stay unchanged. Native Windows
+bootstrap, final hosted checks and release acceptance remain separate evidence.
+The workbench job keeps every test and per-test deadline and now allows twenty
+minutes for authenticated compiler provisioning plus the existing sequential
+suite: both ten-minute hosted runs were still emitting passing cases when
+canceled. This is the bounded job deadline, not a changed product latency budget.
+
+2026-10-23 Private artifact paths. The action-Node bootstrap canonicalizes its
+newly created private temporary directory before creating the download, retaining
+all path, hash and owning-Worker checks. This handles Windows temporary-directory
+aliases without changing runner custody. Kernel lease tests select the explicit
+physical qualified Node binary, then authenticate its hash before execution;
+package-client wrappers cannot stand in for the fixture executable. The selected
+runner's complete admission guard remains unchanged. Live package-client probes
+also receive that executable and the provisioned tool root, so hosted CI runs
+their identity, child-certificate and lifecycle assertions rather than skipping
+those probes.
+
+2026-10-23 Independent dev security prerequisites. CI and the existing review,
+npm-publish, stats, and steward workflows receive the same guarded runtime
+boundary without importing the stacked session features. Workbench keeps dev's
+Native patch and feature scripts while its lock receives the reviewed security
+overrides, including SQLite 13.0.3's N-API binding. Runtime, package, and installer
+entry checks bind executable bytes and keep Electron publication held. CI's
+Python jobs provision and admit the authenticated runtime and retained
+seed before package use; its filtered CA context reaches Python, pip and uv.
+All three Workbench jobs provision isolated clients and rebuilt compilers before
+installation. Linux type checking retains route generation before rebuilt
+TypeScript, and release packing uses the same isolated npm. Focused source
+contracts, runtime/packaging boundary tests, and lock admission support this
+change; full hosted CI, installed dependency compatibility, native Windows
+execution, Electron remediation, and installer acceptance remain incomplete.
+Project/session execution and storage owners above are unchanged.
+
+2026-10-23 Python certificate and seed preservation. Desktop packaging now pins
+CPython 3.12.15 and authenticates its pip 26.2.2/setuptools 84.1.0 build inputs.
+The shared certifi 2026.10.23 overlay preserves pip's vendor imports and distlib,
+changes only the certificate/version data and corresponding metadata, and binds
+both the offline builder and retained ensurepip seeds. Fresh venvs therefore do
+not restore the older trust bundle. CI provisioning binds pip and Requests to a
+separate authenticated copy of the exact certifi anchors, and actual pip
+admission rejects broader effective certificate overrides. Python clients that
+pass `cafile`, native downloads and build clients retain the filtered
+host-derived bundle. On Windows, a Python default context without `cafile` also
+loads the CryptoAPI CA and ROOT stores.
+The seven-package runtime closure and profile
+paths are unchanged. C1/C3 removal is not evidence of exploitation. The
+[desktop runtime contract](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md) describes this boundary;
+source verification does not replace Windows or Electron release acceptance.
 
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff
