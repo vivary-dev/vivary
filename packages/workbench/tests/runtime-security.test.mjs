@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  NODE_ADVISORIES, NODE_SECURITY_FLOORS, assertCurrentNode, assertElectronPublication,
+  ADMITTED_ELECTRON, NODE_ADVISORIES, NODE_SECURITY_FLOORS, assertCurrentNode, assertElectronPublication,
   assertNodeFacts, assertNodeVersion, collectCurrentNode, collectExecutableNode, executableSha256,
 } from "../bin/runtime-security.mjs";
 
@@ -159,7 +159,16 @@ test("real Workbench start admits Node before port probing, user state or server
 
 test("standalone Node policy never waives the Electron publication hold", () => {
   assert.doesNotThrow(() => assertNodeVersion("24.22.1"));
-  assert.throws(assertElectronPublication, /44\.3\.0.*44\.9\.3.*24\.22\.0.*No Electron release is admitted/);
+  assert.throws(() => assertElectronPublication(), /Electron publication is held\. Electron 44\.9\.3 is not admitted.*No Electron release is admitted/);
+});
+
+test("Electron publication admits only a listed release whose bundled Node meets the floor", () => {
+  assert.deepEqual(ADMITTED_ELECTRON, {});
+  const admitted = { "44.9.4": "24.22.1" };
+  assert.deepEqual(assertElectronPublication("44.9.4", admitted), { electron: "44.9.4", node: "24.22.1" });
+  assert.throws(() => assertElectronPublication("44.9.3", admitted), /Electron 44\.9\.3 is not admitted\. Admitted: 44\.9\.4\./);
+  assert.throws(() => assertElectronPublication("44.9.4", { "44.9.4": "24.22.0" }), /Node 24\.22\.0 is affected/);
+  assert.throws(() => assertElectronPublication("toString", admitted), /Electron toString is not admitted/);
 });
 
 test("npm publisher rechecks its actual Node and exact validated archive before a fake publisher", () => fixture(async directory => {

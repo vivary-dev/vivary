@@ -70,6 +70,8 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     await copyFile(fileURLToPath(new URL("../package.mjs", import.meta.url)), entry);
     await copyFile(fileURLToPath(new URL("../../workbench/bin/runtime-security.mjs", import.meta.url)), path.join(workbench, "bin/runtime-security.mjs"));
     await writeFile(path.join(workbench, ".output/server/index.mjs"), "export {};\n");
+    const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
+    await writeFile(path.join(desktop, "package.json"), JSON.stringify({ devDependencies: { electron: pinned } }));
     const packager = path.join(desktop, "node_modules/@electron/packager");
     await mkdir(packager, { recursive: true });
     const marker = path.join(directory, "packager-imported");
@@ -80,7 +82,7 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     assert.match(result.stderr, /Runtime security/);
     let safe = false;
     try { assertNodeVersion(process.versions.node); safe = true; } catch { /* Affected diagnostic runtime. */ }
-    if (safe) assert.match(result.stderr, /Electron publication is held/);
+    if (safe) assert.match(result.stderr, new RegExp(`Electron publication is held\\. Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
     assert.equal(await lstat(marker).catch(() => null), null, "even the fake packager must not load");
     assert.equal(await lstat(path.join(desktop, ".tmp")).catch(() => null), null, "no packaging staging before admission");
     assert.equal(await lstat(path.join(desktop, "dist")).catch(() => null), null);

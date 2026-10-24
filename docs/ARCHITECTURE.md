@@ -732,6 +732,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Electron 44.9.3 with a staged publication admission. The desktop shell moves from
+Electron 44.3.0 to 44.9.3, whose dependencies match 44.3.0's, so only the electron lock entry
+changes. 44.9.3 bundles Node 24.22.0, so publication stays held. The hold is now the empty
+`ADMITTED_ELECTRON` table in `runtime-security.mjs`: packaging and payload checks admit only
+the pinned version when the table lists it with a bundled Node that meets the October floor.
+Qualifying the first 44.x on Node 24.22.1 or later means adding that entry and moving the pin.
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
 runner bootstrap contract and its action count. Every step-level key in an admitted job
