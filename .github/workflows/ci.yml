@@ -780,7 +780,7 @@ jobs:
           fi
 
           if printf '%s\n' "$changed" | grep -Eq \
-            '^(site/|docs/|scripts/(bootstrap_build_tools|build_go_tools|check_site_dependencies|certifi_bundle)\.py$|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
+            '^(site/|docs/|scripts/(bootstrap_build_tools|build_go_tools|check_site_dependencies|certifi_bundle|bootstrap_ci_python|check_python_runtime)\.py$|packages/workbench/bin/runtime-security\.mjs$|README\.md$|CHANGELOG\.md$|\.github/workflows/ci\.yml$)'; then
             echo "site=true" >> "$GITHUB_OUTPUT"
           else
             echo "site=false" >> "$GITHUB_OUTPUT"

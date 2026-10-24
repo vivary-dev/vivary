@@ -1471,6 +1471,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Site CI path coverage. The `changes` job now also runs the site build when
+the scripts that build calls change: `packages/workbench/bin/runtime-security.mjs`,
+`scripts/bootstrap_ci_python.py` and `scripts/check_python_runtime.py`, where the site job
+runs them. Before this, a change to only those files skipped `site build`. No runtime
+behavior changes.
+
 2026-10-24 Zod advisory GHSA-mrhx-c7xc-m3w5 in the Workbench. The Workbench's direct
 zod moves from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit, with
 the four test pins that assert the inspected version. Every zod peer range in the lock
