@@ -8209,6 +8209,7 @@ frozen security PR converges. The CI contract now requires the certificate overl
 The production-installer tests branch on whether the current Node is admitted, like the
 packaging tests. The bounded-probe test gives its passing cases a normal timeout. Tests
 and CI contract only. No runtime behavior changes.
+
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
 runner bootstrap contract and its action count. Every step-level key in an admitted job

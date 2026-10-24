@@ -394,8 +394,9 @@ test("production installer refuses unverified runtime payloads before invoking N
   await writeFile(path.join(payload, "resources/node/node.exe"), "synthetic corrupt Windows Node fixture\n");
   await writeManifest(payload, manifest);
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
+  // A non-admitted Node can be affected, EOL, unknown or a prerelease. Each refuses with its own reason.
   await assert.rejects(buildProductionInstaller(inputs, fake, { installerCommit }), admittedNode
-    ? /Windows Node bytes do not match the authenticated asset/ : /Runtime security: Node .* is affected/);
+    ? /Windows Node bytes do not match the authenticated asset/ : /Runtime security/);
   assert.equal(await lstat(marker).catch(() => null), null, "runtime refusal precedes even makensis -VERSION");
   assert.equal(await lstat(output).catch(() => null), null);
 }));
