@@ -111,9 +111,28 @@ stateDiagram-v2
   AwaitingToolApproval --> Running: authorized answer
   Running --> Completed: observed success
   Running --> Failed: observed error
-  Running --> Interrupted: controller lost
-  Interrupted --> Running: explicit supported resume
+  Running --> Interrupted: host restart
+  AwaitingToolApproval --> Interrupted: host restart, request expired
+  Interrupted --> Running: next send starts a new turn
 ```
+
+### Codex tool request
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Pending: Codex asks, listed on the run record
+  Pending --> Answered: owner allows or declines
+  Pending --> Withdrawn: Codex resolves it
+  Pending --> Cancelled: Stop or run failure
+  Pending --> Expired: host shutdown or restart
+  Answered --> [*]
+  Withdrawn --> [*]
+  Cancelled --> [*]
+  Expired --> [*]
+```
+
+An expired request cannot be answered. Its conversation and the host strip say "Vivary restarted before this request was answered". The host strip shows Interrupted for a run that a restart interrupted, and any request that expired with it, until the next send on that run. A send after Interrupted starts a new turn that resumes the provider session where the runtime supports it. Nothing replays the interrupted turn.
 
 ### Cancellation
 
