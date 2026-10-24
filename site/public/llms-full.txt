@@ -8963,6 +8963,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Zod advisory GHSA-mrhx-c7xc-m3w5 in the Workbench. The Workbench's direct
+zod moves from 4.5.4 to 4.6.7, whose npm provenance names its release tag commit, with
+the four test pins that assert the inspected version. Every zod peer range in the lock
+admits 4.6.7. The lock changes only zod entries and references. No schema or runtime
+behavior is otherwise changed.
+
 2026-10-24 Build-tool launcher verification. On Windows, `bootstrap_build_tools.py`
 now runs each published `bin\*.cmd` launcher after its direct pinned-client check,
 and requires the node launcher's `process.execPath` to be the pinned `node.exe`.
