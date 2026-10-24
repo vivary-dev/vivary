@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { assertCurrentNode, assertDesktopPayload } from "../workbench/bin/runtime-security.mjs";
+import { releaseIdentity } from "./release-version.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(root, "../..");
@@ -17,7 +18,7 @@ const iconFile = path.join(root, "assets", "vivary.ico");
 // of them changes the installer, so the recorded installer commit must hold them.
 const installerSources = [
   "packages/desktop/installer", "packages/desktop/build-installer.mjs",
-  "packages/desktop/assets/vivary.ico", "LICENSE",
+  "packages/desktop/release-version.mjs", "packages/desktop/assets/vivary.ico", "LICENSE",
   "packages/workbench/bin/runtime-security.mjs",
 ];
 const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<commit>.exe> --manifest <package-file-manifest.json>";
@@ -186,9 +187,9 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   if (build.product !== "Vivary" || build.platform !== "win32" || build.architecture !== "x64") {
     throw new Error("The payload is not a Vivary Windows x64 package.");
   }
-  if (typeof build.version !== "string" || !/^\d+\.\d+\.\d+$/.test(build.version)) {
-    throw new Error("The payload's build.json version must have the form major.minor.patch.");
-  }
+  let release;
+  try { release = releaseIdentity(build.version); }
+  catch { throw new Error("The payload's build.json version must have the form major.minor.patch or major.minor.patch-beta.N."); }
   if (typeof build.sourceCommit !== "string" || !/^[0-9a-f]{40}$/.test(build.sourceCommit)) {
     throw new Error("The payload's build.json has no full source commit.");
   }
@@ -198,7 +199,8 @@ export async function resolveInstallerInputs({ payload, output, manifest } = {})
   return Object.freeze({
     payloadDir, outputFile, files, directories, fileCount: files.length, totalBytes, manifest: manifestCheck, longestPaths,
     manifestFile: path.resolve(manifest),
-    version: build.version, payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
+    version: build.version, windowsVersion: release.windowsVersion,
+    payloadCommit: build.sourceCommit, payloadCommitShort: build.sourceCommit.slice(0, 7),
   });
 }
 
@@ -285,6 +287,7 @@ async function compileInstaller(inputs, makensis, { installerCommit }) {
       `-DLICENSE_FILE=${licenseFile}`,
       `-DICON_FILE=${iconFile}`,
       `-DAPP_VERSION=${inputs.version}`,
+      `-DAPP_WINDOWS_VERSION=${inputs.windowsVersion}`,
       `-DPAYLOAD_COMMIT=${inputs.payloadCommit}`,
       `-DPAYLOAD_COMMIT_SHORT=${inputs.payloadCommitShort}`,
       `-DINSTALLER_COMMIT=${installerCommit}`,

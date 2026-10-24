@@ -8199,6 +8199,34 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Desktop beta version and channel. `packages/desktop/package.json` moves
+from `0.0.0` to `0.1.0-beta.1`. The new `release-version.mjs` maps a version to its
+channel (`beta` for `major.minor.patch-beta.N`, `stable` for `major.minor.patch`)
+and to the four-number version that Windows file properties need, and refuses any
+other form. `package.mjs` writes that channel into `build.json` in place of the fixed
+`private-preview`, keeps the `runtimeSecurity` record of the staged Node, and passes the four-number
+form to Electron Packager as
+`buildVersion`. Before, the packager split `0.1.0-beta.1` on dots and parsed
+`0-beta` as `0` by accident. `build-installer.mjs` accepts the beta form, passes
+`APP_WINDOWS_VERSION` to `installer/vivary.nsi` for `VIProductVersion` and
+`VIFileVersion`, which reject a suffix, and counts `release-version.mjs` among the
+installer sources. A new `--build-workbench` option makes `package.mjs` run the
+Workbench build itself, in a checkout with no tracked or untracked changes, and
+refuse to package when the build changed the checkout or HEAD moved. Only that path
+labels the output `built-from-source` and records `sourceCommitVerified: true`.
+The default path still copies a `prebuilt` output with `false`. The process
+boundaries, packaged layout, installer behavior and user data are unchanged, so the
+desktop descriptions above still hold. `tests/package-metadata.test.mjs`, added to
+the desktop Node test list in CI, checks the shipped version and channel, the
+version rules, the full `build.json` record for a verified build, that a prebuilt,
+mismatched or dirty output never counts as verified, and each refusal of the source
+build against a Git fixture. The installer tests cover the beta version and the new
+define. The admission test that copies `package.mjs` alone now copies
+`release-version.mjs` with it. On Linveo, 139 desktop tests pass and the `makensis`
+fixture build skips.
+The original-runtime launcher test fails there before and after this change,
+because that host's Python has no `pip`.
+
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
 runner bootstrap contract and its action count. Every step-level key in an admitted job
