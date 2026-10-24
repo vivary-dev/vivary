@@ -109,6 +109,10 @@ projects.
 npm --prefix packages/desktop run package
 ```
 
+While Electron publication is held, this command refuses before it stages anything,
+because no Electron release is admitted. The rest of this section describes what it
+does once one is.
+
 The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
 Vivary runtime, licenses, and build metadata. It does not copy a source
@@ -371,6 +375,10 @@ npm --prefix packages/desktop run package -- --windows-x64
 npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
+While Electron publication is held, both commands refuse: the packager before it
+stages anything, and the installer build at its runtime check. The rest of this
+section describes them once an Electron release is admitted.
+
 The first command writes the dated `<dist>/<time>/` folder, which holds both the
 `Vivary-win32-x64` payload and its `package-file-manifest.json`.
 
@@ -390,7 +398,8 @@ longest file and folder paths, and the script passes their lengths to setup as
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
-`build-installer.mjs`, `assets/vivary.ico`, and the repository `LICENSE`, so the
+`build-installer.mjs`, `assets/vivary.ico`, `packages/workbench/bin/runtime-security.mjs`
+and the repository `LICENSE`, so the
 installer commit it records holds every source file the build used. It also refuses
 an existing installer, `.sha256`, or `.receipt.json` at the output path.
 

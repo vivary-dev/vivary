@@ -400,7 +400,7 @@ test("production installer rechecks manifest bytes instead of trusting a previou
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
   await writeFile(path.join(payload, "vivary.exe"), "changed after input validation");
   await assert.rejects(buildProductionInstaller(inputs, path.join(directory, "missing-nsis"), { installerCommit }),
-    /Runtime security|manifest/);
+    /does not match its manifest/);
   assert.equal(await lstat(output).catch(() => null), null);
 }));
 

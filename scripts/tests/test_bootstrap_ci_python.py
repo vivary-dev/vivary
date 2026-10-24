@@ -207,6 +207,27 @@ class ProvisioningTests(unittest.TestCase):
         self.assertEqual(environment.read_text(), "")
         self.assertEqual(list(self.root.glob("vivary-python-3.12.15-*")), [])
 
+    def test_failed_download_removes_its_partial_file_so_a_retry_can_succeed(self):
+        target = self.root / "cache" / "certifi.whl"
+        target.parent.mkdir()
+        data = b"authenticated wheel fixture"
+        digest = hashlib.sha256(data).hexdigest()
+        def partial(argv, **options):
+            Path(argv[argv.index("--output") + 1]).write_bytes(data[:5])
+            raise self.module.subprocess.CalledProcessError(56, argv[0])
+        def complete(argv, **options):
+            Path(argv[argv.index("--output") + 1]).write_bytes(data)
+        with mock.patch.object(self.module, "curl_path", return_value="/usr/bin/curl"):
+            with mock.patch.object(self.module.subprocess, "run", side_effect=partial):
+                with self.assertRaisesRegex(ValueError, "curlReturnCode=56"):
+                    self.module.download("https://example.invalid/wheel", target, len(data), digest)
+            # The shared cache must not keep the partial bytes, or every retry refuses.
+            self.assertFalse(target.exists())
+            with mock.patch.object(self.module.subprocess, "run", side_effect=complete) as run:
+                self.assertEqual(self.module.download("https://example.invalid/wheel", target, len(data), digest), target)
+            run.assert_called_once()
+        self.assertEqual(target.read_bytes(), data)
+
     def test_exports_only_prepared_private_runtime_and_filtered_trust_with_empty_ca_directory(self):
         export, environment = self.root / "github-path", self.root / "github-env"
         export.touch(); environment.touch()

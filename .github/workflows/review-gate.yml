@@ -992,24 +992,30 @@ jobs:
               with target.open("xb"):
                   pass
               target.chmod(0o600)
-              before = plain(target)
-              keep = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
-                      "https_proxy", "http_proxy", "all_proxy", "no_proxy", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
-              environment = {name: value for name, value in os.environ.items() if name in keep}
               try:
-                  subprocess.run([curl_path(), "--disable", "--fail", "--silent", "--show-error", "--proto", "=https",
-                                  "--proto-redir", "=https", "--location", "--max-redirs", "3", "--connect-timeout", "10",
-                                  "--max-time", "120", "--max-filesize", str(size), "--output", str(target), url],
-                                 env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, timeout=125, check=True)
-              except subprocess.CalledProcessError as error:
-                  refuse("download failed (curlReturnCode=" + str(error.returncode) + ")")
-              except subprocess.TimeoutExpired:
-                  refuse("download exceeded its deadline")
-              after = plain(target)
-              if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-                  refuse("download destination changed")
-              verify(target, size, digest)
+                  before = plain(target)
+                  keep = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                          "https_proxy", "http_proxy", "all_proxy", "no_proxy", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+                  environment = {name: value for name, value in os.environ.items() if name in keep}
+                  try:
+                      subprocess.run([curl_path(), "--disable", "--fail", "--silent", "--show-error", "--proto", "=https",
+                                      "--proto-redir", "=https", "--location", "--max-redirs", "3", "--connect-timeout", "10",
+                                      "--max-time", "120", "--max-filesize", str(size), "--output", str(target), url],
+                                     env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, timeout=125, check=True)
+                  except subprocess.CalledProcessError as error:
+                      refuse("download failed (curlReturnCode=" + str(error.returncode) + ")")
+                  except subprocess.TimeoutExpired:
+                      refuse("download exceeded its deadline")
+                  after = plain(target)
+                  if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                      refuse("download destination changed")
+                  verify(target, size, digest)
+              except BaseException:
+                  # A failed or partial download must not stay in a shared cache, where it
+                  # would make every later attempt refuse on its size or SHA256.
+                  target.unlink(missing_ok=True)
+                  raise
               return target
 
 
