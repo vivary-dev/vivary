@@ -8199,6 +8199,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Approval cleanup outside the custody transaction (#205, slice 4).
+The maintained Core patch gains appended sections for
+`agent/tool-approval-store.js`, its declaration file and
+`jobs/background-automation-runner.js`. Its hash moves from `c955c126` to
+`7cedcc33`. `createAgentToolApproval` no longer deletes expired decided asks on a
+transaction that its caller passes. The background runner cleans them after
+the approval custody transaction commits. On PostgreSQL a failed statement
+aborts its whole transaction, even when the error is caught, so a failed
+cleanup there made the wait write fail and ended the run with
+`automation_approval_storage_failed`. SQLite never showed the failure. The
+approval store and the runner keep the roles described above, so the
+descriptions hold. No lifecycle changes, so `journeys.md` is unchanged. CI has
+no live PostgreSQL. `tests/automation-approval-cleanup.test.mjs` proves the
+change with a driver adapter over SQLite that rejects every statement after a
+failed one and rolls the transaction back, as PostgreSQL does. Its two finding
+cases failed on the previous patch and pass on this one.
+
 2026-10-24 Approval asks and waits that never ended (#205, slice 3). The
 maintained Core patch gains appended sections for `jobs/run-history.js`, its
 declaration file and `jobs/background-automation-runner.js`. Its hash moves from

@@ -18942,3 +18942,83 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              throw approvalDecisionRefusal("Another decision already claimed this approval.");
          if (!await declineAgentToolApproval(pending))
              throw approvalDecisionRefusal("The exact approval could not be declined.");
+diff --git a/dist/agent/tool-approval-store.js b/dist/agent/tool-approval-store.js
+--- a/dist/agent/tool-approval-store.js
++++ b/dist/agent/tool-approval-store.js
+@@ -164,7 +164,12 @@
+  * re-rendered" apart from "this is a NEW ask for the same tool call". See
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+-export async function createAgentToolApproval(binding, exec = getDbExec()) {
++export async function createAgentToolApproval(binding, exec) {
++    // Vivary #205: a caller that passes its transaction cleans after it commits.
++    // On PostgreSQL a failed statement aborts the whole transaction, even when
++    // the error is caught, so the cleanup cannot share it.
++    const ownsExec = exec === undefined;
++    exec ??= getDbExec();
+     await ensureAgentToolApprovalTable();
+     const now = Date.now();
+     const expiresAt = binding.expiresAt ?? now + APPROVAL_TTL_MS;
+@@ -188,9 +193,17 @@
+             now,
+         ],
+     });
+-    // Cleanup is hygiene only. Expired rows remain unusable because consume uses
+-    // an atomic status and expiry predicate, so cleanup failures must not affect
+-    // the approval that was just recorded.
++    if (ownsExec)
++        await cleanExpiredAgentToolApprovals(exec, now);
++    return id;
++}
++/**
++ * Cleanup is hygiene only. Expired rows remain unusable because consume uses
++ * an atomic status and expiry predicate, so cleanup failures must not affect
++ * the approval that was just recorded. Vivary #205: never pass a transaction
++ * that still has writes to make.
++ */
++export async function cleanExpiredAgentToolApprovals(exec = getDbExec(), now = Date.now()) {
+     try {
+         await exec.execute({
+             sql: `DELETE FROM agent_tool_approvals
+@@ -201,7 +214,6 @@
+     catch (error) {
+         console.warn("[agent] Could not clean expired tool approval records", error);
+     }
+-    return id;
+ }
+ /**
+  * Atomically consume the server-created approval for one logical tool call.
+diff --git a/dist/agent/tool-approval-store.d.ts b/dist/agent/tool-approval-store.d.ts
+--- a/dist/agent/tool-approval-store.d.ts
++++ b/dist/agent/tool-approval-store.d.ts
+@@ -45,6 +45,8 @@
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+ export declare function createAgentToolApproval(binding: AgentToolApprovalBinding, exec?: import("../db/client.js").DbExec): Promise<string>;
++/** Delete expired decided approvals. Failures are logged, never thrown. */
++export declare function cleanExpiredAgentToolApprovals(exec?: import("../db/client.js").DbExec, now?: number): Promise<void>;
+ /**
+  * Atomically consume the server-created approval for one logical tool call.
+  * The model's call id is transport metadata and can change when Dispatch
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -6,7 +6,7 @@
+ import { abortRun, getRun, resolveBackgroundAutomationSoftTimeoutMs, resolveBackgroundRunHardTimeoutMs, startRun, } from "../agent/run-manager.js";
+ import { claimBackgroundRun, getRunById, getRunEventsSince, getRunStatus, getRunTurnRef, insertRun, isTurnAborted } from "../agent/run-store.js";
+ import { buildAssistantMessage, buildUserMessage, extractThreadMeta, foldAssistantTurn, threadDataToEngineMessages, upsertUserMessage, } from "../agent/thread-data-builder.js";
+-import { ensureAgentToolApprovalTable, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
++import { ensureAgentToolApprovalTable, cleanExpiredAgentToolApprovals, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
+ import { AutomationResourceChangedError, withAutomationResourceCustody, resourceGetByPath } from "../resources/store.js";
+ import { redactText, redactTextInValue } from "../audit/redact.js";
+ import { canUpdateAutomationResource, resolveAutomationExecutionIdentity, } from "../automations/service.js";
+@@ -579,6 +579,9 @@
+                         await waitForAutomationApproval(historyId, pending, tx);
+                         return pending;
+                     });
++                    // Vivary #205: clean only after custody commits, so a failed
++                    // cleanup cannot abort the wait write on PostgreSQL.
++                    await cleanExpiredAgentToolApprovals();
+                     if (options.webhookTaskId) {
+                         const { markTaskWaitingForApproval } = await import("../integrations/pending-tasks-store.js");
+                         await markTaskWaitingForApproval(options.webhookTaskId);

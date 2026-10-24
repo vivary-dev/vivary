@@ -3452,6 +3452,30 @@ failed against the previous patch, apart from the in-lease control, and pass
 with this one. Maintained cases that asserted a pending ask after reconciliation
 now assert a declined ask. Only the PostgreSQL cleanup finding of #205 remains.
 
+### Approval cleanup outside the custody transaction
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 4.
+`createAgentToolApproval` deleted expired decided asks on whatever executor it
+received. The background runner passes its approval custody transaction, and
+on PostgreSQL a failed statement aborts the whole transaction even when the
+error is caught. A failed cleanup therefore made the next write, the wait
+itself, fail, and the gate ended the run with
+`automation_approval_storage_failed`.
+
+- `createAgentToolApproval` cleans only when it owns its executor. A caller that
+  passes a transaction cleans after that transaction commits.
+- `cleanExpiredAgentToolApprovals` is the cleanup. It logs a failure and never
+  throws, as the inline cleanup did.
+- The background runner calls it after `withAutomationResourceCustody` returns.
+  The interactive gate passes no executor and keeps the old behavior.
+
+CI has no live PostgreSQL. `tests/automation-approval-cleanup.test.mjs` owns its
+SQLite database and wraps its transactions in a driver adapter that rejects
+every statement after a failed one and rolls the transaction back, as
+PostgreSQL does. A control case proves the adapter does that. The two finding
+cases failed against the previous patch and pass with this one. This is the
+last finding of #205.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a
