@@ -104,6 +104,10 @@ projects.
 npm --prefix packages/desktop run package
 ```
 
+While Electron publication is held, this command refuses before it stages anything,
+because no Electron release is admitted. The rest of this section describes what it
+does once one is.
+
 The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
 Vivary runtime, licenses, and build metadata. It does not copy a source
