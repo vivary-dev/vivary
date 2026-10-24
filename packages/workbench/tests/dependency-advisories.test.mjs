@@ -15,10 +15,9 @@ const advisoryFloors = [
   { name: "vite", branch: "8.3.", fixed: "8.3.3", advisories: ["GHSA-rq7h-c2jc-7f22"] },
   { name: "markdown-it", branch: "15.", fixed: "15.0.3", advisories: ["GHSA-gfr2-rv44-r23c"] },
   { name: "@vitest/mocker", branch: "5.", fixed: "5.0.3", advisories: ["GHSA-xp26-3454-mjgp"] },
-  // The 4.x floor leaves the reviewed zod 3.25.76 copy out of scope. Its only dependents,
-  // botframework-connector and botframework-schema, import the zod root, which loads only v3.
+  // Every zod release below 4.6.6 is affected, 3.x included. Bot Framework moves to 4.6.7 by override.
   // The site's pre-install admission floors its own undici and zod copies.
-  { name: "zod", branch: "4.", fixed: "4.6.6", advisories: ["GHSA-mrhx-c7xc-m3w5"] },
+  { name: "zod", fixed: "4.6.6", advisories: ["GHSA-mrhx-c7xc-m3w5"] },
   // undici 2026-10-23 advisories. Each line has its own patched release.
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
@@ -148,6 +147,24 @@ test("xlsx resolves only from the reviewed SheetJS archive and its integrity", (
 
 // The two major-version overrides must retain the APIs their actual consumers use.
 const require = createRequire(import.meta.url);
+
+test("Bot Framework validates activities with the patched zod 4.6.7", () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
+  const connectorRequire = createRequire(coreRequire.resolve("botframework-connector"));
+  const schemaRequire = createRequire(connectorRequire.resolve("botframework-schema"));
+  for (const consumer of [connectorRequire, schemaRequire]) assert.match(consumer.resolve("zod"), /zod@4\.6\.7/);
+  const { assertActivity, isActivity } = connectorRequire("botframework-schema");
+  // Every field the 4.23.3 Activity schema requires. zod 3.25.76 and 4.6.7 refuse the same fields.
+  const activity = { type: "message", id: "a", channelId: "msteams", serviceUrl: "https://example.test",
+    localTimezone: "UTC", callerId: "caller", label: "label", valueType: "value", text: "hello",
+    from: { id: "user", name: "User" }, recipient: { id: "bot", name: "Bot" },
+    conversation: { id: "conversation", name: "Chat", isGroup: false, conversationType: "personal" },
+    entities: [{ type: "mention" }] };
+  assert.doesNotThrow(() => assertActivity(activity));
+  assert.equal(isActivity(activity), true);
+  assert.equal(isActivity({ ...activity, type: 7 }), false);
+  assert.equal(isActivity({ ...activity, entities: [{ type: 7 }, { type: 8 }] }), false);
+});
 
 test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM exports", async () => {
   const coreRequire = createRequire(require.resolve("@agent-native/core"));

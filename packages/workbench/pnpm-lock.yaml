@@ -18,6 +18,8 @@ overrides:
   '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
   '@azure/msal-node@2.16.3>uuid': 11.1.1
   botframework-schema@4.23.3>uuid: 11.1.1
+  botframework-schema@4.23.3>zod: 4.6.7
+  botframework-connector@4.23.3>zod: 4.6.7
   '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6
   '@agent-native/toolkit@0.19.3>@tiptap/core': 3.30.5
   '@agent-native/toolkit@0.19.3>@tiptap/extension-bubble-menu': 3.30.5
@@ -49,7 +51,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(744c3e43a5f515bd00d03f37c612f14a)
+        version: 0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(2bfec636aa8faf4b338fa1e60c48a68a)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -5805,9 +5807,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -5834,7 +5833,7 @@ packages:
 
 snapshots:
 
-  '@agent-native/core@0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(744c3e43a5f515bd00d03f37c612f14a)':
+  '@agent-native/core@0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(2bfec636aa8faf4b338fa1e60c48a68a)':
     dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -9093,7 +9092,7 @@ snapshots:
       node-fetch: 2.7.0
       openssl-wrapper: 0.3.4
       rsa-pem-from-mod-exp: 0.8.6
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - debug
       - encoding
@@ -9103,7 +9102,7 @@ snapshots:
     dependencies:
       adaptivecards: 1.2.3
       uuid: 11.1.1
-      zod: 3.25.76
+      zod: 4.6.7
 
   brace-expansion@5.0.12:
     dependencies:
@@ -11792,8 +11791,6 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
-
-  zod@3.25.76: {}
 
   zod@4.6.7: {}
 
