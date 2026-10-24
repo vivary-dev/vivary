@@ -639,5 +639,33 @@ class RepairFixture(unittest.TestCase):
         self.downloader.assert_not_called()
 
 
+class RepairMainDiagnosticTests(unittest.TestCase):
+    """The workflow step runs this wrapper main(), so its failure formats are what CI shows."""
+
+    def test_main_reports_each_failure_class_in_the_step_format(self):
+        module = load_helper()
+        runtime = RuntimeError("fixture")
+        cases = ((module.RepairRefusal("Runner Node repair: refused (reason=fixture)"), "Runner Node repair: refused (reason=fixture)"),
+                 (PermissionError(errno.EACCES, "denied"), "Runner Node repair: filesystem: "),
+                 (TypeError("fixture"), "Runner Node repair: refused (exception=TypeError)"),
+                 (runtime, module.admission.admission_failure(runtime)))
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__), mock.patch.object(module.sys, "argv", ["bootstrap"]), \
+                    mock.patch.object(module, "repair_runner_action_node", side_effect=error), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(module.main(), 1)
+            self.assertEqual(out.getvalue(), "")
+            self.assertTrue(err.getvalue().startswith(expected), err.getvalue())
+
+    def test_container_detection_permission_error_reaches_the_repair_filesystem_format(self):
+        module = load_helper()
+        with mock.patch.object(module.sys, "argv", ["bootstrap"]), \
+                mock.patch.object(module.admission, "container_host", side_effect=PermissionError(errno.EACCES, "denied")), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(module.main(), 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertTrue(err.getvalue().startswith("Runner Node repair: filesystem: "), err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

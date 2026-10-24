@@ -73,6 +73,9 @@ AUDIT = (
     "      - name: audit high and critical site dependencies\n"
     '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" audit --audit-level=high\'\n'
     "        working-directory: site\n"
+    "      - name: site behavior and information architecture tests\n"
+    '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" run test:site\'\n'
+    "        working-directory: site\n"
 )
 CONTRACT_TEST_COMMAND = "python scripts/tests/test_ci_workflow.py"
 SOURCE_NAVIGATION_CHECK_COMMAND = "python -B scripts/check-source-navigation.py --check"
@@ -1245,6 +1248,44 @@ def test_release_pack_cannot_use_the_unqualified_image_client():
             assert "package clients" in str(error), (label, error)
         else:
             raise AssertionError((label, "release packaging bypassed qualified clients"))
+
+
+def test_first_key_action_condition_still_requires_bootstrap_success():
+    text = REAL_WORKFLOW.read_text(encoding="utf-8")
+    mutated, count = re.subn(r"(?m)^      - uses: (actions/\S+)$", r"      - if: ${{ always() }}\n        uses: \1", text, count=1)
+    assert count == 1
+    message = _run(mutated)
+    assert message and "must require bootstrap success" in message, message
+
+
+def test_auxiliary_workflow_bootstraps_must_match_the_canonical_step():
+    module = _load()
+    for path, names in module.AUXILIARY_WORKFLOWS:
+        text = (ROOT / path).read_text(encoding="utf-8")
+        module.check_runner_action_bootstrap(text, names, auxiliary=True)
+        drifted = text.replace('"sha256": "', '"sha256": "0', 1)
+        assert drifted != text, path
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = Path(tmp) / path.name
+            stale.write_text(drifted, encoding="utf-8")
+            module = _load()
+            module.AUXILIARY_WORKFLOWS = ((stale, names),)
+            try:
+                module.main()
+            except SystemExit as error:
+                assert "first step must be the canonical" in str(error), (path, error)
+            else:
+                raise AssertionError(f"{path} bootstrap drift was not refused")
+
+
+def test_site_job_must_run_its_behavior_tests_before_the_build():
+    text = REAL_WORKFLOW.read_text(encoding="utf-8")
+    step = _load().SITE_TEST_STEP
+    assert text.count(step) == 1
+    for mutated in (text.replace(step, "", 1),
+                    text.replace(step, step.replace("        run:", "        if: false\n        run:"), 1)):
+        message = _run(mutated)
+        assert message and "site behavior tests must run before the build" in message, message
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { snapshotTrackedRepository } from "../package.mjs";
 import { prepareWindowsX64Target } from "../windows-target.mjs";
 import { fileURLToPath } from "node:url";
-import { assertDesktopPayload, assertNodeVersion, collectCurrentNode, validateStagedNode } from "../../workbench/bin/runtime-security.mjs";
+import { assertCurrentNode, assertDesktopPayload, assertNodeVersion, collectCurrentNode, validateStagedNode } from "../../workbench/bin/runtime-security.mjs";
 
 const git = (repository, args) => execFileSync("git", args, { cwd: repository, stdio: "ignore" });
 
@@ -160,5 +160,32 @@ test("safe build metadata cannot authorize missing or replaced desktop runtime e
     }
     await writeFile(buildFile, JSON.stringify({ platform: "win32", architecture: "x64", node: "24.22.1" }));
     await assert.rejects(assertDesktopPayload(directory), /Runtime security/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("payload runtime evidence must match the staged Node exactly", {
+  skip: process.platform !== "linux" || process.arch !== "x64" ? "the staged Node fixture is a Linux x64 copy" : false,
+}, async (t) => {
+  let facts;
+  try { facts = await assertCurrentNode(); } catch { t.skip("the current Node is not an admitted runtime"); return; }
+  const directory = await mkdtemp(path.join(os.tmpdir(), "vivary-payload-evidence-"));
+  try {
+    await mkdir(path.join(directory, "resources/workbench"), { recursive: true });
+    await mkdir(path.join(directory, "resources/node"));
+    const staged = path.join(directory, "resources/node/node");
+    await copyFile(process.execPath, staged);
+    await chmod(staged, 0o755);
+    const buildFile = path.join(directory, "resources/workbench/build.json");
+    const base = { platform: "linux", architecture: "x64", node: process.versions.node };
+    const evidence = { standalone: { sha256: facts.sha256, versions: { node: facts.versions.node } } };
+    // The staged Node passes validateStagedNode, so each refusal comes from the evidence comparison.
+    for (const runtimeSecurity of [undefined,
+      { standalone: { ...evidence.standalone, sha256: "a".repeat(64) } },
+      { standalone: { ...evidence.standalone, versions: { node: "24.22.0" } } }]) {
+      await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity }));
+      await assert.rejects(assertDesktopPayload(directory), /payload runtime evidence is missing or changed/);
+    }
+    await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence }));
+    await assert.rejects(assertDesktopPayload(directory), /Electron publication is held/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

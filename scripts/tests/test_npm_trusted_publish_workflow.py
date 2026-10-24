@@ -187,6 +187,24 @@ def test_compact_python_consumers_cannot_move_before_runtime_setup():
             assert message and "actual Python before its consumers" in message, (name, label, message)
 
 
+def test_guard_or_validation_text_hidden_in_shell_structure_is_refused():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    module = load()
+    guard = "          set -euo pipefail\n          " + module.NODE_GUARD + "\n"
+    assert text.count(guard) == 2
+    for wrap in (lambda body: "          cat <<'EOF'\n" + body + "          EOF\n",
+                 lambda body: "          guard() {\n" + body + "          }\n",
+                 lambda body: "          if false\n          then\n" + body + "          fi\n"):
+        message = check(text.replace(guard, wrap(guard), 1))
+        assert message and "runtime guard must be exactly the reviewed step" in message, message
+    validation = ('          python ../../../scripts/check_release_artifacts.py --repository ../../.. '
+                  '--artifacts "$RUNNER_TEMP/npm-candidate" --scope npm\n')
+    assert text.count(validation) == 2
+    hidden = "          if " + validation.strip() + "\n          then :\n          fi\n"
+    message = check(text.replace(validation, hidden, 1))
+    assert message and "archive validation must be exactly the reviewed step" in message, message
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     failed = 0
