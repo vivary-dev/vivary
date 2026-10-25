@@ -12,7 +12,7 @@ import {
   maxFolderPath, maxPayloadPath, outputFiles, resolveInstallerCommit, resolveInstallerInputs, verifyPayloadManifest,
 } from "../build-installer.mjs";
 import { writePackageFileManifest } from "../package.mjs";
-import { assertNodeVersion } from "../../workbench/bin/runtime-security.mjs";
+import { assertCurrentNode } from "../../workbench/bin/runtime-security.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const installerCommit = "1111111111111111111111111111111111111111";
@@ -377,7 +377,7 @@ test("a failed build leaves no installer, checksum or receipt", { skip: process.
 
 const makensis = (() => { try { return findMakensis(); } catch { return null; } })();
 // The production builder refuses an affected current Node before it checks the payload.
-const admittedNode = (() => { try { assertNodeVersion(process.versions.node); return true; } catch { return false; } })();
+const admittedNode = await assertCurrentNode().then(() => true, () => false);
 
 test("production installer refuses unverified runtime payloads before invoking NSIS", () => withFixture(async ({ directory, payload, output, manifest }) => {
   const marker = path.join(directory, "nsis-invoked");

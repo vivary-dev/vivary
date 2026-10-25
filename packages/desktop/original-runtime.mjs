@@ -24,6 +24,7 @@ const execFile = promisify(execFileCallback);
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultCacheDirectory = path.join(packageRoot, ".tmp", "original-runtime");
 const buildHelper = path.join(packageRoot, "build-original-wheels.py");
+const hostPython = process.platform === "win32" ? "python" : "python3";
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 const PYTHON_RELEASE = "20261021";
 const PYTHON_VERSION = "3.12.15";
@@ -135,6 +136,9 @@ export async function prepareOriginalRuntime({
   if (typeof sourceDirty !== "boolean") throw new Error("sourceDirty must be a boolean.");
 
   const target = originalRuntimeTarget(platform, arch);
+  // The README requires qualified host CPython 3.12.15. A refused host stops before the destination,
+  // the download cache and every build-helper call.
+  await execFile(hostPython, ["-I", "-B", path.join(repository, "scripts/check_python_runtime.py")], { cwd: repository });
   await prepareEmptyDirectory(destination);
   await mkdir(cacheDirectory, { recursive: true });
   const wheelhouse = await mkdtemp(path.join(cacheDirectory, "wheels-"));
@@ -366,10 +370,7 @@ async function collectRuntimeLicenses(destination, componentLicensePaths) {
 }
 
 async function runBuildHelper(args, repository) {
-  const python = process.platform === "win32" ? "python" : "python3";
-  // The README requires qualified host Python 3.12.15. Admit it before the build venv exists.
-  await execFile(python, ["-I", "-B", path.join(repository, "scripts/check_python_runtime.py")], { cwd: repository });
-  await execFile(python, ["-I", "-B", buildHelper, ...args], {
+  await execFile(hostPython, ["-I", "-B", buildHelper, ...args], {
     cwd: repository,
     env: {
       ...process.env,
