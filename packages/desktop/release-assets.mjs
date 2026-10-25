@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { releaseIdentity } from "./release-version.mjs";
+import { zipFolder } from "./zip-writer.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(root, "../..");
@@ -120,11 +120,6 @@ export async function writeChecksums(directory) {
   for (const name of names) lines.push(`${await sha256(path.join(directory, name))}  ${name}\n`);
   await writeFile(path.join(directory, "SHA256SUMS"), lines.join(""), { flag: "wx" });
   return names;
-}
-
-async function zipFolder(parent, entry, outputFile) {
-  if (await lstat(outputFile).catch(() => null)) throw new Error(`Refusing to overwrite ${outputFile}.`);
-  execFileSync("zip", ["-q", "-r", "-X", outputFile, entry], { cwd: parent });
 }
 
 /**

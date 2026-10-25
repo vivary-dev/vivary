@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   buildReleaseAssets, findPrivatePaths, listFiles, runtimeInventory, selectLicenseFiles, verifyReleaseBuild, writeChecksums,
 } from "../release-assets.mjs";
+import { readZip } from "../zip-writer.mjs";
 
 const commit = "2aaf04fe2fb4d4de272f73ff516714ee9760c89c";
 const version = "0.1.0-beta.1";
@@ -23,7 +24,6 @@ const originalRuntime = {
   runtimeLicensePaths: ["python/LICENSE.txt", "licenses/python-build-standalone.rst"],
 };
 const sha256 = text => createHash("sha256").update(text).digest("hex");
-const hasZip = spawnSync("zip", ["-v"]).status === 0;
 
 /** Writes a packaged folder with the files the release step reads. */
 async function writePayload(payload, overrides = {}) {
@@ -159,7 +159,7 @@ test("release assets refuse a payload that does not match its installer or holds
     /profile or credential files: resources\/workbench\/\.vivary\/state\.json/);
 }));
 
-test("release assets write the ZIPs, metadata, inventory and checksums", { skip: !hasZip && "zip is not installed" },
+test("release assets write the ZIPs, metadata, inventory and checksums",
   () => withRelease(async ({ payload, release, installer, license }) => {
     const result = await buildReleaseAssets({ payload, installer, commit, version, license });
     const expected = [
@@ -174,9 +174,9 @@ test("release assets write the ZIPs, metadata, inventory and checksums", { skip:
     assert.deepEqual(JSON.parse(await readFile(path.join(release, "BUILD-INFO.json"), "utf8")), build);
     execFileSync("sha256sum", ["--check", "--strict", "--quiet", "SHA256SUMS"], { cwd: release });
     execFileSync("sha256sum", ["--check", "--strict", "--quiet", `Vivary-${version}-windows-x64.zip.sha256`], { cwd: release });
-    const listing = name => execFileSync("unzip", ["-Z1", path.join(release, name)], { encoding: "utf8" }).split("\n").filter(Boolean);
-    assert.ok(listing(`Vivary-${version}-windows-x64.zip`).includes("Vivary-win32-x64/resources/workbench/build.json"));
-    assert.deepEqual(listing(`Vivary-${version}-licenses.zip`).filter(name => !name.endsWith("/")).sort(), [
+    const listing = async name => (await readZip(path.join(release, name))).map(entry => entry.name);
+    assert.ok((await listing(`Vivary-${version}-windows-x64.zip`)).includes("Vivary-win32-x64/resources/workbench/build.json"));
+    assert.deepEqual((await listing(`Vivary-${version}-licenses.zip`)).filter(name => !name.endsWith("/")).sort(), [
       `Vivary-${version}-licenses/Vivary-win32-x64/LICENSE`,
       `Vivary-${version}-licenses/Vivary-win32-x64/LICENSES.chromium.html`,
       `Vivary-${version}-licenses/Vivary-win32-x64/resources/node/LICENSE`,
@@ -190,7 +190,7 @@ test("release assets write the ZIPs, metadata, inventory and checksums", { skip:
     await assert.rejects(buildReleaseAssets({ payload, installer, commit, version, license }), /Refusing to overwrite/);
   }));
 
-test("release assets keep an existing BUILD-INFO.json", { skip: !hasZip && "zip is not installed" },
+test("release assets keep an existing BUILD-INFO.json",
   () => withRelease(async ({ payload, release, installer, license }) => {
     // #291 review: every release file refuses an overwrite, BUILD-INFO.json included.
     await writeFile(path.join(release, "BUILD-INFO.json"), "earlier\n");

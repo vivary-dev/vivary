@@ -744,6 +744,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 In-repo ZIP writer for the release files (Stack A, #291 review). The release
+build no longer needs a `zip` program. `packages/desktop/zip-writer.mjs` writes what `zip -q
+-r -X` wrote, using Node's own zlib deflate and CRC-32: one folder, sorted entries with folder
+entries, UTF-8 names and no extra fields. It streams files over 1 MiB, uses ZIP64 end records
+above 65,534 entries, refuses symbolic links, folder names that leave the parent and an
+existing output, and removes a partial archive. `release-assets.mjs` uses it, and its tests no
+longer skip when `zip` is missing. The tests read every archive back, check it with Python's
+`zipfile`, and cover deterministic bytes and the ZIP64 path. The release file set is unchanged.
+
 2026-10-25 Stack A review fixes (#291). `package.mjs --build-workbench` deletes the old
 Workbench output only after the clean-checkout check passes, so a refused build keeps it.
 `release-assets.mjs` writes BUILD-INFO.json with `COPYFILE_EXCL`, so every release file now
