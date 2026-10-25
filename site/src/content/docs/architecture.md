@@ -753,9 +753,11 @@ No documentation route reads arbitrary host files.
 said "Agent work stopped" beside "Vivary restarted before this request was answered", while J05
 promised Interrupted. When shutdown stops a run that still has an unanswered request, the stop
 path in `server/local-code-agent.ts` now records it Interrupted through the transition table's
-new `interruptOnQuit` edge. Core's executor may already have paused the run, so that edge also
-accepts `paused`, while the restart path's `interrupt` edge still accepts only running and
-needs-approval. Both paths use `recordInterruptedRun`. Any other stop still pauses. J05's
+new `interruptOnQuit` edge. Core's executor may already have written its own end, so that edge
+also accepts `paused`, `completed` and `errored`, as `pause` does, while the restart path's
+`interrupt` edge still accepts only running and needs-approval. Both paths use
+`recordInterruptedRun`, which writes its transcript notice only after the record moves. Any other
+stop still pauses. J05's
 `AwaitingToolApproval --> Interrupted` edge in `journeys.md` now names a quit, and its prose
 says so. Step 3's description of Code runs above still holds.
 

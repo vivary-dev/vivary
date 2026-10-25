@@ -1691,17 +1691,7 @@ function recordStoppedRun(runId: string, reason: "shutdown" | "user"): void {
 }
 
 function recordInterruptedRun(runId: string, message: string, edge: "interrupt" | "interruptOnQuit" = "interrupt"): void {
-  appendCodeAgentTranscriptEvent({
-    runId,
-    kind: "status",
-    message,
-    metadata: {
-      status: "paused",
-      phase: "interrupted",
-      reason: "host-restart",
-    },
-  });
-  transitionCodeRun(runId, edge, {
+  const interrupted = transitionCodeRun(runId, edge, {
     needsApproval: false,
     metadata: { pendingLaunch: undefined },
     progress: {
@@ -1710,6 +1700,18 @@ function recordInterruptedRun(runId: string, message: string, edge: "interrupt" 
       total: 1,
       failed: 0,
       percent: 0,
+    },
+  });
+  // The conversation says Interrupted only when the record does.
+  if (!interrupted) return;
+  appendCodeAgentTranscriptEvent({
+    runId,
+    kind: "status",
+    message,
+    metadata: {
+      status: "paused",
+      phase: "interrupted",
+      reason: "host-restart",
     },
   });
 }
