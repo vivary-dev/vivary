@@ -67,9 +67,9 @@ Claude Code IDs, minimum CLI versions, and API list price references, verified
 [pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
 [Claude Code configuration](https://code.claude.com/docs/en/model-config).
 Installation manifests establish CLI version support without an account call.
-When native Claude has no usable manifest, Workbench runs `--version` through
-the same resolved executable, launch prefix, and filtered environment. It accepts
-only a successful complete Claude version response. This local probe retains the
+When native Claude Code or Codex has no usable manifest, Workbench runs `--version`
+through the same resolved executable, launch prefix, and filtered environment. It
+accepts only a successful complete version response from that CLI. This local probe retains the
 existing ten-second process timeout and output bound and creates no model turn.
 An unknown installation version remains unverified. A discovered version stays
 visible while signed out, so compatibility is independent of sign-in state. The
@@ -80,6 +80,18 @@ a CLI downgrade. Legacy aliases and retained historical IDs keep their existing
 admission behavior. Codex's account-effective
 `model/list` remains its model authority. API list prices do not establish a
 subscription bill or included model entitlement.
+
+[`server/local-runtime-setup.ts`](../packages/workbench/server/local-runtime-setup.ts)
+also owns a minimum version for each CLI: Claude Code 2.1.286 and Codex 0.160.0. The
+source comment beside them records why each was chosen. A known installed version
+below its minimum sets the runtime status to `update-required` before the sign-in
+result is read, because an older CLI can fail its status command without naming the
+cause. Settings shows Update required with the installed version, the composer's
+runtime selector marks the runtime update required, its setup notice shows the
+message, and the send boundary refuses the run like any status other than `ready`. An unknown or malformed version
+skips this check and keeps the earlier result. Claude's per-model minimums still
+apply above the CLI minimum. [`shared/runtime-versions.ts`](../packages/workbench/shared/runtime-versions.ts)
+holds the one release comparison both checks use.
 
 Native's [maintained API patch](../packages/workbench/patches/README.md#native-api-claude-catalog)
 separately owns direct Anthropic and AI-SDK Anthropic catalog metadata. New defaults
@@ -783,6 +795,38 @@ recent run, which they could not reach before. Architecture step 3 above and J05
 states. Evidence: `tests/local-code-approval-expiry.test.ts`, `tests/local-code-approval-shutdown.test.ts`, a new
 case in `tests/local-code-agent.test.ts`, and three cases in `tests/code-run-control-cleanup-component.test.mjs`
 fail on dev and pass on this branch. The two new files join the server test step in `ci.yml`.
+
+2026-10-24 Execution mode labels (beta ticket 09). Settings and the line
+under a Code conversation implied that the Normal, Read only, and YOLO execution mode
+governs every coding runtime. Only Codex launches receive it. `local-code-agent.ts`
+records every run as `auto-edit`, and Core's executor starts Claude Code in
+`acceptEdits` with its file tools, so Claude Code edits files without asking in every
+mode. `app/lib/code-permission-labels.ts` now holds the labels.
+`LocalRuntimeSettings.tsx` says under the mode that it applies to Codex only and that
+Claude Code conversations accept file edits without asking. The conversation footer
+moves into `CodeConversationLimits.tsx`, which says the same for Claude Code and
+keeps the Codex line. Launch, permission storage, and the send boundary are
+unchanged, so the runtime descriptions above still hold. The design document's
+execution mode paragraph states the Claude Code behavior.
+`tests/code-permission-labels.test.mjs` renders the real Settings page in each mode
+and the footer for both runtimes, and runs in `test:native-chat`. Its two label cases
+fail against the earlier text and pass with the change.
+
+2026-10-24 Minimum Claude Code and Codex CLI versions (beta ticket 08).
+An older CLI reached a status probe that failed with "could not report its sign-in
+status" or a run that failed later. `local-runtime-setup.ts` now holds a minimum per
+CLI and returns the new `update-required` status, with the installed version, for a
+known version below it, before reading sign-in. A Codex install with no npm manifest
+now reports its version through `codex --version`, as native Claude Code already did,
+and a probe that times out keeps the version it read. `LocalRuntimeSettings.tsx`
+labels the status and says Update in the setup steps. The composer selector, the
+setup notice, `configured`, and the send boundary already treat any status other
+than `ready` as not ready, so `local-code-agent.ts` is unchanged and the Code flow
+described above still holds. `claude-models.ts` now uses the shared comparison with
+the same results. `tests/local-runtime-setup.test.ts` covers older, equal, newer,
+and unreadable versions for both CLIs, failed and timed-out probes, and a fixture
+Codex `--version` line. Both new cases fail against the `dev` source and pass with
+the change. The desktop preview guide states the minimums.
 
 2026-10-24 npm publication on the qualified client. `npm-trusted-publish.yml` was the
 last workflow that ran the npm bundled with setup-node. Both of its jobs now provision
