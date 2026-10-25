@@ -744,6 +744,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
+it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
+whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
+1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
+behavior changes, so the existing design description still holds.
+
 2026-10-25 Approval cleanup keeps asks that a run still claims (beta ticket 28).
 The maintained Core patch gains appended sections for
 `agent/tool-approval-store.js` and `jobs/background-automation-runner.js`. Its
