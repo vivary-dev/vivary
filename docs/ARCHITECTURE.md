@@ -753,7 +753,9 @@ new `interruptOnQuit` edge. Core's executor may already have written its own end
 also accepts `paused`, `completed` and `errored`, as `pause` does, while the restart path's
 `interrupt` edge still accepts only running and needs-approval. Both paths use
 `recordInterruptedRun`, which writes its transcript notice only after the record moves. Any other
-stop still pauses. J05's
+stop still pauses, and `tests/local-code-stop-pauses.test.ts` pins that for a user Stop and for a
+quit whose only request already expired. The shutdown tests share `tests/fixtures/code-shutdown.ts`,
+because shutdown closes the host for the rest of a process. J05's
 `AwaitingToolApproval --> Interrupted` edge in `journeys.md` now names a quit, and its prose
 says so. Step 3's description of Code runs above still holds.
 
