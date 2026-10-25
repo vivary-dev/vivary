@@ -63,6 +63,66 @@ DRY_RUN_STEP = (
 # substitution or a path separator, and before a space, a separator, a quote or the line end. So
 # `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
 # as npm={npm_version} or npm-candidate do not.
+# Both jobs check out the release tag without credentials.
+CHECKOUT_STEP = (
+    '      - name: Checkout release tag\n'
+    '        # actions/checkout v7.0.1 pinned to an immutable commit SHA.\n'
+    '        # The release tag supplies the CI Python bootstrap and admission scripts\n'
+    '        # run below. A tag cut from a commit without them fails before publication.\n'
+    '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n'
+    '        with:\n'
+    '          ref: ${{ inputs.release_tag }}\n'
+    '          fetch-depth: 0\n'
+    '          persist-credentials: false\n'
+)
+# Both jobs select the admitted Node 24.22.1 with no package-manager cache.
+SETUP_NODE_STEP = (
+    '      - name: Set up Node for npm trusted publishing\n'
+    '        # actions/setup-node v7.0.0 pinned to an immutable commit SHA.\n'
+    '        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020\n'
+    '        with:\n'
+    '          node-version: "24.22.1"\n'
+    '          package-manager-cache: false\n'
+)
+# verify checks the tag and both package versions, and publish repeats it as Re-verify.
+VERSION_STEP = (
+    '      - name: Verify release tag and package versions\n'
+    '        shell: bash\n'
+    '        run: |\n'
+    '          set -euo pipefail\n'
+    '          test "${{ inputs.release_tag }}" = "v${{ inputs.version }}"\n'
+    '          test "$(git rev-parse "refs/tags/${{ inputs.release_tag }}^{commit}")" = "$(git rev-parse HEAD)"\n'
+    '          test "$(node -p "require(\'./packages/create-vivary/npm/package.json\').version")" = "${{ inputs.version }}"\n'
+    "          python - <<'PY'\n"
+    '          import json\n'
+    '          import re\n'
+    '          from pathlib import Path\n'
+    '\n'
+    '          npm_version = json.loads(\n'
+    '              Path("packages/create-vivary/npm/package.json").read_text(encoding="utf-8")\n'
+    '          )["version"]\n'
+    '          pyproject = Path("packages/create-vivary/pyproject.toml").read_text(encoding="utf-8")\n'
+    '          match = re.search(r\'^version\\s*=\\s*"([^"]+)"\', pyproject, re.MULTILINE)\n'
+    '          if not match:\n'
+    '              raise SystemExit("missing create-vivary pyproject version")\n'
+    '          pypi_version = match.group(1)\n'
+    '          if pypi_version != npm_version:\n'
+    '              raise SystemExit(\n'
+    '                  f"create-vivary version mismatch: pyproject={pypi_version} npm={npm_version}"\n'
+    '              )\n'
+    '          PY\n'
+)
+# verify runs the create-vivary release checks.
+RELEASE_CHECKS_STEP = (
+    '      - name: Run create-vivary release checks\n'
+    '        run: |\n'
+    '          python packages/create-vivary/tests/test_create_vivary.py\n'
+    '          python packages/create-vivary/tests/test_init_thin.py\n'
+    '          python packages/create-vivary/tests/test_record_workflow.py\n'
+    '          python packages/create-vivary/tests/test_adopt.py\n'
+    '          python packages/create-vivary/tests/test_assets_parity.py\n'
+    '          node packages/create-vivary/tests/test_npm_launcher.js\n'
+)
 # npm's own CLI entry, started through node, is npm too.
 NPM_ENTRY = re.compile(r"(?:npm|npx)-cli\.js|node_modules[/\\]npm[/\\]")
 PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"/\\])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
@@ -168,6 +228,26 @@ def check_runtime_and_archive(text: str) -> None:
                             for shell in re.findall(r"(?m)^\s*(?:-\s+)?shell:(.*)$", step)),
                     f"{name} must run npm only through the qualified client")
     require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
+
+
+def check_job_inventory(text: str, contract) -> None:
+    """Beta ticket 27, #306 review. A pattern over shell text cannot be complete (a variable or eval hides any
+    command), so both npm jobs must consist of exactly the reviewed steps, in order. The checks above give the
+    specific reason when they can. This one refuses every other change, a new benign step included."""
+    shared = [CHECKOUT_STEP, contract.PIP_SETUP_STEP, contract.PYTHON_PROVISIONING_STEP, contract.PYTHON_RUNTIME_STEP,
+              SETUP_NODE_STEP, GUARD_STEP, CLIENT_STEP]
+    expected = {
+        "verify": shared + [VERSION_STEP, RELEASE_CHECKS_STEP, PACK_STEP, DRY_RUN_STEP],
+        "publish": shared + [VERSION_STEP.replace("- name: Verify release tag", "- name: Re-verify release tag", 1),
+                             PACK_STEP.replace("- name: Verify npm", "- name: Re-verify npm", 1), PUBLISH_STEP],
+    }
+    for name, reviewed in expected.items():
+        steps = [step.rstrip("\n") for step in re.split(r"(?m)(?=^      - )", contract.job_block(text, name))[1:]]
+        # The runner admission comes first. check_runner_action_bootstrap verifies its anchor and alias.
+        first = "      - &runner_action_node_bootstrap" if name == "verify" else "      - *runner_action_node_bootstrap"
+        require(bool(steps) and steps[0].splitlines()[0] == first, f"{name} must start with the runner admission")
+        require(steps[1:] == [step.rstrip("\n") for step in reviewed],
+                f"{name} must consist of exactly the reviewed steps, in order")
 
 
 def check_python_consumers(text: str, contract) -> None:
@@ -300,6 +380,7 @@ def main() -> None:
     contract.WORKFLOW = WORKFLOW
     contract.check_runner_action_bootstrap(text, ("verify", "publish"), npm=True)
     check_python_consumers(text, contract)
+    check_job_inventory(text, contract)
     print(f"{WORKFLOW}: trusted publish guard passed")
 
 

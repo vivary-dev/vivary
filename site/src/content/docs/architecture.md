@@ -761,17 +761,19 @@ stop still pauses. J05's
 `AwaitingToolApproval --> Interrupted` edge in `journeys.md` now names a quit, and its prose
 says so. Step 3's description of Code runs above still holds.
 
-2026-10-25 npm publish checker refuses a package manager anywhere (beta ticket 27,
+2026-10-25 npm publish checker pins both jobs to their reviewed steps (beta ticket 27,
 review P3 sweep B). `scripts/check_npm_trusted_publish_workflow.py` refused npm, npx and
 corepack only at the start of a line, so a command such as `$(npm --version)`, `&& npm` or
 `bin/pnpm publish` in another step passed. In both jobs, a step other than the exact
-reviewed client, pack, publish and dry-run steps may not reach `vivary-build-tools/`, and
-its run body may not use npm, npx, pnpm or corepack as a command word anywhere on a line,
-including after a path such as `.../bin/npm`, and may not start npm's own `npm-cli.js` or
-`npx-cli.js` or name a `node_modules/npm/` path. Its `shell:` value is checked the same way.
+reviewed client, pack, publish and dry-run steps may not reach `vivary-build-tools/` or
+name npm, npx, pnpm or corepack as a command word, a path such as `.../bin/npm`, npm's own
+`npm-cli.js` or `npx-cli.js`, or a `node_modules/npm/` path, in its run body or its `shell:`
+value. Those checks give the specific reason. The gate is that both jobs must consist of exactly
+the reviewed steps, in order, because no pattern over shell text can see a command hidden in a
+variable or `eval`. This extends the checker's existing pre-guard inventory to the whole job.
 The publish step must match its reviewed text exactly. The workflow is unchanged, so the
 2026-10-24 description of npm publication on the qualified client still holds, and the
-checker now enforces its last sentence for every position on a line.
+inventory is what enforces its last sentence: no other npm, npx or corepack command can run.
 
 2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
 it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its

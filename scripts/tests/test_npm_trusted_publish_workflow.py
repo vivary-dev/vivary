@@ -153,6 +153,22 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
             message = check(text.replace(job, job[:body] + line + job[body:], 1))
             assert message and (f"{name} must run npm only through the qualified client" in message
                                 or f"{name} reaches the provisioned tools" in message), (name, label, message)
+        # #306 review round 4. Redirection, brace expansion, a variable and eval reach npm with no command word
+        # a pattern can see, so the exact step inventory refuses them.
+        hidden = {
+            "redirect": "          npm>/dev/null whoami\n",
+            "redirect_in": "          npx<&- --yes pkg\n",
+            "brace": "          {npm,} publish\n",
+            "variable": '          n=npm; "$n" publish\n',
+            "eval": "          eval \"$(printf 'np%s publish' m)\"\n",
+        }
+        for label, line in hidden.items():
+            message = check(text.replace(job, job[:body] + line + job[body:], 1))
+            assert message and f"{name} must consist of exactly the reviewed steps" in message, (name, label, message)
+        # Any new step, however harmless, needs review too.
+        extra = text.replace(job, job.replace(version_step, "      - run: echo hi\n" + version_step, 1), 1)
+        message = check(extra)
+        assert message and f"{name} must consist of exactly the reviewed steps" in message, (name, "extra_step", message)
         # A package manager in the step's shell runs the body too.
         start = job.index("        run: |\n", start)
         message = check(text.replace(job, job[:start] + "        shell: npx --yes bash-wrapper {0}\n" + job[start:], 1))
