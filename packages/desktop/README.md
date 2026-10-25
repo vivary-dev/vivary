@@ -77,7 +77,10 @@ pnpm --dir packages/workbench build
 npm --prefix packages/desktop ci
 ```
 
-Packaging the original runtime also requires qualified host Python 3.12 with `venv`.
+Packaging the original runtime also requires qualified host CPython 3.12.15 final, built with
+OpenSSL 3.5.9, with `venv`. `scripts/check_python_runtime.py` admits it before the original
+runtime's first download. Packaging fetches the Node LICENSE, and for `--windows-x64` the
+Windows Node assets, before that.
 It does not execute the host's `ensurepip` or require global setuptools. The first package build
 needs outbound HTTPS for the hash-pinned runtime and build-tool wheels; verified
 downloads are reused from the desktop package's `.tmp` cache.

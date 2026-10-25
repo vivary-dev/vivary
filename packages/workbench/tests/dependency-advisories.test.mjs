@@ -23,6 +23,9 @@ const advisoryFloors = [
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  // Advisories published 2026-10-23 (beta ticket 29). Express 5 and ajv reach these through their own ranges.
+  { name: "body-parser", fixed: "2.4.0", advisories: ["GHSA-27r3-jxmh-p828"] },
+  { name: "fast-uri", fixed: "3.1.9", advisories: ["GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp"] },
   // GHSA-xcx6-jx8p-x3h5 covers msal-node 5.0.0-beta.0 up to 7.1.0, so every 5.x, 6.x and 7.x copy must be 7.1.0 or
   // later. Bot Framework's 2.x copy is outside the range (beta ticket 29).
   { name: "@azure/msal-node", branch: "5.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
