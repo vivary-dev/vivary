@@ -340,8 +340,9 @@ longest file and folder paths, and the script passes their lengths to setup as
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
-`build-installer.mjs`, `assets/vivary.ico`, `packages/workbench/bin/runtime-security.mjs`
-and the repository `LICENSE`, so the
+`build-installer.mjs`, `assets/vivary.ico`, `packages/workbench/bin/runtime-security.mjs`,
+`package.json` (its Electron pin decides which payload is admitted) and the repository
+`LICENSE`, so the
 installer commit it records holds every source file the build used. It also refuses
 an existing installer, `.sha256`, or `.receipt.json` at the output path.
 

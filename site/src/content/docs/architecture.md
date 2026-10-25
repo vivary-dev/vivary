@@ -748,6 +748,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 Electron 45.0.0 with a staged publication admission. The desktop shell moves from
+Electron 44.3.0 to 45.0.0, the newest stable release. Its dependencies match 44.3.0's, so only
+the electron lock entry changes. 45.0.0 bundles Node 24.22.0 and Chromium 156, so publication
+stays held. The hold is now the empty `ADMITTED_ELECTRON` table in `runtime-security.mjs`:
+packaging and payload checks admit only the pinned version when the table lists it with a
+bundled Node that meets the October floor. The payload check also requires the payload's
+`build.json` and the `version` file Electron ships beside its executable to name that pinned
+release, so an installer cannot wrap an older payload. `packages/desktop/package.json` joins
+the installer sources, so the recorded installer commit holds that pin. Qualifying the first
+45.x on Node 24.22.1 or later means adding that entry and moving the pin. The shell uses none
+of the APIs that Electron 45 removes or changes: it has one sandboxed, context-isolated window
+with no preload, and it denies every permission and every `window.open()`.
+
 2026-10-25 A quit while a Code run waits on a Codex request ends it Interrupted (beta ticket
 27, review P3 sweep B). A normal quit expired the request but paused the run, so the host strip
 said "Agent work stopped" beside "Vivary restarted before this request was answered", while J05

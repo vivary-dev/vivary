@@ -70,6 +70,8 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     await copyFile(fileURLToPath(new URL("../package.mjs", import.meta.url)), entry);
     await copyFile(fileURLToPath(new URL("../../workbench/bin/runtime-security.mjs", import.meta.url)), path.join(workbench, "bin/runtime-security.mjs"));
     await writeFile(path.join(workbench, ".output/server/index.mjs"), "export {};\n");
+    const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
+    await writeFile(path.join(desktop, "package.json"), JSON.stringify({ devDependencies: { electron: pinned } }));
     const packager = path.join(desktop, "node_modules/@electron/packager");
     await mkdir(packager, { recursive: true });
     const marker = path.join(directory, "packager-imported");
@@ -80,7 +82,7 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     assert.match(result.stderr, /Runtime security/);
     let safe = false;
     try { assertNodeVersion(process.versions.node); safe = true; } catch { /* Affected diagnostic runtime. */ }
-    if (safe) assert.match(result.stderr, /Electron publication is held/);
+    if (safe) assert.match(result.stderr, new RegExp(`Electron publication is held\\. Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
     assert.equal(await lstat(marker).catch(() => null), null, "even the fake packager must not load");
     assert.equal(await lstat(path.join(desktop, ".tmp")).catch(() => null), null, "no packaging staging before admission");
     assert.equal(await lstat(path.join(desktop, "dist")).catch(() => null), null);
@@ -189,5 +191,20 @@ test("payload runtime evidence must match the staged Node exactly", {
     }
     await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence }));
     await assert.rejects(assertDesktopPayload(directory), /Electron publication is held/);
+
+    // #292 review: the payload's own Electron must be the admitted pin, named by build.json and Electron's version file.
+    const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
+    const admitted = { [pinned]: "24.22.1" };
+    const versionFile = path.join(directory, "version");
+    for (const [electron, shipped] of [[undefined, pinned], [pinned, undefined], [pinned, "44.9.3"], ["44.9.3", "44.9.3"]]) {
+      await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron }));
+      await rm(versionFile, { force: true });
+      if (shipped) await writeFile(versionFile, shipped + "\n");
+      await assert.rejects(assertDesktopPayload(directory, admitted), /The payload's Electron .* is not the pinned/, `${electron} / ${shipped}`);
+    }
+    await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron: pinned }));
+    await writeFile(versionFile, pinned + "\n");
+    await assert.rejects(assertDesktopPayload(directory), new RegExp(`Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
+    await assertDesktopPayload(directory, admitted);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
