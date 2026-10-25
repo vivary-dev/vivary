@@ -18295,3 +18295,730 @@ new file mode 100644
 +/** Render a user message whose displayed text `matches` with `Component`, which receives that text. */
 +export declare function registerUserMessageTextRenderer(renderer: UserMessageTextRenderer): () => void;
 +export declare function userMessageTextRenderer(text: string): UserMessageTextRenderer | undefined;
+diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
+--- a/dist/jobs/run-history.js
++++ b/dist/jobs/run-history.js
+@@ -636,17 +636,32 @@
+  * (resume ids that start with "automation-expire-") that a failed write left
+  * unsettled. No person can approve them any more.
+  */
+-export async function listExpiredApprovalWaits(appId, now = Date.now()) {
++export async function listExpiredApprovalWaits(appId, now = Date.now(), after = null) {
+     await ensureTable();
+     const expiresAt = isPostgres() ? "(approval_context::jsonb ->> 'expiresAt')::bigint"
+         : "CAST(json_extract(approval_context, '$.expiresAt') AS INTEGER)";
+     const result = await getDbExec().execute({
+-        sql: `SELECT id FROM ${TABLE} WHERE finished_at IS NULL
++        sql: `SELECT id, started_at AS sweep_at FROM ${TABLE} WHERE finished_at IS NULL
+           AND (status = 'waiting_approval' OR (status = 'resuming' AND resume_run_id LIKE 'automation-expire-%'))
+-          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''} ORDER BY started_at LIMIT 100`,
+-        args: appId ? [now, appId] : [now],
++          AND approval_context IS NOT NULL AND ${expiresAt} <= ? ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (started_at > ? OR (started_at = ? AND id > ?))' : ''}
++          ORDER BY started_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [now, ...(appId ? [appId] : []), ...sweepCursorArgs(after)],
+     });
+-    return (result.rows ?? []).map(row => String(row.id));
++    return sweepPage(result);
++}
++/**
++ * Vivary #205: the approval sweeps page through their rows in a stable order, so a
++ * page of rows that a sweep skips or cannot settle cannot hide the rows after it.
++ * Each row comes back with its sort value as `at`, and the last row is the cursor
++ * for the next page.
++ */
++export const APPROVAL_SWEEP_PAGE_SIZE = 100;
++function sweepCursorArgs(after) {
++    return after ? [after.at, after.at, after.id] : [];
++}
++function sweepPage(result) {
++    return (result.rows ?? []).map(row => ({ id: String(row.id), at: Number(row.sweep_at) }));
+ }
+ /** Unfinished approval history bound to this exact resource. */
+ export async function listBoundApprovalWaits(resource) {
+@@ -685,16 +700,20 @@
+ }
+ 
+ /** Terminal approval bookkeeping is retried without another agent execution. */
+-export async function listUnreconciledAutomationApprovalRuns(appId) {
++export async function listUnreconciledAutomationApprovalRuns(appId, after = null) {
+     await ensureTable();
++    // A known outcome can wait without a finish time. It sorts first, as SQLite
++    // sorted a NULL finish time before.
+     const result = await getDbExec().execute({
+-        sql: `SELECT id FROM automation_runs WHERE approval_context IS NOT NULL
++        sql: `SELECT id, COALESCE(finished_at, 0) AS sweep_at FROM automation_runs WHERE approval_context IS NOT NULL
+           AND approval_outcome_reconciled = 0 AND (finished_at IS NOT NULL OR
+             ${isPostgres() ? "approval_context::jsonb -> 'terminalOutcome' IS NOT NULL" : "json_extract(approval_context, '$.terminalOutcome') IS NOT NULL"})
+-          ${appId ? 'AND app_id = ?' : ''} ORDER BY finished_at LIMIT 100`,
+-        args: appId ? [appId] : [],
++          ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (COALESCE(finished_at, 0) > ? OR (COALESCE(finished_at, 0) = ? AND id > ?))' : ''}
++          ORDER BY sweep_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [...(appId ? [appId] : []), ...sweepCursorArgs(after)],
+     });
+-    return result.rows.map(row => String(row.id));
++    return sweepPage(result);
+ }
+ export async function markAutomationApprovalOutcomeReconciled(id) {
+     await getDbExec().execute({
+diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
+--- a/dist/jobs/run-history.d.ts
++++ b/dist/jobs/run-history.d.ts
+@@ -141,7 +141,11 @@
+ export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
+ export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
+ 
+-export declare function listUnreconciledAutomationApprovalRuns(appId?: string): Promise<string[]>;
++/** One row of an approval sweep page. `at` is its sort value, and the last row is the next page's cursor. */
++export interface ApprovalSweepRow { id: string; at: number }
++export declare const APPROVAL_SWEEP_PAGE_SIZE: number;
++export declare function listExpiredApprovalWaits(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
++export declare function listUnreconciledAutomationApprovalRuns(appId?: string, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
+ export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
+ export declare function hasNewerAutomationRun(run: AutomationRun): Promise<boolean>;
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1187,41 +1187,67 @@
+  */
+ async function expireAutomationApprovalWaits(appId) {
+     const { listExpiredApprovalWaits } = await import("./run-history.js");
+-    for (const id of await listExpiredApprovalWaits(appId)) {
+-        try {
+-            const state = await getAutomationContinuation(id);
+-            const pending = state?.context;
+-            // This sweep's own claim, left when a write after it failed. It never
+-            // starts a turn, so once its lease passes a later pass settles it.
+-            const staleClaim = state?.storedStatus === "resuming" && Boolean(state.resumeRunId?.startsWith("automation-expire-")) &&
+-                Date.now() - state.decisionAt > automationRunClaimLeaseMs();
+-            if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
+-                continue;
+-            const ask = await readAgentToolApproval(pending);
+-            if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
+-                _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
+-                continue;
+-            if (!staleClaim) {
+-                // A wait saved before its turn was marked ready is recovered as an
+-                // owner's decision recovers it. A run that can still save it is left.
+-                if (!state.run.approvalReady) {
+-                    if (!await canRecoverWaitingTurn(pending))
+-                        continue;
+-                    await recoverWaitingTurn(state);
+-                }
+-                if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
+-                    continue;
++    await sweepApprovalRows("expiry", appId, after => listExpiredApprovalWaits(appId, Date.now(), after), expireApprovalWait);
++}
++async function expireApprovalWait(id) {
++    try {
++        const state = await getAutomationContinuation(id);
++        const pending = state?.context;
++        // This sweep's own claim, left when a write after it failed. It never
++        // starts a turn, so once its lease passes a later pass settles it.
++        const staleClaim = state?.storedStatus === "resuming" && Boolean(state.resumeRunId?.startsWith("automation-expire-")) &&
++            Date.now() - state.decisionAt > automationRunClaimLeaseMs();
++        if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
++            return;
++        const ask = await readAgentToolApproval(pending);
++        if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
++            _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
++            return;
++        if (!staleClaim) {
++            // A wait saved before its turn was marked ready is recovered as an
++            // owner's decision recovers it. A run that can still save it is left.
++            if (!state.run.approvalReady) {
++                if (!await canRecoverWaitingTurn(pending))
++                    return;
++                await recoverWaitingTurn(state);
+             }
+-            if (ask.status === "pending" && !await declineAgentToolApproval(pending))
+-                throw new Error("The expired approval could not be declined.");
+-            await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
+-                "automation_approval_expired", { emitFinished: pending.options.emitFinished });
+-            await recordApprovalExecutionOutcome(pending, "declined");
++            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
++                return;
+         }
+-        catch (error) {
+-            console.error("[automations] approval expiry failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++        if (ask.status === "pending" && !await declineAgentToolApproval(pending))
++            throw new Error("The expired approval could not be declined.");
++        await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
++            "automation_approval_expired", { emitFinished: pending.options.emitFinished });
++        await recordApprovalExecutionOutcome(pending, "declined");
++    }
++    catch (error) {
++        console.error("[automations] approval expiry failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++    }
++}
++/**
++ * Vivary #205: a row that a sweep skips or cannot settle stays listed, so a sweep
++ * that read only its first page let a full page of such rows starve every later
++ * row. Each pass reads up to APPROVAL_SWEEP_PAGES pages and keeps its place for
++ * the next pass in this process, so every listed row is attempted. A row that
++ * keeps failing still costs one attempt per pass.
++ */
++const APPROVAL_SWEEP_PAGES = 5;
++const _approvalSweepCursors = new Map();
++async function sweepApprovalRows(kind, appId, list, visit) {
++    const { APPROVAL_SWEEP_PAGE_SIZE } = await import("./run-history.js");
++    const key = `${kind}:${appId ?? ""}`;
++    let after = _approvalSweepCursors.get(key) ?? null;
++    for (let page = 0; page < APPROVAL_SWEEP_PAGES; page++) {
++        const rows = await list(after);
++        for (const row of rows)
++            await visit(row.id);
++        if (rows.length < APPROVAL_SWEEP_PAGE_SIZE) {
++            _approvalSweepCursors.delete(key);
++            return;
+         }
++        after = rows.at(-1);
+     }
++    _approvalSweepCursors.set(key, after);
+ }
+ export async function reconcileAutomationApprovalOutcomes(appId) {
+     // Expiry first, so a wait that ends here settles in this same pass.
+@@ -1232,10 +1258,10 @@
+         console.error("[automations] approval expiry scan failed:", redactText(error instanceof Error ? error.message : String(error)));
+     }
+     const { listUnreconciledAutomationApprovalRuns } = await import("./run-history.js");
+-    for (const id of await listUnreconciledAutomationApprovalRuns(appId)) {
++    await sweepApprovalRows("terminal", appId, after => listUnreconciledAutomationApprovalRuns(appId, after), async (id) => {
+         try { await reconcileAutomationApprovalOutcome(id); }
+         catch (error) { console.error("[automations] terminal approval reconciliation failed:", id, redactText(error.message)); }
+-    }
++    });
+ }
+ /** Only an authenticated owner decision enters this continuation path. */
+ /**
+diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
+--- a/dist/jobs/scheduler.js
++++ b/dist/jobs/scheduler.js
+@@ -143,15 +143,25 @@
+     if (shouldThrowReleaseError)
+         throw releaseErrorToThrow;
+ }
++/** Null, or the health error for a tick whose approval settlement failed. */
++async function reconcileApprovalOutcomesForTick(appId) {
++    try {
++        const { reconcileAutomationApprovalOutcomes } = await import("./background-automation-runner.js");
++        await reconcileAutomationApprovalOutcomes(appId);
++        return null;
++    }
++    catch (error) {
++        const detail = redactText(error instanceof Error ? error.message : String(error));
++        console.error("[recurring-jobs] Approval reconciliation failed:", detail);
++        return `Approval reconciliation failed: ${detail}`;
++    }
++}
+ /**
+  * Vivary #139: returns the jobs it reserved, which the caller starts after it
+  * releases the lease. Their keys stay in `_activeScheduledJobs` until each
+  * job settles.
+  */
+ async function processRecurringJobsWithLease(deps) {
+-    const { reconcileAutomationApprovalOutcomes } = await import("./background-automation-runner.js");
+-    await reconcileAutomationApprovalOutcomes(deps.appId);
+-
+     subscribeToJobsResourceEvents();
+     // Skip if we recently confirmed there are no job resources to run.
+     const nowMs = Date.now();
+@@ -162,19 +172,23 @@
+         orgIds: [],
+         checkedAt: nowMs,
+     });
++    // Vivary #205: approval settlement runs after the heartbeat, also when there
++    // are no jobs, since a wait can outlive its job. A failure becomes this tick's
++    // health error and the scan still runs the due jobs.
++    let healthError = await reconcileApprovalOutcomesForTick(deps.appId);
+     if (_hasJobsCache === false &&
+         nowMs - _lastJobsCheck < JOBS_CHECK_INTERVAL_MS) {
+         await recordSchedulerHealthForScopes({
+             appId: deps.appId,
+             orgIds: [],
+             checkedAt: nowMs,
++            error: healthError,
+         });
+         return [];
+     }
+     const reservedJobKeys = new Set();
+     const handedOffJobKeys = new Set();
+     const healthOrgIds = new Set();
+-    let healthError = null;
+     let dispatchedAt;
+     try {
+         const jobResources = await resourceListAllOwners("jobs/");
+diff --git a/dist/integrations/pending-tasks-retry-job.js b/dist/integrations/pending-tasks-retry-job.js
+--- a/dist/integrations/pending-tasks-retry-job.js
++++ b/dist/integrations/pending-tasks-retry-job.js
+@@ -128,8 +128,8 @@
+         dispatchFailed: 0,
+     };
+     await ensurePendingTasksTable();
+-    const { reconcileAutomationApprovalOutcomes } = await import("../jobs/background-automation-runner.js");
+-    await reconcileAutomationApprovalOutcomes();
++    if (!options.approvalOutcomesReconciled)
++        await reconcileApprovalOutcomesForSweep();
+     const client = getDbExec();
+     const now = Date.now();
+     const pendingCutoff = now - PENDING_STUCK_AFTER_MS;
+@@ -319,12 +319,33 @@
+             webhookBaseUrl: baseUrl,
+             after: pageEnd,
+             pagesLeft: pagesLeft - 1,
++            approvalOutcomesReconciled: true,
+         });
+         for (const key of Object.keys(result))
+             result[key] += next[key];
+     }
+     return result;
+ }
++/**
++ * Vivary #205: approval settlement belongs to the app whose in-process runner
++ * runs automation webhook tasks here, so several apps can share one database.
++ * A process without that runner settles nothing, and the owning app's scheduler
++ * does it. The sweep's later pages skip it, and its failure never stops the
++ * task retries.
++ */
++async function reconcileApprovalOutcomesForSweep() {
++    const { AUTOMATION_WEBHOOK_PLATFORM } = await import("../triggers/webhook.js");
++    const runner = inProcessIntegrationTaskRunnerFor(AUTOMATION_WEBHOOK_PLATFORM);
++    if (!runner)
++        return;
++    try {
++        const { reconcileAutomationApprovalOutcomes } = await import("../jobs/background-automation-runner.js");
++        await reconcileAutomationApprovalOutcomes(runner.appId ?? undefined);
++    }
++    catch (err) {
++        console.error("[integrations] Approval reconciliation failed during the pending-task sweep:", err);
++    }
++}
+ function getProcessingStuckAfterMs() {
+     if (process.env.NETLIFY ||
+         process.env.AWS_LAMBDA_FUNCTION_NAME ||
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -477,12 +477,22 @@
+         if (options.continuation && (definitionRevision !== options.continuation.definitionRevision ||
+             registryFingerprint !== options.continuation.registryFingerprint))
+             throw new BackgroundAutomationRunError("The automation or its tools changed", "automation_approval_changed");
++        // Vivary #205: set when this guard refuses a call, so the approved replay can
++        // tell a refusal before the entry ran from an error the entry returned.
++        let guardRefusedCall = false;
+         const guardedActions = Object.fromEntries(Object.entries(baseActions).map(([name, entry]) => [name, {
+             ...entry, allowPersistentApproval: false,
+             run: async (args, context) => {
+-                const fresh = await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
+-                if (context?.signal?.aborted || await isTurnAborted(context.threadId, context.turnId))
+-                    throw new BackgroundAutomationRunError("The automation was stopped", INTERRUPTED_RUN_ERROR_CODE);
++                let fresh;
++                try {
++                    fresh = await validatedAutomationSurface({ automation, ownerEmail, orgId, definitionRevision, registryFingerprint }, deps);
++                    if (context?.signal?.aborted || await isTurnAborted(context.threadId, context.turnId))
++                        throw new BackgroundAutomationRunError("The automation was stopped", INTERRUPTED_RUN_ERROR_CODE);
++                }
++                catch (error) {
++                    guardRefusedCall = true;
++                    throw error;
++                }
+                 return fresh.actions[name].run(args, { ...context, caller: "automation" });
+             },
+         }]));
+@@ -521,6 +531,7 @@
+         let approvalStorageFailed = false;
+         let approvalRefusal = null;
+         let consumedApproval = false;
++        let consumeRefused = false;
+         let continuationInterruption = null;
+         let executionSignal;
+         const approvalHooks = {
+@@ -598,6 +609,9 @@
+                     return false;
+                 const consumed = await consumeAgentToolApproval({ ...pending, askId: pending.askId });
+                 consumedApproval ||= consumed;
++                // Vivary #205: the store refused the grant, for example because it
++                // expired after the decision, so the action cannot run under it.
++                consumeRefused ||= !consumed;
+                 return consumed;
+             },
+         };
+@@ -658,17 +672,38 @@
+                         if (options.continuation) {
+                             try {
+                                 const pending = options.continuation;
++                                let replayed = null;
+                                 const single = await executeAgentToolCall({
+                                     actions, name: pending.toolName, input: pending.input, callId: pending.callId,
+                                     ownerEmail, orgId, appId: deps.appId, runId, threadId: thread.id, turnId,
+                                     caller: "automation", automation: options.actionAutomation,
+-                                    signal, approvedToolCalls: [pending.approvalKey], ...approvalHooks,
++                                    signal, approvedToolCalls: [pending.approvalKey],
++                                    // Vivary #205: the replay never asks again. When the store
++                                    // refuses the grant, a new ask and wait would be orphaned by
++                                    // the finish below, so the gate gets no ask to create.
++                                    consumeApproval: approvalHooks.consumeApproval,
++                                    onApprovalRequired: async () => undefined,
+                                     send: (event) => {
+-                                        if (!["text", "thinking", "done", "turn_summary"].includes(event.type))
++                                        if (event.type === "tool_done" && event.tool === pending.toolName)
++                                            replayed = event;
++                                        if (!["text", "thinking", "done", "turn_summary", "approval_required"].includes(event.type))
+                                             send(event);
+                                     },
+                                 });
+-                                if (single.status !== "completed" || signal.aborted)
++                                const stopped = signal.aborted || await isTurnAborted(thread.id, turnId);
++                                if (!stopped && !consumedApproval && consumeRefused) {
++                                    const message = "The approval could not be used, so the pending action did not run";
++                                    send({ type: "tool_done", id: pending.callId, tool: pending.toolName, input: pending.input,
++                                        result: `${message}.`, isError: true, completedSideEffect: false });
++                                    approvalRefusal = new BackgroundAutomationRunError(message, "automation_approval_unconsumed");
++                                    throw approvalRefusal;
++                                }
++                                // A tool that ran and returned an error has a known outcome.
++                                // The model sees it as it sees any failed tool call. A guard
++                                // refusal after consumption stays an unconfirmed outcome.
++                                const failedTool = single.status === "failed" && consumedApproval && replayed?.isError === true &&
++                                    !guardRefusedCall;
++                                if ((single.status !== "completed" && !failedTool) || stopped)
+                                     throw new BackgroundAutomationRunError("The approved action did not confirm completion. Its outcome may be unknown", INTERRUPTED_RUN_ERROR_CODE);
+                                 await persistBackgroundAutomationTurn({ threadId: thread.id, threadTitle, prompt,
+                                     run: getRun(runId), historyId, continuation: true, resolvedAskId: pending.askId });
+@@ -892,8 +927,18 @@
+             const nativeStatus = await getRunStatus(runId);
+             if (!nativeStatus || nativeStatus === "running")
+                 throw new BackgroundAutomationRunError("Native automation terminal storage was not confirmed", "automation_finalization_unconfirmed");
+-            if (pendingApproval)
+-                await markAutomationApprovalReady(historyId, pendingApproval.askId);
++            // Vivary #205: the wait is already saved. A failed readiness write leaves
++            // it unready, and the owner's decision or the expiry sweep recovers it
++            // through recoverWaitingTurn, so the run still returns waiting.
++            if (pendingApproval) {
++                try {
++                    await markAutomationApprovalReady(historyId, pendingApproval.askId);
++                }
++                catch (error) {
++                    console.error("[automations] The approval wait was saved but not marked ready:", historyId,
++                        redactText(error instanceof Error ? error.message : String(error)));
++                }
++            }
+         }
+         catch (error) {
+             throw continuationInterruption ?? callbackError ?? error;
+@@ -901,8 +946,10 @@
+         finally {
+             if (finalizationConfirmed)
+                 _activeBackgroundRunIds.delete(runId);
++            // Vivary #205: a rejected finalization also ends this process's hold.
++            // Native's run status still guards a row that finalization left running.
+             else if (activeRun)
+-                void activeRun.finalized.then(() => _activeBackgroundRunIds.delete(runId), () => { });
++                void activeRun.finalized.then(() => _activeBackgroundRunIds.delete(runId), () => _activeBackgroundRunIds.delete(runId));
+             if (hardAbortTimer) {
+                 clearTimeout(hardAbortTimer);
+                 hardAbortTimer = null;
+diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
+--- a/dist/jobs/run-history.js
++++ b/dist/jobs/run-history.js
+@@ -561,11 +561,16 @@
+         throw new Error("The webhook task has conflicting approval history owners.");
+     return result.rows.length ? getAutomationContinuation(String(result.rows[0].id)) : null;
+ }
+-export async function claimAutomationApprovalDecision(id, askId, resumeRunId) {
++/**
++ * Vivary #205: an approval needs the saved turn, so it claims only a ready wait. A
++ * decline executes nothing, so it passes `requireReady` false and can end a wait
++ * whose turn can no longer be saved.
++ */
++export async function claimAutomationApprovalDecision(id, askId, resumeRunId, requireReady = true) {
+     const result = await getDbExec().execute({
+         sql: `UPDATE automation_runs SET status = 'resuming', decision_at = ?, resume_run_id = ?
+           WHERE id = ? AND pending_ask_id = ? AND status = 'waiting_approval'
+-            AND approval_ready = 1 AND finished_at IS NULL`,
++            ${requireReady ? "AND approval_ready = 1" : ""} AND finished_at IS NULL`,
+         args: [Date.now(), resumeRunId, id, askId],
+     });
+     return result.rowsAffected === 1;
+@@ -663,6 +668,23 @@
+ function sweepPage(result) {
+     return (result.rows ?? []).map(row => ({ id: String(row.id), at: Number(row.sweep_at) }));
+ }
++/**
++ * Vivary #205: owners' decision claims older than the claim lease, so their
++ * continuation has ended or never started. The expiry sweep's own claims are
++ * listed with the expired waits.
++ */
++export async function listStaleApprovalClaims(appId, now = Date.now(), after = null) {
++    await ensureTable();
++    const result = await getDbExec().execute({
++        sql: `SELECT id, decision_at AS sweep_at FROM ${TABLE} WHERE finished_at IS NULL AND status = 'resuming'
++          AND approval_context IS NOT NULL AND resume_run_id NOT LIKE 'automation-expire-%'
++          AND decision_at <= ? ${appId ? 'AND app_id = ?' : ''}
++          ${after ? 'AND (decision_at > ? OR (decision_at = ? AND id > ?))' : ''}
++          ORDER BY decision_at, id LIMIT ${APPROVAL_SWEEP_PAGE_SIZE}`,
++        args: [now - automationRunClaimLeaseMs(), ...(appId ? [appId] : []), ...sweepCursorArgs(after)],
++    });
++    return sweepPage(result);
++}
+ /** Unfinished approval history bound to this exact resource. */
+ export async function listBoundApprovalWaits(resource) {
+     await ensureTable();
+diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
+--- a/dist/jobs/run-history.d.ts
++++ b/dist/jobs/run-history.d.ts
+@@ -136,7 +136,7 @@
+     outcomeReconciled: boolean; resumeRunId: string | null; context: AutomationApprovalContext | null;
+ } | null>;
+ export declare function getAutomationContinuationForWebhookTask(taskId: string): Promise<Awaited<ReturnType<typeof getAutomationContinuation>>>;
+-export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string): Promise<boolean>;
++export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string, requireReady?: boolean): Promise<boolean>;
+ export declare function restoreUnconsumedAutomationApproval(id: string, askId: string, resumeRunId: string): Promise<boolean>;
+ export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
+ export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
+@@ -145,6 +145,7 @@
+ export interface ApprovalSweepRow { id: string; at: number }
+ export declare const APPROVAL_SWEEP_PAGE_SIZE: number;
+ export declare function listExpiredApprovalWaits(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
++export declare function listStaleApprovalClaims(appId?: string, now?: number, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function listUnreconciledAutomationApprovalRuns(appId?: string, after?: ApprovalSweepRow | null): Promise<ApprovalSweepRow[]>;
+ export declare function markAutomationApprovalOutcomeReconciled(id: string): Promise<void>;
+ export declare const NEWER_ADMITTED_AUTOMATION_RUN_SQL: string;
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1104,6 +1104,33 @@
+         !await isTurnAborted(pending.threadId, pending.turnId) &&
+         (await readAgentToolApproval(pending))?.status === "pending";
+ }
++/**
++ * Vivary #205: a wait whose turn cannot be recovered, because its Native run row
++ * is gone or its turn was stopped, is still over once no run can save it.
++ */
++async function waitRunEnded(pending) {
++    if (_activeBackgroundRunIds.has(pending.runId))
++        return false;
++    const native = await getRunById(pending.runId);
++    return !native || native.status !== "running";
++}
++/**
++ * Prepare a wait for a decline, which executes nothing and so needs no saved
++ * turn. A recoverable turn is still recovered for the transcript. False while a
++ * run may still save the wait.
++ */
++async function readyWaitForDecline(state) {
++    const pending = state.context;
++    if (!state.run.approvalReady && await canRecoverWaitingTurn(pending))
++        await recoverWaitingTurn(state);
++    if (!await waitRunEnded(pending))
++        return false;
++    if (!state.run.approvalReady && pending.options.webhookTaskId) {
++        const { restoreAutomationApprovalTaskWait } = await import("../integrations/pending-tasks-store.js");
++        await restoreAutomationApprovalTaskWait(pending.options.webhookTaskId, state.run.appId ?? undefined);
++    }
++    return true;
++}
+ async function recoverWaitingTurn(state) {
+     const pending = state.context;
+     if (!await canRecoverWaitingTurn(pending))
+@@ -1171,6 +1198,10 @@
+         automationHistoryOwner(context.resourceOwner, { userEmail: context.ownerEmail, orgId: context.orgId }) !== run.owner || context.resourcePath !== run.path ||
+         (context.orgId ?? null) !== (run.orgId ?? null))
+         throw new Error("The terminal approval history binding changed.");
++    // Vivary #205: no decision can reach a finished run, so an ask it left pending
++    // is declined. A consumed or declined ask stays as it is.
++    if ((await readAgentToolApproval(context))?.status === "pending")
++        await declineAgentToolApproval(context);
+     if (context.options.webhookTaskId) {
+         const { settleAutomationApprovalTask } = await import("../integrations/pending-tasks-store.js");
+         await settleAutomationApprovalTask(context, run);
+@@ -1251,14 +1282,11 @@
+             _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
+             return;
+         if (!staleClaim) {
+-            // A wait saved before its turn was marked ready is recovered as an
+-            // owner's decision recovers it. A run that can still save it is left.
+-            if (!state.run.approvalReady) {
+-                if (!await canRecoverWaitingTurn(pending))
+-                    return;
+-                await recoverWaitingTurn(state);
+-            }
+-            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire")))
++            // A wait saved before its turn was marked ready is prepared as an
++            // owner's decline prepares it. A run that can still save it is left.
++            if (!await readyWaitForDecline(state))
++                return;
++            if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire"), false))
+                 return;
+         }
+         if (ask.status === "pending" && !await declineAgentToolApproval(pending))
+@@ -1296,8 +1324,55 @@
+     }
+     _approvalSweepCursors.set(key, after);
+ }
++async function recoverStaleApprovalClaims(appId) {
++    const { listStaleApprovalClaims } = await import("./run-history.js");
++    await sweepApprovalRows("claims", appId, after => listStaleApprovalClaims(appId, Date.now(), after), recoverStaleApprovalClaim);
++}
++/**
++ * Vivary #205: an owner's claim whose process ended before its continuation
++ * settled blocked its job until the owner came back. The sweep applies the
++ * decision path's recovery once the claim lease has passed and no run holds it:
++ * declined when the ask was declined, interrupted when it was consumed, and back
++ * to waiting while it is pending, so the expiry pass can end an expired wait.
++ */
++async function recoverStaleApprovalClaim(id) {
++    try {
++        const state = await getAutomationContinuation(id);
++        const pending = state?.context;
++        if (!pending || pending.terminalOutcome || state.storedStatus !== "resuming" || state.run.finishedAt ||
++            !state.resumeRunId || state.resumeRunId.startsWith("automation-expire-") ||
++            Date.now() - state.decisionAt <= automationRunClaimLeaseMs())
++            return;
++        if (_activeBackgroundRunIds.has(state.resumeRunId) || await getRunStatus(state.resumeRunId) === "running")
++            return;
++        const ask = await readAgentToolApproval(pending);
++        if (ask?.status === "declined") {
++            await finishAutomationRun(id, "declined", "The owner declined the pending action. It did not execute.",
++                "automation_approval_declined", { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "declined");
++            return;
++        }
++        if (ask?.status !== "pending") {
++            await finishAutomationRun(id, "interrupted", "An approved action has an unconfirmed outcome. It will not be dispatched again.",
++                INTERRUPTED_RUN_ERROR_CODE, { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "interrupted", "The approved action has an unconfirmed outcome.");
++            return;
++        }
++        await restoreUnconsumedAutomationApproval(id, pending.askId, state.resumeRunId);
++    }
++    catch (error) {
++        console.error("[automations] approval claim recovery failed:", id, redactText(error instanceof Error ? error.message : String(error)));
++    }
++}
+ export async function reconcileAutomationApprovalOutcomes(appId) {
+-    // Expiry first, so a wait that ends here settles in this same pass.
++    // Stale claims first, so a wait they restore can expire in this same pass.
++    try {
++        await recoverStaleApprovalClaims(appId);
++    }
++    catch (error) {
++        console.error("[automations] approval claim scan failed:", redactText(error instanceof Error ? error.message : String(error)));
++    }
++    // Expiry next, so a wait that ends here settles in this same pass.
+     try {
+         await expireAutomationApprovalWaits(appId);
+     }
+@@ -1420,18 +1495,24 @@
+     else if (state.storedStatus !== "waiting_approval") {
+         throw approvalDecisionRefusal("The automation is no longer waiting for approval.");
+     }
+-    if (!state.run.approvalReady)
+-        await recoverWaitingTurn(state);
+-    const nativeStatus = await getRunStatus(pending.runId);
+-    if (_activeBackgroundRunIds.has(pending.runId) || !nativeStatus || nativeStatus === "running" || !state.run.approvalReady)
+-        throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    if (input.decision === "decline") {
++        if (!await readyWaitForDecline(state))
++            throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    }
++    else {
++        if (!state.run.approvalReady)
++            await recoverWaitingTurn(state);
++        const nativeStatus = await getRunStatus(pending.runId);
++        if (_activeBackgroundRunIds.has(pending.runId) || !nativeStatus || nativeStatus === "running" || !state.run.approvalReady)
++            throw approvalDecisionRefusal("The run is still saving its approval wait.");
++    }
+     if (!ask || ask.status !== "pending")
+         throw approvalDecisionRefusal("The exact pending approval is unavailable.");
+     const validity = await validateAutomationRunIdentity(pending.ownerEmail, pending.orgId ?? undefined);
+     if (!validity.ok && !departedOwner)
+         throw approvalDecisionRefusal("The approval owner identity is no longer valid.");
+     if (input.decision === "decline") {
+-        if (!await claimAutomationApprovalDecision(input.historyId, pending.askId, createRunId("automation-decline")))
++        if (!await claimAutomationApprovalDecision(input.historyId, pending.askId, createRunId("automation-decline"), false))
+             throw approvalDecisionRefusal("Another decision already claimed this approval.");
+         if (!await declineAgentToolApproval(pending))
+             throw approvalDecisionRefusal("The exact approval could not be declined.");
+diff --git a/dist/agent/tool-approval-store.js b/dist/agent/tool-approval-store.js
+--- a/dist/agent/tool-approval-store.js
++++ b/dist/agent/tool-approval-store.js
+@@ -164,7 +164,12 @@
+  * re-rendered" apart from "this is a NEW ask for the same tool call". See
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+-export async function createAgentToolApproval(binding, exec = getDbExec()) {
++export async function createAgentToolApproval(binding, exec) {
++    // Vivary #205: a caller that passes its transaction cleans after it commits.
++    // On PostgreSQL a failed statement aborts the whole transaction, even when
++    // the error is caught, so the cleanup cannot share it.
++    const ownsExec = exec === undefined;
++    exec ??= getDbExec();
+     await ensureAgentToolApprovalTable();
+     const now = Date.now();
+     const expiresAt = binding.expiresAt ?? now + APPROVAL_TTL_MS;
+@@ -188,9 +193,17 @@
+             now,
+         ],
+     });
+-    // Cleanup is hygiene only. Expired rows remain unusable because consume uses
+-    // an atomic status and expiry predicate, so cleanup failures must not affect
+-    // the approval that was just recorded.
++    if (ownsExec)
++        await cleanExpiredAgentToolApprovals(exec, now);
++    return id;
++}
++/**
++ * Cleanup is hygiene only. Expired rows remain unusable because consume uses
++ * an atomic status and expiry predicate, so cleanup failures must not affect
++ * the approval that was just recorded. Vivary #205: never pass a transaction
++ * that still has writes to make.
++ */
++export async function cleanExpiredAgentToolApprovals(exec = getDbExec(), now = Date.now()) {
+     try {
+         await exec.execute({
+             sql: `DELETE FROM agent_tool_approvals
+@@ -201,7 +214,6 @@
+     catch (error) {
+         console.warn("[agent] Could not clean expired tool approval records", error);
+     }
+-    return id;
+ }
+ /**
+  * Atomically consume the server-created approval for one logical tool call.
+diff --git a/dist/agent/tool-approval-store.d.ts b/dist/agent/tool-approval-store.d.ts
+--- a/dist/agent/tool-approval-store.d.ts
++++ b/dist/agent/tool-approval-store.d.ts
+@@ -45,6 +45,8 @@
+  * `ApprovalAffordance` in client/chat/tool-call-display.tsx.
+  */
+ export declare function createAgentToolApproval(binding: AgentToolApprovalBinding, exec?: import("../db/client.js").DbExec): Promise<string>;
++/** Delete expired decided approvals. Failures are logged, never thrown. */
++export declare function cleanExpiredAgentToolApprovals(exec?: import("../db/client.js").DbExec, now?: number): Promise<void>;
+ /**
+  * Atomically consume the server-created approval for one logical tool call.
+  * The model's call id is transport metadata and can change when Dispatch
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -6,7 +6,7 @@
+ import { abortRun, getRun, resolveBackgroundAutomationSoftTimeoutMs, resolveBackgroundRunHardTimeoutMs, startRun, } from "../agent/run-manager.js";
+ import { claimBackgroundRun, getRunById, getRunEventsSince, getRunStatus, getRunTurnRef, insertRun, isTurnAborted } from "../agent/run-store.js";
+ import { buildAssistantMessage, buildUserMessage, extractThreadMeta, foldAssistantTurn, threadDataToEngineMessages, upsertUserMessage, } from "../agent/thread-data-builder.js";
+-import { ensureAgentToolApprovalTable, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
++import { ensureAgentToolApprovalTable, cleanExpiredAgentToolApprovals, consumeAgentToolApproval, createAgentToolApproval, declineAgentToolApproval, readAgentToolApproval } from "../agent/tool-approval-store.js";
+ import { AutomationResourceChangedError, withAutomationResourceCustody, resourceGetByPath } from "../resources/store.js";
+ import { redactText, redactTextInValue } from "../audit/redact.js";
+ import { canUpdateAutomationResource, resolveAutomationExecutionIdentity, } from "../automations/service.js";
+@@ -579,6 +579,9 @@
+                         await waitForAutomationApproval(historyId, pending, tx);
+                         return pending;
+                     });
++                    // Vivary #205: clean only after custody commits, so a failed
++                    // cleanup cannot abort the wait write on PostgreSQL.
++                    await cleanExpiredAgentToolApprovals();
+                     if (options.webhookTaskId) {
+                         const { markTaskWaitingForApproval } = await import("../integrations/pending-tasks-store.js");
+                         await markTaskWaitingForApproval(options.webhookTaskId);
