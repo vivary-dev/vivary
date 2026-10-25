@@ -3476,6 +3476,35 @@ PostgreSQL does. A control case proves the adapter does that. The two finding
 cases failed against the previous patch and pass with this one. This is the
 last finding of #205.
 
+### Approval cleanup keeps claimed asks
+
+Vivary beta ticket 28, found by the review of #296.
+`cleanExpiredAgentToolApprovals` deleted every decided ask more than 24 hours
+past its expiry. An automation run that a crash left `resuming` still points at
+its ask, and stale-claim recovery reads that ask to settle the run. Once the
+cleanup deleted it, an owner's decline finished as interrupted with an
+unconfirmed outcome. An expiry sweep's own claim returned early on every pass,
+so its run stayed `resuming` and its job could not be deleted or moved.
+
+- The cleanup skips an ask that an unfinished `automation_runs` row names in
+  `pending_ask_id`. In an app with no `automation_runs` table it falls back to
+  the plain delete, because no run can claim an ask there. Any other failure
+  still only logs.
+- `recoverStaleApprovalClaim` finishes a claim as declined when its ask is gone
+  and its resume run id starts with `automation-decline-`. This settles rows
+  that an older cleanup already reached.
+- `expireApprovalWait` settles its own stale expiry claim as
+  `automation_approval_expired` when the ask is gone. That claim never executes
+  anything.
+- `decideAutomationApproval` applies the same rule to a stale claim. An owner's
+  Decline and Settings Delete reach it before the next sweep, so a missing ask
+  ends a decline claim as declined and an expiry claim as
+  `automation_approval_expired`. Only an approval claim still ends interrupted.
+
+`tests/automation-approval-stuck.test.mjs` adds seven cases. Six cover the claim
+paths, and one checks the missing-table fallback with a stub executor. All seven
+failed against the previous patch and pass with this one.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a
