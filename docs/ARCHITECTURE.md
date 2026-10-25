@@ -751,10 +751,11 @@ stays held. The hold is now the empty `ADMITTED_ELECTRON` table in `runtime-secu
 packaging and payload checks admit only the pinned version when the table lists it with a
 bundled Node that meets the October floor. The payload check also requires the payload's
 `build.json` and the `version` file Electron ships beside its executable to name that pinned
-release, so an installer cannot wrap an older payload. Qualifying the first 45.x on Node
-24.22.1 or later means adding that entry and moving the pin. The shell uses none of the APIs
-that Electron 45 removes or changes: it has one sandboxed, context-isolated window with no
-preload, and it denies every permission and every `window.open()`.
+release, so an installer cannot wrap an older payload. `packages/desktop/package.json` joins
+the installer sources, so the recorded installer commit holds that pin. Qualifying the first
+45.x on Node 24.22.1 or later means adding that entry and moving the pin. The shell uses none
+of the APIs that Electron 45 removes or changes: it has one sandboxed, context-isolated window
+with no preload, and it denies every permission and every `window.open()`.
 
 2026-10-25 body-parser 2.4.0 and fast-uri 3.1.9 (beta ticket 29, part a). GitHub
 published GHSA-27r3-jxmh-p828 for body-parser and four advisories for fast-uri on
