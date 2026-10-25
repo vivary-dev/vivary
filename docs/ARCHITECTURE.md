@@ -759,6 +759,17 @@ whole diff under the trusted reviewer's 1 MiB single-session cap and aims for ab
 1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
 behavior changes, so the existing design description still holds.
 
+2026-10-25 Review P3 sweep A (beta ticket 27). The desktop runtime builder admits its
+host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
+destination, fills the download cache or calls the build helper. Before, the admission ran
+inside `runBuildHelper`, after the downloads. `packages/desktop/README.md` names the admitted
+host runtime, CPython 3.12.15 final with OpenSSL 3.5.9, and says that the check precedes the
+original runtime's downloads but follows the Node LICENSE and Windows Node downloads in
+`package.mjs`. CONTRIBUTING.md lists the size
+report among a PR's contents and puts the merge rule back above its Size subsection, and the
+PR size rule entry below moves under the 2026-10-25 entries, in date order. Only the order of
+an existing check changes, so the packaging description above still holds.
+
 2026-10-25 Approval cleanup keeps asks that a run still claims (beta ticket 28).
 The maintained Core patch gains appended sections for
 `agent/tool-approval-store.js` and `jobs/background-automation-runner.js`. Its
@@ -773,6 +784,12 @@ the roles described above, so the descriptions hold. J10 in `journeys.md` gains
 one sentence on the cleanup, and its diagram is unchanged, because no state or
 edge changes. `tests/automation-approval-stuck.test.mjs` adds seven cases that
 failed on the previous patch and pass on this one.
+
+2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
+it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
+whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
+1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
+behavior changes, so the existing design description still holds.
 
 2026-10-24 Automated restart test for runs and approvals (beta ticket 07). This change adds a test and no server
 code. `tests/local-code-restart.test.ts` runs a first host in a child process until its run waits on a Codex
