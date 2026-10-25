@@ -44,24 +44,33 @@ NODE_GUARD_STEP = (
     "      - name: actual Node security admission\n"
     "        run: " + ci.NODE_GUARD + "\n"
 )
-TOOLS = (ci.WORKBENCH_TOOLS_STEP, ci.WORKBENCH_DEPENDENCY_STEP, ci.WORKBENCH_INSTALL_STEP)
+# The build runs on Windows, because the packaged Windows Node must give native evidence (#291 review).
+BUILD_HOST = "    runs-on: windows-latest\n"
+TOOLS = (ci.WINDOWS_WORKBENCH_TOOLS_STEP, ci.WINDOWS_WORKBENCH_DEPENDENCY_STEP, ci.WINDOWS_WORKBENCH_INSTALL_STEP)
 DESKTOP_INSTALL_STEP = (
     "      - name: install desktop dependencies\n"
-    "        shell: bash\n"
-    "        run: '\"$RUNNER_TEMP/vivary-build-tools/bin/npm\" --prefix packages/desktop ci --ignore-scripts'\n"
+    "        shell: pwsh\n"
+    "        run: |\n"
+    "          & \"$env:RUNNER_TEMP/vivary-build-tools/bin/npm.cmd\" --prefix packages/desktop ci --ignore-scripts\n"
+    "          if ($LASTEXITCODE -ne 0) { throw \"desktop dependency install failed\" }\n"
 )
+NSIS_VERSION = "3.13"
+NSIS_SHA256 = "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8"
 TAG_STEP = (
     "      - name: Require a release tag to name the desktop version\n"
     "        if: github.ref_type == 'tag'\n"
+    "        shell: bash\n"
     "        env:\n"
     "          VERSION: ${{ steps.version.outputs.version }}\n"
     "        run: test \"$GITHUB_REF_NAME\" = \"v$VERSION\"\n"
 )
 PACKAGE_STEP = (
     "      - name: Package Windows x64 from a source build of Workbench\n"
-    "        shell: bash\n"
-    "        run: '\"$RUNNER_TEMP/vivary-build-tools/bin/npm\" --prefix packages/desktop run package"
-    " -- --windows-x64 --build-workbench'\n"
+    "        shell: pwsh\n"
+    "        run: |\n"
+    "          & \"$env:RUNNER_TEMP/vivary-build-tools/bin/npm.cmd\" --prefix packages/desktop run package"
+    " -- --windows-x64 --build-workbench\n"
+    "          if ($LASTEXITCODE -ne 0) { throw \"desktop packaging failed\" }\n"
 )
 
 
@@ -85,7 +94,7 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
 
     # ci.yml's runner admission, action manifests and setup-node pin, then its Python selection and admission.
     contract(ci.check_runner_action_bootstrap, text, BUILD_JOBS, auxiliary=True)
-    contract(ci.check_python_runtime, text, names=("build",))
+    contract(ci.check_python_runtime, text, names=("build",), windows=("build",))
 
     bundled = re.search(r'nodeVersion: "v(\d+\.\d+\.\d+)"', windows_target)
     require(bundled is not None, f"{WINDOWS_TARGET} names no bundled Node version")
@@ -102,6 +111,13 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
     except SystemExit as error:
         problems.append(str(error))
         return problems
+    require(BUILD_HOST in ci.job_block(text, "build").split("    steps:", 1)[0],
+            "the build job must run on windows-latest, where the packaged Windows Node gives native evidence")
+    nsis = [step for step in steps if "makensis" in step or "nsis" in step.lower()]
+    require(len(nsis) == 1 and f'NSIS_VERSION: "{NSIS_VERSION}"' in nsis[0] and f'NSIS_SHA256: "{NSIS_SHA256}"' in nsis[0]
+            and "if ($actual -ne $env:NSIS_SHA256) { throw" in nsis[0]
+            and nsis[0].index("Get-FileHash") < nsis[0].index("Expand-Archive"),
+            f"NSIS must be {NSIS_VERSION}, checked against its pinned SHA-256 before it is unpacked")
     setup = [i for i, step in enumerate(steps) if "uses: actions/setup-node@" in step]
     guard = [i for i, step in enumerate(steps) if ci.NODE_GUARD in step]
     require(len(setup) == len(guard) == 1 and guard[0] == setup[0] + 1
@@ -125,8 +141,8 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
     require(text.count("\non:") == 1 and text.count("\npermissions:") == 1, "one trigger block and one default permissions block")
     uses = re.findall(r"^\s*(?:-\s+)?uses:\s*(\S+)", text, re.MULTILINE)
     require(sorted(action.split("@")[0] for action in uses) == sorted((
-        "actions/checkout", "actions/setup-python", "actions/setup-node", "actions/upload-artifact", "actions/download-artifact")),
-        "checkout, setup-python, setup-node, upload-artifact and download-artifact only")
+        "actions/checkout", "actions/setup-node", "actions/upload-artifact", "actions/download-artifact")),
+        "checkout, setup-node, upload-artifact and download-artifact only")
     require(text.count("persist-credentials: false") == text.count("actions/checkout@"),
             "every checkout must drop its credentials")
     require("secrets." not in text, "the workflow reads no secrets beyond the job token")
@@ -144,7 +160,8 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
         require(flag in create.split("./*")[0], f"the release must be created with {flag}")
     require(sum(step.rstrip("\n") == TAG_STEP.rstrip("\n") for step in steps) == 1,
             "a release tag must name the desktop version, in the exact reviewed step")
-    require('--commit "$GITHUB_SHA"' in text, "the release files must be checked against the built commit")
+    require('--commit "$env:GITHUB_SHA"' in text, "the release files must be checked against the built commit")
+    require('if ($actual -ne $hash) { throw' in text, "the build must check every release file against SHA256SUMS")
     check_at = text.find("sha256sum --check --strict SHA256SUMS", draft)
     require(check_at != -1 and check_at < text.find("gh release create"),
             "the draft job must check the downloaded files before it creates the release")

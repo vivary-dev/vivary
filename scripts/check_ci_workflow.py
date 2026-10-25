@@ -458,9 +458,9 @@ WINDOWS_PYTHON_PROVISIONING_STEP = (
 )
 
 
-def python_admission_prefix(name, inline=False):
+def python_admission_prefix(name, inline=False, windows=("governed-platform-proof",)):
     guard = python_runtime_step(inline)
-    if name == "governed-platform-proof":
+    if name in windows:
         return [WINDOWS_PYTHON_PROVISIONING_STEP, guard]
     if name == "orientation-proof":
         def when(step, condition):
@@ -516,16 +516,18 @@ def python_runtime_step(inline=False) -> str:
             + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
 
 
-def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
+def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False, windows=("governed-platform-proof",)) -> None:
+    """`windows` names the jobs that run on a Windows host, which provision Python with the Windows script and no
+    setup-python step."""
     for name in names:
         steps = re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]
         setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
-        require(len(setups) == (0 if name == "governed-platform-proof" else 1)
+        require(len(setups) == (0 if name in windows else 1)
                 and len(guards) == 1, contract)
         guard = guards[0]
-        prefix = python_admission_prefix(name, inline)
+        prefix = python_admission_prefix(name, inline, windows)
         first = guard - len(prefix) + 1
         require(first >= 0 and [step.rstrip("\n") for step in steps[first:guard + 1]]
                 == [step.rstrip("\n") for step in prefix], contract)

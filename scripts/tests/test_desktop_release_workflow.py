@@ -48,7 +48,7 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
             self.assertNotEqual(self.check(), [])
 
     def test_each_broken_rule_fails(self) -> None:
-        tools = guard.ci.WORKBENCH_TOOLS_STEP
+        tools = guard.ci.WINDOWS_WORKBENCH_TOOLS_STEP
         cases = {
             "mutable action ref": ("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7.0.1"),
             "npm publish setup-node pin": ("actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
@@ -58,19 +58,22 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
             "draft job without admission": ("      - *runner_action_node_bootstrap\n", ""),
             "build job without admission": ("        name: runner action Node admission\n",
                                             "        name: runner action Node admission (edited)\n"),
-            "floating Python": ('python-version: "3.12.15"', 'python-version: "3.12"'),
-            "Python not provisioned": ('          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")\n',
-                                       '          pass\n'),
+            "Python not provisioned": ("        run: ./scripts/bootstrap_ci_python_windows.ps1\n", "        run: echo skipped\n"),
+            "Linux build host": ("    runs-on: windows-latest\n    timeout-minutes: 90\n", "    runs-on: ubuntu-latest\n    timeout-minutes: 90\n"),
+            "another NSIS version": ('NSIS_VERSION: "3.13"', 'NSIS_VERSION: "3.12"'),
+            "unpinned NSIS hash": (guard.NSIS_SHA256, "0" * 64),
+            "NSIS hash not enforced": ("if ($actual -ne $env:NSIS_SHA256) { throw", "if ($false) { throw"),
+            "release files not checked": ("if ($actual -ne $hash) { throw", "if ($false) { throw"),
             "Python not admitted": ("      - name: actual Python runtime admission\n",
                                     "      - name: Python runtime admission\n"),
             "Node not admitted": ("      - name: actual Node security admission\n        run: node packages/workbench/bin/runtime-security.mjs\n", ""),
             "global pnpm": (tools, "      - name: global pnpm\n        run: npm install --global pnpm@10.34.7\n" + tools),
-            "system pnpm install": ('\'"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts\'',
+            "system pnpm install": ('& "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts',
                                     "pnpm --dir packages/workbench install --frozen-lockfile --ignore-scripts"),
             "install scripts run": ("--frozen-lockfile --ignore-scripts", "--frozen-lockfile"),
-            "system npm desktop install": ('\'"$RUNNER_TEMP/vivary-build-tools/bin/npm" --prefix packages/desktop ci --ignore-scripts\'',
+            "system npm desktop install": ('& "$env:RUNNER_TEMP/vivary-build-tools/bin/npm.cmd" --prefix packages/desktop ci --ignore-scripts',
                                            "npm --prefix packages/desktop ci"),
-            "no compiler build": (' --typescript || exit $?', ' || exit $?'),
+            "no compiler build": (' --typescript\n          if ($LASTEXITCODE -ne 0) { throw "compiler', '\n          if ($LASTEXITCODE -ne 0) { throw "compiler'),
             "pull request trigger": ("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n"),
             "draft job on any run": ("    if: github.event_name == 'push' && github.ref_type == 'tag'\n", ""),
             "draft job on a dry-run branch": ("github.event_name == 'push' && github.ref_type == 'tag'", "github.event_name == 'push'"),
@@ -82,8 +85,8 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
             "checkout keeps credentials": ("persist-credentials: false", "persist-credentials: true"),
             "secret read": ("GH_TOKEN: ${{ github.token }}", "GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}"),
             "tag not checked": ('test "$GITHUB_REF_NAME" = "v$VERSION"', "true"),
-            "tag check skipped": ("        if: github.ref_type == 'tag'\n        env:\n          VERSION:",
-                                  "        if: false\n        env:\n          VERSION:"),
+            "tag check skipped": ("        if: github.ref_type == 'tag'\n        shell: bash\n        env:\n          VERSION:",
+                                  "        if: false\n        shell: bash\n        env:\n          VERSION:"),
             "tag check commented out": ('        run: test "$GITHUB_REF_NAME" = "v$VERSION"',
                                         '        run: echo # test "$GITHUB_REF_NAME" = "v$VERSION"'),
             "unchecked download": ("          sha256sum --check --strict SHA256SUMS\n          gh release", "          gh release"),

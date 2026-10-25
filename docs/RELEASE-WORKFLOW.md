@@ -41,10 +41,13 @@ remaining acceptance gaps visible. Do not reuse stable-release claims.
 ### Desktop release build
 
 The `desktop release` workflow (`.github/workflows/desktop-release.yml`) builds
-the Windows release once, on an Ubuntu runner, from one commit. Each job starts with
+the Windows release once, on a Windows runner, from one commit. Each job starts with
 the runner action Node admission from `ci.yml`. The build job then takes `ci.yml`'s
-Python 3.12.15 provisioning and admission, Node 24.22.1 with its security admission,
-and the isolated npm and pnpm 10.34.7 from `scripts/bootstrap_build_tools.py`. It
+Windows Python 3.12.15 provisioning and admission, Node 24.22.1 with its security
+admission, and the isolated npm and pnpm 10.34.7 from `scripts/bootstrap_build_tools.py`.
+It runs on Windows because the packaged Windows Node must give native evidence. It
+unpacks NSIS 3.13 from the official zip only after its SHA-256 matches the pin, and
+writes the ZIPs with `packages/desktop/zip-writer.mjs`, so no `zip` program is needed. It
 installs the locked Workbench and desktop dependencies without install scripts, runs
 `package.mjs --windows-x64 --build-workbench`, builds the per-user installer, and
 runs `packages/desktop/release-assets.mjs`. That script refuses a payload whose

@@ -159,7 +159,10 @@ export async function packageDesktop() {
       // Remove the old output only once the checkout is known clean, so nothing from an earlier build is
       // packaged and a refused build keeps the output it had.
       rmSync(path.join(workbench, ".output"), { recursive: true, force: true });
-      execFileSync("pnpm", ["--dir", workbench, "run", "build"], { stdio: "inherit" });
+      // On Windows pnpm is a .cmd launcher, which Node starts only through a shell, so the folder is quoted.
+      const windows = process.platform === "win32";
+      execFileSync(windows ? "pnpm.cmd" : "pnpm", ["--dir", windows ? `"${workbench}"` : workbench, "run", "build"],
+        { stdio: "inherit", shell: windows });
     });
   }
   await access(path.join(workbench, ".output/server/index.mjs"));

@@ -1,6 +1,6 @@
 name: desktop release
 
-# Builds the Windows desktop release once, from one commit: the portable ZIP, the
+# Builds the Windows desktop release once, on a Windows runner, from one commit: the portable ZIP, the
 # per-user installer, their SHA-256 sums, a licenses ZIP, the runtime inventory
 # and the build metadata. A manual run, or a push to a release-dry-run/ branch,
 # is a dry run that keeps these files as workflow artifacts only. GitHub runs a
@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build:
     name: Windows desktop release build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -744,14 +744,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.12.15"
-      - name: verified Python runtime provisioning
-        shell: python -I -B {0}
-        run: |
-          import runpy
-          runpy.run_path("scripts/bootstrap_ci_python.py", run_name="__main__")
+      - name: verified Windows Python runtime provisioning
+        shell: pwsh
+        run: ./scripts/bootstrap_ci_python_windows.ps1
       - name: actual Python runtime admission
         shell: python -I -B {0}
         run: |
@@ -768,56 +763,86 @@ jobs:
         run: node packages/workbench/bin/runtime-security.mjs
       - name: Read the desktop version
         id: version
+        shell: bash
         run: echo "version=$(node -p "require('./packages/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Require a release tag to name the desktop version
         if: github.ref_type == 'tag'
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: test "$GITHUB_REF_NAME" = "v$VERSION"
-      - name: Install NSIS and zip
+      - name: Install NSIS 3.13 pinned by SHA-256
+        # The official NSIS 3.13 zip from the project's SourceForge downloads. Its SHA-256 was computed after
+        # its MD5 matched the project's published 530e3623c077cba879ed2ae6e13be362. A mismatch fails the job.
+        shell: pwsh
+        env:
+          NSIS_VERSION: "3.13"
+          NSIS_SHA256: "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8"
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends nsis zip
-          makensis -VERSION
+          $zip = Join-Path $env:RUNNER_TEMP "nsis-$env:NSIS_VERSION.zip"
+          Invoke-WebRequest -Uri "https://downloads.sourceforge.net/project/nsis/NSIS%203/$env:NSIS_VERSION/nsis-$env:NSIS_VERSION.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $env:NSIS_SHA256) { throw "NSIS $env:NSIS_VERSION has SHA-256 $actual, not the pinned $env:NSIS_SHA256" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          $nsis = Join-Path $env:RUNNER_TEMP "nsis-$env:NSIS_VERSION"
+          & (Join-Path $nsis "makensis.exe") -VERSION
+          if ($LASTEXITCODE -ne 0) { throw "the pinned makensis does not run" }
+          "MAKENSIS=$(Join-Path $nsis 'makensis.exe')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NSISDIR=$nsis" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: qualified workbench build tools
-        shell: bash
+        shell: pwsh
         run: |
-          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?
-          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" --typescript || exit $?
-          printf '%s/vivary-build-tools/bin\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          printf 'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"
+          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }
+          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript
+          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }
+          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: known workbench dependency admission
-        shell: bash
-        run: '"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs'
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }
       - name: install workbench dependencies
-        shell: bash
-        run: '"$RUNNER_TEMP/vivary-build-tools/bin/pnpm" --dir packages/workbench install --frozen-lockfile --ignore-scripts'
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }
       - name: install desktop dependencies
-        shell: bash
-        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" --prefix packages/desktop ci --ignore-scripts'
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/npm.cmd" --prefix packages/desktop ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "desktop dependency install failed" }
       - name: Package Windows x64 from a source build of Workbench
-        shell: bash
-        run: '"$RUNNER_TEMP/vivary-build-tools/bin/npm" --prefix packages/desktop run package -- --windows-x64 --build-workbench'
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/vivary-build-tools/bin/npm.cmd" --prefix packages/desktop run package -- --windows-x64 --build-workbench
+          if ($LASTEXITCODE -ne 0) { throw "desktop packaging failed" }
       - name: Build the installer and the release files
-        shell: bash
+        shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          set -euo pipefail
-          shopt -s nullglob
           # A fresh checkout holds exactly one dated package folder.
-          folders=(packages/desktop/dist/*/)
-          test "${#folders[@]}" -eq 1
-          dist="${folders[0]%/}"
-          release="$RUNNER_TEMP/release"
-          mkdir "$release"
-          node="$RUNNER_TEMP/vivary-build-tools/bin/node"
-          "$node" packages/desktop/build-installer.mjs --payload "$dist/Vivary-win32-x64" \
-            --manifest "$dist/package-file-manifest.json" --output "$release/Vivary-Setup-$VERSION.exe"
-          "$node" packages/desktop/release-assets.mjs --payload "$dist/Vivary-win32-x64" \
-            --installer "$release/Vivary-Setup-$VERSION.exe" --commit "$GITHUB_SHA"
-          (cd "$release" && sha256sum --check --strict SHA256SUMS)
-          ls -l "$release"
+          $folders = @(Get-ChildItem -Directory packages/desktop/dist)
+          if ($folders.Count -ne 1) { throw "expected one package folder, found $($folders.Count)" }
+          $dist = $folders[0].FullName
+          $release = Join-Path $env:RUNNER_TEMP "release"
+          New-Item -ItemType Directory -Path $release | Out-Null
+          $node = "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd"
+          & $node packages/desktop/build-installer.mjs --payload "$dist/Vivary-win32-x64" `
+            --manifest "$dist/package-file-manifest.json" --output "$release/Vivary-Setup-$env:VERSION.exe"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+          & $node packages/desktop/release-assets.mjs --payload "$dist/Vivary-win32-x64" `
+            --installer "$release/Vivary-Setup-$env:VERSION.exe" --commit "$env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "release files failed" }
+          # Every file must match SHA256SUMS, as `sha256sum --check --strict` does on Linux.
+          foreach ($line in Get-Content (Join-Path $release "SHA256SUMS")) {
+            $hash, $name = $line -split "  ", 2
+            $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $release $name)).Hash.ToLowerInvariant()
+            if ($actual -ne $hash) { throw "$name does not match SHA256SUMS" }
+          }
+          Get-ChildItem $release
       - name: Keep the release files as workflow artifacts
         # actions/upload-artifact v7.0.2 pinned to an immutable commit SHA.
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

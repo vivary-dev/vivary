@@ -8276,6 +8276,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 The release build runs on Windows (Stack A, #291 review, owner option A). On
+Ubuntu, `package.mjs --windows-x64` could not finish, because `validateStagedNode` needs native
+evidence from the packaged Windows Node. The `desktop release` build job now runs on
+`windows-latest`, with `ci.yml`'s Windows Python provisioning and its Windows build tool,
+dependency admission and install steps. It downloads the official NSIS 3.13 zip, checks its
+SHA-256 against the pin before unpacking it, and sets `MAKENSIS` and `NSISDIR` to that copy.
+It checks every release file against `SHA256SUMS` in PowerShell. `package.mjs` starts pnpm
+through `pnpm.cmd` and a shell on Windows. `check_ci_workflow.py`'s `check_python_runtime` takes
+the Windows job names, and `check_desktop_release_workflow.py` pins the Windows host, the NSIS
+version and hash, and the new steps. The release file set and the draft job are unchanged.
+
 2026-10-25 In-repo ZIP writer for the release files (Stack A, #291 review). The release
 build no longer needs a `zip` program. `packages/desktop/zip-writer.mjs` writes what `zip -q
 -r -X` wrote, using Node's own zlib deflate and CRC-32: one folder, sorted entries with folder
