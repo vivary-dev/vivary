@@ -54,7 +54,7 @@ test("current-process collection binds the actual executable bytes and rejects E
   assert.equal(facts.platform, process.platform);
   assert.equal(facts.arch, process.arch);
   assert.equal(facts.sha256, createHash("sha256").update(await readFile(process.execPath)).digest("hex"));
-  assert.throws(() => assertNodeFacts({ ...facts, versions: { node: "24.22.1", electron: "44.9.3" } }), /Electron/);
+  assert.throws(() => assertNodeFacts({ ...facts, versions: { node: "24.22.1", electron: "45.0.0" } }), /Electron/);
   assert.throws(() => assertNodeFacts({ ...facts, sha256: "safe build marker" }), /evidence/);
   for (const node of ["22.23.4", "24.22.1", "26.12.1"]) assert.doesNotThrow(() => assertNodeFacts({ ...facts, versions: { node } }));
   if (actualAdmitted) assert.equal((await assertCurrentNode()).sha256, facts.sha256);
@@ -160,15 +160,15 @@ test("real Workbench start admits Node before port probing, user state or server
 
 test("standalone Node policy never waives the Electron publication hold", () => {
   assert.doesNotThrow(() => assertNodeVersion("24.22.1"));
-  assert.throws(() => assertElectronPublication(), /Electron publication is held\. Electron 44\.9\.3 is not admitted.*No Electron release is admitted/);
+  assert.throws(() => assertElectronPublication(), /Electron publication is held\. Electron 45\.0\.0 is not admitted.*No Electron release is admitted/);
 });
 
 test("Electron publication admits only a listed release whose bundled Node meets the floor", () => {
   assert.deepEqual(ADMITTED_ELECTRON, {});
-  const admitted = { "44.9.4": "24.22.1" };
-  assert.deepEqual(assertElectronPublication("44.9.4", admitted), { electron: "44.9.4", node: "24.22.1" });
-  assert.throws(() => assertElectronPublication("44.9.3", admitted), /Electron 44\.9\.3 is not admitted\. Admitted: 44\.9\.4\./);
-  assert.throws(() => assertElectronPublication("44.9.4", { "44.9.4": "24.22.0" }), /Node 24\.22\.0 is affected/);
+  const admitted = { "45.0.1": "24.22.1" };
+  assert.deepEqual(assertElectronPublication("45.0.1", admitted), { electron: "45.0.1", node: "24.22.1" });
+  assert.throws(() => assertElectronPublication("45.0.0", admitted), /Electron 45\.0\.0 is not admitted\. Admitted: 45\.0\.1\./);
+  assert.throws(() => assertElectronPublication("45.0.1", { "45.0.1": "24.22.0" }), /Node 24\.22\.0 is affected/);
   assert.throws(() => assertElectronPublication("toString", admitted), /Electron toString is not admitted/);
 });
 

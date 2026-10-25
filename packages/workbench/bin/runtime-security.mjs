@@ -128,7 +128,7 @@ export async function validateStagedNode(executable, target) {
 
 // Electron releases admitted for packaging, each with the Node version that DEPS pins at its tag
 // and with no patches/node file touching the October fix files. Empty until a stable release
-// bundles Node 24.22.1 or later: 44.9.3 bundles 24.22.0.
+// bundles Node 24.22.1 or later: 45.0.0 and 44.9.3 bundle 24.22.0.
 export const ADMITTED_ELECTRON = Object.freeze({});
 
 function pinnedElectron() {
