@@ -28,7 +28,8 @@ function setEnv(name: string, value: string | undefined): void {
 /**
  * Beta tickets 05 and 27. Shutdown closes the Vivary code host for the rest of the process, so each quit scenario
  * runs in a test file of its own. This sets up a fake Claude Code runtime and a fake worker that writes runs through
- * Core's file store, as the real executor does. With `request`, the worker asks a Codex question as each run starts.
+ * Core's file store, as the real executor does. With `request`, the worker asks a Codex question as each run starts,
+ * unless the run's prompt contains `[no request]`.
  * On abort it writes paused/paused, as the real executor writes for an interrupted result, then reports the run done.
  */
 export async function withCodeHost(options: { request: boolean }, body: (fixture: CodeHostFixture) => Promise<void>): Promise<void> {
@@ -49,19 +50,21 @@ process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"f
   await writeFile(path.join(server, "vivary-code-worker.mjs"), `
 const REQUEST = ${JSON.stringify(options.request)};
 let runId;
+let asked = false;
 process.on("message", async message => {
  if (message.type === "vivary:code-worker:abort") {
   // The real executor writes paused/paused for an interrupted result before the worker reports it (#306).
   const { updateCodeAgentRunRecord } = await import(${JSON.stringify(codeAgents)});
   updateCodeAgentRunRecord(runId, { status: "paused", phase: "paused" });
   // The real executor's teardown clears every pending request, and the worker forwards each one before it finishes.
-  if (REQUEST) process.send({ type: "vivary:code-worker:resolved", runId, requestId: "request-quit" });
+  if (asked) process.send({ type: "vivary:code-worker:resolved", runId, requestId: "request-quit" });
   process.send({ type: "vivary:code-worker:done", runId });
   return;
  }
  if (message.type !== "vivary:code-worker:start") return;
  runId = message.runId;
- if (REQUEST) process.send({ type: "vivary:code-worker:request", runId, request: { requestId: "request-quit",
+ asked = REQUEST && !String(message.prompt).includes("[no request]");
+ if (asked) process.send({ type: "vivary:code-worker:request", runId, request: { requestId: "request-quit",
   method: "item/commandExecution/requestApproval", params: { command: "pnpm test" } } });
 });
 process.send({type:"vivary:code-worker:ready"});
