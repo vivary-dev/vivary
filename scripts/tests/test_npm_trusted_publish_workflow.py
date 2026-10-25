@@ -145,6 +145,9 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
             "beside_node": '          "$(dirname "$(command -v node)")/npm" publish\n',
             "tool_cache": '          "$RUNNER_TOOL_CACHE/node/24.22.1/x64/bin/npm" publish\n',
             "windows_path": '          C:\\hostedtoolcache\\node\\npm publish\n',
+            # #306 review: npm's own CLI entry started through node.
+            "npm_cli": '          node "$(dirname "$(command -v node)")/../lib/node_modules/npm/bin/npm-cli.js" publish\n',
+            "npx_cli": '          node /opt/hostedtoolcache/node/lib/node_modules/npm/bin/npx-cli.js --yes pkg\n',
         }
         for label, line in lines.items():
             message = check(text.replace(job, job[:body] + line + job[body:], 1))

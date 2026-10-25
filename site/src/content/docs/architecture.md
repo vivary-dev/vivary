@@ -767,7 +767,8 @@ corepack only at the start of a line, so a command such as `$(npm --version)`, `
 `bin/pnpm publish` in another step passed. In both jobs, a step other than the exact
 reviewed client, pack, publish and dry-run steps may not reach `vivary-build-tools/`, and
 its run body may not use npm, npx, pnpm or corepack as a command word anywhere on a line,
-including after a path such as `.../bin/npm`. Its `shell:` value is checked the same way.
+including after a path such as `.../bin/npm`, and may not start npm's own `npm-cli.js` or
+`npx-cli.js` or name a `node_modules/npm/` path. Its `shell:` value is checked the same way.
 The publish step must match its reviewed text exactly. The workflow is unchanged, so the
 2026-10-24 description of npm publication on the qualified client still holds, and the
 checker now enforces its last sentence for every position on a line.

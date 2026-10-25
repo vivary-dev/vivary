@@ -63,6 +63,8 @@ DRY_RUN_STEP = (
 # substitution or a path separator, and before a space, a separator, a quote or the line end. So
 # `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
 # as npm={npm_version} or npm-candidate do not.
+# npm's own CLI entry, started through node, is npm too.
+NPM_ENTRY = re.compile(r"(?:npm|npx)-cli\.js|node_modules[/\\]npm[/\\]")
 PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"/\\])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
 
 
@@ -159,10 +161,11 @@ def check_runtime_and_archive(text: str) -> None:
             require("vivary-build-tools" not in step,
                     f"{name} reaches the provisioned tools outside the reviewed client, pack and publish steps")
             run = re.split(r"(?m)^\s*(?:-\s+)?run:", step, maxsplit=1)
-            require(len(run) == 1 or not PACKAGE_MANAGER.search(run[1]),
+            require(len(run) == 1 or not (PACKAGE_MANAGER.search(run[1]) or NPM_ENTRY.search(run[1])),
                     f"{name} must run npm only through the qualified client")
             # A step's shell runs its body, so a package manager named there runs too.
-            require(not any(PACKAGE_MANAGER.search(shell) for shell in re.findall(r"(?m)^\s*(?:-\s+)?shell:(.*)$", step)),
+            require(not any(PACKAGE_MANAGER.search(shell) or NPM_ENTRY.search(shell)
+                            for shell in re.findall(r"(?m)^\s*(?:-\s+)?shell:(.*)$", step)),
                     f"{name} must run npm only through the qualified client")
     require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
 
