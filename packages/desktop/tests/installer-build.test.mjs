@@ -274,6 +274,7 @@ test("the installer commit must hold every committed installer source", () => wi
     "packages/desktop/build-installer.mjs": "// build\n",
     "packages/desktop/release-version.mjs": "// version\n",
     "packages/workbench/bin/runtime-security.mjs": "// policy\n",
+    "packages/desktop/package.json": "{}\n",
     "packages/desktop/assets/vivary.ico": "icon\n",
     "LICENSE": "license\n",
     "README.md": "readme\n",

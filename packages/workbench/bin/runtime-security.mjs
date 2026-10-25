@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants, createReadStream, realpathSync } from "node:fs";
+import { constants, createReadStream, readFileSync, realpathSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdtemp, readFile, realpath, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -126,17 +126,43 @@ export async function validateStagedNode(executable, target) {
   return facts;
 }
 
-export function assertElectronPublication() {
-  refuse("Electron publication is held. 44.3.0 is affected, and 44.9.3 embeds Node 24.22.0 with incomplete advisory backport evidence. No Electron release is admitted.");
+// Electron releases admitted for packaging, each with the Node version that DEPS pins at its tag
+// and with no patches/node file touching the October fix files. Empty until a stable release
+// bundles Node 24.22.1 or later: 45.0.0 and 44.9.3 bundle 24.22.0.
+export const ADMITTED_ELECTRON = Object.freeze({});
+
+function pinnedElectron() {
+  try {
+    return JSON.parse(readFileSync(path.join(repository, "packages/desktop/package.json"), "utf8")).devDependencies.electron;
+  } catch {
+    refuse("Electron publication is held. The pinned Electron version in packages/desktop/package.json cannot be read.");
+  }
 }
 
-export async function assertDesktopPayload(payload) {
+export function assertElectronPublication(version = pinnedElectron(), admitted = ADMITTED_ELECTRON) {
+  if (!Object.hasOwn(admitted, version)) {
+    refuse(Object.keys(admitted).length === 0
+      ? `Electron publication is held. Electron ${version} is not admitted, because no stable Electron release with Node 24.22.1 or later is qualified yet. No Electron release is admitted.`
+      : `Electron publication is held. Electron ${version} is not admitted. Admitted: ${Object.keys(admitted).join(", ")}.`);
+  }
+  assertNodeVersion(admitted[version]);
+  return { electron: version, node: admitted[version] };
+}
+
+export async function assertDesktopPayload(payload, admitted = ADMITTED_ELECTRON) {
   const build = JSON.parse(await readFile(path.join(payload, "resources/workbench/build.json"), "utf8"));
   const executable = path.join(payload, "resources/node", build.platform === "win32" ? "node.exe" : "node");
   const facts = await validateStagedNode(executable, { platform: build.platform, arch: build.architecture, nodeVersion: build.node });
   if (!build.runtimeSecurity?.standalone || build.runtimeSecurity.standalone.sha256 !== facts.sha256
     || build.runtimeSecurity.standalone.versions?.node !== facts.versions.node) refuse("payload runtime evidence is missing or changed.");
-  assertElectronPublication();
+  // The payload names its Electron in build.json and in the version file Electron ships beside its
+  // executable. Both must name the pinned release, so an older or foreign payload cannot pass.
+  const pinned = pinnedElectron();
+  const shipped = await readFile(path.join(payload, "version"), "utf8").then(text => text.trim(), () => null);
+  if (typeof build.electron !== "string" || build.electron !== shipped || build.electron !== pinned) {
+    refuse(`Electron publication is held. The payload's Electron (build.json ${build.electron ?? "missing"}, version file ${shipped ?? "missing"}) is not the pinned ${pinned}.`);
+  }
+  assertElectronPublication(build.electron, admitted);
 }
 
 function checkedChild(script, args, archive, cwd) {

@@ -19,7 +19,7 @@ const iconFile = path.join(root, "assets", "vivary.ico");
 const installerSources = [
   "packages/desktop/installer", "packages/desktop/build-installer.mjs",
   "packages/desktop/release-version.mjs", "packages/desktop/assets/vivary.ico", "LICENSE",
-  "packages/workbench/bin/runtime-security.mjs",
+  "packages/workbench/bin/runtime-security.mjs", "packages/desktop/package.json",
 ];
 const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<version>.exe> --manifest <package-file-manifest.json>";
 // Windows reserves these device names in any path part, with or without an extension.
