@@ -38,6 +38,51 @@ remaining acceptance gaps visible. Do not reuse stable-release claims.
    and Latest disabled. Do not change repository visibility or publish registry packages.
 6. Verify the public release, tag target, asset sizes and digests, and download links.
 
+### Desktop release build
+
+The `desktop release` workflow (`.github/workflows/desktop-release.yml`) builds
+the Windows release once, on a Windows runner, from one commit. Each job starts with
+the runner action Node admission from `ci.yml`. The build job then takes `ci.yml`'s
+Windows Python 3.12.15 provisioning and admission, Node 24.22.1 with its security
+admission, and the isolated npm and pnpm 10.34.7 from `scripts/bootstrap_build_tools.py`.
+It runs on Windows because the packaged Windows Node must give native evidence. It
+unpacks NSIS 3.13 from the official zip only after its SHA-256 matches the pin, and
+writes the ZIPs with `packages/desktop/zip-writer.mjs`, so no `zip` program is needed. It
+installs the locked Workbench and desktop dependencies without install scripts, runs
+`package.mjs --windows-x64 --build-workbench`, builds the per-user installer, and
+runs `packages/desktop/release-assets.mjs`. That script refuses a payload whose
+`build.json` is not a clean, verified source build of the checked-out commit at the
+desktop version and its channel, or whose installer receipt names another commit.
+It also refuses profile and credential file names. That is a name check, not a
+content scan. The run keeps these files:
+
+- `Vivary-<version>-windows-x64.zip` and its `.sha256`
+- `Vivary-Setup-<version>.exe`, its `.sha256`, and its `.receipt.json`
+- `Vivary-<version>-licenses.zip`: the Vivary license and every license and notice
+  file in the payload, including those the original runtime manifest lists
+- `BUILD-INFO.json`, a copy of the payload's `build.json`
+- `RUNTIME-INVENTORY.json`: Electron, Node, Python, the original runtime
+  components, and every Workbench server package with its version
+- `SHA256SUMS` for all of the above
+
+A manual run (`workflow_dispatch`) or a push to a branch named
+`release-dry-run/<name>` is a dry run. It keeps the files as a workflow artifact
+and creates no tag or release. GitHub starts a manual run only for a workflow on
+the default branch, so until this workflow is on `main`, push a dry-run branch
+instead. A pushed `v<version>` tag that matches
+`packages/desktop/package.json`, such as `v0.1.0-beta.1`, also creates a draft
+prerelease with Latest off and attaches the same files. Only the owner pushes the
+tag and publishes the draft. `scripts/check_ci_workflow.py` checks the admission
+step and the pinned Actions. `scripts/check_desktop_release_workflow.py` checks that
+the toolchain steps match `ci.yml` and that every Node pin matches the Node the
+Windows package bundles. It also checks the triggers, the permissions, and the
+draft-only release. The build's SHA256SUMS check and the draft job's
+`sha256sum --check --strict` must each match their reviewed step exactly, so a
+disabled check fails the guard.
+
+While Electron publication is held, `package.mjs` refuses before it stages anything.
+A run then stops at the package step and keeps no release files.
+
 The [Windows preview guide](desktop-preview.md) owns installation and preservation
 instructions. Public assets must exclude private handoffs, profiles, credentials,
 transcripts, and screenshots containing private user material.

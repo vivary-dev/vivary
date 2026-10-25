@@ -89,8 +89,17 @@ Packaging captures the recorded Git commit and tracked working-tree changes
 before downloads and wheel construction. Stage new source files with `git add`
 first; untracked files are excluded. Later checkout edits cannot change the
 captured inputs. `build.json` records whether that snapshot matches the commit.
-The existing Workbench `.output` is copied once and labeled `prebuilt`; its
-compilation from the recorded commit is not asserted.
+By default the existing Workbench `.output` is copied once and labeled
+`prebuilt`, with `sourceCommitVerified: false`, because nothing ties it to the
+recorded commit. With `--build-workbench`, the packager deletes `.output`, runs
+`pnpm --dir packages/workbench run build` itself, and labels the output
+`built-from-source`. It refuses to start the build unless the checkout has no
+tracked or untracked changes, and refuses to package if the build changed the
+checkout or HEAD moved. Only then, with a snapshot that matches the commit, does
+`build.json` record `sourceCommitVerified: true`. Ignored files, such as
+installed dependencies, are outside this check. The option runs `pnpm` from
+`PATH`, through `pnpm.cmd` and a shell on Windows. The release workflow uses it on
+`windows-latest`.
 
 Set `VIVARY_DESKTOP_NODE` to the absolute path of ordinary Node, then run:
 
@@ -120,6 +129,19 @@ The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
 Vivary runtime, licenses, and build metadata. It does not copy a source
 checkout, runtime data, credentials, or the development preview service.
+
+The `desktop release` workflow builds the release files in CI. The
+[release workflow](../../docs/RELEASE-WORKFLOW.md#desktop-release-build) lists
+them.
+
+The version in `package.json` sets the release channel in `build.json`.
+`release-version.mjs` accepts `major.minor.patch`, on the `stable` channel, and
+`major.minor.patch-beta.N`, on the `beta` channel, and refuses any other form.
+The current version is `0.1.0-beta.1`. Windows file properties need four
+numbers, so the packager and the installer write the beta number as the fourth:
+`0.1.0-beta.1` reads `0.1.0.1` there, and `0.1.0` would read `0.1.0.0`. Windows
+therefore orders a beta above the release it precedes. The readable product
+version keeps the full string.
 
 ### Bundled original runtime
 
@@ -314,7 +336,7 @@ set `NSISDIR` to its data folder (the one holding `Include`, `Plugins`, and `Stu
 
 ```console
 npm --prefix packages/desktop run package -- --windows-x64
-npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
+npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<version>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
 While Electron publication is held, both commands refuse: the packager before it
@@ -340,9 +362,9 @@ longest file and folder paths, and the script passes their lengths to setup as
 `--manifest` is required. The script checks every payload
 file's relative path and SHA-256 against the package's file manifest and refuses
 missing, extra, or changed files. It refuses uncommitted changes to `installer/`,
-`build-installer.mjs`, `assets/vivary.ico`, `packages/workbench/bin/runtime-security.mjs`,
-`package.json` (its Electron pin decides which payload is admitted) and the repository
-`LICENSE`, so the
+`build-installer.mjs`, `release-version.mjs`, `assets/vivary.ico`,
+`packages/workbench/bin/runtime-security.mjs`, `package.json` (its Electron pin decides
+which payload is admitted) and the repository `LICENSE`, so the
 installer commit it records holds every source file the build used. It also refuses
 an existing installer, `.sha256`, or `.receipt.json` at the output path.
 

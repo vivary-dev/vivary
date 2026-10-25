@@ -6,7 +6,8 @@ from pathlib import Path
 WORKFLOW = Path(".github/workflows/ci.yml")
 REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 AUXILIARY_WORKFLOWS = ((Path(".github/workflows/steward.yml"), ("daily-health-check",)),
-                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)))
+                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)),
+                       (Path(".github/workflows/desktop-release.yml"), ("build", "draft")))
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -215,6 +216,8 @@ ACTION_MANIFESTS = {
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9": {"using": "node24", "main": "dist/upload/index.js"},
+    # v8.0.2 action.yml, read at this SHA on 2026-10-24: node24, dist/index.js, no pre or post.
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333": {"using": "node24", "main": "dist/index.js"},
 }
 
 
@@ -246,7 +249,7 @@ CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
 
 def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, auxiliary=False) -> None:
     if auxiliary:
-        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",)),
+        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",), ("build", "draft")),
                 "auxiliary bootstrap requires an exact owned job inventory")
     jobs = text.split("\njobs:\n", 1)[-1]
     headers = re.findall(r"(?m)^  ([\w-]+):\s*$", jobs)
@@ -455,9 +458,9 @@ WINDOWS_PYTHON_PROVISIONING_STEP = (
 )
 
 
-def python_admission_prefix(name, inline=False):
+def python_admission_prefix(name, inline=False, windows=("governed-platform-proof",)):
     guard = python_runtime_step(inline)
-    if name == "governed-platform-proof":
+    if name in windows:
         return [WINDOWS_PYTHON_PROVISIONING_STEP, guard]
     if name == "orientation-proof":
         def when(step, condition):
@@ -513,16 +516,18 @@ def python_runtime_step(inline=False) -> str:
             + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
 
 
-def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
+def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False, windows=("governed-platform-proof",)) -> None:
+    """`windows` names the jobs that run on a Windows host, which provision Python with the Windows script and no
+    setup-python step."""
     for name in names:
         steps = re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]
         setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
-        require(len(setups) == (0 if name == "governed-platform-proof" else 1)
+        require(len(setups) == (0 if name in windows else 1)
                 and len(guards) == 1, contract)
         guard = guards[0]
-        prefix = python_admission_prefix(name, inline)
+        prefix = python_admission_prefix(name, inline, windows)
         first = guard - len(prefix) + 1
         require(first >= 0 and [step.rstrip("\n") for step in steps[first:guard + 1]]
                 == [step.rstrip("\n") for step in prefix], contract)

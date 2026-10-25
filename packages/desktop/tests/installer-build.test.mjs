@@ -44,7 +44,7 @@ async function writePayload(directory, build = {}) {
   await writeFile(path.join(directory, "resources", "LICENSE"), "fixture license\n");
   await writeFile(path.join(directory, "resources", "workbench", ".output", "server", "index.mjs"), "export {};\n");
   await writeFile(path.join(directory, "resources", "workbench", "build.json"), JSON.stringify({
-    product: "Vivary", platform: "win32", architecture: "x64", version: "0.0.0",
+    product: "Vivary", platform: "win32", architecture: "x64", version: "0.1.0-beta.1",
     sourceCommit: commit, sourceDirty: false, ...build,
   }));
 }
@@ -82,7 +82,8 @@ const fixtureFiles = [
 
 test("valid payload yields its files, folders, version, commit and manifest", () => withFixture(async ({ payload, output, manifest }) => {
   const inputs = await resolveInstallerInputs({ payload, output, manifest });
-  assert.equal(inputs.version, "0.0.0");
+  assert.equal(inputs.version, "0.1.0-beta.1");
+  assert.equal(inputs.windowsVersion, "0.1.0.1");
   assert.equal(inputs.payloadCommit, commit);
   assert.equal(inputs.payloadCommitShort, "2aaf04f");
   assert.deepEqual(inputs.files, fixtureFiles);
@@ -234,7 +235,11 @@ test("payload must be a clean Vivary Windows package", async t => {
     ["short commit", { sourceCommit: "2aaf04f" }, /full source commit/],
     ["other platform", { platform: "linux" }, /not a Vivary Windows x64 package/],
     ["other product", { product: "Other" }, /not a Vivary Windows x64 package/],
-    ["bad version", { version: "0.0.0+2aaf04f" }, /major\.minor\.patch/],
+    ["build metadata in the version", { version: "0.0.0+2aaf04f" }, /major\.minor\.patch/],
+    ["release candidate", { version: "0.1.0-rc.1" }, /major\.minor\.patch or major\.minor\.patch-beta\.N/],
+    ["beta without a number", { version: "0.1.0-beta" }, /major\.minor\.patch/],
+    ["part too large for Windows", { version: "0.65536.0" }, /major\.minor\.patch/],
+    ["missing version", { version: undefined }, /major\.minor\.patch/],
   ];
   for (const [name, build, expected] of cases) {
     await t.test(name, () => withFixture(async ({ payload, output, manifest }) => {
@@ -267,6 +272,7 @@ test("the installer commit must hold every committed installer source", () => wi
   const sources = {
     "packages/desktop/installer/vivary.nsi": "; script\n",
     "packages/desktop/build-installer.mjs": "// build\n",
+    "packages/desktop/release-version.mjs": "// version\n",
     "packages/workbench/bin/runtime-security.mjs": "// policy\n",
     "packages/desktop/package.json": "{}\n",
     "packages/desktop/assets/vivary.ico": "icon\n",
@@ -424,7 +430,7 @@ test("makensis builds an installer and receipt from a fixture payload", { skip: 
     const receipt = JSON.parse(await readFile(`${output}.receipt.json`, "utf8"));
     assert.deepEqual({ ...receipt, makensisVersion: undefined }, {
       installer: path.basename(output), bytes: built.size, sha256: built.sha256,
-      version: "0.0.0", displayVersion: "0.0.0+2aaf04f", payloadCommit: commit, installerCommit,
+      version: "0.1.0-beta.1", displayVersion: "0.1.0-beta.1+2aaf04f", payloadCommit: commit, installerCommit,
       makensisVersion: undefined, payloadFiles: 6, payloadFolders: 4, payloadBytes: inputs.totalBytes,
       longestPayloadFile: { path: "resources\\workbench\\.output\\server\\index.mjs", length: 44, limit: 179 },
       longestPayloadFolder: { path: "resources\\workbench\\.output\\server", length: 34, limit: 167 },
@@ -432,7 +438,7 @@ test("makensis builds an installer and receipt from a fixture payload", { skip: 
     });
     assert.match(receipt.makensisVersion, /^v3\./);
     // The version resource holds these strings, so the metadata defines arrived.
-    for (const text of ["0.0.0+2aaf04f", "Vivary Setup", commit, installerCommit]) {
+    for (const text of ["0.1.0-beta.1+2aaf04f", "Vivary Setup", commit, installerCommit]) {
       assert.ok(bytes.includes(Buffer.from(text, "utf16le")), text);
     }
   }));

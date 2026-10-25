@@ -68,6 +68,7 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     await mkdir(path.join(workbench, ".output/server"), { recursive: true });
     const entry = path.join(desktop, "package.mjs");
     await copyFile(fileURLToPath(new URL("../package.mjs", import.meta.url)), entry);
+    await copyFile(fileURLToPath(new URL("../release-version.mjs", import.meta.url)), path.join(desktop, "release-version.mjs"));
     await copyFile(fileURLToPath(new URL("../../workbench/bin/runtime-security.mjs", import.meta.url)), path.join(workbench, "bin/runtime-security.mjs"));
     await writeFile(path.join(workbench, ".output/server/index.mjs"), "export {};\n");
     const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;

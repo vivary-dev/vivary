@@ -744,6 +744,51 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
+pins the build's release-file step and the draft job's attach step as exact reviewed text,
+`RELEASE_FILES_STEP` and `ATTACH_STEP`. Before, substring tests passed a
+`sha256sum --check --strict SHA256SUMS || true` or a SHA256SUMS check left only in a comment.
+`tests/preview-profile-upgrade.test.mjs` now seeds a file database with Core's real runner
+and the preview's four migrations, as the 2026-09-22 preview wrote it. Then it runs the
+startup `migrateRegistry` from `server/db/migrations.mjs`. A renamed history table now fails
+the test, where the earlier hand-written runner missed it. The desktop README says
+`--build-workbench` runs `pnpm.cmd` through a shell on Windows, as the release workflow does.
+A later round on `70edda50` adds a `zip-writer.test.mjs` case that fails on a read after
+the archive opens, so the partial-archive cleanup is tested. No runtime behavior changes, so
+the descriptions above hold.
+
+2026-10-25 The release build runs on Windows (Stack A, #291 review, owner option A). On
+Ubuntu, `package.mjs --windows-x64` could not finish, because `validateStagedNode` needs native
+evidence from the packaged Windows Node. The `desktop release` build job now runs on
+`windows-latest`, with `ci.yml`'s Windows Python provisioning and its Windows build tool,
+dependency admission and install steps. It downloads the official NSIS 3.13 zip with `curl.exe`,
+which follows SourceForge's mirror redirect, checks its
+SHA-256 against the pin before unpacking it, and sets `MAKENSIS` and `NSISDIR` to that copy.
+It checks every release file against `SHA256SUMS` in PowerShell. `package.mjs` starts pnpm
+through `pnpm.cmd` and a shell on Windows. `check_ci_workflow.py`'s `check_python_runtime` takes
+the Windows job names, and `check_desktop_release_workflow.py` pins the Windows host, the NSIS
+version and hash, and the new steps. The release file set and the draft job are unchanged.
+
+2026-10-25 In-repo ZIP writer for the release files (Stack A, #291 review). The release
+build no longer needs a `zip` program. `packages/desktop/zip-writer.mjs` writes what `zip -q
+-r -X` wrote, using Node's own zlib deflate and CRC-32: one folder, sorted entries with folder
+entries, UTF-8 names and no extra fields. It streams files over 1 MiB, uses ZIP64 end records
+above 65,534 entries, refuses symbolic links, folder names that leave the parent and an
+existing output, and removes a partial archive. `release-assets.mjs` uses it, and its tests no
+longer skip when `zip` is missing. The tests read every archive back, check it with Python's
+`zipfile`, and cover deterministic bytes and the ZIP64 path. The release file set is unchanged.
+
+2026-10-25 Stack A review fixes (#291). `package.mjs --build-workbench` deletes the old
+Workbench output only after the clean-checkout check passes, so a refused build keeps it.
+`release-assets.mjs` writes BUILD-INFO.json with `COPYFILE_EXCL`, so every release file now
+refuses an overwrite. `scripts/check_desktop_release_workflow.py` pins the release-tag check as
+a whole step, its `if:` condition included, and requires the draft job to check the downloaded
+files before it creates the release. The preview-profile upgrade test applies
+migrations through `REGISTRY_MIGRATIONS_TABLE` and pins it to the preview's
+`vivary_workbench_registry_migrations`. The installer usage, the install guide and the desktop
+README name the installer and the portable ZIP by version, as the release workflow writes them.
+The packaging description above still holds.
+
 2026-10-25 Site selector parser on the 7.1 line. The site's `@expressive-code/core`
 moves from 0.44.0 to 0.44.3, which takes `postcss-nested` 7.0.2 and
 `postcss-selector-parser` 7.1.7. The `postcss-nested@6.2.0` override that held the parser
@@ -1031,6 +1076,93 @@ terminal history still keeps its reconciliation marker until a sweep finishes
 its bookkeeping, so the descriptions hold. Five cases in
 `tests/automation-approval-settlement.test.mjs` failed on the previous patch and
 pass on this one. The other #205 findings remain open.
+
+2026-10-24 Upgrade from the preview profile. The 2026-09-22 preview (source
+`98846706`) was a portable ZIP, so installing this release over it is a first
+install for setup, and the installer script is unchanged. Setup and the uninstaller
+already never name the profile folders, and `installer-script.test.mjs` covers
+upgrade file handling and kept user files. What carries the user's data across is
+the profile: the preview and this release use the same data folder, the same
+`auth.sqlite` and `auth-secret`, and the same `@agent-native/core` 0.176.5. The
+Vivary registry migrations move to `server/db/registry-migrations.mjs`, a list with
+no imports, and `server/db/migrations.mjs` still runs them through core's runner.
+`bin/start.mjs` names its profile files as `PROFILE_DATABASE` and
+`PROFILE_AUTH_SECRET` and exports `authSecret`. The new
+`tests/preview-profile-upgrade.test.mjs`, in the CI list beside `startup.test.mjs`,
+fails when a migration the preview ran changes (it compares the SHA-256 of each),
+when a later migration loses a row from a populated preview-era registry, applied
+with `node:sqlite`, or when the profile's folder, file names or kept secret change.
+The core tables are not tested here: core is the same version, and the core patch
+adds only `automation_runs` columns, whose older rows the automation approval tests
+already cover. The Code and Native draft records are newer than the preview, so they
+have nothing to migrate. The install guide now covers moving from the portable
+prerelease to the installer. Runtime behavior is unchanged, so the descriptions
+above still hold. Windows acceptance on a real preview profile waits for a release
+artifact, which the Electron publication hold blocks.
+
+2026-10-24 Desktop release build workflow. The new `desktop release` workflow builds
+the Windows release once on an Ubuntu runner from the checked-out commit: the
+package with `--windows-x64 --build-workbench`, then the installer, then the new
+`packages/desktop/release-assets.mjs`. That script refuses a payload unless
+`build.json` records the commit, the desktop version and its channel, a clean
+source and `sourceCommitVerified: true`, and unless the installer receipt names the
+same commit and version. It refuses profile and credential file names. It writes the
+portable ZIP and its `.sha256`, a licenses ZIP, `BUILD-INFO.json`,
+`RUNTIME-INVENTORY.json` and `SHA256SUMS`. A manual run, or a push to a
+`release-dry-run/` branch, keeps them as a workflow artifact only. GitHub starts a
+manual run only for a workflow on the default branch, so the branch push is the dry
+run until this workflow reaches `main`. A pushed `v*.*.*-beta.*` tag that names the
+desktop version also creates a draft prerelease with Latest off, in the only job
+with `contents: write`. Both jobs start with the runner action Node admission from
+`ci.yml`. The build job then uses `ci.yml`'s steps: Python 3.12.15 provisioning and
+admission, setup-node v7.1.0 with Node 24.22.1 followed by the Node security
+admission, `bootstrap_build_tools.py` and `build_go_tools.py` for the isolated npm,
+pnpm 10.34.7 and compilers, the Workbench dependency admission, and locked installs
+with `--ignore-scripts` for Workbench and the desktop. No global package client is
+installed. `scripts/check_ci_workflow.py` lists the workflow beside the other
+auxiliary workflows, so it checks the admission step, each pinned Action and the
+setup-node pin. Its action table gains `download-artifact` v8.0.2, read from that
+Action's `action.yml` at the pinned SHA. `scripts/check_desktop_release_workflow.py`
+takes the Python, Node and build tool steps from `check_ci_workflow.py` instead of
+restating them, and fails when `ci.yml`, `bootstrap_build_tools.py`,
+`windows-target.mjs` and this workflow name different Node versions. It also guards
+the triggers, permissions and draft-only release, and `tests + checks` runs it with
+its test. While Electron publication is held, `package.mjs` refuses before it stages
+anything, so a run on this base stops at the package step and keeps no release
+files. The desktop runtime, packaged layout, installer and user data are unchanged,
+so the desktop descriptions above still hold. The release build is a delivery step
+around the same package. `tests/release-assets.test.mjs` joins the desktop Node test
+list. It checks each refusal, the license selection, the inventory, the checksum
+format, and, where `zip` is installed, the full set of release files and their
+archive contents.
+
+2026-10-24 Desktop beta version and channel. `packages/desktop/package.json` moves
+from `0.0.0` to `0.1.0-beta.1`. The new `release-version.mjs` maps a version to its
+channel (`beta` for `major.minor.patch-beta.N`, `stable` for `major.minor.patch`)
+and to the four-number version that Windows file properties need, and refuses any
+other form. `package.mjs` writes that channel into `build.json` in place of the fixed
+`private-preview`, keeps the `runtimeSecurity` record of the staged Node, and passes the four-number
+form to Electron Packager as
+`buildVersion`. Before, the packager split `0.1.0-beta.1` on dots and parsed
+`0-beta` as `0` by accident. `build-installer.mjs` accepts the beta form, passes
+`APP_WINDOWS_VERSION` to `installer/vivary.nsi` for `VIProductVersion` and
+`VIFileVersion`, which reject a suffix, and counts `release-version.mjs` among the
+installer sources. A new `--build-workbench` option makes `package.mjs` run the
+Workbench build itself, in a checkout with no tracked or untracked changes, and
+refuse to package when the build changed the checkout or HEAD moved. Only that path
+labels the output `built-from-source` and records `sourceCommitVerified: true`.
+The default path still copies a `prebuilt` output with `false`. The process
+boundaries, packaged layout, installer behavior and user data are unchanged, so the
+desktop descriptions above still hold. `tests/package-metadata.test.mjs`, added to
+the desktop Node test list in CI, checks the shipped version and channel, the
+version rules, the full `build.json` record for a verified build, that a prebuilt,
+mismatched or dirty output never counts as verified, and each refusal of the source
+build against a Git fixture. The installer tests cover the beta version and the new
+define. The admission test that copies `package.mjs` alone now copies
+`release-version.mjs` with it. On Linveo, 139 desktop tests pass and the `makensis`
+fixture build skips.
+The original-runtime launcher test fails there before and after this change,
+because that host's Python has no `pip`.
 
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the
