@@ -291,6 +291,9 @@ def check_job_inventory(text: str, contract) -> None:
     for name, header in (("verify", VERIFY_HEADER), ("publish", PUBLISH_HEADER)):
         require(contract.job_block(text, name).split("    steps:\n", 1)[0] == header,
                 f"the {name} job header must be exactly the reviewed text")
+        # YAML also takes a bare `-` with an indented step, which the step split below would drop with the header.
+        require(re.split(r"(?m)(?=^      - )", contract.job_block(text, name))[0] == header + "    steps:\n",
+                f"the {name} job must have nothing between its steps: line and its first reviewed step")
     shared = [CHECKOUT_STEP, contract.PIP_SETUP_STEP, contract.PYTHON_PROVISIONING_STEP, contract.PYTHON_RUNTIME_STEP,
               SETUP_NODE_STEP, GUARD_STEP, CLIENT_STEP]
     expected = {

@@ -176,6 +176,10 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
         assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "defaults", message)
         message = check(text.replace(job, job[:header_end] + "    env:\n      npm_config_registry: https://example.test\n" + job[header_end:], 1))
         assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "env", message)
+        # #306 review round 9. A bare dash right after steps: is a step the step split would drop.
+        hidden_first = job.replace("    steps:\n", '    steps:\n      -\n        run: n=npm; "$n" publish\n', 1)
+        message = check(text.replace(job, hidden_first, 1))
+        assert message and f"the {name} job must have nothing between its steps: line and its first reviewed step" in message, (name, "bare dash", message)
         # A package manager in the step's shell runs the body too.
         start = job.index("        run: |\n", start)
         message = check(text.replace(job, job[:start] + "        shell: npx --yes bash-wrapper {0}\n" + job[start:], 1))
