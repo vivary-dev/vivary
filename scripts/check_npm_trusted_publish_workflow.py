@@ -59,10 +59,6 @@ DRY_RUN_STEP = (
     "        if: ${{ !inputs.publish }}\n"
     "        run: echo \"Dry run complete. Re-run with publish=true only after the npm publish gate is approved.\"\n"
 )
-# A package manager as a command word: after a line start, a space, a shell separator, a quote, a
-# substitution or a path separator, and before a space, a separator, a quote or the line end. So
-# `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
-# as npm={npm_version} or npm-candidate do not.
 # The name, the dispatch inputs and read-only permissions. No defaults or env.
 WORKFLOW_PREAMBLE = (
     'name: npm trusted publish\n'
@@ -170,6 +166,10 @@ RELEASE_CHECKS_STEP = (
 )
 # npm's own CLI entry, started through node, is npm too.
 NPM_ENTRY = re.compile(r"(?:npm|npx)-cli\.js|node_modules[/\\]npm[/\\]")
+# A package manager as a command word: after a line start, a space, a shell separator, a quote, a
+# substitution or a path separator, and before a space, a separator, a quote or the line end. So
+# `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
+# as npm={npm_version} or npm-candidate do not.
 PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"/\\])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
 
 
