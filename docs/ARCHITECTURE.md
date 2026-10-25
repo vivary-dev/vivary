@@ -747,16 +747,16 @@ No documentation route reads arbitrary host files.
 2026-10-25 Approval cleanup keeps asks that a run still claims (beta ticket 28).
 The maintained Core patch gains appended sections for
 `agent/tool-approval-store.js` and `jobs/background-automation-runner.js`. Its
-hash moves from `7cedcc33` to `70b09308`. Approval cleanup deleted decided asks
+hash moves from `7cedcc33` to `18b96430`. Approval cleanup deleted decided asks
 more than a day past expiry, even while a run that a crash left resuming still
 pointed at one. Stale-claim recovery then finished an owner's decline as
 interrupted, and an expiry claim stayed resuming forever, which kept its job
 from being deleted or moved. The cleanup now skips asks that an unfinished
-automation run names, and both recovery paths settle from the claim's kind when
-an older cleanup already deleted the ask. The approval store and the runner keep
+automation run names. Both recovery sweeps and the owner's decision path settle
+from the claim's kind when an older cleanup already deleted the ask. The approval store and the runner keep
 the roles described above, so the descriptions hold. J10 in `journeys.md` gains
 one sentence on the cleanup, and its diagram is unchanged, because no state or
-edge changes. `tests/automation-approval-stuck.test.mjs` adds five cases that
+edge changes. `tests/automation-approval-stuck.test.mjs` adds seven cases that
 failed on the previous patch and pass on this one.
 
 2026-10-24 Automated restart test for runs and approvals (beta ticket 07). This change adds a test and no server

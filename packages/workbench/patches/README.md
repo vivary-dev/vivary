@@ -3496,9 +3496,13 @@ so its run stayed `resuming` and its job could not be deleted or moved.
 - `expireApprovalWait` settles its own stale expiry claim as
   `automation_approval_expired` when the ask is gone. That claim never executes
   anything.
+- `decideAutomationApproval` applies the same rule to a stale claim. An owner's
+  Decline and Settings Delete reach it before the next sweep, so a missing ask
+  ends a decline claim as declined and an expiry claim as
+  `automation_approval_expired`. Only an approval claim still ends interrupted.
 
-`tests/automation-approval-stuck.test.mjs` adds five cases. Four cover the claim
-paths, and one checks the missing-table fallback with a stub executor. All five
+`tests/automation-approval-stuck.test.mjs` adds seven cases. Six cover the claim
+paths, and one checks the missing-table fallback with a stub executor. All seven
 failed against the previous patch and pass with this one.
 
 ## Command menu return focus

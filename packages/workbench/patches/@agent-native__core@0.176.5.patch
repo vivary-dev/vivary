@@ -19097,3 +19097,22 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              await finishAutomationRun(id, "declined", "The owner declined the pending action. It did not execute.",
                  "automation_approval_declined", { emitFinished: pending.options.emitFinished });
              await recordApprovalExecutionOutcome(pending, "declined");
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1489,7 +1489,14 @@
+         const neverStarted = nativeStatus === null && Date.now() - state.decisionAt > automationRunClaimLeaseMs();
+         if (!ended && !neverStarted)
+             throw approvalDecisionRefusal("An approval decision is already in progress.");
+-        if (ask?.status === "declined") {
++        // Vivary beta ticket 28: when cleanup before this patch deleted the ask,
++        // the claim's kind shows a decline or an expiry, and neither executes.
++        if (!ask && state.resumeRunId?.startsWith("automation-expire-")) {
++            await finishAutomationRun(input.historyId, "declined", "The approval request expired. The pending action did not execute.", "automation_approval_expired", { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "declined");
++            return { status: "declined", historyId: input.historyId };
++        }
++        if (ask?.status === "declined" || (!ask && state.resumeRunId?.startsWith("automation-decline-"))) {
+             await finishAutomationRun(input.historyId, "declined", "The owner declined the pending action. It did not execute.", "automation_approval_declined", { emitFinished: pending.options.emitFinished });
+             await recordApprovalExecutionOutcome(pending, "declined");
+             return { status: "declined", historyId: input.historyId };

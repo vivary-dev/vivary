@@ -244,6 +244,34 @@ test("an expiry claim whose ask an older cleanup deleted is settled as expired a
   assert.equal(configuredCalls(fixture), 0);
 });
 
+test("an owner's Decline on a decline claim whose ask an older cleanup deleted finishes it as declined", async () => {
+  const waiting = await waitingCase("deleted-decline-ask-decide");
+  const { fixture, result, pending } = waiting;
+  await crashedClaim(waiting, "automation-decline-deleted-decide");
+  assert.equal(await approvalStore.declineAgentToolApproval(pending), true);
+  await db().execute({ sql: "DELETE FROM agent_tool_approvals WHERE id = ?", args: [pending.askId] });
+  const declined = await fixture.decide(result.historyId, pending, "decline");
+  assert.equal(declined.status, "declined");
+  const run = await history.getAutomationRun(result.historyId);
+  assert.equal(run.status, "declined", "Settings Delete and the Decline button take this path before the next sweep");
+  assert.equal(run.errorCode, "automation_approval_declined");
+  assert.equal(configuredCalls(fixture), 0);
+});
+
+test("an owner's Decline on an expiry claim whose ask an older cleanup deleted settles it as expired", async () => {
+  const waiting = await waitingCase("deleted-expiry-ask-decide");
+  const { fixture, result, pending } = waiting;
+  await crashedExpiryClaim(waiting);
+  await db().execute({ sql: "DELETE FROM agent_tool_approvals WHERE id = ?", args: [pending.askId] });
+  const declined = await fixture.decide(result.historyId, pending, "decline");
+  assert.equal(declined.status, "declined");
+  const run = await history.getAutomationRun(result.historyId);
+  assert.equal(run.status, "declined", "an expiry claim never executes, so a missing ask settles it");
+  assert.equal(run.errorCode, "automation_approval_expired");
+  assert.equal(await history.hasUnresolvedAutomationApproval(owner, fixture.automation.resource.path), false, "the job is free again");
+  assert.equal(configuredCalls(fixture), 0);
+});
+
 test("cleanup in an app with no automation_runs table still removes old decided asks", async () => {
   const run = async failure => {
     const statements = [];
