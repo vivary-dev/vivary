@@ -722,6 +722,11 @@ test lists and Native patch remain intact. The [build-tool contract](https://git
 owns artifact pins, client isolation, and the remaining native verification.
 Standalone Node evidence does not admit Electron or authorize publication.
 
+A Dagger module (`dagger.json`, `.dagger/`) runs the Linux jobs of `ci.yml` from that
+file, locally or through the manual `dagger` workflow. Its container starts from a
+digest-pinned `python:3.12.15` image, and each job's own bootstrap steps then
+provision and admit the runtimes. It is not a required check.
+
 The unified workspace, project registration and selection, scoped Code and Native history, bounded files and search, reviewed project preview, bundled original CLI, and selected original operations have implemented and tested slices. The [acceptance register](product/multi-project/desktop-acceptance-status.md) states their candidate-specific evidence. A passing component or source check does not complete the desktop and browser release journey.
 
 Issue #19's five project read reports entered `dev` in PR #89. Its receipt records hosted fake-provider proof and the Windows packages, including the final `e6ccddf5` package, which passed the panel reads and the agent turn. PR #94 recorded that result, and the owner closed issue #19 on 2026-09-26. PR #90 added [route-question research](product/multi-project/research/tropo-find-route-questions.md) only. It did not change Tropo's public path refusal or MCP privacy rules.
@@ -743,6 +748,24 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-25 Dagger module for the Linux CI jobs. This change adds a Dagger module (`dagger.json` and
+`.dagger/`), the manual `dagger` workflow, and `dagger.yml` to the auxiliary workflows that
+`scripts/check_ci_workflow.py` checks. The module reads `.github/workflows/ci.yml` and runs the steps of
+each Linux job (`test`, `workbench`, `workbench-maintained`, `review`, `site`, and the Ubuntu leg of
+`orientation-proof`) in order, in one process per job, in a container laid out like the GitHub runner: user
+`runner`, the same `RUNNER_TEMP`, and the same `GITHUB_PATH` and `GITHUB_ENV` handling. Each job's own
+bootstrap steps provision and admit its runtimes, so the admission chain above is unchanged. The module
+skips only the runner action Node admission, which guards the Node that runs GitHub's JavaScript actions,
+because none run in the container. A `coverage` check fails when `ci.yml` gains a Linux job with no Dagger
+check. The `dagger` workflow starts with the canonical runner bootstrap step, pins the Dagger CLI v0.21.11
+archive by SHA256, runs one check at a time, and runs only on manual dispatch. It is not a required check.
+The CI jobs, the required checks, and branch protection are unchanged, so the delivery description holds
+with the paragraph this change adds. Evidence: the contract refuses `dagger.yml` with a drifted bootstrap
+hash and with a tag-pinned checkout, `scripts/tests/test_ci_workflow.py` passes 62 of 62, and on Linveo at
+`3b64188e` the `test`, `workbench`, `review`, `site`, and `orientation-proof` checks passed from an empty
+cache. `workbench-maintained` failed there because one `handoff.test.ts` case passed its 120 second limit.
+That case takes 56 seconds on a GitHub runner, and Linveo runs these jobs 1.7 to 2.9 times slower.
 
 2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
 it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its

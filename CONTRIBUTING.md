@@ -267,3 +267,14 @@ python packages/tropo/tropo.py check --root packages/tropo/examples/vault
 python scripts/check_line_endings.py
 git diff --check
 ```
+
+To run one Linux CI job the way GitHub runs it, use the Dagger module from a plain
+clone. A linked worktree's `.git` is a file that names a directory outside the
+container, so the module refuses it.
+
+```bash
+dagger check site
+```
+
+`dagger check --list` lists the checks. On Linveo they run 1.7 to 2.9 times slower
+than on a GitHub runner, so use them to reproduce one job, not in place of CI.

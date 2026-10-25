@@ -6,7 +6,8 @@ from pathlib import Path
 WORKFLOW = Path(".github/workflows/ci.yml")
 REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 AUXILIARY_WORKFLOWS = ((Path(".github/workflows/steward.yml"), ("daily-health-check",)),
-                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)))
+                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)),
+                       (Path(".github/workflows/dagger.yml"), ("dagger-checks",)))
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -246,7 +247,7 @@ CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
 
 def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, auxiliary=False) -> None:
     if auxiliary:
-        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",)),
+        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",), ("dagger-checks",)),
                 "auxiliary bootstrap requires an exact owned job inventory")
     jobs = text.split("\njobs:\n", 1)[-1]
     headers = re.findall(r"(?m)^  ([\w-]+):\s*$", jobs)
