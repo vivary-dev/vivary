@@ -156,6 +156,10 @@ Every PR should include:
 - verification: local commands run and CI expectations
 - docs impact: docs, README, package READMEs, generated site sync, or "none"
 - release/package impact: versions, package metadata, install commands, or "none"
+- size: the diff in bytes and the changed hand-written lines, against the size rule below
+
+Merges happen only after the written plan matches the delivered change, the
+applicable CI or explicitly approved alternative gate passes, and review is complete.
 
 ### Size
 
@@ -171,9 +175,6 @@ chunked reviews of 25 to 50 minutes a round, and those rounds stopped repeatedly
 - Put large generated or vendored changes in their own PR, landed first.
 - Cover one issue or one slice. Split before you open the PR, never after its
   review starts.
-
-Merges happen only after the written plan matches the delivered change, the
-applicable CI or explicitly approved alternative gate passes, and review is complete.
 
 ## High-level design gate
 
