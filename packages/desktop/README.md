@@ -332,7 +332,7 @@ set `NSISDIR` to its data folder (the one holding `Include`, `Plugins`, and `Stu
 
 ```console
 npm --prefix packages/desktop run package -- --windows-x64
-npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<commit>.exe --manifest <dist>/<time>/package-file-manifest.json
+npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<version>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
 While Electron publication is held, both commands refuse: the packager before it

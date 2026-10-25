@@ -754,8 +754,9 @@ Workbench output only after the clean-checkout check passes, so a refused build 
 refuses an overwrite. `scripts/check_desktop_release_workflow.py` pins the release-tag check as
 a whole step, its `if:` condition included. The preview-profile upgrade test applies
 migrations through `REGISTRY_MIGRATIONS_TABLE` and pins it to the preview's
-`vivary_workbench_registry_migrations`. The installer usage names the file by version. The
-packaging description above still holds.
+`vivary_workbench_registry_migrations`. The installer usage, the install guide and the desktop
+README name the installer and the portable ZIP by version, as the release workflow writes them.
+The packaging description above still holds.
 
 2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
 it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its

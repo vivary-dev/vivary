@@ -1,7 +1,7 @@
 # Install the Windows prerelease
 
 This guide covers the unsigned Windows x64 desktop release of Vivary. This release
-adds a per-user installer, `Vivary-Setup-<commit>.exe`, as the main download and
+adds a per-user installer, `Vivary-Setup-<version>.exe`, as the main download and
 keeps the portable ZIP as an option.
 
 Installer acceptance is pending. The installer steps below describe how setup is
@@ -18,8 +18,8 @@ public. The complete desktop and self-hosted web acceptance journey remains unfi
 
 A release's Assets list holds the desktop downloads. Choose one:
 
-- `Vivary-Setup-<commit>.exe` is the installer. Use it unless you need a portable copy.
-- `Vivary-windows-x64-<commit>.zip` is the optional portable ZIP.
+- `Vivary-Setup-<version>.exe` is the installer. Use it unless you need a portable copy.
+- `Vivary-<version>-windows-x64.zip` is the optional portable ZIP.
 
 Each download has a `.sha256` companion. Download both files. The automatic Source
 code archives hold the source only. They do not contain a ready-to-run desktop
@@ -29,7 +29,7 @@ In PowerShell, from the download folder, compare the file with its companion.
 Replace the file name with the one you downloaded:
 
 ```powershell
-$file = '.\Vivary-Setup-<commit>.exe'
+$file = '.\Vivary-Setup-<version>.exe'
 $expected = (Get-Content "$file.sha256").Split(' ')[0].Trim()
 $actual = (Get-FileHash $file -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw 'Vivary download checksum mismatch' }
@@ -52,7 +52,7 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
 
 ### With the installer (acceptance pending)
 
-1. Run `Vivary-Setup-<commit>.exe` after its checksum matches. The installer is
+1. Run `Vivary-Setup-<version>.exe` after its checksum matches. The installer is
    not code signed, so Windows can show **Windows protected your PC** with an
    unknown publisher. Choose **More info**, then **Run anyway**.
 2. Setup needs 64-bit Windows and no administrator rights. It installs Vivary for
@@ -63,7 +63,7 @@ gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --patter
    shortcut** if you want one. Then choose **Finish**.
 5. Open Vivary later from **Vivary** in the Start menu.
 
-To install without any window, run `Vivary-Setup-<commit>.exe /S`. A silent
+To install without any window, run `Vivary-Setup-<version>.exe /S`. A silent
 install does not start Vivary or create a desktop shortcut.
 
 ### With the portable ZIP (optional)
@@ -124,7 +124,7 @@ Use disposable projects for preview testing.
 1. Finish or stop active work, then close Vivary normally.
 2. Copy `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary` to a private backup location.
 3. Back up registered external project folders separately if you need a complete recovery copy.
-4. Verify the new download. With the installer, run the new `Vivary-Setup-<commit>.exe`.
+4. Verify the new download. With the installer, run the new `Vivary-Setup-<version>.exe`.
    It removes the files the previous setup installed in
    `%LOCALAPPDATA%\Programs\Vivary`, then copies the new ones. Your data and any
    files you added to that folder stay. If Vivary is still running, setup asks you
@@ -518,7 +518,7 @@ To build the installer from source, run
 `Vivary-win32-x64` folder and `package-file-manifest.json` into a dated `dist/`
 folder. Then run `npm --prefix packages/desktop run installer` with `--payload` set
 to that `Vivary-win32-x64` folder, `--manifest` set to that
-`package-file-manifest.json`, and `--output` set to `Vivary-Setup-<commit>.exe`.
+`package-file-manifest.json`, and `--output` set to `Vivary-Setup-<version>.exe`.
 The [desktop package README](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#windows-installer)
 covers the tools it needs. The rest of this section describes the
 2026-09-22 portable prerelease.
