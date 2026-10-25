@@ -757,12 +757,6 @@ for body-parser's raised range. `tests/dependency-advisories.test.mjs` floors bo
 at their fixes. No manifest, override, patch or runtime path changes, so the dependency
 description above still holds.
 
-2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
-it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
-whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
-1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
-behavior changes, so the existing design description still holds.
-
 2026-10-25 Review P3 sweep A (beta ticket 27). The desktop runtime builder admits its
 host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
 destination, fills the download cache or calls the build helper. Before, the admission ran
