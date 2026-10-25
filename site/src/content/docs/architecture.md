@@ -761,6 +761,40 @@ the installer sources, so the recorded installer commit holds that pin. Qualifyi
 of the APIs that Electron 45 removes or changes: it has one sandboxed, context-isolated window
 with no preload, and it denies every permission and every `window.open()`.
 
+2026-10-25 A quit while a Code run waits on a Codex request ends it Interrupted (beta ticket
+27, review P3 sweep B). A normal quit expired the request but paused the run, so the host strip
+said "Agent work stopped" beside "Vivary restarted before this request was answered", while J05
+promised Interrupted. When shutdown stops a run that still has an unanswered request, the stop
+path in `server/local-code-agent.ts` now records it Interrupted through the transition table's
+new `interruptOnQuit` edge. Core's executor may already have written its own end, so that edge
+also accepts `paused`, `completed` and `errored`, as `pause` does, while the restart path's
+`interrupt` edge still accepts only running and needs-approval. Both paths use
+`recordInterruptedRun`, which writes its transcript notice only after the record moves. Any other
+stop still pauses, and `tests/local-code-stop-pauses.test.ts` pins that for a user Stop with a
+request waiting and for a quit with no request waiting. The shutdown tests share `tests/fixtures/code-shutdown.ts`,
+because shutdown closes the host for the rest of a process. J05's
+`AwaitingToolApproval --> Interrupted` edge in `journeys.md` now names a quit, and its prose
+says so. Step 3's description of Code runs above still holds.
+
+2026-10-25 npm publish checker pins both jobs to their reviewed steps (beta ticket 27,
+review P3 sweep B). `scripts/check_npm_trusted_publish_workflow.py` refused npm, npx and
+corepack only at the start of a line, so a command such as `$(npm --version)`, `&& npm` or
+`bin/pnpm publish` in another step passed. In both jobs, a step other than the exact
+reviewed client, pack, publish and dry-run steps may not reach `vivary-build-tools/` or
+name npm, npx, pnpm or corepack as a command word, a path such as `.../bin/npm`, npm's own
+`npm-cli.js` or `npx-cli.js`, or a `node_modules/npm/` path, in its run body or its `shell:`
+value. Those checks give the specific reason. The gate is that both jobs must consist of exactly
+the reviewed steps, in order, because no pattern over shell text can see a command hidden in a
+variable or `eval`. This extends the checker's existing pre-guard inventory to the whole job.
+The workflow preamble, the job list and both job headers are pinned the same way, so no
+`defaults:` or `env:` block can change how a reviewed step runs, and the jobs section must be
+exactly the two pinned jobs, so no commented or flow-style job can sit beside them. Nothing may
+sit between a job's `steps:` line and its first reviewed step, so no bare-dash step can hide there. Each
+pattern's comment sits directly above the pattern it explains.
+The publish step must match its reviewed text exactly. The workflow is unchanged, so the
+2026-10-24 description of npm publication on the qualified client still holds, and the
+inventory is what enforces its last sentence: no other npm, npx or corepack command can run.
+
 2026-10-25 body-parser 2.4.0 and fast-uri 3.1.9 (beta ticket 29, part a). GitHub
 published GHSA-27r3-jxmh-p828 for body-parser and four advisories for fast-uri on
 2026-10-23, after the dev security unit (#275). Express 5.2.1 and ajv 8.20.0 accept the
