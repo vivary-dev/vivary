@@ -23,6 +23,11 @@ const advisoryFloors = [
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  // GHSA-xcx6-jx8p-x3h5 covers msal-node 5.0.0-beta.0 up to 7.1.0, so every 5.x, 6.x and 7.x copy must be 7.1.0 or
+  // later. Bot Framework's 2.x copy is outside the range (beta ticket 29).
+  { name: "@azure/msal-node", branch: "5.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "6.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "7.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
