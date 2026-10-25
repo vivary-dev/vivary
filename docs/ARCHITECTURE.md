@@ -762,10 +762,10 @@ check. The `dagger` workflow starts with the canonical runner bootstrap step, pi
 archive by SHA256, runs one check at a time, and runs only on manual dispatch. It is not a required check.
 The CI jobs, the required checks, and branch protection are unchanged, so the delivery description holds
 with the paragraph this change adds. Evidence: the contract refuses `dagger.yml` with a drifted bootstrap
-hash and with a tag-pinned checkout, `scripts/tests/test_ci_workflow.py` passes 62 of 62, and on Linveo at
+hash and with a tag-pinned checkout, `scripts/tests/test_ci_workflow.py` passes 62 of 62, and on the build server at
 `3b64188e` the `test`, `workbench`, `review`, `site`, and `orientation-proof` checks passed from an empty
 cache. `workbench-maintained` failed there because one `handoff.test.ts` case passed its 120 second limit.
-That case takes 56 seconds on a GitHub runner, and Linveo runs these jobs 1.7 to 2.9 times slower.
+That case takes 56 seconds on a GitHub runner, and the build server runs these jobs 1.7 to 2.9 times slower.
 
 2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
 it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its

@@ -276,5 +276,5 @@ container, so the module refuses it.
 dagger check site
 ```
 
-`dagger check --list` lists the checks. On Linveo they run 1.7 to 2.9 times slower
+`dagger check --list` lists the checks. On the build server they run 1.7 to 2.9 times slower
 than on a GitHub runner, so use them to reproduce one job, not in place of CI.
