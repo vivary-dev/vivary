@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +23,14 @@ const advisoryFloors = [
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  // Advisories published 2026-10-23 (beta ticket 29). Express 5 and ajv reach these through their own ranges.
+  { name: "body-parser", fixed: "2.4.0", advisories: ["GHSA-27r3-jxmh-p828"] },
+  { name: "fast-uri", fixed: "3.1.9", advisories: ["GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp"] },
+  // GHSA-xcx6-jx8p-x3h5 covers msal-node 5.0.0-beta.0 up to 7.1.0, so every 5.x, 6.x and 7.x copy must be 7.1.0 or
+  // later. Bot Framework's 2.x copy is outside the range (beta ticket 29).
+  { name: "@azure/msal-node", branch: "5.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "6.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "7.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
@@ -195,6 +204,32 @@ test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM
     assert.match(uuid.v4(), uuidV4);
     assert.match(esm.v4(), uuidV4);
   }
+});
+
+// Beta ticket 29. GHSA-xcx6-jx8p-x3h5 affects msal-node 5.x and 6.x, so @azure/identity 4.13.2's copy is forced to
+// 7.1.0. Bot Framework's own 2.16.3 copy is outside the range and stays. No test can finish a real Azure sign-in, so
+// this proves identity loads 7.1.0, builds its clients and sends a client-credential request without an API error.
+test("identity runs on the patched MSAL 7.1.0 while Bot Framework keeps its own 2.16.3", async () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
+  const connectorRequire = createRequire(coreRequire.resolve("botframework-connector"));
+  const identityRequire = createRequire(connectorRequire.resolve("@azure/identity"));
+  assert.match(identityRequire.resolve("@azure/msal-node"), /@azure\+msal-node@7\.1\.0/);
+  assert.match(connectorRequire.resolve("@azure/msal-node"), /@azure\+msal-node@2\.16\.3/);
+  const { ClientSecretCredential, DefaultAzureCredential, ManagedIdentityCredential } = connectorRequire("@azure/identity");
+  assert.doesNotThrow(() => new DefaultAzureCredential());
+  assert.doesNotThrow(() => new ManagedIdentityCredential());
+  // A closed loopback port. MSAL 7 builds the confidential client and fails only when it tries the network.
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise(resolve => server.close(resolve));
+  const credential = new ClientSecretCredential("00000000-0000-0000-0000-000000000000", "client", "secret",
+    { authorityHost: `https://127.0.0.1:${port}`, disableInstanceDiscovery: true, retryOptions: { maxRetries: 0 } });
+  const error = await credential.getToken("https://management.azure.com/.default").then(() => null, failure => failure);
+  assert.ok(error, "a closed port cannot issue a token");
+  assert.doesNotMatch(String(error?.stack ?? error), /is not a (function|constructor)|Cannot read properties of undefined/);
+  // MSAL itself names the failure: it tried to resolve the authority endpoints over the closed port.
+  assert.match(String(error?.message ?? error), /endpoints_resolution_error/);
 });
 
 test("Typography retains selector AST behavior with the patched parser", () => {
