@@ -122,6 +122,44 @@ def test_each_job_runs_npm_only_through_the_qualified_client():
             assert check(text.replace(job, mutation, 1)), (name, label)
 
 
+def test_package_managers_run_only_in_the_exact_reviewed_steps():
+    """Beta ticket 27: a command word anywhere on a line, or a reach into the provisioned tools, is refused."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    module = load()
+    contract = python_contract()
+    tools = '"$RUNNER_TEMP/vivary-build-tools'
+    for name, version_step in (("verify", "      - name: Verify release tag and package versions\n"),
+                               ("publish", "      - name: Re-verify release tag and package versions\n")):
+        job = contract.job_block(text, name)
+        start = job.index(version_step)
+        body = job.index("        run: |\n", start) + len("        run: |\n")
+        lines = {
+            "substitution": '          test "$(npm --version)" = "12.2.1"\n',
+            "after_and": "          node --version && npm whoami\n",
+            "after_semicolon": "          node --version; npx --yes pkg\n",
+            "bare_pnpm": "          pnpm publish\n",
+            "quoted_corepack": "          bash -c 'corepack enable'\n",
+            "tools_pnpm": "          " + tools + '/bin/pnpm" publish\n',
+            "tools_client": "          " + tools + '/bin/node" ' + tools + '/npm/client.cjs" npm publish\n',
+        }
+        for label, line in lines.items():
+            message = check(text.replace(job, job[:body] + line + job[body:], 1))
+            assert message and (f"{name} must run npm only through the qualified client" in message
+                                or f"{name} reaches the provisioned tools" in message), (name, label, message)
+    publish = contract.job_block(text, "publish")
+    step = module.PUBLISH_STEP
+    assert publish.count(step) == 1
+    message = check(text.replace(step, step + "        shell: bash\n", 1))
+    assert message == "publication must be exactly the reviewed step", message
+    dry_run = module.DRY_RUN_STEP
+    assert text.count(dry_run) == 1
+    message = check(text.replace(dry_run, dry_run.replace('approved."', 'approved."; npm publish'), 1))
+    assert message and "verify must run npm only through the qualified client" in message, message
+    # A path and a data value that contain the word stay allowed.
+    assert "packages/create-vivary/npm/package.json" in text and "npm={npm_version}" in text
+    assert check(text) is None
+
+
 def test_workflow_publisher_and_provisioner_name_one_client():
     module = load()
     source = module.RUNTIME_SECURITY.read_text(encoding="utf-8")

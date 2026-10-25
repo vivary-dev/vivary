@@ -53,6 +53,16 @@ PACK_STEP = (
     "          " + PACK + "\n"
     "          python ../../../scripts/check_release_artifacts.py --repository ../../.. --artifacts \"$RUNNER_TEMP/npm-candidate\" --scope npm\n"
 )
+PUBLISH_STEP = "      - name: Publish @vivary/create with npm trusted publishing\n        run: '" + PUBLISH + "'\n"
+DRY_RUN_STEP = (
+    "      - name: Stop before publish unless explicitly enabled\n"
+    "        if: ${{ !inputs.publish }}\n"
+    "        run: echo \"Dry run complete. Re-run with publish=true only after the npm publish gate is approved.\"\n"
+)
+# A package manager as a command word: after a line start, a space, a shell separator, a quote or a
+# substitution, and before a space, a separator, a quote or the line end. A path such as
+# packages/create-vivary/npm and data such as npm={npm_version} are not command words.
+PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
 
 
 def shell_masks_failure(step: str) -> bool:
@@ -137,6 +147,19 @@ def check_runtime_and_archive(text: str) -> None:
                     "publish must recheck the qualified Node and client and publish only the checked candidate archive")
             require(not re.search(r"(?m)^\s+(?:if|continue-on-error|working-directory|env):", step),
                     "publication admission cannot be skipped or redirected")
+            require(step.rstrip("\n") == PUBLISH_STEP.rstrip("\n"), "publication must be exactly the reviewed step")
+        # Vivary beta ticket 27: the provisioned tools and every package manager run only in the exact
+        # reviewed client, pack, publish and dry-run steps, wherever another step's line names them.
+        reviewed = {CLIENT_STEP, PACK_STEP, PACK_STEP.replace("- name: Verify npm", "- name: Re-verify npm", 1),
+                    PUBLISH_STEP, DRY_RUN_STEP}
+        for step in steps:
+            if step.rstrip("\n") in {text.rstrip("\n") for text in reviewed}:
+                continue
+            require("vivary-build-tools" not in step,
+                    f"{name} reaches the provisioned tools outside the reviewed client, pack and publish steps")
+            run = re.split(r"(?m)^\s*(?:-\s+)?run:", step, maxsplit=1)
+            require(len(run) == 1 or not PACKAGE_MANAGER.search(run[1]),
+                    f"{name} must run npm only through the qualified client")
     require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
 
 
