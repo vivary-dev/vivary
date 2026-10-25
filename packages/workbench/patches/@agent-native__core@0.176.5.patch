@@ -19022,3 +19022,97 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
                      if (options.webhookTaskId) {
                          const { markTaskWaitingForApproval } = await import("../integrations/pending-tasks-store.js");
                          await markTaskWaitingForApproval(options.webhookTaskId);
+diff --git a/dist/agent/tool-approval-store.js b/dist/agent/tool-approval-store.js
+--- a/dist/agent/tool-approval-store.js
++++ b/dist/agent/tool-approval-store.js
+@@ -204,14 +204,31 @@
+  * that still has writes to make.
+  */
+ export async function cleanExpiredAgentToolApprovals(exec = getDbExec(), now = Date.now()) {
++    const sql = `DELETE FROM agent_tool_approvals
++        WHERE expires_at < ? AND status <> 'pending'`;
++    const args = [now - APPROVAL_CLEANUP_AGE_MS];
+     try {
++        // Vivary beta ticket 28: an unfinished automation run that claims an
++        // ask settles from it after a crash, so the ask stays until the run ends.
+         await exec.execute({
+-            sql: `DELETE FROM agent_tool_approvals
+-        WHERE expires_at < ? AND status <> 'pending'`,
+-            args: [now - APPROVAL_CLEANUP_AGE_MS],
++            sql: `${sql} AND NOT EXISTS (SELECT 1 FROM automation_runs
++          WHERE automation_runs.pending_ask_id = agent_tool_approvals.id
++            AND automation_runs.finished_at IS NULL)`,
++            args,
+         });
+     }
+     catch (error) {
++        // An app that never ran an automation has no automation_runs table, so
++        // no run can claim an ask there.
++        if (/automation_runs/.test(String(error?.message ?? error)) && /no such table|does not exist/i.test(String(error?.message ?? error))) {
++            try {
++                await exec.execute({ sql, args });
++                return;
++            }
++            catch (fallbackError) {
++                error = fallbackError;
++            }
++        }
+         console.warn("[agent] Could not clean expired tool approval records", error);
+     }
+ }
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1281,7 +1281,12 @@
+         if (!pending || (state.storedStatus !== "waiting_approval" && !staleClaim) || state.run.finishedAt)
+             return;
+         const ask = await readAgentToolApproval(pending);
+-        if (!ask || !(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now() ||
++        // Vivary beta ticket 28: cleanup before this patch could delete the
++        // declined ask of this sweep's own claim. Such a claim never executes
++        // anything, so a missing ask settles it as expired.
++        if (!ask && !staleClaim)
++            return;
++        if ((ask && (!(ask.status === "pending" || (staleClaim && ask.status === "declined")) || ask.expiresAt > Date.now())) ||
+             _activeBackgroundRunIds.has(pending.runId) || await getRunStatus(pending.runId) === "running")
+             return;
+         if (!staleClaim) {
+@@ -1292,7 +1297,7 @@
+             if (!await claimAutomationApprovalDecision(id, pending.askId, createRunId("automation-expire"), false))
+                 return;
+         }
+-        if (ask.status === "pending" && !await declineAgentToolApproval(pending))
++        if (ask?.status === "pending" && !await declineAgentToolApproval(pending))
+             throw new Error("The expired approval could not be declined.");
+         await finishAutomationRun(id, "declined", "The approval request expired. The pending action did not execute.",
+             "automation_approval_expired", { emitFinished: pending.options.emitFinished });
+@@ -1349,7 +1354,9 @@
+         if (_activeBackgroundRunIds.has(state.resumeRunId) || await getRunStatus(state.resumeRunId) === "running")
+             return;
+         const ask = await readAgentToolApproval(pending);
+-        if (ask?.status === "declined") {
++        // Vivary beta ticket 28: when cleanup before this patch deleted the ask,
++        // the claim's kind still shows that the owner declined.
++        if (ask?.status === "declined" || (!ask && state.resumeRunId.startsWith("automation-decline-"))) {
+             await finishAutomationRun(id, "declined", "The owner declined the pending action. It did not execute.",
+                 "automation_approval_declined", { emitFinished: pending.options.emitFinished });
+             await recordApprovalExecutionOutcome(pending, "declined");
+diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-automation-runner.js
+--- a/dist/jobs/background-automation-runner.js
++++ b/dist/jobs/background-automation-runner.js
+@@ -1489,7 +1489,14 @@
+         const neverStarted = nativeStatus === null && Date.now() - state.decisionAt > automationRunClaimLeaseMs();
+         if (!ended && !neverStarted)
+             throw approvalDecisionRefusal("An approval decision is already in progress.");
+-        if (ask?.status === "declined") {
++        // Vivary beta ticket 28: when cleanup before this patch deleted the ask,
++        // the claim's kind shows a decline or an expiry, and neither executes.
++        if (!ask && state.resumeRunId?.startsWith("automation-expire-")) {
++            await finishAutomationRun(input.historyId, "declined", "The approval request expired. The pending action did not execute.", "automation_approval_expired", { emitFinished: pending.options.emitFinished });
++            await recordApprovalExecutionOutcome(pending, "declined");
++            return { status: "declined", historyId: input.historyId };
++        }
++        if (ask?.status === "declined" || (!ask && state.resumeRunId?.startsWith("automation-decline-"))) {
+             await finishAutomationRun(input.historyId, "declined", "The owner declined the pending action. It did not execute.", "automation_approval_declined", { emitFinished: pending.options.emitFinished });
+             await recordApprovalExecutionOutcome(pending, "declined");
+             return { status: "declined", historyId: input.historyId };
