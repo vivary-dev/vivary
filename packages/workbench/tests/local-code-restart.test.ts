@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -20,7 +20,8 @@ const requestId = "request-restart";
 const expiredNotice = "Codex request expired. Vivary restarted before this request was answered.";
 
 if (process.argv[2] === "first-host") await runFirstHost(process.argv[3]);
-else test("a run waiting on a Codex request comes back Interrupted after a host crash, its request Expired, with no replay", async () => {
+else test("a run waiting on a Codex request comes back Interrupted after a host crash, its request Expired, with no replay",
+  { timeout: 120_000 }, async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "vivary-code-restart-crash-"));
   const server = path.join(fixture, ".output", "server");
   const bin = path.join(fixture, "bin");
@@ -52,6 +53,7 @@ process.send({ type: "vivary:code-worker:ready" });
     database: process.env.DATABASE_URL, // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
     workspace: process.env.VIVARY_LOCAL_AGENT_WORKSPACE }; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
   let shutdown: (() => Promise<void>) | undefined;
+  let first: ChildProcess | undefined;
   try {
     process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
     process.env.PATH = bin + path.delimiter + (previous.path ?? ""); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
@@ -59,20 +61,26 @@ process.send({ type: "vivary:code-worker:ready" });
     process.env.DATABASE_URL = "file:" + path.join(fixture, "state.sqlite"); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
     process.env.VIVARY_LOCAL_AGENT_WORKSPACE = fixture; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
 
-    const first = spawn(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), "first-host", fixture],
+    first = spawn(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), "first-host", fixture],
       { cwd: previous.cwd, env: process.env, stdio: ["ignore", "pipe", "inherit"] });
+    const firstHost = first;
     const runId = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("The first host did not reach a waiting run within 60 seconds.")), 60_000);
       let output = "";
-      first.stdout.on("data", chunk => {
+      firstHost.stdout!.on("data", chunk => {
         output += chunk;
         const ready = /^waiting (\S+)$/m.exec(output);
-        if (ready) resolve(ready[1]);
+        if (ready) {
+          clearTimeout(timer);
+          resolve(ready[1]);
+        }
       });
-      first.once("exit", code => reject(new Error(`The first host exited with ${code} before its run waited.`)));
+      firstHost.once("exit", code => {
+        clearTimeout(timer);
+        reject(new Error(`The first host exited with ${code} before its run waited.`));
+      });
     });
-    const firstExit = once(first, "exit");
-    first.kill("SIGKILL");
-    await firstExit;
+    await killFirstHost(firstHost);
     assert.equal(getCodeAgentRunRecord(runId)?.status, "needs-approval", "the killed host left its run waiting");
 
     process.chdir(fixture);
@@ -107,6 +115,7 @@ process.send({ type: "vivary:code-worker:ready" });
     assert.deepEqual((await readFile(launches, "utf8")).split("\n").filter(Boolean), [runId]);
     assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "user").length, 1);
   } finally {
+    if (first) await killFirstHost(first);
     await shutdown?.();
     process.chdir(previous.cwd);
     if (previous.mode === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previous.mode; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
@@ -120,6 +129,14 @@ process.send({ type: "vivary:code-worker:ready" });
     await rm(fixture, { recursive: true, force: true });
   }
 });
+
+/** Kills the first host and waits for it to exit. It does nothing once the host has exited. */
+async function killFirstHost(host: ChildProcess): Promise<void> {
+  if (host.exitCode !== null || host.signalCode !== null) return;
+  const exited = once(host, "exit");
+  host.kill("SIGKILL");
+  await exited;
+}
 
 /** The first host: it starts a run, waits until the run waits on a request, says so, and waits to be killed. */
 async function runFirstHost(fixture: string): Promise<void> {
