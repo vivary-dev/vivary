@@ -7346,6 +7346,15 @@ release tag checkout, as they already run `scripts/check_release_artifacts.py`.
 Tag a commit that contains those scripts. A tag cut from an older commit fails at
 the Python provisioning step, before any npm setup or publication.
 
+Both jobs then provision npm 12.2.1 with `scripts/bootstrap_build_tools.py`, the
+client every other CI job uses, and pack with it. The publish step runs
+`runtime-security.mjs publish-npm` under that tool root's Node. It refuses any other
+Node, npm, undici or ip-address version, and runs npm through the root's launcher,
+which replaces the runner's npm configuration. npm then uses its default registry and
+requests the GitHub OIDC token itself, so the trusted publisher setup above does not
+change. A tag cut before this change passes verification and then stops at the
+publish step with "unsupported guard command", before any upload.
+
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
 every package that depends on it. Publish `vivary-tropo` next; then the eligible
 `vivary-strato`, `vivary-ozone`, `vivary-exo`, `vivary-memory-cognee`, `vivary-mcp`, and
@@ -8246,6 +8255,36 @@ the same results. `tests/local-runtime-setup.test.ts` covers older, equal, newer
 and unreadable versions for both CLIs, failed and timed-out probes, and a fixture
 Codex `--version` line. Both new cases fail against the `dev` source and pass with
 the change. The desktop preview guide states the minimums.
+
+2026-10-24 npm publication on the qualified client. `npm-trusted-publish.yml` was the
+last workflow that ran the npm bundled with setup-node. Both of its jobs now provision
+npm 12.2.1 with `scripts/bootstrap_build_tools.py` right after the Node guard, and pack
+with it. `runtime-security.mjs publish-npm` takes the tool root as a second argument,
+refuses a Node other than the root's own and any npm, undici or ip-address version
+other than the pins, and runs the root's `client.cjs` from the scratch directory, so no
+runner or project npm configuration applies. setup-node no longer writes an npmrc
+(`registry-url`), and npm publishes to its default registry with the OIDC token it
+requests. The checker requires the client step and refuses any other npm, npx or
+corepack command in both jobs.
+
+2026-10-24 Back-merge of main into dev. main gained #278, the main mirror of the security unit
+that #275 brought to dev, plus main-only Dependabot bumps and lockfile normalization. Merging
+main into dev makes main an ancestor of dev, so the later promotion merge of dev into main
+produces the tested candidate tree. All 20 conflicts take dev's side, because dev is newer in
+each file and #275 already carries #278's changes. main's one auto-merged paragraph in
+packages/mcp/README.md gives way to dev's README, which states the published vivary-mcp 0.1.3
+pin and the staged 0.1.4. No code, build or runtime behavior changes.
+
+2026-10-24 Follow-ups from the #278 review that also apply to dev. The desktop build helper
+admits its host Python with `scripts/check_python_runtime.py` before it creates the build venv.
+The Astro replacement README states GHSA-ch52-4w7c-c8xp's published range and the status of
+the replaced 4.3.0. No runtime behavior changes while packaging is held.
+
+2026-10-24 Security review follow-ups. Three P3s from the #275 review land here, so the
+frozen security PR converges. The CI contract now requires the certificate overlay tests.
+The production-installer tests branch on whether the current Node is admitted, like the
+packaging tests. The bounded-probe test gives its passing cases a normal timeout. Tests
+and CI contract only. No runtime behavior changes.
 
 2026-10-24 Runner contract refuses irregular step keys. GitHub accepts quoted, spaced,
 escaped and complex keys, so a step written `"uses": someone/action@main` hid from the

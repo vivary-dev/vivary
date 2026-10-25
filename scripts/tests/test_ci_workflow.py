@@ -225,6 +225,7 @@ def _workflow(site_steps: str, trailing_job: str = "") -> str:
             setup += module.REPAIR_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
             setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_certifi_bundle.py\n'
             setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
             setup += module.BUILD_TEST_STEP
             setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
@@ -1417,6 +1418,12 @@ def test_python_provisioning_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_bootstrap_ci_python.py", "echo skipped", 1))
     assert message and "verified Python provisioning regressions" in message
+
+
+def test_certificate_overlay_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_certifi_bundle.py", "echo skipped", 1))
+    assert message and "certificate overlay preservation regressions" in message
 
 
 def test_windows_python_bootstrap_regressions_must_run():

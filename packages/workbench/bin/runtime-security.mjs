@@ -26,6 +26,9 @@ export const NODE_ADVISORIES = Object.freeze([
 // Its retained native Windows probe is separate; staged bytes and facts are still checked below.
 const WINDOWS_NODE_ASSET = Object.freeze({ version: "24.22.1", platform: "win32", arch: "x64",
   fileName: "node-v24.22.1-win-x64.exe", sha256: "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5" });
+// The only npm admitted to publish: NPM_PINS in scripts/bootstrap_build_tools.py, which
+// check_npm_trusted_publish_workflow.py compares with this constant.
+export const QUALIFIED_NPM = Object.freeze({ npm: "12.2.1", undici: "6.29.1", "ip-address": "10.7.4" });
 const helper = fileURLToPath(import.meta.url);
 const repository = path.resolve(path.dirname(helper), "../../..");
 
@@ -136,13 +139,13 @@ export async function assertDesktopPayload(payload) {
   assertElectronPublication();
 }
 
-function checkedChild(script, args, archive) {
+function checkedChild(script, args, archive, cwd) {
   // Collect in the very Node process which imports the builder or publisher, before its code runs.
   const code = `import {assertCurrentNode, executableSha256} from ${JSON.stringify(pathToFileURL(helper).href)};
 await assertCurrentNode();
 ${archive ? `if (await executableSha256(${JSON.stringify(archive.file)}) !== ${JSON.stringify(archive.sha256)}) throw new Error("Checked archive changed");` : ""}
 await import(${JSON.stringify(pathToFileURL(script).href)});`;
-  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", code, script, ...args], { stdio: "inherit" });
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", code, script, ...args], { stdio: "inherit", cwd });
   if (result.error) throw result.error;
   if (result.status !== 0) refuse(`guarded child failed (${result.status ?? result.signal}).`);
 }
@@ -158,8 +161,32 @@ export async function runPackageBin(packageFile, name, args) {
   checkedChild(script, args);
 }
 
-export async function publishNpmArchive(candidateDirectory) {
+// The tool root from scripts/bootstrap_build_tools.py. Its client.cjs launcher clears npm_config_*
+// variables and selects its own CA, user and global configuration, so publication goes through it.
+async function qualifiedNpmClient(toolRoot) {
+  if (typeof toolRoot !== "string" || !path.isAbsolute(toolRoot)) refuse("npm publication requires the absolute qualified tool root.");
+  const resolve = file => realpath(file).catch(() => null);
+  const root = await resolve(toolRoot);
+  if (!root) refuse("the qualified tool root does not exist.");
+  const node = path.join(root, process.platform === "win32" ? "node/node.exe" : "node/bin/node");
+  if (await resolve(node) !== await resolve(process.execPath)) refuse("npm publication must run under the qualified tool root's Node.");
+  for (const [name, version] of Object.entries(QUALIFIED_NPM)) {
+    const manifest = path.join(root, "npm", ...(name === "npm" ? [] : ["node_modules", name]), "package.json");
+    let metadata;
+    try { metadata = JSON.parse(await readFile(manifest, "utf8")); } catch { metadata = null; }
+    if (metadata?.name !== name || metadata?.version !== version) refuse(`the qualified npm client requires ${name} ${version}.`);
+  }
+  const client = path.join(root, "client.cjs");
+  const entry = await resolve(path.join(root, "npm/bin/npm-cli.js"));
+  if (await resolve(client) !== client || !entry?.startsWith(path.join(root, "npm") + path.sep)) {
+    refuse("the qualified npm launcher escapes its tool root.");
+  }
+  return client;
+}
+
+export async function publishNpmArchive(candidateDirectory, toolRoot) {
   await assertCurrentNode();
+  const client = await qualifiedNpmClient(toolRoot);
   const entries = await readdir(candidateDirectory, { withFileTypes: true });
   if (entries.length !== 1 || !entries[0].isFile() || !entries[0].name.endsWith(".tgz")) {
     refuse("npm publication requires exactly one regular candidate tarball.");
@@ -176,17 +203,8 @@ export async function publishNpmArchive(candidateDirectory) {
     ], { stdio: "inherit" });
     if (validation.error || validation.status !== 0) refuse("the exact npm archive failed release-artifact validation.");
     if (await executableSha256(archive) !== digest) refuse("the checked npm archive changed.");
-    let npm;
-    // guard:allow-env-credential - Executable search path used to locate the installed npm entrypoint.
-    for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
-      if (!path.isAbsolute(directory)) continue;
-      try {
-        const candidate = await realpath(path.join(directory, "npm"));
-        if (path.basename(candidate) === "npm-cli.js") { npm = candidate; break; }
-      } catch { /* Try the next installed npm location. */ }
-    }
-    if (!npm) refuse("the installed npm Node entrypoint could not be resolved.");
-    checkedChild(npm, ["publish", archive], { file: archive, sha256: digest });
+    // The scratch directory holds no .npmrc, so npm has no project configuration layer.
+    checkedChild(client, ["npm", "publish", archive], { file: archive, sha256: digest }, scratch);
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }
 
@@ -202,7 +220,7 @@ if (invokedAsCli()) {
     const [command, ...args] = process.argv.slice(2);
     if (command === "collect" && args.length === 0) console.log(JSON.stringify(await collectCurrentNode()));
     else if (command === "run" && args.length >= 2) await runPackageBin(args[0], args[1], args.slice(2));
-    else if (command === "publish-npm" && args.length === 1) await publishNpmArchive(args[0]);
+    else if (command === "publish-npm" && args.length === 2) await publishNpmArchive(args[0], args[1]);
     else if (command === undefined) console.log(JSON.stringify(await assertCurrentNode()));
     else refuse("unsupported guard command.");
   } catch (error) { console.error(error.message); process.exitCode = 1; }
