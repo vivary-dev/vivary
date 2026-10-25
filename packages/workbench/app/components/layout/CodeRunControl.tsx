@@ -38,8 +38,10 @@ export function CodeRunControl() {
   }, [pending?.requestId]);
   const current = pending ?? active;
   const currentRunId = pending?.runId ?? active?.id ?? recent?.id;
-  const projectLabel = current?.projectId
-    ? catalog?.projects.find(project => project.projectId === current.projectId)?.displayName ?? "Unavailable project"
+  // The run the strip names. Without current work, that is the recent run.
+  const named = current ?? recent;
+  const projectLabel = named?.projectId
+    ? catalog?.projects.find(project => project.projectId === named.projectId)?.displayName ?? "Unavailable project"
     : "Personal workspace";
 
   async function decide(decision: "approve" | "deny" | "stop") {
@@ -80,7 +82,7 @@ export function CodeRunControl() {
     } finally { setResolving(null); }
   }
 
-  async function openConversation(target = current && currentRunId ? { id: currentRunId, projectId: current.projectId } : null) {
+  async function openConversation(target = named && currentRunId ? { id: currentRunId, projectId: named.projectId } : null) {
     if (!target) return;
     setError(undefined);
     if (!await selectProject(target.projectId)) {
@@ -90,7 +92,10 @@ export function CodeRunControl() {
     navigate("/?run=" + encodeURIComponent(target.id));
   }
 
-  if (!current && !cleanup && !status.error) return null;
+  // Beta ticket 05. A finished run's outcome stays in its conversation (J05). A restart's outcome also shows here,
+  // because nothing else tells the owner that work stopped or a request expired. The next send on that run clears it.
+  const restarted = recent && (recent.phase === "interrupted" || recent.expiredApproval);
+  if (!current && !cleanup && !restarted && !status.error) return null;
   const cleanupHeld = !ready || resolving !== null || cleanup?.checking === true;
   // Issue #121. The run stays active while its failed stop's own check runs, and the owner sees that check, not Stop.
   const stopChecking = Boolean(active && cleanup?.checking && cleanup.run?.id === active.id);
@@ -129,13 +134,18 @@ export function CodeRunControl() {
           onClick={() => void resolveCleanup("continue")}>{resolving === "continue" ? "Continuing…" : "Continue anyway"}</Button>}
         {cleanup.run && <Button variant="ghost" size="sm" onClick={() => void openConversation(cleanup.run)}>Open conversation</Button>}
       </div>
-    </div> : recent ? <div className="flex flex-wrap items-center gap-2">
-      <span className="min-w-0 flex-1" role="status">{recent.phase === "approval-denied"
-        ? "Request denied. No agent work started" : recent.phase === "interrupted"
-          ? "Agent work was interrupted" : recent.status === "completed"
-            ? "Agent work completed" : recent.status === "errored"
-              ? "Agent work failed" : "Agent work stopped"} in {projectLabel}: {recent.title}</span>
-      <Button variant="ghost" size="sm" onClick={() => void openConversation()}>Open conversation</Button>
+    </div> : recent ? <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1" role="status">{recent.phase === "approval-denied"
+          ? "Request denied. No agent work started" : recent.phase === "interrupted"
+            ? "Interrupted" : recent.status === "completed"
+              ? "Agent work completed" : recent.status === "errored"
+                ? "Agent work failed" : "Agent work stopped"} in {projectLabel}: {recent.title}</span>
+        <Button variant="ghost" size="sm" onClick={() => void openConversation()}>Open conversation</Button>
+      </div>
+      {recent.expiredApproval && <p className="break-words text-xs text-muted-foreground">
+        Codex request expired{recent.expiredApproval.summary ? `: ${recent.expiredApproval.summary}` : ""}. {recent.expiredApproval.reason}
+      </p>}
     </div> : <div className="flex items-center gap-2">
       <span role="status">Agent status could not be loaded.</span>
       <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>Retry</Button>

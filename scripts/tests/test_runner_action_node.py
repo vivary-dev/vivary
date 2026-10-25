@@ -352,7 +352,8 @@ class RunnerBootstrapTests(unittest.TestCase):
                 ("print('x' * 1000)", False), ("import time; time.sleep(5)", False)):
                 program.write_text("#!" + sys.executable + "\n" + body + "\n")
                 program.chmod(0o700)
-                module.PROBE_TIMEOUT = 0.2
+                # Only the sleeping case relies on the bound. A cold interpreter start can exceed 0.2 s.
+                module.PROBE_TIMEOUT = 0.2 if "sleep" in body else 10
                 if valid: self.assertEqual(module.probe_version(program, {"LANG": "C", "LC_ALL": "C"}), "v24.22.1")
                 else:
                     with self.assertRaises(RuntimeError): module.probe_version(program, {"LANG": "C", "LC_ALL": "C"})

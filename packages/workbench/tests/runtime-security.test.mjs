@@ -8,7 +8,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  ADMITTED_ELECTRON, NODE_ADVISORIES, NODE_SECURITY_FLOORS, assertCurrentNode, assertElectronPublication,
+  ADMITTED_ELECTRON, NODE_ADVISORIES, NODE_SECURITY_FLOORS, QUALIFIED_NPM, assertCurrentNode,
+  assertElectronPublication,
   assertNodeFacts, assertNodeVersion, collectCurrentNode, collectExecutableNode, executableSha256,
 } from "../bin/runtime-security.mjs";
 
@@ -171,15 +172,17 @@ test("Electron publication admits only a listed release whose bundled Node meets
   assert.throws(() => assertElectronPublication("toString", admitted), /Electron toString is not admitted/);
 });
 
-test("npm publisher rechecks its actual Node and exact validated archive before a fake publisher", () => fixture(async directory => {
+test("npm publisher rechecks its actual Node and exact validated archive before the qualified client", () => fixture(async directory => {
   if (process.platform === "win32") return; // Trusted publication is a Linux job, with Unix npm links.
   const bin = path.join(directory, "bin");
   const candidate = path.join(directory, "candidate");
+  const tools = path.join(directory, "tools");
   await mkdir(bin); await mkdir(candidate);
   await writeFile(path.join(candidate, "candidate.tgz"), "fixture archive bytes");
   const marker = path.join(directory, "published");
   const validation = path.join(directory, "validated");
-  // Only the existing external validator/publisher transport is faked. The guard and copying are real.
+  // Only the external validator and the qualified client's npm are faked. The guard, the tool
+  // root identity checks and the copying are real.
   const validator = path.join(bin, "python3");
   await writeFile(validator, `#!${process.execPath}\nimport fs from 'node:fs'; import path from 'node:path';
 const dir = process.argv[process.argv.indexOf('--artifacts') + 1];
@@ -189,30 +192,75 @@ fs.writeFileSync(process.env.VALIDATED, archive);
 // guard:allow-env-credential - Test fixture rejection switch set to the literal 1.
 if (process.env.REFUSE_ARCHIVE === '1') process.exit(9);\n`);
   await chmod(validator, 0o700);
-  await writeFile(path.join(bin, "package.json"), '{"type":"module"}');
-  const npm = path.join(bin, "npm-cli.js");
-  await writeFile(npm, `import fs from 'node:fs'; import assert from 'node:assert/strict';
-assert.equal(process.argv[2], 'publish'); assert.equal(process.argv.length, 4);
+  await mkdir(path.join(tools, "node/bin"), { recursive: true });
+  await symlink(process.execPath, path.join(tools, "node/bin/node"));
+  const manifest = async (name, version) => {
+    const directory = path.join(tools, "npm", ...(name === "npm" ? [] : ["node_modules", name]));
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "package.json"), JSON.stringify({ name, version }));
+  };
+  for (const [name, version] of Object.entries(QUALIFIED_NPM)) await manifest(name, version);
+  await mkdir(path.join(tools, "npm/bin"));
+  await writeFile(path.join(tools, "npm/bin/npm-cli.js"), "throw new Error('the fixture client never loads npm');\n");
+  const client = path.join(tools, "client.cjs");
+  await writeFile(client, `const fs = require('node:fs'); const path = require('node:path'); const assert = require('node:assert/strict');
+assert.deepEqual(process.argv.slice(2, 4), ['npm', 'publish']); assert.equal(process.argv.length, 5);
 // guard:allow-env-credential - Test fixture validation marker path used to compare the checked archive.
-const archive = process.argv[3]; assert.equal(archive, fs.readFileSync(process.env.VALIDATED, 'utf8'));
+const archive = process.argv[4]; assert.equal(archive, fs.readFileSync(process.env.VALIDATED, 'utf8'));
 assert.equal(fs.readFileSync(archive, 'utf8'), 'fixture archive bytes');
+assert.equal(process.cwd(), fs.realpathSync(path.dirname(archive)));
 // guard:allow-env-credential - Test fixture publication marker path in its owned temporary directory.
 fs.writeFileSync(process.env.PUBLISHED, archive);`);
-  await symlink(npm, path.join(bin, "npm"));
-  // guard:allow-env-credential - Test fixture executable search path for the fake validator and npm.
+  // guard:allow-env-credential - Test fixture executable search path for the fake validator.
   const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VALIDATED: validation, PUBLISHED: marker };
-  let result = child([guard, "publish-npm", candidate], { env: { ...env, REFUSE_ARCHIVE: "1" } });
+  const publish = (options = {}) => child([guard, "publish-npm", candidate, tools], { env, ...options });
+  let result = publish({ env: { ...env, REFUSE_ARCHIVE: "1" } });
   assert.equal(result.status, 1);
   await absent(marker);
   result = child([guard, "publish-npm", candidate], { env });
+  assert.equal(result.status, 1, "publication without the qualified tool root must be refused");
+  assert.match(result.stderr, /unsupported guard command/);
+  await rm(validation, { force: true });
+  result = publish();
   assert.equal(result.status, actualAdmitted ? 0 : 1, result.stderr);
   if (actualAdmitted) {
     const published = await readFile(marker, "utf8");
     assert.notEqual(published, path.join(candidate, "candidate.tgz"));
     assert.equal(published.endsWith("candidate.tgz"), true);
     await absent(published); // Owned copy is cleaned after the synchronous publisher returns.
+    await rm(marker);
+    await rm(validation);
   } else { await absent(marker); await absent(validation); assert.match(result.stderr, /Runtime security/); }
+  // Each identity change is refused before the archive is copied or validated.
+  const refused = async (label, change, restore, pattern) => {
+    await change();
+    const outcome = publish();
+    await restore();
+    assert.equal(outcome.status, 1, label);
+    assert.match(outcome.stderr, pattern, label);
+    await absent(marker); await absent(validation);
+  };
+  if (actualAdmitted) {
+    for (const [name, version] of [["npm", "11.19.1"], ["undici", "6.28.0"], ["ip-address", "10.5.0"]]) {
+      await refused(`${name} ${version}`, () => manifest(name, version), () => manifest(name, QUALIFIED_NPM[name]),
+        new RegExp(`requires ${name} ${QUALIFIED_NPM[name].replaceAll(".", "\\.")}`));
+    }
+    const node = path.join(tools, "node/bin/node");
+    await refused("another Node", async () => { await rm(node); await writeFile(node, ""); },
+      async () => { await rm(node); await symlink(process.execPath, node); }, /qualified tool root's Node/);
+    const outside = path.join(directory, "client.cjs");
+    await copyFile(client, outside);
+    await refused("client.cjs outside the root", async () => { await rm(client); await symlink(outside, client); },
+      async () => { await rm(client); await copyFile(outside, client); }, /escapes its tool root/);
+    const relative = child([guard, "publish-npm", candidate, "tools"], { env, cwd: directory });
+    assert.equal(relative.status, 1);
+    assert.match(relative.stderr, /absolute qualified tool root/);
+    const missing = child([guard, "publish-npm", candidate, path.join(directory, "missing")], { env });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /tool root does not exist/);
+    await absent(marker); await absent(validation);
+  }
   await writeFile(path.join(candidate, "other.tgz"), "unchecked");
-  result = child([guard, "publish-npm", candidate], { env });
+  result = publish();
   assert.equal(result.status, 1, "a directory of candidate archives must never be published");
 }));

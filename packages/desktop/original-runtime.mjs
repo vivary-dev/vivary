@@ -367,6 +367,8 @@ async function collectRuntimeLicenses(destination, componentLicensePaths) {
 
 async function runBuildHelper(args, repository) {
   const python = process.platform === "win32" ? "python" : "python3";
+  // The README requires qualified host Python 3.12.15. Admit it before the build venv exists.
+  await execFile(python, ["-I", "-B", path.join(repository, "scripts/check_python_runtime.py")], { cwd: repository });
   await execFile(python, ["-I", "-B", buildHelper, ...args], {
     cwd: repository,
     env: {
