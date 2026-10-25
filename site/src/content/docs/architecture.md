@@ -768,6 +768,18 @@ report among a PR's contents and puts the merge rule back above its Size subsect
 PR size rule entry below moves under the 2026-10-25 entries, in date order. Only the order of
 an existing check changes, so the packaging description above still holds.
 
+2026-10-25 @azure/identity's msal-node copy forced to 7.1.0 (beta ticket 29, part c).
+GHSA-xcx6-jx8p-x3h5 affects @azure/msal-node from 5.0.0-beta.0 to before 7.1.0, and no
+@azure/identity release accepts 7.x yet. `pnpm-workspace.yaml` overrides only
+`@azure/identity@4.13.2>@azure/msal-node`, so identity's 5.6.0 copy becomes 7.1.0 (with
+msal-common 16.14.2, which it pins), while Bot Framework's direct 2.16.3 copy, outside the
+range, stays. Identity 4.13.2 calls none of the APIs that msal-node 6 and 7 removed.
+Vivary's code never imports identity or MSAL. Core reaches Bot Framework only from its Teams
+adapter, and unstorage's Azure drivers cannot load without their own SDKs, none of which is
+installed. `tests/dependency-advisories.test.mjs` checks both copies and drives identity
+through MSAL 7 to a refused loopback request. Remove the override once an identity release
+accepts msal-node 7. The dependency description above still holds.
+
 2026-10-25 Approval cleanup keeps asks that a run still claims (beta ticket 28).
 The maintained Core patch gains appended sections for
 `agent/tool-approval-store.js` and `jobs/background-automation-runner.js`. Its
