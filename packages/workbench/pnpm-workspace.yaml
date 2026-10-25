@@ -31,6 +31,10 @@ overrides:
   '@modelcontextprotocol/client': 2.3.0
   '@modelcontextprotocol/core': 2.3.0
   '@modelcontextprotocol/server': 2.3.0
+  # GHSA-xcx6-jx8p-x3h5 affects msal-node >= 5.0.0-beta.0, < 7.1.0. Only identity's 5.6.0 copy is in that
+  # range. Bot Framework's direct 2.16.3 copy is not, so it stays. No @azure/identity release accepts 7.x yet
+  # (4.14.0 needs ^6.0.0). Remove this line once one does.
+  '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
   # Fixed parser and HTTP dependencies retain their existing major release lines.
   markdown-it: 14.3.3
   follow-redirects: 1.16.1

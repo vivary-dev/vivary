@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,6 +196,32 @@ test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM
     assert.match(uuid.v4(), uuidV4);
     assert.match(esm.v4(), uuidV4);
   }
+});
+
+// Beta ticket 29. GHSA-xcx6-jx8p-x3h5 affects msal-node 5.x and 6.x, so @azure/identity 4.13.2's copy is forced to
+// 7.1.0. Bot Framework's own 2.16.3 copy is outside the range and stays. No test can finish a real Azure sign-in, so
+// this proves identity loads 7.1.0, builds its clients and sends a client-credential request without an API error.
+test("identity runs on the patched MSAL 7.1.0 while Bot Framework keeps its own 2.16.3", async () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
+  const connectorRequire = createRequire(coreRequire.resolve("botframework-connector"));
+  const identityRequire = createRequire(connectorRequire.resolve("@azure/identity"));
+  assert.match(identityRequire.resolve("@azure/msal-node"), /@azure\+msal-node@7\.1\.0/);
+  assert.match(connectorRequire.resolve("@azure/msal-node"), /@azure\+msal-node@2\.16\.3/);
+  const { ClientSecretCredential, DefaultAzureCredential, ManagedIdentityCredential } = connectorRequire("@azure/identity");
+  assert.doesNotThrow(() => new DefaultAzureCredential());
+  assert.doesNotThrow(() => new ManagedIdentityCredential());
+  // A closed loopback port. MSAL 7 builds the confidential client and fails only when it tries the network.
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise(resolve => server.close(resolve));
+  const credential = new ClientSecretCredential("00000000-0000-0000-0000-000000000000", "client", "secret",
+    { authorityHost: `https://127.0.0.1:${port}`, disableInstanceDiscovery: true, retryOptions: { maxRetries: 0 } });
+  const error = await credential.getToken("https://management.azure.com/.default").then(() => null, failure => failure);
+  assert.ok(error, "a closed port cannot issue a token");
+  assert.doesNotMatch(String(error?.stack ?? error), /is not a (function|constructor)|Cannot read properties of undefined/);
+  // MSAL itself names the failure: it tried to resolve the authority endpoints over the closed port.
+  assert.match(String(error?.message ?? error), /endpoints_resolution_error/);
 });
 
 test("Typography retains selector AST behavior with the patched parser", () => {
