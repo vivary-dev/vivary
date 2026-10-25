@@ -744,11 +744,37 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
-2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
-it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
-whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
-1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
-behavior changes, so the existing design description still holds.
+2026-10-25 body-parser 2.4.0 and fast-uri 3.1.9 (beta ticket 29, part a). GitHub
+published GHSA-27r3-jxmh-p828 for body-parser and four advisories for fast-uri on
+2026-10-23, after the dev security unit (#275). Express 5.2.1 and ajv 8.20.0 accept the
+fixed releases within their own ranges, so only `packages/workbench/pnpm-lock.yaml`
+changes: body-parser 2.3.0 to 2.4.0, fast-uri 3.1.8 to 3.1.9, and qs 6.16.1 beside 6.16.0
+for body-parser's raised range. `tests/dependency-advisories.test.mjs` floors both packages
+at their fixes. No manifest, override, patch or runtime path changes, so the dependency
+description above still holds.
+
+2026-10-25 Review P3 sweep A (beta ticket 27). The desktop runtime builder admits its
+host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
+destination, fills the download cache or calls the build helper. Before, the admission ran
+inside `runBuildHelper`, after the downloads. `packages/desktop/README.md` names the admitted
+host runtime, CPython 3.12.15 final with OpenSSL 3.5.9, and says that the check precedes the
+original runtime's downloads but follows the Node LICENSE and Windows Node downloads in
+`package.mjs`. CONTRIBUTING.md lists the size
+report among a PR's contents and puts the merge rule back above its Size subsection, and the
+PR size rule entry below moves under the 2026-10-25 entries, in date order. Only the order of
+an existing check changes, so the packaging description above still holds.
+
+2026-10-25 @azure/identity's msal-node copy forced to 7.1.0 (beta ticket 29, part c).
+GHSA-xcx6-jx8p-x3h5 affects @azure/msal-node from 5.0.0-beta.0 to before 7.1.0, and no
+@azure/identity release accepts 7.x yet. `pnpm-workspace.yaml` overrides only
+`@azure/identity@4.13.2>@azure/msal-node`, so identity's 5.6.0 copy becomes 7.1.0 (with
+msal-common 16.14.2, which it pins), while Bot Framework's direct 2.16.3 copy, outside the
+range, stays. Identity 4.13.2 calls none of the APIs that msal-node 6 and 7 removed.
+Vivary's code never imports identity or MSAL. Core reaches Bot Framework only from its Teams
+adapter, and unstorage's Azure drivers cannot load without their own SDKs, none of which is
+installed. `tests/dependency-advisories.test.mjs` checks both copies and drives identity
+through MSAL 7 to a refused loopback request. Remove the override once an identity release
+accepts msal-node 7. The dependency description above still holds.
 
 2026-10-25 Approval cleanup keeps asks that a run still claims (beta ticket 28).
 The maintained Core patch gains appended sections for
@@ -764,6 +790,12 @@ the roles described above, so the descriptions hold. J10 in `journeys.md` gains
 one sentence on the cleanup, and its diagram is unchanged, because no state or
 edge changes. `tests/automation-approval-stuck.test.mjs` adds seven cases that
 failed on the previous patch and pass on this one.
+
+2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
+it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
+whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about
+1,000 hand-written lines. Contributor process only. No runtime, build or review-gate
+behavior changes, so the existing design description still holds.
 
 2026-10-24 Automated restart test for runs and approvals (beta ticket 07). This change adds a test and no server
 code. `tests/local-code-restart.test.ts` runs a first host in a child process until its run waits on a Codex
