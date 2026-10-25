@@ -9,7 +9,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { PROFILE_AUTH_SECRET, PROFILE_DATABASE, authSecret, startupOptions } from "../bin/start.mjs";
-import { REGISTRY_MIGRATIONS } from "../server/db/registry-migrations.mjs";
+import { REGISTRY_MIGRATIONS, REGISTRY_MIGRATIONS_TABLE } from "../server/db/registry-migrations.mjs";
 
 // SHA-256 of each migration's SQL in the preview's server/db/migrations.mjs.
 const PREVIEW_MIGRATIONS = [
@@ -20,25 +20,31 @@ const PREVIEW_MIGRATIONS = [
 ];
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 
-// Models the migration runner: each version runs once, in order, and is recorded.
+// The preview recorded its migrations here. A renamed table would make every preview profile look fresh, and
+// migration 2's ALTER TABLE would then fail on the existing column.
+const PREVIEW_MIGRATIONS_TABLE = "vivary_workbench_registry_migrations";
+
+// Models the migration runner: each version runs once, in order, and is recorded in the shared history table.
 function migrate(db, migrations) {
-  db.exec("CREATE TABLE IF NOT EXISTS applied (version INTEGER PRIMARY KEY)");
-  const applied = new Set(db.prepare("SELECT version FROM applied").all().map(row => row.version));
+  db.exec(`CREATE TABLE IF NOT EXISTS "${REGISTRY_MIGRATIONS_TABLE}" (version INTEGER PRIMARY KEY)`);
+  const applied = new Set(db.prepare(`SELECT version FROM "${REGISTRY_MIGRATIONS_TABLE}"`).all().map(row => row.version));
   for (const { version, sql } of migrations) {
     if (applied.has(version)) continue;
     db.exec("BEGIN");
     db.exec(sql);
-    db.prepare("INSERT INTO applied (version) VALUES (?)").run(version);
+    db.prepare(`INSERT INTO "${REGISTRY_MIGRATIONS_TABLE}" (version) VALUES (?)`).run(version);
     db.exec("COMMIT");
   }
 }
 
 function rows(db) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vivary_%' ORDER BY name").all();
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vivary_%' AND name <> ? ORDER BY name")
+    .all(REGISTRY_MIGRATIONS_TABLE);
   return Object.fromEntries(tables.map(({ name }) => [name, db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()]));
 }
 
 test("released registry migrations are unchanged since the preview", () => {
+  assert.equal(REGISTRY_MIGRATIONS_TABLE, PREVIEW_MIGRATIONS_TABLE, "a preview profile keeps its migration history here");
   assert.deepEqual(REGISTRY_MIGRATIONS.slice(0, PREVIEW_MIGRATIONS.length).map(({ version, name, sql }) => [version, name, sha256(sql)]),
     PREVIEW_MIGRATIONS, "a profile keeps the migrations it already ran, so a released one must not change");
   assert.deepEqual(REGISTRY_MIGRATIONS.map(({ version }) => version), REGISTRY_MIGRATIONS.map((_, index) => index + 1),
@@ -68,7 +74,7 @@ test("later registry migrations open a preview profile and keep its projects", (
     }
     assert.deepEqual(Object.keys(after).filter(name => !(name in before)).sort(),
       ["vivary_conversation_links", "vivary_handoff_records"]);
-    assert.equal(db.prepare("SELECT count(*) AS count FROM applied").get().count, REGISTRY_MIGRATIONS.length);
+    assert.equal(db.prepare(`SELECT count(*) AS count FROM "${REGISTRY_MIGRATIONS_TABLE}"`).get().count, REGISTRY_MIGRATIONS.length);
   } finally {
     db.close();
   }

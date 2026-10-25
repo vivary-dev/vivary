@@ -21,7 +21,7 @@ const installerSources = [
   "packages/desktop/release-version.mjs", "packages/desktop/assets/vivary.ico", "LICENSE",
   "packages/workbench/bin/runtime-security.mjs",
 ];
-const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<commit>.exe> --manifest <package-file-manifest.json>";
+const usage = "Usage: node build-installer.mjs --payload <Vivary-win32-x64 directory> --output <Vivary-Setup-<version>.exe> --manifest <package-file-manifest.json>";
 // Windows reserves these device names in any path part, with or without an extension.
 const reservedNames = new Set(["CON", "PRN", "AUX", "NUL",
   ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`), ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)]);

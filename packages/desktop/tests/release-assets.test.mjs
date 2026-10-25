@@ -189,3 +189,11 @@ test("release assets write the ZIPs, metadata, inventory and checksums", { skip:
     ]);
     await assert.rejects(buildReleaseAssets({ payload, installer, commit, version, license }), /Refusing to overwrite/);
   }));
+
+test("release assets keep an existing BUILD-INFO.json", { skip: !hasZip && "zip is not installed" },
+  () => withRelease(async ({ payload, release, installer, license }) => {
+    // #291 review: every release file refuses an overwrite, BUILD-INFO.json included.
+    await writeFile(path.join(release, "BUILD-INFO.json"), "earlier\n");
+    await assert.rejects(buildReleaseAssets({ payload, installer, commit, version, license }), /EEXIST/);
+    assert.equal(await readFile(path.join(release, "BUILD-INFO.json"), "utf8"), "earlier\n");
+  }));

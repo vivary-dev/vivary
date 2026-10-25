@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -174,7 +174,7 @@ export async function buildReleaseAssets({ payload, installer, commit, version, 
     await rm(staging, { recursive: true, force: true });
   }
 
-  await copyFile(buildFile, path.join(output, "BUILD-INFO.json"));
+  await copyFile(buildFile, path.join(output, "BUILD-INFO.json"), constants.COPYFILE_EXCL);
   await writeFile(path.join(output, "RUNTIME-INVENTORY.json"), `${JSON.stringify(inventory, null, 2)}\n`, { flag: "wx" });
   const checked = await writeChecksums(output);
   return Object.freeze({ output, files: [...checked, "SHA256SUMS"], licenses: licenses.length,

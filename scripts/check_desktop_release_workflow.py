@@ -50,6 +50,13 @@ DESKTOP_INSTALL_STEP = (
     "        shell: bash\n"
     "        run: '\"$RUNNER_TEMP/vivary-build-tools/bin/npm\" --prefix packages/desktop ci --ignore-scripts'\n"
 )
+TAG_STEP = (
+    "      - name: Require a release tag to name the desktop version\n"
+    "        if: github.ref_type == 'tag'\n"
+    "        env:\n"
+    "          VERSION: ${{ steps.version.outputs.version }}\n"
+    "        run: test \"$GITHUB_REF_NAME\" = \"v$VERSION\"\n"
+)
 PACKAGE_STEP = (
     "      - name: Package Windows x64 from a source build of Workbench\n"
     "        shell: bash\n"
@@ -135,7 +142,8 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
     create = text[text.find("gh release create"):]
     for flag in ("--verify-tag", "--draft", "--prerelease", "--latest=false"):
         require(flag in create.split("./*")[0], f"the release must be created with {flag}")
-    require('test "$GITHUB_REF_NAME" = "v$VERSION"' in text, "a release tag must name the desktop version")
+    require(sum(step.rstrip("\n") == TAG_STEP.rstrip("\n") for step in steps) == 1,
+            "a release tag must name the desktop version, in the exact reviewed step")
     require('--commit "$GITHUB_SHA"' in text, "the release files must be checked against the built commit")
     require("sha256sum --check --strict SHA256SUMS" in text[draft:], "the draft job must check the downloaded files")
     require("if-no-files-found: error" in text, "a missing release file must fail the upload")

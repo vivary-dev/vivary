@@ -74,6 +74,10 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
             "checkout keeps credentials": ("persist-credentials: false", "persist-credentials: true"),
             "secret read": ("GH_TOKEN: ${{ github.token }}", "GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}"),
             "tag not checked": ('test "$GITHUB_REF_NAME" = "v$VERSION"', "true"),
+            "tag check skipped": ("        if: github.ref_type == 'tag'\n        env:\n          VERSION:",
+                                  "        if: false\n        env:\n          VERSION:"),
+            "tag check commented out": ('        run: test "$GITHUB_REF_NAME" = "v$VERSION"',
+                                        '        run: echo # test "$GITHUB_REF_NAME" = "v$VERSION"'),
             "unchecked download": ("          sha256sum --check --strict SHA256SUMS\n          gh release", "          gh release"),
         }
         for name, (old, new) in cases.items():

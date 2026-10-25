@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, rmSync } from "node:fs";
 import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -155,11 +155,12 @@ export async function packageDesktop() {
   const stagingParent = path.join(root, ".tmp");
   let workbenchCommit = null;
   if (values["build-workbench"]) {
-    // Remove the old output first, so nothing from an earlier build is packaged.
-    await rm(path.join(workbench, ".output"), { recursive: true, force: true });
-    workbenchCommit = buildWorkbenchFromSource(repository, () => execFileSync(
-      "pnpm", ["--dir", workbench, "run", "build"], { stdio: "inherit" },
-    ));
+    workbenchCommit = buildWorkbenchFromSource(repository, () => {
+      // Remove the old output only once the checkout is known clean, so nothing from an earlier build is
+      // packaged and a refused build keeps the output it had.
+      rmSync(path.join(workbench, ".output"), { recursive: true, force: true });
+      execFileSync("pnpm", ["--dir", workbench, "run", "build"], { stdio: "inherit" });
+    });
   }
   await access(path.join(workbench, ".output/server/index.mjs"));
   await mkdir(stagingParent, { recursive: true });
