@@ -736,6 +736,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 npm publication on the qualified client. `npm-trusted-publish.yml` was the
+last workflow that ran the npm bundled with setup-node. Both of its jobs now provision
+npm 12.2.1 with `scripts/bootstrap_build_tools.py` right after the Node guard, and pack
+with it. `runtime-security.mjs publish-npm` takes the tool root as a second argument,
+refuses a Node other than the root's own and any npm, undici or ip-address version
+other than the pins, and runs the root's `client.cjs` from the scratch directory, so no
+runner or project npm configuration applies. setup-node no longer writes an npmrc
+(`registry-url`), and npm publishes to its default registry with the OIDC token it
+requests. The checker requires the client step and refuses any other npm, npx or
+corepack command in both jobs.
+
 2026-10-24 Back-merge of main into dev. main gained #278, the main mirror of the security unit
 that #275 brought to dev, plus main-only Dependabot bumps and lockfile normalization. Merging
 main into dev makes main an ancestor of dev, so the later promotion merge of dev into main
