@@ -196,6 +196,13 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
     # The runner contract already refuses a job it does not cover. The inventory names it if that check changes.
     assert message and ("exactly the verify and publish jobs" in message
                         or "runner bootstrap must cover the exact job inventory" in message), message
+    # #306 review round 6. A commented or flow-style job header escapes the job-name pattern.
+    for label, job in (("commented", "  extra:  # helper\n    runs-on: ubuntu-latest\n    permissions:\n      \"id-token\": write\n"
+                                     "    steps:\n      - run: corepack pnpm publish\n"),
+                       ("flow", "  extra: {runs-on: ubuntu-latest, steps: [{run: corepack pnpm publish}]}\n")):
+        message = check(text.replace("\njobs:\n", "\njobs:\n" + job, 1))
+        assert message and ("the jobs section must hold exactly the verify and publish jobs" in message
+                            or "runner bootstrap must cover the exact job inventory" in message), (label, message)
     # A path and a data value that contain the word stay allowed.
     assert "packages/create-vivary/npm/package.json" in text and "npm={npm_version}" in text
     assert check(text) is None

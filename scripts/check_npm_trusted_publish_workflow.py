@@ -284,6 +284,10 @@ def check_job_inventory(text: str, contract) -> None:
             "the workflow name, triggers and permissions must be exactly the reviewed text")
     require(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", text.split("\njobs:\n", 1)[1]) == ["verify", "publish"],
             "the workflow must declare exactly the verify and publish jobs")
+    # A job header with a trailing comment, or a flow-style job, escapes the name pattern above. Nothing may sit
+    # in the jobs section outside the two pinned job blocks.
+    require(text.split("\njobs:\n", 1)[1] == contract.job_block(text, "verify") + contract.job_block(text, "publish"),
+            "the jobs section must hold exactly the verify and publish jobs, with nothing before, between or after them")
     for name, header in (("verify", VERIFY_HEADER), ("publish", PUBLISH_HEADER)):
         require(contract.job_block(text, name).split("    steps:\n", 1)[0] == header,
                 f"the {name} job header must be exactly the reviewed text")

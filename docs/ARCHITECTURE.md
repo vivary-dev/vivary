@@ -768,7 +768,8 @@ value. Those checks give the specific reason. The gate is that both jobs must co
 the reviewed steps, in order, because no pattern over shell text can see a command hidden in a
 variable or `eval`. This extends the checker's existing pre-guard inventory to the whole job.
 The workflow preamble, the job list and both job headers are pinned the same way, so no
-`defaults:` or `env:` block can change how a reviewed step runs.
+`defaults:` or `env:` block can change how a reviewed step runs, and the jobs section must be
+exactly the two pinned jobs, so no commented or flow-style job can sit beside them.
 The publish step must match its reviewed text exactly. The workflow is unchanged, so the
 2026-10-24 description of npm publication on the qualified client still holds, and the
 inventory is what enforces its last sentence: no other npm, npx or corepack command can run.
