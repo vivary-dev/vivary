@@ -3,6 +3,8 @@
 // https://platform.claude.com/docs/en/about-claude/pricing
 // https://code.claude.com/docs/en/model-config
 export type ClaudeCodeModelId = "claude-sonnet-5-5" | "claude-haiku-5-5" | "claude-opus-5-5" | "claude-fable-5-1";
+import { compareReleaseVersions } from "./runtime-versions";
+
 export const CLAUDE_CODE_DEFAULT_MODEL: ClaudeCodeModelId = "claude-sonnet-5-5";
 export const CLAUDE_CODE_LEGACY_ALIASES: readonly string[] = ["sonnet", "haiku", "opus", "fable"];
 
@@ -17,11 +19,9 @@ export const CLAUDE_CODE_MODELS: readonly {
 ];
 
 export function claudeCodeModelChoices(version?: string) {
-  const installed = version?.match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number);
   return CLAUDE_CODE_MODELS.map(model => {
-    const required = model.minimumVersion.split(".").map(Number);
-    const difference = installed?.map((part, index) => part - required[index]).find(part => part !== 0) ?? 0;
-    const support = !installed ? "unverified" : difference >= 0 ? "supported" : "upgrade-required";
+    const difference = compareReleaseVersions(version, model.minimumVersion);
+    const support = difference === undefined ? "unverified" : difference >= 0 ? "supported" : "upgrade-required";
     return { ...model, support,
       message: support === "supported" ? `Claude Code ${version} supports this model ID.`
         : support === "upgrade-required" ? `Requires Claude Code ${model.minimumVersion} or later. Installed: ${version}.`
