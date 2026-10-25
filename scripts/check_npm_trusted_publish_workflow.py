@@ -63,6 +63,51 @@ DRY_RUN_STEP = (
 # substitution or a path separator, and before a space, a separator, a quote or the line end. So
 # `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
 # as npm={npm_version} or npm-candidate do not.
+# The name, the dispatch inputs and read-only permissions. No defaults or env.
+WORKFLOW_PREAMBLE = (
+    'name: npm trusted publish\n'
+    '\n'
+    'on:\n'
+    '  workflow_dispatch:\n'
+    '    inputs:\n'
+    '      version:\n'
+    '        description: "@vivary/create version to publish; must match package.json and release_tag."\n'
+    '        required: true\n'
+    '        type: string\n'
+    '      release_tag:\n'
+    '        description: "Existing release tag to publish from, e.g. v0.3.1."\n'
+    '        required: true\n'
+    '        type: string\n'
+    '      publish:\n'
+    '        description: "Actually publish to npm. Leave false for the dry-run gate."\n'
+    '        required: true\n'
+    '        default: false\n'
+    '        type: boolean\n'
+    '\n'
+    'permissions:\n'
+    '  contents: read\n'
+    '\n'
+)
+# The verify job runs unconditionally, with no defaults or env.
+VERIFY_HEADER = (
+    '  verify:\n'
+    '    name: "@vivary/create release checks"\n'
+    '    runs-on: ubuntu-latest\n'
+    '    timeout-minutes: 15\n'
+)
+# The publish job needs consent and verify, and alone holds id-token.
+PUBLISH_HEADER = (
+    '  publish:\n'
+    '    name: "@vivary/create trusted publish"\n'
+    "    if: ${{ inputs.publish && needs.verify.result == 'success' }}\n"
+    '    needs: verify\n'
+    '    runs-on: ubuntu-latest\n'
+    '    environment: npm-publish\n'
+    '    timeout-minutes: 10\n'
+    '    permissions:\n'
+    '      contents: read\n'
+    '      id-token: write\n'
+)
 # Both jobs check out the release tag without credentials.
 CHECKOUT_STEP = (
     '      - name: Checkout release tag\n'
@@ -233,7 +278,15 @@ def check_runtime_and_archive(text: str) -> None:
 def check_job_inventory(text: str, contract) -> None:
     """Beta ticket 27, #306 review. A pattern over shell text cannot be complete (a variable or eval hides any
     command), so both npm jobs must consist of exactly the reviewed steps, in order. The checks above give the
-    specific reason when they can. This one refuses every other change, a new benign step included."""
+    specific reason when they can. This one refuses every other change, a new benign step included. A
+    `defaults:` or `env:` block changes how every step runs, so the preamble and both job headers are pinned too."""
+    require(text.split("\njobs:\n", 1)[0] + "\n" == WORKFLOW_PREAMBLE,
+            "the workflow name, triggers and permissions must be exactly the reviewed text")
+    require(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", text.split("\njobs:\n", 1)[1]) == ["verify", "publish"],
+            "the workflow must declare exactly the verify and publish jobs")
+    for name, header in (("verify", VERIFY_HEADER), ("publish", PUBLISH_HEADER)):
+        require(contract.job_block(text, name).split("    steps:\n", 1)[0] == header,
+                f"the {name} job header must be exactly the reviewed text")
     shared = [CHECKOUT_STEP, contract.PIP_SETUP_STEP, contract.PYTHON_PROVISIONING_STEP, contract.PYTHON_RUNTIME_STEP,
               SETUP_NODE_STEP, GUARD_STEP, CLIENT_STEP]
     expected = {

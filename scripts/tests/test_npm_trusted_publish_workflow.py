@@ -169,6 +169,13 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
         extra = text.replace(job, job.replace(version_step, "      - run: echo hi\n" + version_step, 1), 1)
         message = check(extra)
         assert message and f"{name} must consist of exactly the reviewed steps" in message, (name, "extra_step", message)
+        # #306 review round 5. A default shell would run every reviewed step that names none.
+        header_end = job.index("    steps:\n")
+        defaults = job[:header_end] + "    defaults:\n      run:\n        shell: npx --yes some-wrapper {0}\n" + job[header_end:]
+        message = check(text.replace(job, defaults, 1))
+        assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "defaults", message)
+        message = check(text.replace(job, job[:header_end] + "    env:\n      npm_config_registry: https://example.test\n" + job[header_end:], 1))
+        assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "env", message)
         # A package manager in the step's shell runs the body too.
         start = job.index("        run: |\n", start)
         message = check(text.replace(job, job[:start] + "        shell: npx --yes bash-wrapper {0}\n" + job[start:], 1))
@@ -182,6 +189,13 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
     assert text.count(dry_run) == 1
     message = check(text.replace(dry_run, dry_run.replace('approved."', 'approved."; npm publish'), 1))
     assert message and "verify must run npm only through the qualified client" in message, message
+    # Workflow-level defaults reach both jobs, and a third job is not reviewed.
+    message = check(text.replace("\njobs:\n", "\ndefaults:\n  run:\n    shell: npx --yes some-wrapper {0}\n\njobs:\n", 1))
+    assert message == "the workflow name, triggers and permissions must be exactly the reviewed text", message
+    message = check(text.rstrip("\n") + "\n\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n")
+    # The runner contract already refuses a job it does not cover. The inventory names it if that check changes.
+    assert message and ("exactly the verify and publish jobs" in message
+                        or "runner bootstrap must cover the exact job inventory" in message), message
     # A path and a data value that contain the word stay allowed.
     assert "packages/create-vivary/npm/package.json" in text and "npm={npm_version}" in text
     assert check(text) is None
