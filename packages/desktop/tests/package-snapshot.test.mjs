@@ -191,5 +191,20 @@ test("payload runtime evidence must match the staged Node exactly", {
     }
     await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence }));
     await assert.rejects(assertDesktopPayload(directory), /Electron publication is held/);
+
+    // #292 review: the payload's own Electron must be the admitted pin, named by build.json and Electron's version file.
+    const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
+    const admitted = { [pinned]: "24.22.1" };
+    const versionFile = path.join(directory, "version");
+    for (const [electron, shipped] of [[undefined, pinned], [pinned, undefined], [pinned, "44.9.3"], ["44.9.3", "44.9.3"]]) {
+      await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron }));
+      await rm(versionFile, { force: true });
+      if (shipped) await writeFile(versionFile, shipped + "\n");
+      await assert.rejects(assertDesktopPayload(directory, admitted), /The payload's Electron .* is not the pinned/, `${electron} / ${shipped}`);
+    }
+    await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron: pinned }));
+    await writeFile(versionFile, pinned + "\n");
+    await assert.rejects(assertDesktopPayload(directory), new RegExp(`Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
+    await assertDesktopPayload(directory, admitted);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

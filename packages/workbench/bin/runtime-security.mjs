@@ -149,13 +149,20 @@ export function assertElectronPublication(version = pinnedElectron(), admitted =
   return { electron: version, node: admitted[version] };
 }
 
-export async function assertDesktopPayload(payload) {
+export async function assertDesktopPayload(payload, admitted = ADMITTED_ELECTRON) {
   const build = JSON.parse(await readFile(path.join(payload, "resources/workbench/build.json"), "utf8"));
   const executable = path.join(payload, "resources/node", build.platform === "win32" ? "node.exe" : "node");
   const facts = await validateStagedNode(executable, { platform: build.platform, arch: build.architecture, nodeVersion: build.node });
   if (!build.runtimeSecurity?.standalone || build.runtimeSecurity.standalone.sha256 !== facts.sha256
     || build.runtimeSecurity.standalone.versions?.node !== facts.versions.node) refuse("payload runtime evidence is missing or changed.");
-  assertElectronPublication();
+  // The payload names its Electron in build.json and in the version file Electron ships beside its
+  // executable. Both must name the pinned release, so an older or foreign payload cannot pass.
+  const pinned = pinnedElectron();
+  const shipped = await readFile(path.join(payload, "version"), "utf8").then(text => text.trim(), () => null);
+  if (typeof build.electron !== "string" || build.electron !== shipped || build.electron !== pinned) {
+    refuse(`Electron publication is held. The payload's Electron (build.json ${build.electron ?? "missing"}, version file ${shipped ?? "missing"}) is not the pinned ${pinned}.`);
+  }
+  assertElectronPublication(build.electron, admitted);
 }
 
 function checkedChild(script, args, archive, cwd) {
