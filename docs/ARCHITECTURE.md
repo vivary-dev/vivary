@@ -732,6 +732,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-24 Follow-ups from the #278 review that also apply to dev. The desktop build helper
+admits its host Python with `scripts/check_python_runtime.py` before it creates the build venv.
+The Astro replacement README states GHSA-ch52-4w7c-c8xp's published range and the status of
+the replaced 4.3.0. No runtime behavior changes while packaging is held.
+
+2026-10-24 Security review follow-ups. Three P3s from the #275 review land here, so the
+frozen security PR converges. The CI contract now requires the certificate overlay tests.
+The production-installer tests branch on whether the current Node is admitted, like the
+packaging tests. The bounded-probe test gives its passing cases a normal timeout. Tests
+and CI contract only. No runtime behavior changes.
+
 2026-10-24 Approval cleanup outside the custody transaction (#205, slice 4).
 The maintained Core patch gains appended sections for
 `agent/tool-approval-store.js`, its declaration file and
