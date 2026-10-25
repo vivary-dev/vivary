@@ -19,6 +19,7 @@ const EXPECTED: Record<CodeRunEdge, { to: string; from: CodeAgentRunStatus[] }> 
   stop: { to: "running/stopping", from: ["queued", "running", "needs-approval"] },
   pause: { to: "paused/paused", from: ["queued", "running", "needs-approval", "paused", "completed", "errored"] },
   interrupt: { to: "paused/interrupted", from: ["running", "needs-approval"] },
+  interruptOnQuit: { to: "paused/interrupted", from: ["running", "needs-approval", "paused"] },
   fail: { to: "errored/error", from: ["queued", "running", "needs-approval", "paused", "errored"] },
   cleanupUnverified: { to: "errored/cleanup-unverified",
     from: ["queued", "running", "needs-approval", "paused", "completed", "errored"] },

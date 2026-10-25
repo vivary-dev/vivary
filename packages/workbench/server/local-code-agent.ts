@@ -1684,13 +1684,13 @@ function titleFromMessage(message: string): string {
  */
 function recordStoppedRun(runId: string, reason: "shutdown" | "user"): void {
   if (reason === "shutdown" && recordedApprovals(getCodeAgentRunRecord(runId)).some(approval => !approval.expiredAt)) {
-    recordInterruptedRun(runId, "The Vivary code host shut down while this run waited on a Codex request.");
+    recordInterruptedRun(runId, "The Vivary code host shut down while this run waited on a Codex request.", "interruptOnQuit");
   } else {
     recordPausedRun(runId, "The local code run stopped.", { phase: "paused", reason });
   }
 }
 
-function recordInterruptedRun(runId: string, message: string): void {
+function recordInterruptedRun(runId: string, message: string, edge: "interrupt" | "interruptOnQuit" = "interrupt"): void {
   appendCodeAgentTranscriptEvent({
     runId,
     kind: "status",
@@ -1701,7 +1701,7 @@ function recordInterruptedRun(runId: string, message: string): void {
       reason: "host-restart",
     },
   });
-  transitionCodeRun(runId, "interrupt", {
+  transitionCodeRun(runId, edge, {
     needsApproval: false,
     metadata: { pendingLaunch: undefined },
     progress: {

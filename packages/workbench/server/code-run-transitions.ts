@@ -29,6 +29,8 @@ export const CODE_RUN_TRANSITIONS = {
     from: ["queued", "running", "needs-approval", "paused", "completed", "errored"] },
   /** A fresh host found a run that the previous host left active. */
   interrupt: { to: { status: "paused", phase: "interrupted" }, from: ["running", "needs-approval"] },
+  /** Beta ticket 27. A quit expired the request a run waited on. Core may have paused the run first. */
+  interruptOnQuit: { to: { status: "paused", phase: "interrupted" }, from: ["running", "needs-approval", "paused"] },
   /** The worker failed outside a stop. */
   fail: { to: { status: "errored", phase: "error" }, from: ["queued", "running", "needs-approval", "paused", "errored"] },
   /** A stop could not confirm that the run's processes ended. Any run can end this way. */

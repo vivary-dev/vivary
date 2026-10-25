@@ -24,10 +24,15 @@ if (JSON.stringify(process.argv.slice(2)) === '["--version"]') {
 if (JSON.stringify(process.argv.slice(2)) !== '["auth","status","--json"]') process.exit(2);
 process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}');
 `, { mode: 0o755 });
+  // The worker writes runs through Core's file store, as the real executor does.
+  const codeAgents = import.meta.resolve("@agent-native/core/code-agents");
   await writeFile(path.join(server, "vivary-code-worker.mjs"), `
 let runId;
-process.on("message", message => {
+process.on("message", async message => {
  if (message.type === "vivary:code-worker:abort") {
+  // The real executor writes paused/paused for an interrupted result before the worker reports it (#306).
+  const { updateCodeAgentRunRecord } = await import(${JSON.stringify(codeAgents)});
+  updateCodeAgentRunRecord(runId, { status: "paused", phase: "paused" });
   // The real executor's teardown clears every pending request, and the worker forwards each one before it finishes.
   process.send({ type: "vivary:code-worker:resolved", runId, requestId: "request-quit" });
   process.send({ type: "vivary:code-worker:done", runId });
