@@ -24,22 +24,10 @@ const sha256 = text => createHash("sha256").update(text).digest("hex");
 // migration 2's ALTER TABLE would then fail on the existing column.
 const PREVIEW_MIGRATIONS_TABLE = "vivary_workbench_registry_migrations";
 
-// Models the migration runner: each version runs once, in order, and is recorded in the shared history table.
-function migrate(db, migrations) {
-  db.exec(`CREATE TABLE IF NOT EXISTS "${REGISTRY_MIGRATIONS_TABLE}" (version INTEGER PRIMARY KEY)`);
-  const applied = new Set(db.prepare(`SELECT version FROM "${REGISTRY_MIGRATIONS_TABLE}"`).all().map(row => row.version));
-  for (const { version, sql } of migrations) {
-    if (applied.has(version)) continue;
-    db.exec("BEGIN");
-    db.exec(sql);
-    db.prepare(`INSERT INTO "${REGISTRY_MIGRATIONS_TABLE}" (version) VALUES (?)`).run(version);
-    db.exec("COMMIT");
-  }
-}
-
+// Project tables only. Core's runner keeps its history in the table and in "<table>_named".
 function rows(db) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vivary_%' AND name <> ? ORDER BY name")
-    .all(REGISTRY_MIGRATIONS_TABLE);
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vivary_%' AND name NOT IN (?, ?) ORDER BY name")
+    .all(PREVIEW_MIGRATIONS_TABLE, `${PREVIEW_MIGRATIONS_TABLE}_named`);
   return Object.fromEntries(tables.map(({ name }) => [name, db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()]));
 }
 
@@ -51,10 +39,18 @@ test("released registry migrations are unchanged since the preview", () => {
     "versions run in order with no gap");
 });
 
-test("later registry migrations open a preview profile and keep its projects", () => {
-  const db = new DatabaseSync(":memory:");
+// #291 review: the upgrade runs through the startup runner in server/db/migrations.mjs, not a model of it.
+// The preview ran Core 0.176.5's runMigrations too, so the seed below writes the history a preview profile holds.
+test("the startup migration runner opens a preview profile and keeps its projects", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vivary-preview-upgrade-"));
+  const file = path.join(root, PROFILE_DATABASE);
+  process.env.DATABASE_URL = `file:${file}`; // guard:allow-env-mutation - This test's own SQLite file, set before Core loads.
+  const { closeDbExec, runMigrations, withMigrationRuntime } = await import("@agent-native/core/db");
   try {
-    migrate(db, REGISTRY_MIGRATIONS.slice(0, PREVIEW_MIGRATIONS.length));
+    await withMigrationRuntime(() => runMigrations(REGISTRY_MIGRATIONS.slice(0, PREVIEW_MIGRATIONS.length),
+      { table: PREVIEW_MIGRATIONS_TABLE })());
+    await closeDbExec();
+    let db = new DatabaseSync(file);
     db.exec(`
       INSERT INTO vivary_registry_projects VALUES ('project-a', 1, 'Project A', 'sha256', 'digest-a');
       INSERT INTO vivary_registry_bindings (binding_id, project_id, collection_id, actor_id, device_id, root_id,
@@ -67,16 +63,27 @@ test("later registry migrations open a preview profile and keep its projects", (
     `);
     const before = rows(db);
     assert.equal(before.vivary_registry_bindings[0].verification_kind, "held-custody-v1");
-    migrate(db, REGISTRY_MIGRATIONS);
-    const after = rows(db);
-    for (const [table, contents] of Object.entries(before)) {
-      assert.deepEqual(after[table], contents, `${table} keeps every preview row`);
-    }
-    assert.deepEqual(Object.keys(after).filter(name => !(name in before)).sort(),
-      ["vivary_conversation_links", "vivary_handoff_records"]);
-    assert.equal(db.prepare(`SELECT count(*) AS count FROM "${REGISTRY_MIGRATIONS_TABLE}"`).get().count, REGISTRY_MIGRATIONS.length);
-  } finally {
     db.close();
+
+    const { migrateRegistry } = await import("../server/db/migrations.mjs");
+    await withMigrationRuntime(() => migrateRegistry());
+    await closeDbExec();
+    db = new DatabaseSync(file);
+    try {
+      const after = rows(db);
+      for (const [table, contents] of Object.entries(before)) {
+        assert.deepEqual(after[table], contents, `${table} keeps every preview row`);
+      }
+      assert.deepEqual(Object.keys(after).filter(name => !(name in before)).sort(),
+        ["vivary_conversation_links", "vivary_handoff_records"]);
+      assert.deepEqual(db.prepare(`SELECT name FROM "${PREVIEW_MIGRATIONS_TABLE}_named" ORDER BY version`).all().map(row => row.name),
+        REGISTRY_MIGRATIONS.map(({ name }) => name), "the preview's history gains only the later migrations");
+    } finally {
+      db.close();
+    }
+  } finally {
+    await closeDbExec();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

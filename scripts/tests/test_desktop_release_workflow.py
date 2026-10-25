@@ -90,6 +90,11 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
             "tag check commented out": ('        run: test "$GITHUB_REF_NAME" = "v$VERSION"',
                                         '        run: echo # test "$GITHUB_REF_NAME" = "v$VERSION"'),
             "unchecked download": ("          sha256sum --check --strict SHA256SUMS\n          gh release", "          gh release"),
+            # #291 review: a disabled check, and a check left only in a comment, both fail.
+            "ignored download check": ("sha256sum --check --strict SHA256SUMS\n", "sha256sum --check --strict SHA256SUMS || true\n"),
+            "release file check in a comment only": (
+                '            if ($actual -ne $hash) { throw "$name does not match SHA256SUMS" }\n',
+                '            # if ($actual -ne $hash) { throw "$name does not match SHA256SUMS" }\n'),
         }
         for name, (old, new) in cases.items():
             with self.subTest(name):

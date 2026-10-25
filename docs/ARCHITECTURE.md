@@ -744,6 +744,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
+pins the build's release-file step and the draft job's attach step as exact reviewed text,
+`RELEASE_FILES_STEP` and `ATTACH_STEP`. Before, substring tests passed a
+`sha256sum --check --strict SHA256SUMS || true` or a SHA256SUMS check left only in a comment.
+`tests/preview-profile-upgrade.test.mjs` now seeds a file database with Core's real runner
+and the preview's four migrations, as the 2026-09-22 preview wrote it. Then it runs the
+startup `migrateRegistry` from `server/db/migrations.mjs`. A renamed history table now fails
+the test, where the earlier hand-written runner missed it. The desktop README says
+`--build-workbench` runs `pnpm.cmd` through a shell on Windows, as the release workflow does.
+No runtime behavior changes, so the descriptions above hold.
+
 2026-10-25 The release build runs on Windows (Stack A, #291 review, owner option A). On
 Ubuntu, `package.mjs --windows-x64` could not finish, because `validateStagedNode` needs native
 evidence from the packaged Windows Node. The `desktop release` build job now runs on

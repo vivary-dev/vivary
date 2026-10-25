@@ -98,7 +98,8 @@ tracked or untracked changes, and refuses to package if the build changed the
 checkout or HEAD moved. Only then, with a snapshot that matches the commit, does
 `build.json` record `sourceCommitVerified: true`. Ignored files, such as
 installed dependencies, are outside this check. The option runs `pnpm` from
-`PATH`, so it suits Linux and macOS build hosts.
+`PATH`, through `pnpm.cmd` and a shell on Windows. The release workflow uses it on
+`windows-latest`.
 
 Set `VIVARY_DESKTOP_NODE` to the absolute path of ordinary Node, then run:
 

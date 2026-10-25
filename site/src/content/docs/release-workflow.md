@@ -80,7 +80,9 @@ tag and publishes the draft. `scripts/check_ci_workflow.py` checks the admission
 step and the pinned Actions. `scripts/check_desktop_release_workflow.py` checks that
 the toolchain steps match `ci.yml` and that every Node pin matches the Node the
 Windows package bundles. It also checks the triggers, the permissions, and the
-draft-only release.
+draft-only release. The build's SHA256SUMS check and the draft job's
+`sha256sum --check --strict` must each match their reviewed step exactly, so a
+disabled check fails the guard.
 
 While Electron publication is held, `package.mjs` refuses before it stages anything.
 A run then stops at the package step and keeps no release files.

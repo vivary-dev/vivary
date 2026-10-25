@@ -74,6 +74,52 @@ PACKAGE_STEP = (
 )
 
 
+# The build checks every release file against SHA256SUMS, and the draft job checks the downloads
+# again before it creates the release. Both are pinned as reviewed, so `|| true` or a check left
+# only in a comment fails the guard.
+RELEASE_FILES_STEP = (
+    "      - name: Build the installer and the release files\n"
+    "        shell: pwsh\n"
+    "        env:\n"
+    "          VERSION: ${{ steps.version.outputs.version }}\n"
+    "        run: |\n"
+    "          # A fresh checkout holds exactly one dated package folder.\n"
+    "          $folders = @(Get-ChildItem -Directory packages/desktop/dist)\n"
+    "          if ($folders.Count -ne 1) { throw \"expected one package folder, found $($folders.Count)\" }\n"
+    "          $dist = $folders[0].FullName\n"
+    "          $release = Join-Path $env:RUNNER_TEMP \"release\"\n"
+    "          New-Item -ItemType Directory -Path $release | Out-Null\n"
+    "          $node = \"$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd\"\n"
+    "          & $node packages/desktop/build-installer.mjs --payload \"$dist/Vivary-win32-x64\" `\n"
+    "            --manifest \"$dist/package-file-manifest.json\" --output \"$release/Vivary-Setup-$env:VERSION.exe\"\n"
+    "          if ($LASTEXITCODE -ne 0) { throw \"installer build failed\" }\n"
+    "          & $node packages/desktop/release-assets.mjs --payload \"$dist/Vivary-win32-x64\" `\n"
+    "            --installer \"$release/Vivary-Setup-$env:VERSION.exe\" --commit \"$env:GITHUB_SHA\"\n"
+    "          if ($LASTEXITCODE -ne 0) { throw \"release files failed\" }\n"
+    "          # Every file must match SHA256SUMS, as `sha256sum --check --strict` does on Linux.\n"
+    "          foreach ($line in Get-Content (Join-Path $release \"SHA256SUMS\")) {\n"
+    "            $hash, $name = $line -split \"  \", 2\n"
+    "            $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $release $name)).Hash.ToLowerInvariant()\n"
+    "            if ($actual -ne $hash) { throw \"$name does not match SHA256SUMS\" }\n"
+    "          }\n"
+    "          Get-ChildItem $release\n"
+)
+ATTACH_STEP = (
+    "      - name: Attach the files to a draft prerelease\n"
+    "        working-directory: release\n"
+    "        env:\n"
+    "          GH_TOKEN: ${{ github.token }}\n"
+    "          TAG: ${{ github.ref_name }}\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          sha256sum --check --strict SHA256SUMS\n"
+    "          gh release create \"$TAG\" --repo \"$GITHUB_REPOSITORY\" --verify-tag --draft --prerelease --latest=false \\\n"
+    "            --title \"Vivary $TAG\" \\\n"
+    "            --notes \"Draft build of $TAG from $GITHUB_SHA. It is not published. Release notes and Windows acceptance come before the owner publishes it.\" \\\n"
+    "            ./*\n"
+)
+
+
 def steps_of(text: str, job: str) -> list[str]:
     return re.split(r"(?m)(?=^      - )", ci.job_block(text, job))[1:]
 
@@ -160,10 +206,13 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
         require(flag in create.split("./*")[0], f"the release must be created with {flag}")
     require(sum(step.rstrip("\n") == TAG_STEP.rstrip("\n") for step in steps) == 1,
             "a release tag must name the desktop version, in the exact reviewed step")
-    require('--commit "$env:GITHUB_SHA"' in text, "the release files must be checked against the built commit")
-    require('if ($actual -ne $hash) { throw' in text, "the build must check every release file against SHA256SUMS")
-    check_at = text.find("sha256sum --check --strict SHA256SUMS", draft)
-    require(check_at != -1 and check_at < text.find("gh release create"),
+    require(sum(step.rstrip("\n") == RELEASE_FILES_STEP.rstrip("\n") for step in steps) == 1,
+            "the build must check every release file against SHA256SUMS and the built commit, in the exact reviewed step")
+    try:
+        draft_steps = steps_of(text, "draft")
+    except SystemExit:
+        draft_steps = []
+    require(sum(step.rstrip("\n") == ATTACH_STEP.rstrip("\n") for step in draft_steps) == 1,
             "the draft job must check the downloaded files before it creates the release")
     require("if-no-files-found: error" in text, "a missing release file must fail the upload")
     return problems
