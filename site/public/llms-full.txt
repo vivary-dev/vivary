@@ -8224,6 +8224,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 Review P3 sweep A (beta ticket 27). The desktop runtime builder admits its
+host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
+destination, fills the download cache or calls the build helper. Before, the admission ran
+inside `runBuildHelper`, after the downloads. `packages/desktop/README.md` names the admitted
+host runtime, CPython 3.12.15 final with OpenSSL 3.5.9. Only the order of an existing check
+changes, so the packaging description above still holds.
+
 2026-10-24 PR size rule. CONTRIBUTING.md gains a Size section, AGENTS.md points to
 it, and the PR template asks for diff bytes and hand-written lines. Each PR keeps its
 whole diff under the trusted reviewer's 1 MiB single-session cap and aims for about

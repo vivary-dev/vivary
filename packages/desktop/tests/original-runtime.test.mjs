@@ -16,6 +16,7 @@ import {
   ORIGINAL_RUNTIME_COMPONENTS,
   ORIGINAL_RUNTIME_LICENSE_ASSET,
   originalRuntimeTarget,
+  prepareOriginalRuntime,
   stageWorkbenchBridge,
   writeOriginalRuntimeLauncher,
 } from "../original-runtime.mjs";
@@ -346,6 +347,24 @@ test("distlib launcher accepts the authenticated stub with only the fixture vend
   const result = await distlibBoundaryFixture("valid-stub");
   assert.equal(result.rejected, false, result.error ?? "authenticated launcher accepted");
   assert.equal(result.launcherCreated, true);
+});
+
+test("a refused host Python stops runtime preparation before any download or build-helper call", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vivary-runtime-admission-"));
+  try {
+    const repository = path.join(root, "repository");
+    const destination = path.join(root, "runtime");
+    const cacheDirectory = path.join(root, "cache");
+    await mkdir(path.join(repository, "scripts"), { recursive: true });
+    await writeFile(path.join(repository, "scripts/check_python_runtime.py"),
+      "import sys\nsys.stderr.write('fixture host Python refused\\n')\nsys.exit(1)\n");
+    await assert.rejects(prepareOriginalRuntime({ destination, platform: "linux", arch: "x64", repository,
+      sourceCommit: "a".repeat(40), sourceDirty: false, cacheDirectory }), /fixture host Python refused/);
+    assert.equal(await stat(destination).catch(() => null), null, "no destination was prepared");
+    assert.equal(await stat(cacheDirectory).catch(() => null), null, "no runtime asset was downloaded or cached");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("runtime cache replaces corrupt content and reuses only the verified hash", async () => {
