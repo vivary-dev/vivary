@@ -141,11 +141,19 @@ def test_package_managers_run_only_in_the_exact_reviewed_steps():
             "quoted_corepack": "          bash -c 'corepack enable'\n",
             "tools_pnpm": "          " + tools + '/bin/pnpm" publish\n',
             "tools_client": "          " + tools + '/bin/node" ' + tools + '/npm/client.cjs" npm publish\n',
+            # #306 review: setup-node's own npm reached through a path.
+            "beside_node": '          "$(dirname "$(command -v node)")/npm" publish\n',
+            "tool_cache": '          "$RUNNER_TOOL_CACHE/node/24.22.1/x64/bin/npm" publish\n',
+            "windows_path": '          C:\\hostedtoolcache\\node\\npm publish\n',
         }
         for label, line in lines.items():
             message = check(text.replace(job, job[:body] + line + job[body:], 1))
             assert message and (f"{name} must run npm only through the qualified client" in message
                                 or f"{name} reaches the provisioned tools" in message), (name, label, message)
+        # A package manager in the step's shell runs the body too.
+        start = job.index("        run: |\n", start)
+        message = check(text.replace(job, job[:start] + "        shell: npx --yes bash-wrapper {0}\n" + job[start:], 1))
+        assert message and f"{name} must run npm only through the qualified client" in message, (name, "shell", message)
     publish = contract.job_block(text, "publish")
     step = module.PUBLISH_STEP
     assert publish.count(step) == 1

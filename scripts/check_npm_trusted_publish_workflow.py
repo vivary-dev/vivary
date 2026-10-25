@@ -59,10 +59,11 @@ DRY_RUN_STEP = (
     "        if: ${{ !inputs.publish }}\n"
     "        run: echo \"Dry run complete. Re-run with publish=true only after the npm publish gate is approved.\"\n"
 )
-# A package manager as a command word: after a line start, a space, a shell separator, a quote or a
-# substitution, and before a space, a separator, a quote or the line end. A path such as
-# packages/create-vivary/npm and data such as npm={npm_version} are not command words.
-PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
+# A package manager as a command word: after a line start, a space, a shell separator, a quote, a
+# substitution or a path separator, and before a space, a separator, a quote or the line end. So
+# `.../bin/npm publish` counts, while a directory such as packages/create-vivary/npm/ and data such
+# as npm={npm_version} or npm-candidate do not.
+PACKAGE_MANAGER = re.compile(r"(?m)(?:^|[\s;&|(`'\"/\\])(?:npm|npx|pnpm|corepack)(?=$|[\s;&|)`'\"])")
 
 
 def shell_masks_failure(step: str) -> bool:
@@ -159,6 +160,9 @@ def check_runtime_and_archive(text: str) -> None:
                     f"{name} reaches the provisioned tools outside the reviewed client, pack and publish steps")
             run = re.split(r"(?m)^\s*(?:-\s+)?run:", step, maxsplit=1)
             require(len(run) == 1 or not PACKAGE_MANAGER.search(run[1]),
+                    f"{name} must run npm only through the qualified client")
+            # A step's shell runs its body, so a package manager named there runs too.
+            require(not any(PACKAGE_MANAGER.search(shell) for shell in re.findall(r"(?m)^\s*(?:-\s+)?shell:(.*)$", step)),
                     f"{name} must run npm only through the qualified client")
     require(not re.search(r"(?m)^\s*(?:-\s+)?(?:run:\s*)?['\"]?npm publish(?:\s|$)", text), "raw npm publication is forbidden")
 
