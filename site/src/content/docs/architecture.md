@@ -752,7 +752,8 @@ No documentation route reads arbitrary host files.
 Ubuntu, `package.mjs --windows-x64` could not finish, because `validateStagedNode` needs native
 evidence from the packaged Windows Node. The `desktop release` build job now runs on
 `windows-latest`, with `ci.yml`'s Windows Python provisioning and its Windows build tool,
-dependency admission and install steps. It downloads the official NSIS 3.13 zip, checks its
+dependency admission and install steps. It downloads the official NSIS 3.13 zip with `curl.exe`,
+which follows SourceForge's mirror redirect, checks its
 SHA-256 against the pin before unpacking it, and sets `MAKENSIS` and `NSISDIR` to that copy.
 It checks every release file against `SHA256SUMS` in PowerShell. `package.mjs` starts pnpm
 through `pnpm.cmd` and a shell on Windows. `check_ci_workflow.py`'s `check_python_runtime` takes

@@ -780,7 +780,10 @@ jobs:
           NSIS_SHA256: "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8"
         run: |
           $zip = Join-Path $env:RUNNER_TEMP "nsis-$env:NSIS_VERSION.zip"
-          Invoke-WebRequest -Uri "https://downloads.sourceforge.net/project/nsis/NSIS%203/$env:NSIS_VERSION/nsis-$env:NSIS_VERSION.zip" -OutFile $zip
+          # curl follows SourceForge's redirect to a mirror. The first dry run (40222790697) saw a different
+          # SHA-256 through Invoke-WebRequest, likely a page rather than the zip, and the pin refused it.
+          curl.exe --fail --silent --show-error --location --output $zip "https://downloads.sourceforge.net/project/nsis/NSIS%203/$env:NSIS_VERSION/nsis-$env:NSIS_VERSION.zip"
+          if ($LASTEXITCODE -ne 0) { throw "the NSIS download failed" }
           $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
           if ($actual -ne $env:NSIS_SHA256) { throw "NSIS $env:NSIS_VERSION has SHA-256 $actual, not the pinned $env:NSIS_SHA256" }
           Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
