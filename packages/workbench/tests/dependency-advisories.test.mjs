@@ -22,6 +22,9 @@ const advisoryFloors = [
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  // Advisories published 2026-10-23 (beta ticket 29). Express 5 and ajv reach these through their own ranges.
+  { name: "body-parser", fixed: "2.4.0", advisories: ["GHSA-27r3-jxmh-p828"] },
+  { name: "fast-uri", fixed: "3.1.9", advisories: ["GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },

@@ -8224,6 +8224,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 body-parser 2.4.0 and fast-uri 3.1.9 (beta ticket 29, part a). GitHub
+published GHSA-27r3-jxmh-p828 for body-parser and four advisories for fast-uri on
+2026-10-23, after the dev security unit (#275). Express 5.2.1 and ajv 8.20.0 accept the
+fixed releases within their own ranges, so only `packages/workbench/pnpm-lock.yaml`
+changes: body-parser 2.3.0 to 2.4.0, fast-uri 3.1.8 to 3.1.9, and qs 6.16.1 beside 6.16.0
+for body-parser's raised range. `tests/dependency-advisories.test.mjs` floors both packages
+at their fixes. No manifest, override, patch or runtime path changes, so the dependency
+description above still holds.
+
 2026-10-25 Review P3 sweep A (beta ticket 27). The desktop runtime builder admits its
 host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
 destination, fills the download cache or calls the build helper. Before, the admission ran
