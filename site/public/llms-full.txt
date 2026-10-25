@@ -8277,7 +8277,8 @@ No documentation route reads arbitrary host files.
 Workbench output only after the clean-checkout check passes, so a refused build keeps it.
 `release-assets.mjs` writes BUILD-INFO.json with `COPYFILE_EXCL`, so every release file now
 refuses an overwrite. `scripts/check_desktop_release_workflow.py` pins the release-tag check as
-a whole step, its `if:` condition included. The preview-profile upgrade test applies
+a whole step, its `if:` condition included, and requires the draft job to check the downloaded
+files before it creates the release. The preview-profile upgrade test applies
 migrations through `REGISTRY_MIGRATIONS_TABLE` and pins it to the preview's
 `vivary_workbench_registry_migrations`. The installer usage, the install guide and the desktop
 README name the installer and the portable ZIP by version, as the release workflow writes them.

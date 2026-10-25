@@ -145,7 +145,9 @@ def check(text: str, windows_target: str, ci_text: str) -> list[str]:
     require(sum(step.rstrip("\n") == TAG_STEP.rstrip("\n") for step in steps) == 1,
             "a release tag must name the desktop version, in the exact reviewed step")
     require('--commit "$GITHUB_SHA"' in text, "the release files must be checked against the built commit")
-    require("sha256sum --check --strict SHA256SUMS" in text[draft:], "the draft job must check the downloaded files")
+    check_at = text.find("sha256sum --check --strict SHA256SUMS", draft)
+    require(check_at != -1 and check_at < text.find("gh release create"),
+            "the draft job must check the downloaded files before it creates the release")
     require("if-no-files-found: error" in text, "a missing release file must fail the upload")
     return problems
 

@@ -25,6 +25,14 @@ class DesktopReleaseWorkflowGuardTests(unittest.TestCase):
         self.assertIn(old, self.text)
         return self.check(self.text.replace(old, new, 1))
 
+    def test_download_check_must_precede_the_release(self) -> None:
+        # #291 review: a check after the release exists cannot keep unverified files off it.
+        check = "          sha256sum --check --strict SHA256SUMS\n"
+        self.assertEqual(self.text.count("            ./*\n"), 1)
+        late = self.text.replace(check + "          gh release", "          gh release", 1).replace(
+            "            ./*\n", "            ./*\n" + check, 1)
+        self.assertIn("the draft job must check the downloaded files before it creates the release", self.check(late))
+
     def test_real_workflow_passes(self) -> None:
         self.assertEqual(self.check(), [])
 
