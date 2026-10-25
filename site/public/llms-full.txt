@@ -8224,6 +8224,14 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 Site selector parser on the 7.1 line. The site's `@expressive-code/core`
+moves from 0.44.0 to 0.44.3, which takes `postcss-nested` 7.0.2 and
+`postcss-selector-parser` 7.1.7. The `postcss-nested@6.2.0` override that held the parser
+at 6.1.5 no longer matches anything and is removed. 6.1.5 carries the publisher's
+backport of the GHSA-rj75-hqrm-r3gf fix, but the advisory still lists every release below
+7.1.6, so scanners kept reporting it. 7.1.7 is past the advisory's own floor, and
+`check_site_dependencies.py` already admits it. Site build only.
+
 2026-10-25 body-parser 2.4.0 and fast-uri 3.1.9 (beta ticket 29, part a). GitHub
 published GHSA-27r3-jxmh-p828 for body-parser and four advisories for fast-uri on
 2026-10-23, after the dev security unit (#275). Express 5.2.1 and ajv 8.20.0 accept the
