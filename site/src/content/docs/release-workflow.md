@@ -360,6 +360,15 @@ release tag checkout, as they already run `scripts/check_release_artifacts.py`.
 Tag a commit that contains those scripts. A tag cut from an older commit fails at
 the Python provisioning step, before any npm setup or publication.
 
+Both jobs then provision npm 12.2.1 with `scripts/bootstrap_build_tools.py`, the
+client every other CI job uses, and pack with it. The publish step runs
+`runtime-security.mjs publish-npm` under that tool root's Node. It refuses any other
+Node, npm, undici or ip-address version, and runs npm through the root's launcher,
+which replaces the runner's npm configuration. npm then uses its default registry and
+requests the GitHub OIDC token itself, so the trusted publisher setup above does not
+change. A tag cut before this change passes verification and then stops at the
+publish step with "unsupported guard command", before any upload.
+
 Order when multiple packages ship: dependencies first. Publish `vivary-core` before
 every package that depends on it. Publish `vivary-tropo` next; then the eligible
 `vivary-strato`, `vivary-ozone`, `vivary-exo`, `vivary-memory-cognee`, `vivary-mcp`, and

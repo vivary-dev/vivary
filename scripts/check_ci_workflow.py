@@ -1167,6 +1167,8 @@ def main() -> None:
             "tests job must run Python runtime admission regressions")
     require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
             "tests job must run verified pip provisioning regressions")
+    require("python -I -B scripts/tests/test_certifi_bundle.py" in test_job,
+            "tests job must run certificate overlay preservation regressions")
     require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
             "tests job must run known site dependency admission regressions")
     require(test_job.count(BUILD_TEST_STEP) == 1,
