@@ -744,6 +744,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-25 A quit while a Code run waits on a Codex request ends it Interrupted (beta ticket
+27, review P3 sweep B). A normal quit expired the request but paused the run, so the host strip
+said "Agent work stopped" beside "Vivary restarted before this request was answered", while J05
+promised Interrupted. When shutdown stops a run that still has an unanswered request, the stop
+path in `server/local-code-agent.ts` now records it through the transition table's `interrupt`
+edge, as the restart path does, and both use `recordInterruptedRun`. Any other stop still
+pauses. The table is unchanged, because the stop path reaches `interrupt` from running. J05's
+`AwaitingToolApproval --> Interrupted` edge in `journeys.md` now names a quit, and its prose
+says so. Step 3's description of Code runs above still holds.
+
 2026-10-25 npm publish checker refuses a package manager anywhere (beta ticket 27,
 review P3 sweep B). `scripts/check_npm_trusted_publish_workflow.py` refused npm, npx and
 corepack only at the start of a line, so a command such as `$(npm --version)`, `&& npm` or

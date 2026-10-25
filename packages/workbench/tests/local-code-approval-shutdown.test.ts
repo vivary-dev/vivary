@@ -73,11 +73,14 @@ process.send({type:"vivary:code-worker:ready"});
     assert.equal(expired?.reason, "host-restart");
     assert.equal(typeof expired?.expiredAt, "string");
     assert.equal(getCodeAgentRunRecord(runId)?.status, "paused");
+    // Beta ticket 27. A quit with a request waiting is a restart from the owner's view, so the strip says Interrupted.
+    assert.equal(getCodeAgentRunRecord(runId)?.phase, "interrupted");
     assert.equal(getCodeAgentRunRecord(runId)?.needsApproval, false);
     assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.metadata?.requestId === "request-quit"
       && event.message === "Codex request expired. Vivary restarted before this request was answered.").length, 1);
     const host = await getVivaryCodeHostState("quit@example.com");
     assert.equal(host.pendingApproval, null);
+    assert.equal(host.recentRun?.phase, "interrupted");
     assert.deepEqual(host.recentRun?.expiredApproval, { method: "item/commandExecution/requestApproval",
       summary: "pnpm test", reason: "Vivary restarted before this request was answered." });
   } finally {

@@ -321,27 +321,7 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
     for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
       if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER) continue;
       if (!isActiveCodeAgentRun(run)) continue;
-      appendCodeAgentTranscriptEvent({
-        runId: run.id,
-        kind: "status",
-        message: "The previous Vivary code host ended before this run finished.",
-        metadata: {
-          status: "paused",
-          phase: "interrupted",
-          reason: "host-restart",
-        },
-      });
-      transitionCodeRun(run.id, "interrupt", {
-        needsApproval: false,
-        metadata: { pendingLaunch: undefined },
-        progress: {
-          label: "Interrupted",
-          completed: 0,
-          total: 1,
-          failed: 0,
-          percent: 0,
-        },
-      });
+      recordInterruptedRun(run.id, "The previous Vivary code host ended before this run finished.");
     }
     // Beta ticket 05. A run can end without clearing its list when the previous host died mid-cleanup, so every run
     // is checked, not only the interrupted ones.
@@ -1321,10 +1301,7 @@ async function executeVivaryCodeRun(input: {
       },
     });
     if (input.activeRun.stopReason !== null) {
-      recordPausedRun(input.runId, "The local code run stopped.", {
-        phase: "paused",
-        reason: input.activeRun.stopReason,
-      });
+      recordStoppedRun(input.runId, input.activeRun.stopReason);
     }
   } catch (error) {
     if (error instanceof VivaryCodeWorkerCleanupError) {
@@ -1344,10 +1321,7 @@ async function executeVivaryCodeRun(input: {
       return;
     }
     if (input.activeRun.stopReason !== null) {
-      recordPausedRun(input.runId, "The local code run stopped.", {
-        phase: "paused",
-        reason: input.activeRun.stopReason,
-      });
+      recordStoppedRun(input.runId, input.activeRun.stopReason);
       return;
     }
     const message = safeErrorMessage(error);
@@ -1702,6 +1676,42 @@ export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: str
 function titleFromMessage(message: string): string {
   const firstLine = message.split(/\r?\n/, 1)[0]?.trim() || "Vivary code run";
   return firstLine.length <= 72 ? firstLine : `${firstLine.slice(0, 69)}...`;
+}
+
+/**
+ * Beta ticket 27. A quit while the run waits on a Codex request is a restart from the owner's view, so the run ends
+ * Interrupted beside the request that the quit expires, as after a crash (J05). Any other stop leaves it paused.
+ */
+function recordStoppedRun(runId: string, reason: "shutdown" | "user"): void {
+  if (reason === "shutdown" && recordedApprovals(getCodeAgentRunRecord(runId)).some(approval => !approval.expiredAt)) {
+    recordInterruptedRun(runId, "The Vivary code host shut down while this run waited on a Codex request.");
+  } else {
+    recordPausedRun(runId, "The local code run stopped.", { phase: "paused", reason });
+  }
+}
+
+function recordInterruptedRun(runId: string, message: string): void {
+  appendCodeAgentTranscriptEvent({
+    runId,
+    kind: "status",
+    message,
+    metadata: {
+      status: "paused",
+      phase: "interrupted",
+      reason: "host-restart",
+    },
+  });
+  transitionCodeRun(runId, "interrupt", {
+    needsApproval: false,
+    metadata: { pendingLaunch: undefined },
+    progress: {
+      label: "Interrupted",
+      completed: 0,
+      total: 1,
+      failed: 0,
+      percent: 0,
+    },
+  });
 }
 
 function recordPausedRun(
