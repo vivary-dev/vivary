@@ -8287,7 +8287,9 @@ and the preview's four migrations, as the 2026-09-22 preview wrote it. Then it r
 startup `migrateRegistry` from `server/db/migrations.mjs`. A renamed history table now fails
 the test, where the earlier hand-written runner missed it. The desktop README says
 `--build-workbench` runs `pnpm.cmd` through a shell on Windows, as the release workflow does.
-No runtime behavior changes, so the descriptions above hold.
+A later round on `70edda50` adds a `zip-writer.test.mjs` case that fails on a read after
+the archive opens, so the partial-archive cleanup is tested. No runtime behavior changes, so
+the descriptions above hold.
 
 2026-10-25 The release build runs on Windows (Stack A, #291 review, owner option A). On
 Ubuntu, `package.mjs --windows-x64` could not finish, because `validateStagedNode` needs native

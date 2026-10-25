@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -86,6 +86,23 @@ test("a symbolic link is refused and leaves no partial archive", { skip: process
     await assert.rejects(zipFolder(root, "Vivary-test", output), /symbolic link Vivary-test\/resources\/link/);
     assert.equal(await lstat(output).catch(() => null), null);
   }));
+
+// #291 review: the symbolic-link case fails during the walk, before the output exists. This one fails after
+// the archive is open, on the last file's read, so only the cleanup can leave the release folder empty.
+test("a read error after the archive opens removes the partial archive", {
+  skip: process.platform === "win32" ? "file modes do not deny reads on Windows"
+    : process.getuid?.() === 0 ? "root reads a file whatever its mode" : false,
+}, () => withTree(async ({ root }) => {
+  const unreadable = path.join(root, "Vivary-test", "resources", "node", "node.exe");
+  const output = path.join(root, "out.zip");
+  await chmod(unreadable, 0o000);
+  try {
+    await assert.rejects(zipFolder(root, "Vivary-test", output), { code: "EACCES" });
+  } finally {
+    await chmod(unreadable, 0o644);
+  }
+  assert.equal(await lstat(output).catch(() => null), null, "the partial archive is removed");
+}));
 
 test("a folder name that leaves the parent is refused", () => withTree(async ({ root }) => {
   for (const name of ["../escape", "a/../b", "", "a\\b"]) {
