@@ -752,7 +752,9 @@ No documentation route reads arbitrary host files.
 host Python once, at the start of `prepareOriginalRuntime`, before it prepares the
 destination, fills the download cache or calls the build helper. Before, the admission ran
 inside `runBuildHelper`, after the downloads. `packages/desktop/README.md` names the admitted
-host runtime, CPython 3.12.15 final with OpenSSL 3.5.9. CONTRIBUTING.md lists the size
+host runtime, CPython 3.12.15 final with OpenSSL 3.5.9, and says that the check precedes the
+original runtime's downloads but follows the Node LICENSE and Windows Node downloads in
+`package.mjs`. CONTRIBUTING.md lists the size
 report among a PR's contents and puts the merge rule back above its Size subsection, and the
 PR size rule entry below moves under the 2026-10-25 entries, in date order. Only the order of
 an existing check changes, so the packaging description above still holds.
