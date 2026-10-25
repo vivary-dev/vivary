@@ -19,6 +19,12 @@ export type CodeHostFixture = {
   waitForRequest(runId: string): Promise<void>;
 };
 
+/** Sets or removes one variable of this test process. Each fixture restores what it changed. */
+function setEnv(name: string, value: string | undefined): void {
+  // guard:allow-env-mutation — Test-only fixture: isolated synthetic configuration for one test file's process, restored after cleanup.
+  if (value === undefined) delete process.env[name]; else process.env[name] = value; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+}
+
 /**
  * Beta tickets 05 and 27. Shutdown closes the Vivary code host for the rest of the process, so each quit scenario
  * runs in a test file of its own. This sets up a fake Claude Code runtime and a fake worker that writes runs through
@@ -61,10 +67,8 @@ process.on("message", async message => {
 process.send({type:"vivary:code-worker:ready"});
 `);
   const previousCwd = process.cwd();
-  const previousMode = process.env.VIVARY_ACCESS_MODE; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-  const previousPath = process.env.PATH; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-  const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-  const previousDatabase = process.env.DATABASE_URL; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+  const names = ["VIVARY_ACCESS_MODE", "PATH", "AGENT_NATIVE_CODE_AGENTS_HOME", "DATABASE_URL"] as const;
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]])); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
   const workspace = { root: fixture, label: "Quit project", projectId: "quit",
     bindingId: "quit-binding", rootId: "quit-root", bindingRevision: 1 };
   const ownerEmail = "quit@example.com";
@@ -72,10 +76,10 @@ process.send({type:"vivary:code-worker:ready"});
   let host: CodeHost | undefined;
   try {
     process.chdir(fixture);
-    process.env.VIVARY_ACCESS_MODE = "local"; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    process.env.PATH = bin + path.delimiter + (previousPath ?? ""); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = fixture; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    process.env.DATABASE_URL = "file:" + path.join(fixture, "state.sqlite"); // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    setEnv("VIVARY_ACCESS_MODE", "local");
+    setEnv("PATH", bin + path.delimiter + (previous.PATH ?? ""));
+    setEnv("AGENT_NATIVE_CODE_AGENTS_HOME", fixture);
+    setEnv("DATABASE_URL", "file:" + path.join(fixture, "state.sqlite"));
     const { getVivaryRuntimeStatus } = await import("../../server/local-runtime-setup.ts");
     host = await import("../../server/local-code-agent.ts");
     if ((await getVivaryRuntimeStatus("claude-cli", { refresh: true })).status !== "ready") throw new Error("The fake Claude Code runtime is not ready.");
@@ -96,12 +100,7 @@ process.send({type:"vivary:code-worker:ready"});
   } finally {
     await host?.shutdownVivaryCodeAgent();
     process.chdir(previousCwd);
-    if (previousMode === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previousMode; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    if (previousDatabase === undefined) delete process.env.DATABASE_URL; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
-    else process.env.DATABASE_URL = previousDatabase; // guard:allow-env-credential - Isolated synthetic test configuration, restored after cleanup.
+    for (const name of names) setEnv(name, previous[name]);
     await rm(fixture, { recursive: true, force: true });
   }
 }
