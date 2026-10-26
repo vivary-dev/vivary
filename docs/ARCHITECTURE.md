@@ -899,6 +899,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-26 Runtime switch review fixes for PR #258 on dev `56932a96`. A confirmed
+choice of the current route while a run stops now drops an earlier saved target, so
+the run keeps the route the user confirmed last. A failed target write at host start
+is logged and no longer rejects the start that every later call awaits. The panel
+shows a saved target only while its run is in the host, and a send applies a target
+left on a settled record before its route checks, so no send starts on the route the
+user left. The two 2026-10-21 entries that described a combined dev tree and a
+`ci.yml` pip pin are removed, because this PR carries neither.
+
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
 `RELEASE_FILES_STEP` and `ATTACH_STEP`. Before, substring tests passed a
@@ -1496,33 +1505,6 @@ The seven-package runtime closure and profile
 paths are unchanged. C1/C3 removal is not evidence of exploitation. The
 [desktop runtime contract](../packages/desktop/README.md) describes this boundary;
 source verification does not replace Windows or Electron release acceptance.
-
-2026-10-21 Dev integration conflict resolution for PR #258. The prepared union
-retains every PR258 runtime-switch and Stop definition and adopts PR262's
-`HandoffStatusContext.Provider` wrapper around the Code chat, keeping its already
-merged closing provider. Both architecture histories remain, including PR258's
-red/green distinctions and CI pip 26.2.2 correction, PR262's reply-once and handoff
-contracts, and PR259's table and footnote repairs. Earlier passing results do not
-validate this combined working tree. The frozen offline installation and installed
-Core/Toolkit checks completed, and the full merged-source preflight passed 10/10.
-Product tests, including existing PR258/PR262 focused regressions, typecheck,
-staged HLDD, line-ending and whitespace gates, capture sealing, commit/push,
-final integrated-head CI, required reviews, Windows acceptance and owner approval
-before merging PR258 into dev remain pending. No integrated passing result or release
-is established.
-
-2026-10-21 CI pip pin correction for PR #258. The Python bootstrap in
-`.github/workflows/ci.yml` now pins `pip==26.2.2` instead of `pip==26.0.1`,
-preventing that step from reintroducing the incident-affected certifi bundled
-with the old pip. The controller verified the new pip's provenance through OIDC
-and updated the existing Linux CI virtual environment. This correction covers
-only this workflow pin, without establishing protection of every Python
-environment, package source, platform or application. Product architecture is
-unchanged. The earlier focused 199/199 tests remain historical evidence and do
-not validate these new workflow bytes or establish final-head server CI.
-Workflow validation, explicit independent review of this CI change, the staged
-HLDD check, capture verification and owner Entire approval before merge remain
-pending. No merge or release result is established.
 
 2026-10-21 Focused working-tree verification follow-up for PR #258 at base
 `46196cc4`. Green-v2 completed at 00:49:15 UTC with routes/state 48/48,

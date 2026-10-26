@@ -340,8 +340,12 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
       expireRecordedApprovals(run);
       // A host that ended after saving the stopped state, before the execution owner applied a Stop and switch,
       // leaves the target on a settled record. No worker remains to apply it, so this start does, under the same
-      // cleanup refusal check, after the old route's requests have expired.
-      applyPendingSwitch(run.id);
+      // cleanup refusal check, after the old route's requests have expired. A failed write leaves the target for the
+      // next send, and does not reject the start that every later call awaits.
+      try { applyPendingSwitch(run.id); }
+      catch (error) {
+        console.error(`[vivary-code-host] pending-switch-failed run=${run.id} ${error instanceof Error ? error.name : "unknown"}`);
+      }
     }
     // Issue #121. The oldest persisted refusal is in force before any send. The check that may lift it runs behind it.
     reloadCleanup();
@@ -1010,6 +1014,9 @@ export async function sendVivaryCodeMessage(input: {
       errorCode: "vivary_linked_history_unavailable", statusCode: 409,
     });
   }
+  // A saved Stop and switch target on a run that left the host means its apply failed then. Apply it here, so this
+  // send cannot start on the route the user switched away from. The record check before launch then refuses it.
+  if (existing && !activeRuns.has(existing.id) && existing.metadata?.pendingSwitch) applyPendingSwitch(existing.id);
   const selectedEngine = existing ? engineFromRun(existing) : input.engine ?? VIVARY_CODE_DEFAULT_ENGINE;
   if (input.engine && input.engine !== selectedEngine) {
     fail("Switch this conversation's runtime before sending with another one.", { errorCode: "vivary_code_engine_changed", statusCode: 409 });
@@ -1558,7 +1565,9 @@ export async function switchVivaryCodeRuntime(input: {
   }
   const active = activeRuns.get(current.id);
   if (!target) {
-    // Even a matching route needs the fresh grant and reconnection checks before its confirmed Stop.
+    // Even a matching route needs the fresh grant and reconnection checks before its confirmed Stop. Choosing the
+    // current route also drops an earlier saved target, so the run keeps the route the user confirmed last.
+    if (current.metadata?.pendingSwitch) updateCodeAgentRunRecord(current.id, { metadata: { pendingSwitch: undefined } });
     if (input.stop && active) requestUserStop(current.id, active);
     return getVivaryCodeState(input.ownerEmail, current.id, workspace, input.orgId);
   }
@@ -1875,7 +1884,8 @@ function toRunSummary(run: CodeAgentRunRecord): VivaryCodeRunSummary {
     engineLabel: engineLabelFromRun(run),
     model: modelFromRun(run),
     draftThreadId: runDraftThreadId(run),
-    pendingSwitch: pendingSwitchFromRun(run),
+    // Only while the run is in the host. A target left on a settled record is applied by the next send or host start.
+    pendingSwitch: activeRuns.has(run.id) ? pendingSwitchFromRun(run) : null,
   };
 }
 

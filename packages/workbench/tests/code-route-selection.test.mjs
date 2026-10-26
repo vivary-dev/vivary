@@ -44,6 +44,7 @@ function fixture() {
   const allowWrite = () => { if (writeFault) throw writeFault; };
   const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [], stoppedTurns = [];
   const activeRuns = new Map(), hostState = { cleanup: null };
+  let linked;
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace,
@@ -100,11 +101,13 @@ function fixture() {
     ],
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
+    applyPendingSwitch: runId => linked.applyPendingSwitch(runId),
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));
   const { switchVivaryCodeRuntime: switchWithObservation, applyPendingSwitch, codeSwitchObservation } = compileFunction(observationCode
     + "\n" + sessionCode + "\n" + pendingCode + "\n"
     + switchCode + "\nreturn { switchVivaryCodeRuntime, applyPendingSwitch, codeSwitchObservation };", Object.keys(owners))(...Object.values(owners));
+  linked = { applyPendingSwitch };
   // Existing setup calls deliberately observe their current fixture. Explicit stale, null or undefined inputs win.
   const switchRoute = input => {
     const run = records.get(input.runId);
@@ -432,6 +435,39 @@ test("Stop and switch to the route a run already has still stops it", async () =
   await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace }),
     { errorCode: "vivary_code_switch_run_active" });
   assert.deepEqual(value.stops, [runId]);
+});
+
+test("Stop and switch back to the current route drops an earlier saved target", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  value.activeRuns.set(runId, { stopReason: null });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
+  assert.equal(value.records.get(runId).metadata.pendingSwitch.engine, "codex-cli");
+  // While it stops, the user confirms the original route again.
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace, stop: true });
+  assert.equal(value.records.get(runId).metadata.pendingSwitch, undefined);
+  value.activeRuns.delete(runId);
+  value.applyPendingSwitch(runId);
+  const run = value.records.get(runId);
+  assert.deepEqual([run.metadata.engine, run.metadata.model], ["claude-cli", "claude-sonnet-5-5"]);
+  assert.equal(value.events.filter(event => event.kind === "note").length, 0, "no switch is recorded");
+});
+
+test("a send applies a target left on a run that already left the host, and starts nothing on the old route", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  value.activeRuns.set(runId, { stopReason: null });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
+  // The apply at run exit failed, so the target stays on the settled record.
+  value.activeRuns.delete(runId);
+  const launched = value.launches.length;
+  await assert.rejects(value.send({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", message: "Second",
+    workspace: value.workspace }), { errorCode: "vivary_code_engine_changed" });
+  const run = value.records.get(runId);
+  assert.deepEqual([run.metadata.engine, run.metadata.model, run.metadata.pendingSwitch], ["codex-cli", "gpt-fixture", undefined]);
+  assert.equal(value.launches.length, launched, "nothing starts on the old route");
 });
 
 for (const grant of ["revoked", "replaced"]) {
