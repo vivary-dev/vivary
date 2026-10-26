@@ -8,7 +8,7 @@ A person opens the composer picker, sees Claude Code, Codex and other supported 
 
 Supported registered entries can show an unavailable/setup state. Selection is enabled only when the requested mode is supported and authorized. An installed unknown CLI is not automatically executed or labeled supported. Discovery runs bounded probes for known registrations. Refresh rechecks the catalog after installation, login or version changes. Vivary retains project and host authorization plus approval, denial and Stop for the exact request.
 
-A same-harness model change stays in the conversation only when the adapter confirms compatibility. A different harness creates a linked conversation in the same project. No handoff wizard is required. The existing unsent text remains unsent. Source history is accessible through its original owner. Preparing a handoff is a separate action.
+A Code conversation can switch to another runtime or model in place. The switch starts a new provider session, which receives the quoted visible conversation and no provider state. A different harness can also create a linked conversation in the same project. No handoff wizard is required. The existing unsent text remains unsent. Source history is accessible through its original owner. Preparing a handoff is a separate action.
 
 ## Existing API versus Vivary composition
 
@@ -27,7 +27,7 @@ Source basis: installed `@agent-native/core` 0.176.5, especially `docs/content/h
 
 Current code: [local-code-agent.ts](../../../../packages/workbench/server/local-code-agent.ts), [local-runtime-setup.ts](../../../../packages/workbench/server/local-runtime-setup.ts), [project-runtime-readiness.mjs](../../../../packages/workbench/server/project-runtime-readiness.mjs), [project-services.mjs](../../../../packages/workbench/server/project-services.mjs), and the [Code execution host](../../../../packages/workbench/server/code-execution-host.ts).
 
-Codex execution uses its app-server protocol through the maintained Core patch. New runs store the native session ID, and follow-ups resume that exact session. Historical runs without an ID use bounded prompt replay once, then retain the created native session. The Claude compatibility path still reconstructs a bounded prompt. Runtime or model changes require a new conversation. Never feed one runtime's resume state to another.
+Codex execution uses its app-server protocol through the maintained Core patch. New runs store the native session ID, and follow-ups resume that exact session. Historical runs without an ID use bounded prompt replay once, then retain the created native session. The Claude compatibility path still reconstructs a bounded prompt. A runtime or model switch clears both stored session IDs, so the next turn starts a new session from the quoted conversation. Never feed one runtime's resume state to another.
 
 ## Implemented Codex behavior
 

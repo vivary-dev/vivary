@@ -50,12 +50,13 @@ The selected coding runtime owns execution, tools, model access, and native sess
 The Code composer embeds the runtime and model selectors inside its existing
 toolbar. Saved draft choices remain unchanged when a model catalog changes.
 Unavailable selections keep the composer disabled with a reason to choose another
-model, update Claude Code, or verify its installed version. Retained conversations
-keep their recorded runtime and model ID, because the saved provider session and
-resume depend on both, and the send boundary refuses a change. Above the composer,
-a conversation with a run says which runtime and model it keeps and offers New
-conversation, and the locked selectors name that line as their description. When
-another conversation's agent is working, the selectors also name that notice.
+model, update Claude Code, or verify its installed version. A retained
+conversation changes its runtime or model in place through a confirmed switch,
+described below. The send boundary still refuses a send that names a runtime or
+model the run does not record, so only that switch changes a retained route. When
+another conversation's agent is working, a new conversation's selectors stay
+locked and name that notice. A retained conversation's selectors stay open,
+because a switch waits only for its own run.
 A historical Claude run
 without a model still means the legacy `sonnet` alias, independently of the exact
 `claude-sonnet-5-5` default for new conversations.
@@ -150,6 +151,160 @@ prefixes and Windows SystemRoot while retaining credential filtering.
 
 Offline runtime fixtures cover route selection and error handling. Live provider
 execution and packaged Windows acceptance remain separate checks.
+
+### Switching a Code conversation in place
+
+The owner required on 2026-10-19 that a Code conversation can change its runtime
+or model without leaving the visible conversation or starting over. A Code
+conversation is one Native Code run, so the switch changes that run instead of
+creating another. Replies, approvals, worker messages, the transcript, and Stop
+are keyed by the run ID, so they keep routing to the same conversation.
+`switchVivaryCodeRuntime` in
+[`local-code-agent.ts`](../packages/workbench/server/local-code-agent.ts) owns the
+change, and the `vivary-code-switch` action carries a signed-in owner's request
+with the same project resolution a send uses.
+
+The switch refuses while this conversation's run is active
+(`vivary_code_switch_run_active`), while it is stopping
+(`vivary_code_switch_run_stopping`), and while a cleanup refusal names it
+(`vivary_code_cleanup_required`). Switch admission and pending application find
+this run's refusal in `cleanupRefusalsInForce`, the canonical collection that also
+supplies the host strip. It includes parsed persisted refusals and legacy
+`cleanupUnverified` markers, with unsaved failed-write refusals taking precedence
+for their run. A different run in the strip's oldest slot cannot hide the target
+run's refusal. A refused immediate switch writes no route, session, or transcript
+change. Another conversation's active run does not
+block it, because a switch only edits this run's record. The target runtime must
+be ready, and the target model must be one that runtime lists now: a Claude Code
+catalog ID the installed version supports, or a model from Codex's live
+`model/list`. Legacy aliases, retained historical IDs, and Codex's `default` are
+refused. After those awaited checks the owner resolves the project grant again
+and refuses a changed or missing project (`vivary_code_project_changed`). Then,
+with no await before the write, it refuses while a project reconnection is
+pending (`vivary_code_project_reconnecting`) and reads the run again, refusing if
+it started, stopped, or changed route meanwhile. A send that awaited its own
+checks while a switch landed reads the record again before it claims the host. It
+refuses with `vivary_code_engine_changed` when the route changed, so it never
+launches the old route. It builds the prompt from that fresh record, so a switch
+away and back during the send, which keeps the route but clears the sessions,
+still gives the new session the quoted conversation.
+
+Stop and switch is owned by the host. The action's `stop` flag admits an active or
+stopping run. After the same checks, the switch records the target as
+`metadata.pendingSwitch` and requests Stop for the run. Run summaries carry it as
+`pendingSwitch`, so a reloaded or reopened view shows it. When the run leaves the
+host, the execution owner applies the target in the same turn that frees the run,
+so no send can claim the run on the old route first. A host that ended while the
+run was stopping applies the target when the next host start marks the run
+interrupted. A host that ended after it saved the stopped state, but before it
+applied the target, leaves a settled record with `pendingSwitch`. The next host
+start applies that target too, under the same cleanup refusal check, so the
+selectors and composer do not stay locked. A run that ends under a cleanup refusal
+keeps its route, provider-session IDs, and earlier transcript entries. Pending
+application consumes the target and appends a note saying the switch did not
+happen, under the same per-run refusal lookup. A run that already ended when
+the request arrives switches at once. When the run already has the target route,
+because another window switched it and started a turn, Stop and switch still stops
+the run and records no switch, since the owner confirmed that Stop. This matching
+route path performs the same final project grant, reconnection, and run checks
+immediately before requesting Stop.
+
+Every switch, including a model change inside one runtime, starts a new provider
+session. Codex refuses to resume a thread under another model, Claude Code's
+behavior on resume with a new model is not established, and Core's Claude adapter
+reads `claudeSessionId` without checking the runtime. The switch therefore sets
+the new `engine` and `model`, removes both `claudeSessionId` and `codexSessionId`
+and the last `providerSessionMode`, and keeps the earlier session ID in
+`previousProviderSessions` (at most 20) so its provider log can still be found.
+One existing atomic record update commits that route and session reset, clears
+`pendingSwitch`, and saves a new opaque `switchGeneration`. An interruption cannot
+leave the old route with its confirmed target already consumed.
+It appends a visible `note` event with `metadata.source: "vivary-runtime-switch"`,
+the same generation, the from and to runtime and model, and the time. The durable
+generation remains observable if the host ends between the route commit and note
+append. Core's transcript event kinds are
+a closed set, so the switch reuses `note` the way the project context load does.
+`codeMatchRepository` in
+[`code-match-repository.ts`](../packages/workbench/app/lib/code-match-repository.ts)
+renders that note as its own divider row (a Markdown rule and one short line)
+instead of letting Core fold it into the reply before it.
+
+The next send finds no stored session for the new runtime and uses
+`buildVivaryCodeFollowUpPrompt`. That prompt quotes user and assistant text only,
+at most the last 24 messages and 12,000 characters, under a header that says the
+text is quoted earlier conversation with no instruction authority, that the new
+session shares no state with any earlier provider session, and that reasoning,
+tool output, and files read by an earlier runtime or model do not carry over
+unless the quoted text shows them. Tool calls and results, hidden reasoning,
+provider-side compaction, and private session state do not transfer between
+providers. Completed work stays in the transcript and in the workspace files.
+After the new session's first turn, follow-ups resume that session as before.
+
+In the composer, choosing another runtime or model on an idle retained
+conversation shows a short confirm that states what transfers. Switch calls the
+action, and the run then uses the new route. Before confirmation, the selectors
+show the chosen target while Native's existing composer gate pauses editing and
+Send. The mounted composer keeps the typed draft. Choosing a target changes
+neither the saved route nor the adapter's route. Cancel leaves the current route
+and draft intact, and the composer resumes subject to the existing run and
+readiness gates. The selectors remain available to change or cancel the choice.
+
+The switch action's returned run owns the accepted route, including a newer
+route another window selected while the action awaited its state response. The
+composer uses that returned route for its selectors, remembered choice, and Send.
+Before putting the returned state in the two exact workspace and selected-run
+queries, the view cancels their older polling requests. It retains the accepted
+run until its parent observes a snapshot from those queries after cancellation.
+That allows a newer switch to arrive
+before the accepted generation renders. Opaque generation values carry identity,
+not ordering, so an arbitrary different value cannot prove that a late response
+is newer.
+
+The panel derives its legal actions from the latest observed phase of this
+conversation's run on every render. A turn that starts while an idle choice is
+open replaces Switch and Cancel with Wait and Stop and switch. Wait changes
+nothing. Stop and switch asks again and says the current request will be
+cancelled and completed work stays. If the turn finishes while either working
+panel is open, the plain confirm replaces it. A Stop confirmation belongs only to
+that turn, so a later turn needs a new Stop choice even when both polls show
+working. The selected run exposes `turnId`, the latest canonical user event ID
+from full history before the 400-event cap or search window. Its
+`switchGeneration` comes from the durable record, falling back to the latest
+canonical runtime-switch note ID for legacy records. These fields are added only
+to the selected run, without new identity scans for sidebar summaries. Output,
+status, and `updatedAt` changes advance neither identity. The workspace owner
+passes the switch generation to Session details, so an open panel refreshes after
+switches away and back to the same route, including a route commit whose note has
+not yet appended. An unrelated update does not trigger that refresh.
+Every switch carries the nullable `expectedSwitchGeneration` captured when the
+owner chose its target. Stop also requires the nullable `expectedTurnId` captured
+when the owner chose Stop. The strict action accepts only nonblank opaque strings
+of at most 128 characters or explicit null. Omission is refused. Null matches only
+canonical absence. Snapshot and admission share the same full-history identity
+owner. Admission checks a fresh owned record initially and after awaited checks,
+with no await between final validation and mutation. A stale route generation or
+Stop turn refuses with a conflict before any route, session, transcript, pending
+target or Stop mutation, including matching-route Stop. A same-route switch away
+and back invalidates an open choice and requires a new deliberate choice.
+
+Confirming Stop and switch sends one request with `stop`. Plain and Stop replies
+share the same authoritative state acceptance. An applied reply immediately owns
+the Send route, while a pending reply keeps Send gated without saving its target
+as an accepted choice. After reload, both disabled selectors and the model list
+show the durable pending target, retaining an unavailable recorded model as a
+disabled option after catalog drift. Leaving or reloading the view
+does not cancel the recorded switch. A refused switch keeps the route and shows
+the server's reason. The [journeys state chart](product/multi-project/specification/journeys.md#j03-choose-a-model-or-another-harness)
+draws these states. A linked conversation, described next, remains the way to
+continue in a separate conversation that keeps the source unchanged.
+
+Offline evidence: `tests/code-route-selection.test.mjs` runs the switch owner as
+written against stub records, `tests/code-run-worker.test.ts` runs the real worker
+with stub Claude Code and Codex executables from Claude to Codex and back,
+`tests/local-code-agent.test.ts` runs Stop and switch and a later approval on the
+real Native store, `tests/chat-search-code-replay.test.mjs` checks the divider
+rows, and `tests/native-chat-components.test.mjs` drives the composer. No live
+provider turn and no packaged Windows run has exercised the switch.
 
 ### Linked runtime conversations
 
@@ -522,7 +677,7 @@ keeps schema support and the existing one-second autosave owner unchanged.
 1. **Select a project.** Workbench resolves the authenticated actor, stable project ID, current binding, policy revision, and observed root. Project selection changes the files and history shown. A missing folder leaves authorized history available but blocks file-dependent execution. [Project registry](product/multi-project/source-map/modules/project-registry/index.md) owns the identity contract.
 2. **Send and continue.** A Native chat send rechecks its pinned project scope before model or attachment work. A Code send starts or resumes the selected native session against its bound project. Native stores the resulting run and transcript. A model choice or project switch cannot silently move an active run. [`native-chat-project.ts`](../packages/workbench/server/native-chat-project.ts), [`local-code-agent.ts`](../packages/workbench/server/local-code-agent.ts), and the [session model](product/multi-project/desktop-release.md#one-understandable-model) own this flow.
    Each project message also loads the project's context when it starts. [`project-memory.ts`](../packages/workbench/server/project-memory.ts) reads the law files, the state file, and the fact files in the memory folders from the admitted project only, and renders one block of at most 8,000 characters. A Code send puts the full block before the engine prompt on every turn, for new runs and Claude or Codex follow-ups. A resumed provider session therefore accumulates one block per turn, up to 8,000 characters each. That cost is accepted so a session never depends on an earlier block that its runtime may have compacted away. Only Full chat blocks name Native's owner-wide tools. The transcript keeps only the typed message, and one note per turn, which the Code view shows, names the loaded revision and whether it changed. The panel's last load is recorded only after the send passes its refusals and claims the host slot. Full chat returns the block from Native's `extraContext` on every send. Its three Vivary hooks, the send guard (`prepareRequest`), `extraContext`, and `resolveActionSurface`, each classify the pinned chat scope again rather than sharing one match. A change to a fact file therefore applies from the next message, in new and open conversations, and after a restart. A reply already running keeps what it started with.
-   Claude Code now receives the pinned Native participant's persistence option. Native records the UUID reported by its init event before a turn can be interrupted and requests resume of that UUID on later turns. A different or invalid reported UUID stops the turn without replacing the saved reference. Codex keeps its existing app-server thread owner and resume check. Each executor records whether the current turn requested resume, confirmed native resume, started fresh, or reconstructed context. Older runs without a validated provider ID still quote bounded Native history; runs with an ID send the new request and project block directly. The owner-only Details branch of `vivary-code-state` authorizes the existing project/run identity before reading at most 64 KiB of its Native transcript. It returns a logical reference and at most 20,000 characters of redacted text, refuses linked files, and distinguishes missing or unavailable transcripts. Native and Provider Details text share complete-text credential and filesystem-path sanitization before per-message or aggregate limits. Ordinary web URLs and Native Running/Finished status events remain; path redaction conservatively hides ambiguous prose through the line end without rewriting stored transcripts. The Code conversation's Session details view labels this as Native transcript data. Provider logs remain in each runtime's storage. The Claude reader uses Native's retained run cwd and UUID to derive one documented short default location, refuses linked paths and a store inside the selected project, and reads a whole snapshot of at most 256 KiB. Framing caps line count, line size and JSON depth before parsing; identity checks reject colliding project names and mixed sessions. Provider keys and cwd metadata use the SDK's Darwin-only NFC normalization; filesystem canonical-path and link checks retain the original path spelling, and Linux Unicode names stay distinct. The official Claude SDK interprets opaque entries through a read-only custom store in a terminable Node worker with a three-second deadline and memory limits. Native serializes inspections through one active reader and at most four FIFO waiters, each waiting at most 15 seconds; overload remains unavailable. Its empty environment removes inherited environment values only; the worker retains OS filesystem/network rights and is not an OS sandbox. Retained canonical cwd may be absent without reporting an intact log as missing; existing linked project paths are refused. Workbench redacts only returned user/assistant text before shortening it, then retains the newest 20,000 characters of the latest 40 messages; provider tools, thinking and metadata stay private. HTTP/HTTPS links retain their text after credential redaction, while POSIX, Windows, UNC and file-URI host paths are scrubbed. Path redaction consumes through the line end, including spaces, apostrophes and enclosing quotes; ambiguous trailing prose is hidden with the path, while the next line remains intact. The 256 KiB input and 32 KiB line limits bound processing; the 20,000-character excerpt limit applies after redaction. Session details labels provider and Native sources separately and retains both logical references for missing or refused files. Its query uses `staleTime: 0` to revalidate on every open, including completion while the panel was closed; it polls every two seconds only while the selected Claude run is active. Codex details use open/reopen and manual Refresh rather than automatic active polling, with visible Refresh guidance. Both providers refresh once when an open run settles, retaining a pending final refresh across an in-flight request. Custom storage and hashed long names are unsupported. The [reader receipt](product/multi-project/receipts/10-claude-log-reader.md) records passing installed-reader, scoped-action, browser and isolated production-output checks. Inspection makes no provider call or directory scan and does not relocate credentials. Nitro traces only the official SDK package and seeds its resolved worker entry; peer dependencies retain existing Core/app bundling. The previously accepted real Claude Stop/restart/resume journey remains valid for the unchanged executor. Native also owns a read-only Codex stored-thread reader using metadata-only `thread/read` and one descending summary page of at most 20 turns through `thread/turns/list`. Retained thread/canonical cwd and outside-project provider-path guards precede text selection. Raw wire bytes, lines, UTF-8/depth, page size, protocol duration and FIFO admission are bounded; Workbench supplies only its trusted filtered launcher and existing process-tree cleanup. A process-global reader registry is shared by plugin and action module instances. Normal host shutdown closes admission before other stops, awaits active readers and pending opens, and propagates unconfirmed cleanup; repeated close hooks share the same shutdown result. Windows readers retain observed PID/creation identities during inspection, so final checks retain descendants whose intermediate parent exited. Close lets an already in-flight Windows observation use the remaining 15-second cleanup budget minus the existing three-second teardown reserve before terminating the reader; the scanner retains its own 10-second bound. A successful Windows observation must first establish the original root PID within its retained creation-time window; a reused PID does not count. After that, later root-absent snapshots can use the retained ancestry. A failed/timed-out pending scan or failure to establish that original root retains an uncheckable refusal that later root-only checks cannot clear. Periodic observation is not OS containment and cannot prove ancestry that was never observed; retained targets and overflow survive unavailable scans. Retained cleanup rechecks require both confirmed pipe closure and a clean identity scan; a clean original group cannot clear refusal while an escaped helper holds inherited output descriptors. After preserving the pre-stop observation, the reader closes stdin and drains output for a bounded graceful exit. Existing tree stop is the fallback. Windows cleanup also ends only safely traced PID/creation identities through the existing end primitive and rechecks them within the same deadline, including when the root exited first; untraced or reused identities are never killed. Unconfirmed targets refuse new spawns until verified clean; shutdown never reopens admission. Linux/Windows lifecycle confirmation is implemented; other platforms report unavailable. Each turn summary contains the first user and last assistant message, regardless of phase; middle messages are omitted and Session details explains this subset. This text uses the same full redaction before output limits, with older pages reflected in truncation. Only pinned missing-error operation/code/message/retained-ID combinations report missing; generic errors remain unavailable and provider error text stays private. RPC bounds do not bound internal provider file parsing or establish an OS sandbox. The [Codex reader receipt](product/multi-project/receipts/10-codex-stored-thread-reader.md) separates passing installed-reader, lifecycle and browser checks from pending packaged Windows acceptance. Current Codex reader and Windows acceptance remain open under [issue #10](https://github.com/vivary-dev/vivary/issues/10).
+   Claude Code now receives the pinned Native participant's persistence option. Native records the UUID reported by its init event before a turn can be interrupted and requests resume of that UUID on later turns. A different or invalid reported UUID stops the turn without replacing the saved reference. Codex keeps its existing app-server thread owner and resume check. Each executor records whether the current turn requested resume, confirmed native resume, started fresh, or reconstructed context. Older runs without a validated provider ID still quote bounded Native history; runs with an ID send the new request and project block directly. The owner-only Details branch of `vivary-code-state` authorizes the existing project/run identity before reading at most 64 KiB of its Native transcript. It returns a logical reference and at most 20,000 characters of redacted text, refuses linked files, and distinguishes missing or unavailable transcripts. Native and Provider Details text share complete-text credential and filesystem-path sanitization before per-message or aggregate limits. Ordinary web URLs and Native Running/Finished status events remain; path redaction conservatively hides ambiguous prose through the line end without rewriting stored transcripts. The Code conversation's Session details view labels this as Native transcript data. Provider logs remain in each runtime's storage. The Claude reader uses Native's retained run cwd and UUID to derive one documented short default location, refuses linked paths and a store inside the selected project, and reads a whole snapshot of at most 256 KiB. Framing caps line count, line size and JSON depth before parsing; identity checks reject colliding project names and mixed sessions. Provider keys and cwd metadata use the SDK's Darwin-only NFC normalization; filesystem canonical-path and link checks retain the original path spelling, and Linux Unicode names stay distinct. The official Claude SDK interprets opaque entries through a read-only custom store in a terminable Node worker with a three-second deadline and memory limits. Native serializes inspections through one active reader and at most four FIFO waiters, each waiting at most 15 seconds; overload remains unavailable. Its empty environment removes inherited environment values only; the worker retains OS filesystem/network rights and is not an OS sandbox. Retained canonical cwd may be absent without reporting an intact log as missing; existing linked project paths are refused. Workbench redacts only returned user/assistant text before shortening it, then retains the newest 20,000 characters of the latest 40 messages; provider tools, thinking and metadata stay private. HTTP/HTTPS links retain their text after credential redaction, while POSIX, Windows, UNC and file-URI host paths are scrubbed. Path redaction consumes through the line end, including spaces, apostrophes and enclosing quotes; ambiguous trailing prose is hidden with the path, while the next line remains intact. The 256 KiB input and 32 KiB line limits bound processing; the 20,000-character excerpt limit applies after redaction. Session details labels provider and Native sources separately and retains both logical references for missing or refused files. Its query uses `staleTime: 0` to revalidate on every open, including completion while the panel was closed; it polls every two seconds only while the selected Claude run is active. Codex details use open/reopen and manual Refresh rather than automatic active polling, with visible Refresh guidance. Both providers refresh once when an open run settles, retaining a pending final refresh across an in-flight request. An open panel also refreshes once when a switch changes the run's runtime or model, because the switch cleared its provider session. Custom storage and hashed long names are unsupported. The [reader receipt](product/multi-project/receipts/10-claude-log-reader.md) records passing installed-reader, scoped-action, browser and isolated production-output checks. Inspection makes no provider call or directory scan and does not relocate credentials. Nitro traces only the official SDK package and seeds its resolved worker entry; peer dependencies retain existing Core/app bundling. The previously accepted real Claude Stop/restart/resume journey remains valid for the unchanged executor. Native also owns a read-only Codex stored-thread reader using metadata-only `thread/read` and one descending summary page of at most 20 turns through `thread/turns/list`. Retained thread/canonical cwd and outside-project provider-path guards precede text selection. Raw wire bytes, lines, UTF-8/depth, page size, protocol duration and FIFO admission are bounded; Workbench supplies only its trusted filtered launcher and existing process-tree cleanup. A process-global reader registry is shared by plugin and action module instances. Normal host shutdown closes admission before other stops, awaits active readers and pending opens, and propagates unconfirmed cleanup; repeated close hooks share the same shutdown result. Windows readers retain observed PID/creation identities during inspection, so final checks retain descendants whose intermediate parent exited. Close lets an already in-flight Windows observation use the remaining 15-second cleanup budget minus the existing three-second teardown reserve before terminating the reader; the scanner retains its own 10-second bound. A successful Windows observation must first establish the original root PID within its retained creation-time window; a reused PID does not count. After that, later root-absent snapshots can use the retained ancestry. A failed/timed-out pending scan or failure to establish that original root retains an uncheckable refusal that later root-only checks cannot clear. Periodic observation is not OS containment and cannot prove ancestry that was never observed; retained targets and overflow survive unavailable scans. Retained cleanup rechecks require both confirmed pipe closure and a clean identity scan; a clean original group cannot clear refusal while an escaped helper holds inherited output descriptors. After preserving the pre-stop observation, the reader closes stdin and drains output for a bounded graceful exit. Existing tree stop is the fallback. Windows cleanup also ends only safely traced PID/creation identities through the existing end primitive and rechecks them within the same deadline, including when the root exited first; untraced or reused identities are never killed. Unconfirmed targets refuse new spawns until verified clean; shutdown never reopens admission. Linux/Windows lifecycle confirmation is implemented; other platforms report unavailable. Each turn summary contains the first user and last assistant message, regardless of phase; middle messages are omitted and Session details explains this subset. This text uses the same full redaction before output limits, with older pages reflected in truncation. Only pinned missing-error operation/code/message/retained-ID combinations report missing; generic errors remain unavailable and provider error text stays private. RPC bounds do not bound internal provider file parsing or establish an OS sandbox. The [Codex reader receipt](product/multi-project/receipts/10-codex-stored-thread-reader.md) separates passing installed-reader, lifecycle and browser checks from pending packaged Windows acceptance. Current Codex reader and Windows acceptance remain open under [issue #10](https://github.com/vivary-dev/vivary/issues/10).
 3. **Approve, deny, or stop.** Native owns an action request and its execution lifecycle. Workbench checks the owner, project, run, and exact request before relaying a decision. Stop targets the owned running work. During a Windows Code run, the host periodically records descendant PIDs and creation times while parent links are still visible. Every Windows stop checks those recorded identities after tree termination, including when `taskkill` reports success. When a stop cannot confirm that a run's coding processes ended, Code refuses new sends and the host strip names what is left, by process name and PID. End them ends only listed processes that Vivary traced to the run, each after it checks the process's PID and start time at the moment it acts. Continue anyway lifts the refusal on the owner's word once End them has run or cannot act, and only for processes the owner was shown. A later check lifts it on its own when nothing is left. Client closure does not itself approve or replay an action. The host lists each pending Codex request on its run record, with its method, a short redacted summary, and when it arrived, until it is answered or withdrawn. When the run ends, Stop and failure remove what is left, and a host shutdown marks it Expired. A stopping executor reports each request resolved in its teardown, so the host keeps the list from the moment the run is aborted until that final step. A fresh host marks any request still listed Expired. The conversation and the host strip then say "Vivary restarted before this request was answered", and no action can answer it, because its answer channel ended with the previous host. The host strip shows Interrupted for a run that a restart interrupted, and any request that expired with it, until the next send on that run. The workbench server writes a Code run's status and phase only through one transition table, `server/code-run-transitions.ts`. A write the table refuses changes nothing and logs `transition-refused` with the run, the edge, and both states. Core's executor writes its own pairs inside the worker, outside the table. The [coding permission decision](product/multi-project/design.md#native-coding-permissions-and-activity-2026-09-16) and [authority module](product/multi-project/specification/modules.md#m05-authority-and-approvals) own the rules.
 4. **Read and change project files.** Scoped file actions list and read bounded content. Explicit Save and Rename check the selected project and file revision. Project memory is the only caller of the file service's exclusive Create and version-checked Remove, which reuse the same link refusal, per-project mutation queue, and conflicts. The Memory section in Project details calls two owner actions, `vivary-project-memory` and `vivary-project-memory-write`. It shows the memory folder and why it applies, the role assignments, when changes apply, each fact with its source and file, the exact block the next message receives, and the last load in this app session. Remember, correct, and forget write the owning file, and forget states what it cannot erase. Neither action is an agent tool. The Search panel walks one authorized project with caps, private-file exclusions, and continuation. It does not use a persistent index or a shell search process. [`project-files.ts`](../packages/workbench/server/project-files.ts), [`project-search.ts`](../packages/workbench/server/project-search.ts), and the [write-back map](product/multi-project/source-map/modules/project-writeback/index.md) own the behavior and limits.
 5. **Call the original engine.** The bundled Python runtime receives a bounded command and a selected project root. The seven project read reports, Doctor, Check, Find, Capabilities, Receipts, Review, and Impact, share one server module for the Details panel and the Native tool. Review findings carry a rule code that the app renders from a closed sentence table, so an unknown rule makes the report unreadable instead of passing text through. The agent tool gets its project from the chat's pinned scope, not model-supplied input. Public Doctor, Find, and Check use the privacy-filtered CLI path. For issue #20, the CLI's public Review and Impact build their graph only from the documents in Tropo's privacy-filtered snapshot, before any rule runs. A link to a private note therefore reads exactly like a link to a missing id, findings carry no free-text message, and a private, missing, or unknown Impact target gets one `target_unavailable` refusal. Only the Structure and Editorial packs have a public form, because Context budget reads routing files from disk. Ozone loads one Tropo engine per process on first use, so the plain and public paths share its facade errors, and public note ids longer than 256 characters are left out and counted. Decide and control run through a separate server module, shown to the owner in the Evaluate section of Project details, where the owner picks whether to evaluate as themself or as the project's agent and every result states it was not saved and shows a refusal from Strato, Exo, or Vivary as an alert, including a refusal Core reports inside an ordinary result, [`project-evaluate.ts`](../packages/workbench/server/project-evaluate.ts), behind the `vivary-project-evaluate` agent tool and an owner action. The runner, not the caller, binds the actor: a tool call is always this project's agent, an opaque id hashed from the owner's actor id and the project id, and the owner chooses to evaluate as themself or as that agent. [`governed-request.ts`](../packages/workbench/server/governed-request.ts) is the only writer of the actor, contributor authority, project scope, and clocks, and the clocks are taken after the project lock is held. Input that names a server-owned field is refused by name, never overwritten. The agent may run decide, claim, release, expire_leases, and dependencies only, and may not submit a receipt, a verdict, or an execution log, because Native cannot verify them. Results carry `persisted: false` and are never saved. Host paths cross that boundary only as `.` and `./` project paths, and only at the absolute-path positions Core, Strato, and Exo declare. Each position names Core's capsule or claim spelling, so decoding restores claim ids and capsule fingerprints, and any other string is text that is redacted on the way out and never rewritten on the way in. An agent's scope and capsule paths are checked by their text alone, never on disk, so a claim cannot reveal whether a private file exists. A Windows device-namespace root is refused. Native has no capsule producer, so an agent decide without an owner-supplied capsule ends in Strato's own refusal. Governed writes retain their own plan, authority, and receipt rules. The creator bridge starts Python through the same runner. It previews and creates a managed project, lists the installed guidance patterns, and reads a project's memory settings, with the runner's environment allowlist, reader-writer gate, 30-second limit, receipts, and shutdown. A settings read takes its project's read lock, so it waits for a write to that project. Any queued write to that project likewise waits for the settings reads already holding its gate, and behind a slow one it can fail its own 30-second queue wait. A plan and an apply share a gate on their target folder, and the catalog shares one gate with no project. An apply records a required receipt and a plan an optional one. Catalog and settings reads record nothing, because project memory reads settings whenever its memo misses, for example after a change to the settings file or to a memory folder's listing. The creator may print 512 KiB, counting stdout and stderr together, and its stderr is then discarded. Its answer is parsed exactly as printed, and only its refusal message and an invalid settings message are redacted. Every bundled child, an original command or a creator call, compiles its bytecode once into `python-cache/<build>` in the data folder rather than on every launch, where `build` is the first 8 hex digits of the bundle manifest's sha256. The first launch that prepares the cache removes other builds' folders. A child keeps `-B` when the cache would sit in the install folder or the call's project, when the call's project sits in the cache folder, when the data folder is missing, when a cache folder is not a plain directory or cannot be created, and for any Python outside the bundle. [`python-bytecode.ts`](../packages/workbench/server/python-bytecode.ts) makes that decision, and `runGated` requires it. [`original-runtime.ts`](../packages/workbench/server/original-runtime.ts), [`project-read.ts`](../packages/workbench/server/project-read.ts), and the [issue #19 receipt](product/multi-project/receipts/09b-original-read-tools.md) record the delivered slice.
@@ -743,6 +898,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-26 Runtime switch review fixes for PR #258 on dev `56932a96`. A confirmed
+choice of the current route while a run stops now drops an earlier saved target, so
+the run keeps the route the user confirmed last. A failed target write at host start
+is logged and no longer rejects the start that every later call awaits. The panel
+shows a saved target only while its run is in the host, and a send applies a target
+left on a settled record before its route checks, so no send starts on the route the
+user left. The two 2026-10-21 entries that described a combined dev tree and a
+`ci.yml` pip pin are removed, because this PR carries neither.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
@@ -1341,6 +1505,178 @@ The seven-package runtime closure and profile
 paths are unchanged. C1/C3 removal is not evidence of exploitation. The
 [desktop runtime contract](../packages/desktop/README.md) describes this boundary;
 source verification does not replace Windows or Electron release acceptance.
+
+2026-10-21 Focused working-tree verification follow-up for PR #258 at base
+`46196cc4`. Green-v2 completed at 00:49:15 UTC with routes/state 48/48,
+components 63/63, host/schema/cleanup/model choices 67/67 and native owner
+actions/schema 21/21, totaling 199/199. Typecheck exited 0. All five steps and
+all 27 protected regressions passed with no failures, skips, cancellations or
+todos. Job and guard exits were 0 with no reserve stop. Minimum persistent
+availability was 11,225,870,336 bytes and ending availability was
+11,236,143,104 bytes.
+
+The first attempt remains a failed batch. Routes/state passed 48/48 and
+components passed 61/63 with one catalog-drift fixture failure and its parent.
+Its 20 protected route/component cases passed, but the remaining three stages
+were unrun. The subsequent one-line fixture correction reads the option's
+disabled attribute instead of its unsupported DOM property. That continuation
+exited 0, ran no tests and preserved all other candidate and historical files.
+Green-v2 then exercised the complete batch. Earlier old-code assertions remain
+separately recorded for the applied Stop reply's route, reopened pending targets,
+stale generation admission and the delayed turn-A to turn-B Stop admission case.
+Schema and forwarding failures remain additional contract evidence.
+
+These are focused fixture/source receipts for an uncommitted working tree.
+They cover source slices, the real component and installed adapter, action
+validation and Native-store controls, without proving live provider execution
+or killed-host durability. The documentation added here was not built or tested
+by that run. Controller source review, actual capture verification, commit/push,
+final integrated-head CI and required reviews/gates, dev integration, actual
+provider and UI journeys, and packaged Windows acceptance remain pending.
+PR merge and production release are not authorized.
+
+2026-10-20 Third Codex review repairs for PR #258 at `46196cc4`. The retained
+unchanged-input run ended at 23:33:13 UTC. Routes completed 34 tests with 29 passes
+and five assertion failures. Components completed 60 tests with 52 passes and
+seven failing leaf assertions plus their parent. Host and schema tests completed
+26 tests with 21 passes and five failures. All controls passed with no skips,
+cancellation, memory limit or reserve stops. Four stale observations mutated the
+route and retained state, delayed turn-A consent stopped B, an applied Stop reply
+sent through the previous route, two reopened targets displayed the old
+selectors, and four UI payloads omitted the route observation. The strict action
+also rejected supplied observations and accepted their omission.
+
+The switch boundary now requires explicit bounded nullable route observations
+and, for Stop, canonical user-turn consent. Fresh admission and final validation
+use the same identity owner as selected snapshots. The composer invalidates ABA
+choices, forwards captured consent, shares authoritative reply acceptance for
+plain and Stop actions, and displays durable pending targets without authorizing
+Send or remembering an unaccepted choice. The 27 retained regressions and their
+behavior assertions remain, with caller migration and added final-await, ABA,
+turn-forwarding and catalog-drift controls. These fixtures exercise source-slice,
+real component and installed adapter, action-schema and Native-store boundaries.
+They do not prove live provider execution or a killed-host crash. Focused green
+tests, typecheck and final review of these repairs remain pending. Integrated
+final-head CI, real provider switching, screenshots, installed Windows acceptance
+with preserved profiles, dev integration approval, merge approval and production
+release remain separate pending gates.
+
+2026-10-20 Second Codex review repairs for PR #258 at `ad935f28`. The coordinator
+ran the prepared cases against unchanged product source. Route selection
+completed 24 tests with 20 passes and four assertion failures. Components
+completed 49 tests with 45 passes and three failing leaf assertions plus their
+parent. The matching authoritative-response control passed. The failures cover
+matching-route Stop without final grant checks, consuming a pending target before
+its route commit, sending the requested model instead of the returned model,
+stale Session details after switches away and back, and retaining Stop consent
+when a new user turn starts between working snapshots.
+
+The route owner now shares final admission across matching and changed routes.
+Pending consumption, route, session reset, and an opaque generation share one
+atomic record update. Selected snapshots derive the user turn from full history
+and expose the committed generation with a legacy switch-note fallback. The
+composer accepts the returned run, cancels older requests for the two affected
+owner queries, and binds Stop confirmation to the canonical user ID. The real
+workspace owner passes the switch generation to Session details. Existing
+assertions remain, with added snapshot cap and anchor cases, an interrupted
+record-write boundary, real-store generation assertions, and delayed-note
+coverage. The injected write fault is source-slice evidence, not a killed-host
+durability test. Focused green tests and typecheck for these repairs remain
+unrun. Integrated final-head CI, final reviews, real provider switching,
+screenshots, installed Windows acceptance with preserved profiles, dev
+integration approval, merge approval, and production release remain separate
+pending gates.
+
+2026-10-20 Target cleanup refusal lookup and confirmation behavior for PR #258.
+An old-code run against
+`ef05b753` completed the six cases in `local-code-cleanup-refusal.test.ts` with two
+passes and four assertion failures. The persisted-refusal controls passed, but
+legacy markers and memory-only failed-write refusals behind another run's oldest
+cleanup slot let both direct switching and pending host-start application change
+the route. Pending application also cleared the prior provider-session ID.
+Both paths now consult the existing canonical refusal collection for the target
+run, preserving its legacy parser and unsaved-over-persisted precedence. The
+switch section records the unchanged-route/session contract and the pending
+target's dropped-switch note. The coordinator then passed all 31 cleanup tests,
+including those four regressions, all 20 route-selection tests, and typecheck
+with the backend repair before the UI changes below.
+
+The component proof now returns an inert recorded-send refusal through the real
+adapter's terminal-error result and imports the same bundle from a temporary
+file, keeping unexpected stack filenames bounded. This does not test thrown
+pre-append rejection handling. Against production UI and adapter files identical
+to `ef05b753`, the corrected suite completed with 40 passes and three failing
+child assertions plus their parent failure. The failures showed both pending
+runtime and model targets sending through the previous route, and a newly active
+run retaining the idle confirmation. The cancellation/draft and working
+Wait/Stop controls passed, classifying the earlier Stop failure as fixture
+fallout.
+
+`LocalCodeConversation` now derives the confirmation actions from the latest run
+phase in both directions and clears a Stop confirmation after its turn ends.
+The existing composer gate blocks Send and pauses editing while a target is
+unconfirmed, preserving the mounted draft and leaving selectors and confirmation
+buttons available. The actual composer/adapter route assertions remain intact.
+One added lifecycle case checks that a finished turn's Stop confirmation cannot
+authorize stopping a later turn.
+
+The first combined component/model run with `tsx` reported 46 passes and two
+failures, including a file abort at the unchanged 1 GiB V8 heap limit. One
+assertion had read the whole panel text, including button labels, instead of its
+message span. After that minimal assertion correction, the direct Node component
+suite passed 45/45 without the extra `tsx` loader. Exact message and legal action
+assertions remain intact. The separate model-choice suite passed 8/8 with `tsx`
+for extensionless TypeScript imports. This sequence does not establish the
+loader as the sole cause of the heap abort. The coordinator also recorded 10/10
+test preflight and passing typecheck on the prepared product source.
+
+Full server CI against the integrated head and required final reviews remain
+pending. Real provider switching, screenshots, installed Windows acceptance with
+preserved profiles, and production release remain unrun. Dev integration and the
+PR merge require separate approval.
+
+2026-10-20 Codex review fixes for PR #258 at `8d359579`. Stop and switch to the
+route a run already has returned before requesting Stop, so a stale window's
+confirmed Stop left the current turn running. The no-op branch of
+`switchVivaryCodeRuntime` now requests Stop for an active run when `stop` is set.
+The Stop and switch paragraph in "Switching a Code conversation in place" says
+so. `code-route-selection.test.mjs` covers it and failed before the fix.
+Host start applied a recorded switch only on records it marked interrupted. A
+host that exited after `recordPausedRun` saved the stopped state, but before the
+execution `finally` applied the switch, left `pendingSwitch` on a paused record
+forever, which locked the selectors and composer. Host start now also runs
+`applyPendingSwitch` on settled records, which keeps its cleanup refusal check.
+A paused record case in `local-code-agent.test.ts` failed before the fix.
+An open Session details panel kept the previous runtime and provider session
+after an idle switch, because its query key and final-refresh tracker ignore the
+route. `CodeSessionDetails` now takes the run's model and refreshes once when the
+engine or model changes while it is open. The header passes `model`, which is
+its only change there. A `native-chat-components.test.mjs` case failed before the
+fix. That proof replaces the Toolkit popover with an in-place stand-in, because
+Radix's positioned popover exhausts the heap on linkedom.
+
+2026-10-19 Review fixes for the in-place Code switch (PR #258). A send now builds
+its prompt from the record it reads before claiming the host, not the one read
+before its awaits. The switch resolves the project grant again and refuses while
+a reconnection is pending, right before its write. Stop and switch moved from the
+composer to the host, which records `pendingSwitch` on the run and applies it when
+the run leaves the host or at the next host start. The composer test slice that
+`code-conversation-model-choices.test.mjs` evaluates no longer holds switch state.
+The section "Switching a Code conversation in place" and the J03 chart describe
+the result.
+
+2026-10-19 Runtime and model switch inside a Code conversation, stacked on PR #257.
+The owner rejected #257's explanation of locked selectors as the answer and asked
+for a supported transition. The new section "Switching a Code conversation in
+place" describes the action, refusals, session clearing, divider, quoted context,
+and composer flow. The Coding model selection section no longer says a retained
+conversation keeps its route, and #257's kept-route line and its New conversation
+link are gone. The header's New conversation button is unchanged. The send
+refusals for a changed runtime or model are unchanged in effect and now name the
+switch. The send owner rereads the record before claiming the host. The worker's
+model check is unchanged, because it compares the start message with the record
+the switch already updated. Session details read the run's current engine, so a
+switched run reports no provider session until its next turn.
 
 2026-10-20 Integration of reply recording and chat Markdown patches. The
 combined Core patch keeps table token marking alongside registered handoff

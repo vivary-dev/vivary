@@ -45,7 +45,33 @@ Acceptance: two projects with different drafts and conversations. Fail selection
 
 ## J03: Choose a model or another harness
 
-The implemented two-engine picker selects Claude Code or Codex for a new conversation. Codex resumes its own native session on follow-up. Runtime/model changes require a new conversation. The grouped picker and linked-history sequence below are target behavior, not the shipped switching flow. [Implemented Codex behavior](harness-adapters.md#implemented-codex-behavior) defines immediate Send, native approvals, modes, and activity cards.
+The implemented two-engine picker selects Claude Code or Codex for a new conversation. Codex resumes its own native session on follow-up. A retained Code conversation switches runtime or model in place, as the first chart shows. Every switch starts a new provider session that receives the quoted visible conversation, at most the last 24 messages, and no tool output, reasoning, or private session state. The grouped picker and linked-history sequence in the second chart are target behavior beside it. [Implemented Codex behavior](harness-adapters.md#implemented-codex-behavior) defines immediate Send, native approvals, modes, and activity cards.
+
+Implemented in-place switch for a retained Code conversation ([HLDD](../../../ARCHITECTURE.md#switching-a-code-conversation-in-place)):
+
+```mermaid
+stateDiagram-v2
+  state "Confirm switch" as Confirm
+  state "Wait or stop" as Choice
+  state "Confirm stop and switch" as ConfirmStop
+  [*] --> Idle
+  Idle --> Confirm: choose another runtime or model
+  Confirm --> Idle: Cancel or current route chosen
+  Confirm --> Switching: Switch
+  Working --> Choice: choose another runtime or model
+  Choice --> Working: Wait
+  Choice --> Confirm: turn finishes
+  Choice --> ConfirmStop: Stop and switch
+  ConfirmStop --> Working: Keep working
+  ConfirmStop --> Stopping: confirm, host records the target and stops the run
+  ConfirmStop --> Working: refused, route kept, reason shown
+  Stopping --> Switching: run leaves the host, or the next host start marks it interrupted
+  Stopping --> Idle: cleanup refusal, route kept, note shown
+  Switching --> Idle: new route recorded, sessions cleared, divider shown
+  Switching --> Idle: refused, route kept, reason shown
+  Idle --> Working: send, new provider session with quoted context
+  Working --> Idle: turn ends
+```
 
 The single picker groups model rows under Claude Code, Codex and other supported registered harness names. Each group has a small trusted logo or generic fallback. Unknown brands cannot inject markup. Readiness appears beside unavailable entries. No preset persona is required. Optional user-authored profiles use the existing Native resource/settings owner or intentionally authored project instructions. A person can create/edit, select, clear and inspect their effective instruction sources. Selection applies to future explicitly requested context and records the profile revision. Clearing preserves history and does not claim prior model context was erased. Profiles cannot grant tool permissions or transfer approval.
 
