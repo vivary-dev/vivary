@@ -26,6 +26,7 @@ import "../../local-agent.css";
 import mascotUrl from "../../assets/vivary-mascot.svg";
 import { ConversationMatch } from "./ConversationMatch";
 import { CodeLinkOptions, LinkedHistoryNotice, sourceDraftSaver } from "./LinkedConversation";
+import { CodeConversationLimits } from "./CodeConversationLimits";
 import { HandoffControl } from "./HandoffControl";
 import "./HandoffDisplay";
 import { HandoffStatusContext, createHandoffStatusHub } from "./handoff-status";
@@ -961,6 +962,6 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
       <Button variant="outline" size="sm" disabled={props.stopping} onClick={() => void props.onStop()} aria-label="Stop response">
         <IconSquare size={14} /> Stop
       </Button> : undefined}
-    threadFooterSlot={<p className="local-agent-limits"><span>{selectedEngine?.label ?? choice.engine} · {choice.model}</span>. {choice.engine === "codex-cli" ? "Codex uses the permissions selected in Runtime settings." : "Claude Code uses file tools."} Work continues if you leave this page. Use Stop to end the active turn.</p>}
+    threadFooterSlot={<CodeConversationLimits engine={choice.engine} engineLabel={selectedEngine?.label ?? choice.engine} model={choice.model} />}
   /></HandoffStatusContext.Provider>;
 }

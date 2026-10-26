@@ -1,7 +1,5 @@
-# Native's local database needs the locked SQLite native module.
-# https://pnpm.io/10.x/settings#allowbuilds
-allowBuilds:
-  better-sqlite3@12.11.1: true
+# better-sqlite3 13 ships N-API prebuilds and has no install script.
+# No lifecycle build permission is needed for supported desktop/server targets.
 patchedDependencies:
   '@agent-native/core@0.176.5': patches/@agent-native__core@0.176.5.patch
   '@agent-native/toolkit@0.19.3': patches/@agent-native__toolkit@0.19.3.patch
@@ -24,13 +22,33 @@ ignoredOptionalDependencies:
 # Core's optional xlsx ^0.18.5 cannot reach the fixed 0.20.3, which SheetJS publishes only on
 # its CDN. Route it to the same archive Workbench depends on, so both share one module.
 overrides:
+  # Includes SQLite 3.53.4 maintenance fixes. Windows staging must use its N-API prebuild.
+  better-sqlite3: 13.0.3
   officeparser@7.8.0>pdfjs-dist: 6.2.108
   '@agent-native/core@0.176.5>xlsx': https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
-  # Keep Native's MCP client, core and server pins aligned at the fixed OAuth release.
-  '@agent-native/core@0.176.5>@modelcontextprotocol/sdk': 1.31.0
-  '@agent-native/core@0.176.5>@modelcontextprotocol/client': 2.2.0
-  '@agent-native/core@0.176.5>@modelcontextprotocol/core': 2.2.0
-  '@agent-native/core@0.176.5>@modelcontextprotocol/server': 2.2.0
+  # Include the nested WebMCP server: Core-only overrides leave its older v2 server behind.
+  '@modelcontextprotocol/sdk': 1.32.0
+  '@modelcontextprotocol/client': 2.3.0
+  '@modelcontextprotocol/core': 2.3.0
+  '@modelcontextprotocol/server': 2.3.0
+  # GHSA-xcx6-jx8p-x3h5 affects msal-node >= 5.0.0-beta.0, < 7.1.0. Only identity's 5.6.0 copy is in that
+  # range. Bot Framework's direct 2.16.3 copy is not, so it stays. No @azure/identity release accepts 7.x yet
+  # (4.14.0 needs ^6.0.0). Remove this line once one does.
+  '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
+  # Fixed parser and HTTP dependencies retain their existing major release lines.
+  markdown-it: 14.3.3
+  follow-redirects: 1.16.1
+  hono: 4.13.11
+  '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
+  # These consumers use v4 UUID generation; 11.1.1 retains both CJS and ESM exports.
+  '@azure/msal-node@2.16.3>uuid': 11.1.1
+  'botframework-schema@4.23.3>uuid': 11.1.1
+  # zod 3.x is inside GHSA-mrhx-c7xc-m3w5 (every release below 4.6.6), and no patched 3.x exists.
+  # botframework 4.23.3 uses zod's v3 API, including single-argument record(), which 4.6.7 keeps.
+  'botframework-schema@4.23.3>zod': 4.6.7
+  'botframework-connector@4.23.3>zod': 4.6.7
+  # Typography's selector AST API is covered by the dependency compatibility checks.
+  '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6
   # Toolkit 0.19.3 pins its TipTap packages at 3.30.1, whose core carries GHSA-j95f-988m-3j2f.
   # The packages pin each other exactly, so all of Toolkit's direct TipTap pins move to 3.30.5
   # together. @tiptap/y-tiptap keeps its own 3.0.x line.

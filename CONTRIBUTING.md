@@ -156,9 +156,25 @@ Every PR should include:
 - verification: local commands run and CI expectations
 - docs impact: docs, README, package READMEs, generated site sync, or "none"
 - release/package impact: versions, package metadata, install commands, or "none"
+- size: the diff in bytes and the changed hand-written lines, against the size rule below
 
 Merges happen only after the written plan matches the delivered change, the
 applicable CI or explicitly approved alternative gate passes, and review is complete.
+
+### Size
+
+Keep each PR small enough for one fast trusted review round. Measured on
+2026-10-24, every PR whose diff fit the trusted reviewer's single-session cap
+was reviewed in one session of under 5 minutes. Two PRs above the cap needed
+chunked reviews of 25 to 50 minutes a round, and those rounds stopped repeatedly.
+
+- Keep the whole diff under 1 MiB (1,048,576 bytes), the single-session cap.
+- Aim for about 1,000 changed hand-written lines or fewer. Lockfiles, mirrored
+  site docs, CA bundles, vendored trees and patch files, and embedded copies that
+  a checker generates do not count.
+- Put large generated or vendored changes in their own PR, landed first.
+- Cover one issue or one slice. Split before you open the PR, never after its
+  review starts.
 
 ## High-level design gate
 

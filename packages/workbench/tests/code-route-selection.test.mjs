@@ -80,6 +80,9 @@ function fixture() {
       try { afterRecordPersist?.(id, change, structuredClone(records.get(id))); }
       catch (error) { writeFault = error; throw error; }
     },
+    // The send path takes only the queue edge, so these fakes write its pair.
+    createCodeRun: (edge, input) => owners.createCodeAgentRunRecord({ ...input, status: "queued", phase: "queued" }),
+    transitionCodeRun: (id, edge, change) => { owners.updateCodeAgentRunRecord(id, { ...change, status: "queued", phase: "queued" }); return records.get(id); },
     startVivaryCodeRun: input => { allowWrite(); launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
     projectReconnectionPending: () => reconnecting,

@@ -4,6 +4,7 @@ import { SettingsGroup, SettingsRow } from "@agent-native/core/client/settings";
 import { Badge, Button, Skeleton } from "@agent-native/toolkit/ui";
 import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 
+import { EXECUTION_MODE_SCOPE_LABEL } from "../../lib/code-permission-labels";
 import type { CodePermissionMode } from "../../../server/code-permissions";
 import type { VivaryCodeEngine, VivaryRuntimeStatus, VivaryRuntimeStatusResult } from "../../../server/local-runtime-setup";
 
@@ -39,6 +40,7 @@ const permissionModes: readonly CodePermissionMode[] = ["normal", "read-only", "
 const statusLabels: Record<VivaryRuntimeStatus["status"], string> = {
   ready: "Signed in",
   "sign-in-required": "Sign-in required",
+  "update-required": "Update required",
   "not-installed": "Not installed",
   unavailable: "Check needed",
 };
@@ -109,6 +111,7 @@ export function LocalRuntimeSettings() {
             : permissions.data?.mode === "read-only" ? "Codex can inspect local files but cannot edit them or request broader command permissions. Connected services retain their own access settings."
               : "Codex can work inside the project. It asks before actions that need broader access."}
         </p>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">{EXECUTION_MODE_SCOPE_LABEL}</p>
         {permissions.error && <p role="alert" className="text-sm text-destructive">Permissions could not be loaded. <button onClick={() => void permissions.refetch()}>Retry</button></p>}
       </SettingsRow>
     </SettingsGroup>
@@ -152,7 +155,7 @@ export function LocalRuntimeSettings() {
               <li>
                 <a className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4"
                   href={runtime.installUrl} target="_blank" rel="noopener noreferrer">
-                  Install {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
+                  {current?.status === "update-required" ? "Update" : "Install"} {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
                 </a>{" "}using the official instructions.
               </li>
               <li>
