@@ -8278,6 +8278,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 qualified esbuild in Core's server build. Desktop releases build on `windows-latest`,
+where Core's `findEsbuild()` returned esbuild's JavaScript launcher and `execFileSync` failed
+with ENOENT during yjs bundling, so the beta-candidate dry run stopped. The only earlier
+successful dry run built on `ubuntu-latest`. The maintained Core patch gains an appended
+section for `dist/deploy/build.js`: `findEsbuild()` returns `ESBUILD_BINARY_PATH` first when
+that file exists, which the build workflows set to the Go-built qualified esbuild. The patch
+hash moves from `8b6b806f` to `b15426f0`. The build's inputs, outputs and admission checks are
+unchanged, so the delivery description above still holds.
+
 2026-10-31 Issue #206, first two items. Run now on an automation whose earlier run waits for an
 approval decision was refused as "The automation is already running.", although nothing ran.
 The maintained Core patch gains an appended section for `dist/jobs/scheduler.js`, where

@@ -19286,3 +19286,19 @@ index 4f4744c2a07091aea7f6556d4b6aaede6d94c9e8..072aa50c499798686c30b57232e4a925
          return refuseAlreadyRunning(options.historyId);
      // Vivary #114: a quit has begun, so the run does not start. A scheduled
      // job stays due for the next launch, and a Run now row it had already
+diff --git a/dist/deploy/build.js b/dist/deploy/build.js
+index d215d3d9fbabe76222ac0590a572da0eb32ee86f..0d3e28a07291df457a01e1321097b48d61aee64b 100644
+--- a/dist/deploy/build.js
++++ b/dist/deploy/build.js
+@@ -2354,6 +2354,11 @@ function generateRequireShim() {
+     return `${imports}\n${messageChannelPolyfill}\nconst __unavailable=(m)=>new Proxy({}, { get(_target, prop) { return (..._args) => { throw new Error(m + "." + String(prop) + " is unavailable in Cloudflare Pages workers"); }; } });\nconst __mods={${allEntries}};export var require=globalThis.require||function(m){const r=__mods[m];if(r!==undefined)return r;throw new Error("Cannot require: "+m)};\n`;
+ }
+ function findEsbuild() {
++    // Vivary: a qualified esbuild named by ESBUILD_BINARY_PATH comes first. On Windows,
++    // esbuild/bin/esbuild is a JavaScript launcher that execFileSync cannot start.
++    const qualified = process.env.ESBUILD_BINARY_PATH;
++    if (qualified && fs.existsSync(qualified))
++        return qualified;
+     // Try to resolve esbuild's binary via Node module resolution
+     // This works regardless of hoisting or .bin symlink creation
+     try {

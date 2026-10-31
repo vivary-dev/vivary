@@ -3526,6 +3526,18 @@ inspection use it. A refused Run now row is stored as `error`, so it still reads
 the end of the patch, after the earlier sections for the same files, and pnpm applies them in
 order.
 
+## Qualified esbuild for the server build
+
+Desktop releases build Core's server output on `windows-latest`. `bundleYjsRuntimeForServerlessOutput`
+in `dist/deploy/build.js` runs esbuild through `findEsbuild()`, which returned
+`node_modules/esbuild/bin/esbuild`. On Windows that file is a JavaScript launcher, so
+`execFileSync` failed with ENOENT, and the 2026-10-31 beta-candidate dry run stopped there. The
+one earlier successful dry run built on `ubuntu-latest`, where the launcher has a shebang.
+`findEsbuild()` now returns `process.env.ESBUILD_BINARY_PATH` first when that file exists. The
+build workflows export the Go-built `esbuild-0.28.2-go1.26.10` there, the same qualified binary
+the rest of the build uses. Without it, the lookup is unchanged.
+`tests/core-esbuild-binary.test.mjs` runs the yjs bundling with a recording esbuild at that path.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a
