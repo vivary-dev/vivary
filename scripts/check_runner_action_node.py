@@ -180,8 +180,12 @@ def shared_externals(root, system):
     Hosted Ubuntu images from 20261025 (runner 2.338.0) run the Worker from
     actions-runner/cached/<version>, whose externals entry is a symlink to one
     externals tree that every cached version shares. Admit only that one link,
-    only on Linux, and only when no other account can change what it names.
-    Every path below the returned directory must still be plain and canonical.
+    only on Linux. The target and the directory holding it must be owned by
+    root or the runner account and writable by no other account. Higher
+    ancestors need the same owners but may be root-owned and world-writable,
+    because the hosted image ships /opt as root-owned mode 0777. A rename there
+    changes the target directory's inode, which the repair re-checks before it
+    replaces the interpreter. Every path below the target stays plain.
     """
     link = Path(root) / "externals"
     if not stat.S_ISLNK(link.lstat().st_mode):
@@ -202,9 +206,8 @@ def shared_externals(root, system):
         evidence = f"(depth={depth} of {len(folders) - 1}, uid={info.st_uid}, euid={owners[1]}, mode={info.st_mode & 0xffff})"
         if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
             refuse("linked runner externals must sit in directories owned by root or the runner account " + evidence)
-        # A root-owned sticky ancestor such as /tmp cannot have our entry replaced.
         shared = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
-        if shared and not (folder != target and info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+        if shared and not (depth < len(folders) - 2 and info.st_uid == 0):
             refuse("linked runner externals must sit in directories no other account can write " + evidence)
     return target
 

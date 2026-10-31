@@ -8248,8 +8248,10 @@ application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
 hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
 runner root links `externals` to one shared cache, admission follows only that
-link, only on Linux, and only when its absolute target and every ancestor are
-owned by root or the runner account and no other account can write them. It
+link, only on Linux. Its absolute target and the directory holding it must be
+owned by root or the runner account and writable by no other account. Higher
+ancestors need the same owners, and a root-owned world-writable one such as the
+hosted `/opt` is allowed because the repair re-checks the target's inode. It
 then binds the shared interpreter the Worker executes and pins the link and its
 target until repair ends. Every path below the target stays plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
@@ -8290,9 +8292,13 @@ Ubuntu image 20261025 (runner 2.338.0) runs the Worker from
 `/opt/runner-cache/externals`, and `plain()` refuses any symlink. The last green
 run was on 2026-10-26. `shared_externals` in `scripts/check_runner_action_node.py`
 now admits that one link on Linux when it names an absolute directory called
-`externals` in one step and the target and its ancestors are owned by root or the
-runner account and not group- or world-writable, except a root-owned sticky
-ancestor. `selected_interpreter` requires the Worker's selected path to resolve
+`externals` in one step, when the target and the directory holding it are owned
+by root or the runner account and not group- or world-writable, and when higher
+ancestors have the same owners. The hosted run's diagnostics showed `/opt` as
+root-owned mode 0777, so a root-owned world-writable higher ancestor is allowed.
+A rename there changes the target's inode, which the repair re-checks before it
+replaces the interpreter. The admission step alone hashes the interpreter
+before and after its probe and pins no inode. `selected_interpreter` requires the Worker's selected path to resolve
 to the shared interpreter, which admission hashes and probes. The repair in
 `scripts/bootstrap_runner_action_node.py` takes custody of the shared target
 directories and re-checks the link's device, inode and text with the rest of its

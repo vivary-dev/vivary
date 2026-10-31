@@ -328,6 +328,35 @@ class RepairFixture(unittest.TestCase):
                 self.downloader.assert_not_called()
                 self.probe.assert_not_called()
 
+    def high_ancestor_lstat(self, owner):
+        """Show self.directory, an ancestor above runner-cache, as mode 0777 with the given owner."""
+        original_lstat = Path.lstat
+        def lstat(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if path == self.directory:
+                fields = list(info)
+                fields[0] = stat.S_IFDIR | 0o777
+                fields[4] = owner
+                return os.stat_result(fields)
+            return info
+        return mock.patch.object(Path, "lstat", lstat)
+
+    def test_root_owned_world_writable_high_ancestor_is_admitted_like_hosted_opt(self):
+        self.link_externals()
+        with self.high_ancestor_lstat(0):
+            self.repair()
+        self.assertEqual(self.node.read_bytes(), self.patched)
+        self.probe.assert_called_once()
+
+    def test_runner_owned_world_writable_high_ancestor_is_refused(self):
+        self.link_externals()
+        with self.high_ancestor_lstat(os.geteuid()):
+            with self.assertRaisesRegex(self.module.RepairRefusal, "no other account can write"):
+                self.repair()
+        self.assertEqual(self.node.read_bytes(), self.old)
+        self.downloader.assert_not_called()
+        self.probe.assert_not_called()
+
     def test_linked_externals_stay_refused_on_windows(self):
         self.link_externals()
         with self.assertRaisesRegex(RuntimeError, "admitted only on Linux"):
