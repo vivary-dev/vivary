@@ -748,6 +748,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
+GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,
+and the lockfile changes only those lines. The lockfile is now in pnpm's own layout, and a
+no-change `pnpm install --lockfile-only` run left it byte-identical, so issue #213's rewrite
+no longer applies. `better-auth` stays at 1.6.28, which Core 0.176.5 pins exactly. It is
+inside GHSA-965c-763c-88jm, GHSA-r4xp-prcw-77qf and GHSA-q84f-53jg-9ppm, which only the
+breaking 1.7 line fixes. 1.7 adds a required account column and changes forwarded-host
+handling, so that upgrade needs its own Core change. Vivary stays outside each advisory's
+preconditions: Core's Magic Link stores hashed tokens with plain verification identifiers,
+and neither Core nor Workbench registers the OAuth Proxy or device authorization plugin. A
+test in `packages/workbench/tests/dependency-advisories.test.mjs` fails if that changes. No
+authentication behavior changes, so the descriptions above still hold.
+
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
 `RELEASE_FILES_STEP` and `ATTACH_STEP`. Before, substring tests passed a
