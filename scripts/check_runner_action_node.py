@@ -190,18 +190,22 @@ def shared_externals(root, system):
         refuse("a linked runner externals directory is admitted only on Linux")
     target = Path(os.readlink(link))
     if not target.is_absolute() or ".." in target.parts or target.name != "externals":
-        refuse("linked runner externals must name an absolute externals directory")
+        refuse(f"linked runner externals must name an absolute externals directory "
+               f"(absolute={int(target.is_absolute())}, named={int(target.name == 'externals')})")
     if target.resolve(strict=True) != target:
         refuse("linked runner externals must resolve in one step")
+    # Report only depth, owner and mode bits, never the path, as plain() does.
     owners = (0, os.geteuid())
-    for folder in [*reversed(target.parents), target]:
+    folders = [*reversed(target.parents), target]
+    for depth, folder in enumerate(folders):
         info = folder.lstat()
+        evidence = f"(depth={depth} of {len(folders) - 1}, uid={info.st_uid}, euid={owners[1]}, mode={info.st_mode & 0xffff})"
         if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
-            refuse("linked runner externals must sit in directories owned by root or the runner account")
+            refuse("linked runner externals must sit in directories owned by root or the runner account " + evidence)
         # A root-owned sticky ancestor such as /tmp cannot have our entry replaced.
         shared = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
         if shared and not (folder != target and info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
-            refuse("linked runner externals must sit in directories no other account can write")
+            refuse("linked runner externals must sit in directories no other account can write " + evidence)
     return target
 
 

@@ -770,8 +770,11 @@ context, so a swapped link is refused. A symlinked interpreter, a symlink below
 the target, and any linked externals on Windows stay refused. The six workflows
 embed the regenerated step. The layout comes from a third-party report
 (plengauer/Thoth#4498), not from a GitHub release note, so the confirming check
-is a real GitHub run of these jobs. The rest of the admission boundary above
-still holds.
+is a real GitHub run of these jobs. That first hosted run refused in the
+runner-layout phase with the rule redacted, so the link refusals now report fixed
+text with ancestor depth, owner uid, runner euid and mode bits, never a path, as
+`plain()` does, and the repair prints them. The rest of the admission boundary
+above still holds.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
