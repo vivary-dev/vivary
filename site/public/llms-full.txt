@@ -8284,8 +8284,11 @@ with ENOENT during yjs bundling, so the beta-candidate dry run stopped. The only
 successful dry run built on `ubuntu-latest`. The maintained Core patch gains an appended
 section for `dist/deploy/build.js`: `findEsbuild()` returns `ESBUILD_BINARY_PATH` first when
 that file exists, which the build workflows set to the Go-built qualified esbuild. The patch
-hash moves from `8b6b806f` to `b15426f0`. The build's inputs, outputs and admission checks are
-unchanged, so the delivery description above still holds.
+hash moves from `8b6b806f` to `b15426f0`. The next dry run then stopped in the installer:
+`File /r "${PAYLOAD_DIR}/*"` found no files under makensis 3.13 on Windows, because
+`PAYLOAD_DIR` is a Windows path. `installer/vivary.nsi` now uses `\*`, which makensis on
+Linux also accepts. The build's inputs, outputs and admission checks are unchanged, so the
+delivery description above still holds.
 
 2026-10-31 Issue #206, first two items. Run now on an automation whose earlier run waits for an
 approval decision was refused as "The automation is already running.", although nothing ran.
