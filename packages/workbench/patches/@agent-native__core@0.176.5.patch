@@ -19116,3 +19116,189 @@ diff --git a/dist/jobs/background-automation-runner.js b/dist/jobs/background-au
              await finishAutomationRun(input.historyId, "declined", "The owner declined the pending action. It did not execute.", "automation_approval_declined", { emitFinished: pending.options.emitFinished });
              await recordApprovalExecutionOutcome(pending, "declined");
              return { status: "declined", historyId: input.historyId };
+diff --git a/dist/client/agent-page/AgentJobsTab.js b/dist/client/agent-page/AgentJobsTab.js
+index 89252676c301ebc42abc9ebe1978b02488a3bff6..17e82b9ceba32c8c041b28f2c520f293098b3560 100644
+--- a/dist/client/agent-page/AgentJobsTab.js
++++ b/dist/client/agent-page/AgentJobsTab.js
+@@ -11,7 +11,7 @@ import { automationWebhookUrl, isLoopbackWebhookUrl, } from "../integrations/web
+ import { automationCreationContext } from "../settings/AutomationsSection.js";
+ import { AgentEmptyState } from "./AgentEmptyState.js";
+ import { AgentTabFrame } from "./AgentTabFrame.js";
+-import { AutomationDetailsDialog, } from "./AutomationDetailsDialog.js";
++import { AutomationDetailsDialog, automationStatusLabel, } from "./AutomationDetailsDialog.js";
+ import { AutomationScheduleDialog } from "./AutomationScheduleDialog.js";
+ import { scheduleFiringFor, } from "./scheduled-trigger-state.js";
+ import { ScheduledTriggerNotice } from "./ScheduledTriggerNotice.js";
+@@ -175,7 +175,7 @@ function detailsFields(entry, t, formatDateTime, scheduleFiring) {
+         value: formatDateTime(resource.lastCheck) ?? unset,
+     }, {
+         label: t("jobs.lastStatus", { defaultValue: "Last status" }),
+-        value: resource.lastStatus || unset,
++        value: resource.lastStatus ? automationStatusLabel(t, resource.lastStatus) : unset,
+     }, {
+         label: t("jobs.scope", { defaultValue: "Scope" }),
+         value: resource.scope === "organization"
+@@ -348,7 +348,7 @@ export function AgentJobsTab({ canManageOrg = false, hideHeader = false, organiz
+                                                             ? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400"
+                                                             : "rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground", children: resource.enabled
+                                                             ? t("jobs.enabled", { defaultValue: "Enabled" })
+-                                                            : t("jobs.paused", { defaultValue: "Paused" }) }), resource.lastStatus ? (_jsx("span", { className: "rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground", children: resource.lastStatus })) : null] }), _jsx("p", { className: "mt-1 text-sm text-muted-foreground", children: triggerDescription }), _jsx("p", { className: "hidden", children: instructions }), lastRun || nextRun || lastCheck ? (_jsxs("div", { className: "hidden", children: [nextRun ? (_jsxs("span", { children: [t("jobs.nextRun", { defaultValue: "Next run" }), ":", " ", nextRun] })) : null, _jsxs("span", { children: [t("jobs.lastRun", { defaultValue: "Last run" }), ":", " ", lastRun ??
++                                                            : t("jobs.paused", { defaultValue: "Paused" }) }), resource.lastStatus ? (_jsx("span", { className: "rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground", children: automationStatusLabel(t, resource.lastStatus) })) : null] }), _jsx("p", { className: "mt-1 text-sm text-muted-foreground", children: triggerDescription }), _jsx("p", { className: "hidden", children: instructions }), lastRun || nextRun || lastCheck ? (_jsxs("div", { className: "hidden", children: [nextRun ? (_jsxs("span", { children: [t("jobs.nextRun", { defaultValue: "Next run" }), ":", " ", nextRun] })) : null, _jsxs("span", { children: [t("jobs.lastRun", { defaultValue: "Last run" }), ":", " ", lastRun ??
+                                                                 t("jobs.neverRan", { defaultValue: "Never" })] }), !lastRun && lastCheck ? (_jsxs("span", { children: [t("jobs.lastChecked", {
+                                                                 defaultValue: "Last checked",
+                                                             }), ": ", lastCheck] })) : null] })) : null, resource.lastError ? (_jsxs("div", { className: "mt-2 flex items-start gap-1.5 text-[11px] text-destructive", children: [_jsx(IconAlertTriangle, { className: "mt-px size-3 shrink-0" }), _jsx("span", { className: "min-w-0 break-words", children: resource.lastError }), _jsx("button", { type: "button", className: "shrink-0 font-medium text-foreground underline-offset-4 hover:underline", onClick: () => openDetails(entry), children: t("jobs.viewDetails", {
+diff --git a/dist/client/agent-page/AutomationDetailsDialog.d.ts b/dist/client/agent-page/AutomationDetailsDialog.d.ts
+index f29071d312419fe6911d4ccca6608233e86b98a1..059a78369ae7d6345b4a168aaa27a50392dfb54d 100644
+--- a/dist/client/agent-page/AutomationDetailsDialog.d.ts
++++ b/dist/client/agent-page/AutomationDetailsDialog.d.ts
+@@ -18,6 +18,9 @@ export interface AutomationDetailsDialogProps {
+     formatTimestamp: (value: number) => string;
+     onClose: () => void;
+ }
++export declare function automationStatusLabel(t: (key: string, options: {
++    defaultValue: string;
++}) => string, status: string): string;
+ export declare function AutomationDetailsDialog({ open, name, triggerSummary, fields, condition, instructions, mcpTools, lastError, refreshFailed, scope, formatTimestamp, onClose, }: AutomationDetailsDialogProps): import("react").JSX.Element;
+ 
+ export declare function AutomationRunInspection(props: { historyId: string; onClose: () => void }): import("react/jsx-runtime").JSX.Element;
+diff --git a/dist/client/agent-page/AutomationDetailsDialog.js b/dist/client/agent-page/AutomationDetailsDialog.js
+index 0720966fc37263398f99d8c4462ea20526969e42..7462b236e5a54fe418c589fd74761ebdcec03c87 100644
+--- a/dist/client/agent-page/AutomationDetailsDialog.js
++++ b/dist/client/agent-page/AutomationDetailsDialog.js
+@@ -4,6 +4,22 @@ import { IconAlertTriangle, IconLoader2, } from "@tabler/icons-react";
+ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, } from "../components/ui/dialog.js";
+ import { useT } from "../i18n.js";
+ import { firstLoading, loadFailed, useAutomationApprovalDecision, useAutomationRunInspection, useAutomationRuns } from "./use-jobs.js";
++const STATUS_LABELS = {
++    running: "Running",
++    waiting_approval: "Waiting for approval",
++    resuming: "Resuming",
++    success: "Succeeded",
++    error: "Failed",
++    interrupted: "Interrupted",
++    declined: "Declined",
++    skipped: "Skipped",
++};
++/** Vivary #206: the words Settings shows for a stored automation run status. */
++export function automationStatusLabel(t, status) {
++    return Object.hasOwn(STATUS_LABELS, status)
++        ? t(`jobs.runStatus.${status}`, { defaultValue: STATUS_LABELS[status] })
++        : status;
++}
+ function RunStatusDot({ status }) {
+     const tone = status === "success"
+         ? "bg-emerald-500"
+@@ -39,7 +55,7 @@ export function AutomationDetailsDialog({ open, name, triggerSummary, fields, co
+                                         defaultValue: "Could not load run history.",
+                                     }) })) : runs.length === 0 ? (_jsx("p", { className: "mt-1 text-xs text-muted-foreground", children: t("jobs.noRuns", {
+                                         defaultValue: "This automation has not executed yet. Only real executions are recorded here.",
+-                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: run.status }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : run.canInspect !== true ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.runInspectionUnavailable", { defaultValue: "Inspection unavailable." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
++                                    }) })) : (_jsx("ul", { className: "mt-2 divide-y divide-border/60 border-y border-border/60", children: runs.map((run) => (_jsxs("li", { className: "flex items-center gap-2 py-1.5 text-xs", children: [_jsx(RunStatusDot, { status: run.status }), _jsx("span", { className: "shrink-0 text-muted-foreground", children: formatTimestamp(run.startedAt) }), _jsx("span", { className: "shrink-0 font-medium", children: automationStatusLabel(t, run.status) }), run.error ? (_jsx("span", { className: "min-w-0 flex-1 truncate text-muted-foreground", title: run.error, children: run.error })) : (_jsx("span", { className: "min-w-0 flex-1" })), run.threadId ? (run.appId == null ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.legacyInspectionUnavailable", { defaultValue: "Inspection unavailable for this older run." }) }) : run.canInspect !== true ? _jsx("span", { className: "shrink-0 text-muted-foreground", children: t("jobs.runInspectionUnavailable", { defaultValue: "Inspection unavailable." }) }) : _jsx("button", { type: "button", className: "shrink-0 rounded border px-2 py-1", onClick: () => setInspectionId(run.id), children: t("jobs.inspectRun", { defaultValue: "Inspect run" }) })) : null, run.finishedAt ? (_jsxs("span", { className: "shrink-0 tabular-nums text-muted-foreground", children: [Math.round((run.finishedAt - run.startedAt) / 1000), "s"] })) : null] }, run.id))) })), inspectionId ? _jsx(AutomationRunInspection, { historyId: inspectionId, onClose: () => setInspectionId(null) }) : null] })] })] }) }));
+ }
+ 
+ /** Retained Native data only. No chat runtime, composer, send or resume control. */
+@@ -67,7 +83,7 @@ export function AutomationRunInspection({ historyId, onClose }) {
+         ] }),
+         query.isLoading ? _jsx("p", { children: t("jobs.loadingRun", { defaultValue: "Loading run…" }) }) : null,
+         query.isError ? _jsx("p", { role: "alert", children: t("jobs.inspectionUnavailable", { defaultValue: "Could not refresh this run. Refresh before deciding." }) }) : null,
+-        data ? _jsx("p", { role: "status", children: data.run.status.replace(/_/g, " ") }) : null,
++        data ? _jsx("p", { role: "status", children: automationStatusLabel(t, data.run.status) }) : null,
+         data?.bookkeepingPending ? _jsx("p", { role: "status", children: t("jobs.bookkeepingPending", { defaultValue: "This run finished. Its result is still being saved." }) }) : null,
+         _jsx("div", { className: "max-h-80 space-y-3 overflow-auto", children: messages.map((item, index) => {
+             const message = item.message ?? item;
+diff --git a/dist/jobs/run-history.d.ts b/dist/jobs/run-history.d.ts
+index a2879b45035a127179f7baca0c74bbe0805e21aa..4ffa6344b33d9a4abbec3627ade4c617832abf83 100644
+--- a/dist/jobs/run-history.d.ts
++++ b/dist/jobs/run-history.d.ts
+@@ -139,6 +139,7 @@ export declare function getAutomationContinuationForWebhookTask(taskId: string):
+ export declare function claimAutomationApprovalDecision(id: string, askId: string, resumeRunId: string, requireReady?: boolean): Promise<boolean>;
+ export declare function restoreUnconsumedAutomationApproval(id: string, askId: string, resumeRunId: string): Promise<boolean>;
+ export declare function hasUnresolvedAutomationApproval(owner: string, path: string): Promise<boolean>;
++export declare function unresolvedAutomationApprovalStatus(owner: string, path: string): Promise<"waiting_approval" | "resuming" | null>;
+ export declare function isAutomationRunThread(threadId: string): Promise<boolean>;
+ 
+ /** One row of an approval sweep page. `at` is its sort value, and the last row is the next page's cursor. */
+diff --git a/dist/jobs/run-history.js b/dist/jobs/run-history.js
+index d401d6987142381af0b5a4e90b96a7daf3c1b6b6..9c0b72b7a9c54fb860b5b539f2494bda8ffb4a9e 100644
+--- a/dist/jobs/run-history.js
++++ b/dist/jobs/run-history.js
+@@ -593,6 +593,20 @@ export async function hasUnresolvedAutomationApproval(owner, path) {
+     });
+     return (result.rows ?? []).length > 0;
+ }
++/**
++ * Vivary #206: the status of an unfinished approval run for this automation,
++ * preferring one that still waits for a decision over one that is resuming.
++ */
++export async function unresolvedAutomationApprovalStatus(owner, path) {
++    await ensureTable();
++    const result = await getDbExec().execute({
++        sql: `SELECT status FROM automation_runs WHERE owner = ? AND path = ?
++          AND status IN ('waiting_approval', 'resuming') AND finished_at IS NULL
++          ORDER BY CASE status WHEN 'waiting_approval' THEN 0 ELSE 1 END LIMIT 1`,
++        args: [owner, path],
++    });
++    return result.rows?.[0]?.status ?? null;
++}
+ /** Deletion authority is separate from the stored creator's current eligibility. */
+ export async function assertLegacyJobApprovalDeletionAllowed(resource, meta, appId, exec = getDbExec()) {
+     const resourceOrg = organizationIdFromResourceOwner(resource.owner);
+diff --git a/dist/jobs/scheduler.js b/dist/jobs/scheduler.js
+index 4f4744c2a07091aea7f6556d4b6aaede6d94c9e8..072aa50c499798686c30b57232e4a9253d8de054 100644
+--- a/dist/jobs/scheduler.js
++++ b/dist/jobs/scheduler.js
+@@ -4,7 +4,7 @@ import { backgroundRunCutOffReason, interruptBackgroundAutomations, isBackground
+ import { nextOccurrence, isValidCron, describeCron, effectiveTimezone, } from "./cron.js";
+ import { buildJobResourceContent, isRecoveredFactoryJob, jobBelongsToApp, parseJobResource, patchJobFrontmatterFields, recoveredFactoryOwnerOrgId, } from "./frontmatter.js";
+ import { dispatchRemoteAutomation, finishRemoteAutomationHistory, getRemoteAutomationStatus, } from "./remote-execution.js";
+-import { automationHistoryOwner, automationRunBindingMatches, AUTOMATION_RUN_BINDING_REFUSAL, hasUnresolvedAutomationApproval, claimAutomationRun, finishAutomationRun, getAutomationRun, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, listAutomationRuns, } from "./run-history.js";
++import { automationHistoryOwner, automationRunBindingMatches, AUTOMATION_RUN_BINDING_REFUSAL, hasUnresolvedAutomationApproval, unresolvedAutomationApprovalStatus, claimAutomationRun, finishAutomationRun, getAutomationRun, INTERRUPTED_RUN_ERROR_CODE, INTERRUPTED_RUN_MESSAGE, listAutomationRuns, } from "./run-history.js";
+ import { acquireAutomationRunLease, acquireAutomationSchedulerLease, automationRunLeaseKey, recordAutomationSchedulerHealth, releaseAutomationRunLease, releaseAutomationSchedulerLease, renewAutomationRunLease, renewAutomationSchedulerLease, AUTOMATION_SCHEDULER_LEASE_RENEWAL_MS, } from "./scheduler-health.js";
+ // ─── Frontmatter parsing ────────────────────────────────────────────────────
+ export { classifyJobFrontmatter, classifyJobResource, normalizeJobMcpTools, parseJobResource, } from "./frontmatter.js";
+@@ -431,6 +431,13 @@ async function actOnRunningMark(resource, act) {
+         console.warn(`[recurring-jobs] Could not check the running mark of "${resource.path}":`, error instanceof Error ? error.message : error);
+     }
+ }
++const APPROVAL_PENDING_REFUSAL = "This automation is waiting for an approval decision in Past runs. Approve or decline it before running it again.";
++async function refuseApprovalPending(historyId) {
++    if (historyId) {
++        await finishAutomationRun(historyId, "error", `${APPROVAL_PENDING_REFUSAL} No delivery was confirmed.`, "automation_approval_pending");
++    }
++    return { status: "skipped", error: APPROVAL_PENDING_REFUSAL };
++}
+ async function refuseAlreadyRunning(historyId) {
+     const error = "The automation is already running.";
+     if (historyId) {
+@@ -565,8 +572,13 @@ async function executeJob(resource, meta, body, deps, now, options = {}) {
+     // Manual runs use the same resource row as scheduled runs for concurrency
+     // protection. The check is paired with the conditional write below: two
+     // requests that read the same idle snapshot cannot both claim it.
+-    if (await hasUnresolvedAutomationApproval(automationHistoryOwner(resource.owner, identity.identity), resource.path) ||
+-        (options.manual && isBackgroundAutomationRunActive(meta, now)))
++    // Vivary #206: an earlier run that waits for an approval decision is not
++    // running, so the refusal names the wait and where to decide it. A run whose
++    // decision was claimed is resuming, so it is running.
++    const unresolvedApproval = await unresolvedAutomationApprovalStatus(automationHistoryOwner(resource.owner, identity.identity), resource.path);
++    if (unresolvedApproval === "waiting_approval")
++        return refuseApprovalPending(options.historyId);
++    if (unresolvedApproval || (options.manual && isBackgroundAutomationRunActive(meta, now)))
+         return refuseAlreadyRunning(options.historyId);
+     // Vivary #114: a quit has begun, so the run does not start. A scheduled
+     // job stays due for the next launch, and a Run now row it had already
+diff --git a/dist/deploy/build.js b/dist/deploy/build.js
+index d215d3d9fbabe76222ac0590a572da0eb32ee86f..0d3e28a07291df457a01e1321097b48d61aee64b 100644
+--- a/dist/deploy/build.js
++++ b/dist/deploy/build.js
+@@ -2354,6 +2354,11 @@ function generateRequireShim() {
+     return `${imports}\n${messageChannelPolyfill}\nconst __unavailable=(m)=>new Proxy({}, { get(_target, prop) { return (..._args) => { throw new Error(m + "." + String(prop) + " is unavailable in Cloudflare Pages workers"); }; } });\nconst __mods={${allEntries}};export var require=globalThis.require||function(m){const r=__mods[m];if(r!==undefined)return r;throw new Error("Cannot require: "+m)};\n`;
+ }
+ function findEsbuild() {
++    // Vivary: a qualified esbuild named by ESBUILD_BINARY_PATH comes first. On Windows,
++    // esbuild/bin/esbuild is a JavaScript launcher that execFileSync cannot start.
++    const qualified = process.env.ESBUILD_BINARY_PATH;
++    if (qualified && fs.existsSync(qualified))
++        return qualified;
+     // Try to resolve esbuild's binary via Node module resolution
+     // This works regardless of hoisting or .bin symlink creation
+     try {
