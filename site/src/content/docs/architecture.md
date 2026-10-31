@@ -718,8 +718,9 @@ application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
 hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
 runner root links `externals` to the pinned shared `/opt/runner-cache/externals`,
-admission follows only that link and only on Linux, binds the shared interpreter
-the Worker executes, and keeps every directory below the target plain. Jobs provision authenticated
+admission follows only that link and only on Linux, and requires the Worker's
+selected interpreter to resolve to the shared one, which it hashes and probes at
+that moment. The repair keeps every directory below the target plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
 certificate overlay, export filtered task trust, and admit its loaded OpenSSL
 3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
@@ -762,16 +763,18 @@ and it resolves in one step. `selected_interpreter` requires the Worker's select
 path to resolve to the shared interpreter, which admission hashes and probes.
 Hosted runs on this branch showed `/opt` and `/opt/runner-cache` as root-owned
 mode 0777, so directory modes give no protection on that path and the guard does
-not rely on them. Custody comes from `plain()` on the target, `node24` and `bin`,
-and from the repair in `scripts/bootstrap_runner_action_node.py`, which records
-the link's device, inode and text with its directory inodes and re-checks them
-before it replaces the interpreter, so a swapped link is refused. Link refusals
-carry fixed text with no path, and the repair prints them instead of the redacted
-admission summary. A symlinked interpreter, a symlink below the target, an
-unpinned or relative target, and any linked externals on Windows stay refused.
-The six workflows embed the regenerated step. A new hosted target needs its own
-review, like every other pin here. The rest of the admission boundary above still
-holds.
+not rely on them. Admission requires the canonical interpreter path. The repair in
+`scripts/bootstrap_runner_action_node.py` keeps `plain()` on the target, `node24`
+and `bin`, records the link's device, inode and text with the directory inodes,
+and re-checks them before it replaces the interpreter, so a swapped link or a
+swapped target directory is refused. The Worker later runs through a link that
+any account could replace under those 0777 parents. That gap predates this
+change. Link refusals raise `ExternalsRefusal`, whose fixed text names no path,
+and the repair prints them instead of the redacted admission summary. A symlinked
+interpreter, a symlink below the target, an unpinned or relative target, and any
+linked externals on Windows stay refused. The six workflows embed the regenerated
+step. A new hosted target needs its own review, like every other pin here. The
+rest of the admission boundary above still holds.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,

@@ -285,6 +285,10 @@ class RepairFixture(unittest.TestCase):
         self.assertEqual(self.probe.call_args.args[0], self.node)
 
     def test_unpinned_relative_chained_or_deeper_links_are_refused_before_download_or_probe(self):
+        # Each case asserts the rule that refuses it, so a later change cannot hide behind another check.
+        expected = {"unpinned": "must name the pinned", "relative": "must name the pinned",
+                    "chained": "must resolve in one step",
+                    "linked-node24": "selected interpreter must resolve inside the linked externals"}
         for case in ("unpinned", "relative", "chained", "linked-node24"):
             with self.subTest(case=case):
                 self.setUp()
@@ -311,7 +315,7 @@ class RepairFixture(unittest.TestCase):
                     (shared / "node24").rename(moved)
                     (shared / "node24").symlink_to(moved, target_is_directory=True)
                     self.node = moved / "bin/node"
-                with self.assertRaises((RuntimeError, OSError)):
+                with self.assertRaisesRegex(self.module.RepairRefusal, expected[case]):
                     self.repair()
                 self.assertEqual(self.node.read_bytes(), self.old)
                 self.downloader.assert_not_called()
@@ -322,6 +326,22 @@ class RepairFixture(unittest.TestCase):
         output = self.refusal_output()
         self.assertIn("Runner Node repair: linked runner externals must name the pinned", output)
         self.assertNotIn(str(self.directory), output)
+
+    def test_target_directory_swapped_behind_an_unchanged_link_is_refused(self):
+        # The hosted parents are mode 0777, so the target can be renamed aside and replaced.
+        shared = self.link_externals()
+        aside = self.directory / "runner-cache/externals-aside"
+        def swap(artifact, destination):
+            shutil.copytree(shared, aside, symlinks=True)
+            shared.rename(self.directory / "runner-cache/externals-original")
+            aside.rename(shared)
+            Path(destination).write_bytes(self.payload)
+        self.downloader.side_effect = swap
+        with self.assertRaisesRegex(self.module.RepairRefusal, "runner directory changed"):
+            self.repair()
+        self.assertEqual((self.directory / "runner-cache/externals-original/node24/bin/node").read_bytes(), self.old)
+        self.assertEqual((shared / "node24/bin/node").read_bytes(), self.old)
+        self.probe.assert_not_called()
 
     def test_linked_externals_stay_refused_on_windows(self):
         self.link_externals()

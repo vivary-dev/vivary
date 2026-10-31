@@ -128,12 +128,9 @@ def context():
     # With a linked externals entry, custody covers the shared directory it names.
     try:
         interpreter = admission.selected_interpreter(root, selected, system)
-    except RuntimeError as error:
-        # These refusals carry fixed text and numeric evidence only, so report them.
-        reason = str(error).removeprefix("Runner action Node: ")
-        if reason.startswith(("linked runner externals ", "a linked runner externals ", "the selected interpreter must resolve")):
-            refuse(reason)
-        raise
+    except admission.ExternalsRefusal as error:
+        # Only this class carries fixed, path-free text, so report it instead of the redacted summary.
+        refuse(str(error).removeprefix("Runner action Node: "))
     folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
     directories = []
     for role, path in zip(("root", "externals", "node24", "bin"), folders):

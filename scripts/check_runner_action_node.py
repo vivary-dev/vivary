@@ -35,6 +35,14 @@ def refuse(message):
     raise RuntimeError("Runner action Node: " + message)
 
 
+class ExternalsRefusal(RuntimeError):
+    """A linked-externals refusal. Its text is fixed and names no path, so the repair may print it."""
+
+
+def refuse_externals(message):
+    raise ExternalsRefusal("Runner action Node: " + message)
+
+
 def node_version(value, selected_major=None):
     if not isinstance(value, str) or not re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value):
         refuse("malformed or prerelease version")
@@ -193,13 +201,13 @@ def shared_externals(root, system):
     if not stat.S_ISLNK(link.lstat().st_mode):
         return link
     if system == "win32":
-        refuse("a linked runner externals directory is admitted only on Linux")
+        refuse_externals("a linked runner externals directory is admitted only on Linux")
     text = os.readlink(link)
     if text not in SHARED_EXTERNALS:
-        refuse("linked runner externals must name the pinned hosted shared externals directory")
+        refuse_externals("linked runner externals must name the pinned hosted shared externals directory")
     target = Path(text)
     if target.resolve(strict=True) != target:
-        refuse("linked runner externals must resolve in one step")
+        refuse_externals("linked runner externals must resolve in one step")
     return target
 
 
@@ -210,7 +218,7 @@ def selected_interpreter(root, selected, system):
         return Path(selected)
     interpreter = externals / "node24" / "bin" / "node"
     if Path(selected).resolve(strict=True) != interpreter:
-        refuse("the selected interpreter must resolve inside the linked externals directory")
+        refuse_externals("the selected interpreter must resolve inside the linked externals directory")
     return interpreter
 
 

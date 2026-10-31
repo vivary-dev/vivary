@@ -376,10 +376,13 @@ class RunnerBootstrapTests(unittest.TestCase):
                 self.assertEqual(result, 1)
 
 
+@unittest.skipIf(sys.platform == "win32", "linked-externals fixtures need POSIX symlinks")
 class LinkedExternalsTests(unittest.TestCase):
     """Hosted ubuntu-latest 20261025 runs the Worker from cached/<version>, whose externals links to one shared tree."""
 
     def test_only_the_pinned_shared_externals_tree_is_admitted_in_every_actual_source(self):
+        expected = {"unpinned": "must name the pinned", "relative": "must name the pinned",
+                    "chained": "must resolve in one step", "interpreter-link": "selected interpreter must resolve inside the linked externals"}
         for name, source in sources():
             for mode in ("shared", "unpinned", "relative", "chained", "interpreter-link"):
                 with self.subTest(source=name, mode=mode), tempfile.TemporaryDirectory() as directory:
@@ -412,7 +415,7 @@ class LinkedExternalsTests(unittest.TestCase):
                                 self.assertEqual(actual["sha256"], module.sha256(canonical))
                                 probing.assert_called_once_with(canonical, {"LANG": "C", "LC_ALL": "C"})
                             else:
-                                with self.assertRaises((RuntimeError, OSError)):
+                                with self.assertRaisesRegex(RuntimeError, expected[mode]):
                                     module.check_runner_action_node()
                                 probing.assert_not_called()
 
