@@ -8282,6 +8282,29 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 Electron 45.2.1 qualified for packaging. The desktop shell moves from Electron
+45.0.0 to 45.2.1, and `ADMITTED_ELECTRON` in `runtime-security.mjs` admits it with Node
+24.22.1. At tag v45.2.1, Electron's DEPS pins node v24.22.1, and none of its 58
+`patches/node` files touches the October fix files under `lib/internal/dns/`. Its npm
+dependencies, engines and scripts match 45.0.0's, so only the electron lock entry changes.
+A beta-candidate dry run on 2026-10-31 had stopped at this hold. Packaging and payload
+checks are unchanged: they still admit only the pinned version, require the bundled Node to
+meet the October floor, and require the payload to name the pinned release. The shell's use
+of Electron APIs is unchanged, so the description above still holds. The admission criteria
+cover Node only, so Chromium coverage was checked separately on the same day. Of the 18
+changes Electron backported to 44.10.1 on 2026-10-30, 45.2.1 carries 17, two of them under
+their M156 branch hashes (`e2075db3`, `93f574f1`). It lacks cherry-pick `3318e836e90b`, a Blink
+fix for re-entrant attribute changes in `Element::AppendAttributeInternal` and copied id and
+class values in `DidMoveToNewDocument`. `element.cc` at Chromium 156.0.8078.75 and
+156.0.8078.80 still has the old code, and neither the 45-x-y branch nor its open pull requests
+carry the cherry-pick. 44.10.1 is not a superset either: Chromium 152.0.7977.169 lacks the
+menu runner fix for bug 574516887 and the sandboxed file system database fix for bugs
+571156746 and 576122089, which 45.2.1 carries, and the rest of the 152 to 156 difference is
+unmeasured. 45.2.1 stays the admitted release, and Vivary does not patch Electron. Move to the
+first 45.x whose `patches/chromium/.patches` lists `cherry-pick-3318e836e90b` or whose Chromium
+`element.cc` has the re-entrant append guard. Node 24.22.2, which a 45-x-y pull request adopts,
+is not a security release, so the 24.22.1 floor stands.
+
 2026-10-31 qualified esbuild in Core's server build. Desktop releases build on `windows-latest`,
 where Core's `findEsbuild()` returned esbuild's JavaScript launcher and `execFileSync` failed
 with ENOENT during yjs bundling, so the beta-candidate dry run stopped. The only earlier
