@@ -8247,13 +8247,9 @@ Build and publication have a runtime admission boundary separate from the
 application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
 hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
-runner root links `externals` to one shared cache, admission follows only that
-link, only on Linux. Its absolute target and the directory holding it must be
-owned by root or the runner account and writable by no other account. Higher
-ancestors need the same owners, and a root-owned world-writable one such as the
-hosted `/opt` is allowed because the repair re-checks the target's inode. It
-then binds the shared interpreter the Worker executes and pins the link and its
-target until repair ends. Every path below the target stays plain. Jobs provision authenticated
+runner root links `externals` to the pinned shared `/opt/runner-cache/externals`,
+admission follows only that link and only on Linux, binds the shared interpreter
+the Worker executes, and keeps every directory below the target plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
 certificate overlay, export filtered task trust, and admit its loaded OpenSSL
 3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
@@ -8285,32 +8281,27 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
-2026-10-31 runner action Node admission on linked externals. Every GitHub job
-failed at its first step from the 2026-10-31 PR #312 run on, because hosted
-Ubuntu image 20261025 (runner 2.338.0) runs the Worker from
+2026-10-31 runner action Node admission on a linked externals entry. Every GitHub
+job failed at its first step from the 2026-10-31 PR #312 run on. Hosted
+ubuntu-latest 20261025 (runner 2.338.0) runs the Worker from
 `actions-runner/cached/<version>` and links its `externals` entry to a shared
-`/opt/runner-cache/externals`, and `plain()` refuses any symlink. The last green
+`/opt/runner-cache/externals`, and `plain()` refused every symlink. The last green
 run was on 2026-10-26. `shared_externals` in `scripts/check_runner_action_node.py`
-now admits that one link on Linux when it names an absolute directory called
-`externals` in one step, when the target and the directory holding it are owned
-by root or the runner account and not group- or world-writable, and when higher
-ancestors have the same owners. The hosted run's diagnostics showed `/opt` as
-root-owned mode 0777, so a root-owned world-writable higher ancestor is allowed.
-A rename there changes the target's inode, which the repair re-checks before it
-replaces the interpreter. The admission step alone hashes the interpreter
-before and after its probe and pins no inode. `selected_interpreter` requires the Worker's selected path to resolve
-to the shared interpreter, which admission hashes and probes. The repair in
-`scripts/bootstrap_runner_action_node.py` takes custody of the shared target
-directories and re-checks the link's device, inode and text with the rest of its
-context, so a swapped link is refused. A symlinked interpreter, a symlink below
-the target, and any linked externals on Windows stay refused. The six workflows
-embed the regenerated step. The layout comes from a third-party report
-(plengauer/Thoth#4498), not from a GitHub release note, so the confirming check
-is a real GitHub run of these jobs. That first hosted run refused in the
-runner-layout phase with the rule redacted, so the link refusals now report fixed
-text with ancestor depth, owner uid, runner euid and mode bits, never a path, as
-`plain()` does, and the repair prints them. The rest of the admission boundary
-above still holds.
+now follows that one link on Linux when its text equals a `SHARED_EXTERNALS` pin
+and it resolves in one step. `selected_interpreter` requires the Worker's selected
+path to resolve to the shared interpreter, which admission hashes and probes.
+Hosted runs on this branch showed `/opt` and `/opt/runner-cache` as root-owned
+mode 0777, so directory modes give no protection on that path and the guard does
+not rely on them. Custody comes from `plain()` on the target, `node24` and `bin`,
+and from the repair in `scripts/bootstrap_runner_action_node.py`, which records
+the link's device, inode and text with its directory inodes and re-checks them
+before it replaces the interpreter, so a swapped link is refused. Link refusals
+carry fixed text with no path, and the repair prints them instead of the redacted
+admission summary. A symlinked interpreter, a symlink below the target, an
+unpinned or relative target, and any linked externals on Windows stay refused.
+The six workflows embed the regenerated step. A new hosted target needs its own
+review, like every other pin here. The rest of the admission boundary above still
+holds.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,

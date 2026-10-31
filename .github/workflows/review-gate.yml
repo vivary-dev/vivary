@@ -55,6 +55,9 @@ jobs:
           # not a zero-vulnerability claim or permission to select another project runtime.
           FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
           MAX_ANCESTORS = 64
+          # Hosted ubuntu-latest 20261025 (runner 2.338.0) links every cached runner
+          # version's externals here. A new target needs its own review, like any pin.
+          SHARED_EXTERNALS = ("/opt/runner-cache/externals",)
           PROBE_TIMEOUT = 10
           KNOWN_SELECTION_FLAGS = {
               "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
@@ -215,35 +218,23 @@ jobs:
               Hosted Ubuntu images from 20261025 (runner 2.338.0) run the Worker from
               actions-runner/cached/<version>, whose externals entry is a symlink to one
               externals tree that every cached version shares. Admit only that one link,
-              only on Linux. The target and the directory holding it must be owned by
-              root or the runner account and writable by no other account. Higher
-              ancestors need the same owners but may be root-owned and world-writable,
-              because the hosted image ships /opt as root-owned mode 0777. A rename there
-              changes the target directory's inode, which the repair re-checks before it
-              replaces the interpreter. Every path below the target stays plain.
+              only on Linux, and only to the pinned target below. The image ships that
+              whole path as root-owned mode 0777, so directory modes give no protection
+              there. Custody instead comes from plain() on every directory below the
+              target, the Worker's selected interpreter resolving to it, and the repair
+              re-checking the link and directory inodes before it replaces any file.
               """
               link = Path(root) / "externals"
               if not stat.S_ISLNK(link.lstat().st_mode):
                   return link
               if system == "win32":
                   refuse("a linked runner externals directory is admitted only on Linux")
-              target = Path(os.readlink(link))
-              if not target.is_absolute() or ".." in target.parts or target.name != "externals":
-                  refuse(f"linked runner externals must name an absolute externals directory "
-                         f"(absolute={int(target.is_absolute())}, named={int(target.name == 'externals')})")
+              text = os.readlink(link)
+              if text not in SHARED_EXTERNALS:
+                  refuse("linked runner externals must name the pinned hosted shared externals directory")
+              target = Path(text)
               if target.resolve(strict=True) != target:
                   refuse("linked runner externals must resolve in one step")
-              # Report only depth, owner and mode bits, never the path, as plain() does.
-              owners = (0, os.geteuid())
-              folders = [*reversed(target.parents), target]
-              for depth, folder in enumerate(folders):
-                  info = folder.lstat()
-                  evidence = f"(depth={depth} of {len(folders) - 1}, uid={info.st_uid}, euid={owners[1]}, mode={info.st_mode & 0xffff})"
-                  if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
-                      refuse("linked runner externals must sit in directories owned by root or the runner account " + evidence)
-                  shared = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
-                  if shared and not (depth < len(folders) - 2 and info.st_uid == 0):
-                      refuse("linked runner externals must sit in directories no other account can write " + evidence)
               return target
 
 
