@@ -8282,6 +8282,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
+GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,
+and the lockfile changes only those lines. The lockfile is now in pnpm's own layout, and a
+no-change `pnpm install --lockfile-only` run left it byte-identical, so issue #213's rewrite
+no longer applies. `better-auth` stays at 1.6.28, which Core 0.176.5 pins exactly. It is
+inside GHSA-965c-763c-88jm, GHSA-r4xp-prcw-77qf and GHSA-q84f-53jg-9ppm, which only the
+breaking 1.7 line fixes. 1.7 adds a required account column and changes forwarded-host
+handling, so that upgrade needs its own Core change. Vivary stays outside each advisory's
+preconditions: Core's Magic Link stores hashed tokens with plain verification identifiers,
+and neither Core nor Workbench registers the OAuth Proxy or device authorization plugin. A
+test in `packages/workbench/tests/dependency-advisories.test.mjs` fails if that changes. No
+authentication behavior changes, so the descriptions above still hold.
+
 2026-10-31 Electron 45.2.1 qualified for packaging. The desktop shell moves from Electron
 45.0.0 to 45.2.1, and `ADMITTED_ELECTRON` in `runtime-security.mjs` admits it with Node
 24.22.1. At tag v45.2.1, Electron's DEPS pins node v24.22.1, and none of its 58

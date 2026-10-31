@@ -37,7 +37,7 @@ overrides:
   '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
   # Fixed parser and HTTP dependencies retain their existing major release lines.
   markdown-it: 14.3.3
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   hono: 4.13.11
   '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
   # These consumers use v4 UUID generation; 11.1.1 retains both CJS and ESM exports.
