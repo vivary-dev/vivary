@@ -42,6 +42,7 @@ jobs:
           from pathlib import Path, PurePosixPath, PureWindowsPath
           import platform
           import re
+          import stat
           import struct
           import subprocess
           import sys
@@ -208,6 +209,48 @@ jobs:
               return str(root), str(node)
 
 
+          def shared_externals(root, system):
+              """Return the directory the runner's externals entry names.
+
+              Hosted Ubuntu images from 20261025 (runner 2.338.0) run the Worker from
+              actions-runner/cached/<version>, whose externals entry is a symlink to one
+              externals tree that every cached version shares. Admit only that one link,
+              only on Linux, and only when no other account can change what it names.
+              Every path below the returned directory must still be plain and canonical.
+              """
+              link = Path(root) / "externals"
+              if not stat.S_ISLNK(link.lstat().st_mode):
+                  return link
+              if system == "win32":
+                  refuse("a linked runner externals directory is admitted only on Linux")
+              target = Path(os.readlink(link))
+              if not target.is_absolute() or ".." in target.parts or target.name != "externals":
+                  refuse("linked runner externals must name an absolute externals directory")
+              if target.resolve(strict=True) != target:
+                  refuse("linked runner externals must resolve in one step")
+              owners = (0, os.geteuid())
+              for folder in [*reversed(target.parents), target]:
+                  info = folder.lstat()
+                  if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
+                      refuse("linked runner externals must sit in directories owned by root or the runner account")
+                  # A root-owned sticky ancestor such as /tmp cannot have our entry replaced.
+                  shared = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                  if shared and not (folder != target and info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+                      refuse("linked runner externals must sit in directories no other account can write")
+              return target
+
+
+          def selected_interpreter(root, selected, system):
+              """The file the Worker executes for node24, through a validated externals link."""
+              externals = shared_externals(root, system)
+              if externals == Path(root) / "externals":
+                  return Path(selected)
+              interpreter = externals / "node24" / "bin" / "node"
+              if Path(selected).resolve(strict=True) != interpreter:
+                  refuse("the selected interpreter must resolve inside the linked externals directory")
+              return interpreter
+
+
           def binary_x64(file, system):
               with open(file, "rb") as stream:
                   header = stream.read(64)
@@ -302,7 +345,7 @@ jobs:
               read_process = windows_process if system == "win32" else linux_process
               worker, chain = discover_worker(os.getpid(), read_process, system)
               root, selected = runner_paths(worker, system)
-              interpreter = Path(selected)
+              interpreter = selected_interpreter(root, selected, system)
               if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
                   refuse("missing interpreter or a path outside the discovered runner root")
               binary_x64(worker["exe"], system)
@@ -325,6 +368,7 @@ jobs:
                   "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
                   "linux_process": "process-identity", "windows_process": "process-identity",
                   "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+                  "shared_externals": "runner-layout", "selected_interpreter": "runner-layout",
                   "binary_x64": "binary-identity", "sha256": "binary-hash",
                   "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
                   "node_version": "interpreter-version",
@@ -466,6 +510,16 @@ jobs:
               return info
 
 
+          def externals_link(root):
+              """Identity of a linked runner externals entry, or None for a plain directory."""
+              try:
+                  link = Path(root) / "externals"
+                  info = link.lstat()
+                  return (info.st_dev, info.st_ino, os.readlink(link)) if stat.S_ISLNK(info.st_mode) else None
+              except OSError as error:
+                  refuse(filesystem_failure("path-externals", error))
+
+
           def identity(info):
               return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_nlink)
 
@@ -478,7 +532,9 @@ jobs:
               read = admission.windows_process if system == "win32" else admission.linux_process
               worker, chain = admission.discover_worker(os.getpid(), read, system)
               root, selected = admission.runner_paths(worker, system)
-              interpreter = Path(selected)
+              link = externals_link(root)
+              # With a linked externals entry, custody covers the shared directory it names.
+              interpreter = admission.selected_interpreter(root, selected, system)
               folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
               directories = []
               for role, path in zip(("root", "externals", "node24", "bin"), folders):
@@ -490,8 +546,8 @@ jobs:
               plain(Path(worker["exe"]), role="worker")
               admission.binary_x64(worker["exe"], system)
               admission.binary_x64(interpreter, system)
-              result = {"system": system, "worker": worker, "chain": chain, "root": root,
-                        "interpreter": interpreter, "directories": directories, "original": identity(original),
+              result = {"system": system, "worker": worker, "chain": chain, "root": root, "selected": selected,
+                        "link": link, "interpreter": interpreter, "directories": directories, "original": identity(original),
                         "mode": stat.S_IMODE(original.st_mode), "oldSha256": admission.sha256(interpreter),
                         "workerSha256": admission.sha256(worker["exe"])}
               verify_context(result, result["oldSha256"])
@@ -504,8 +560,11 @@ jobs:
               for item in current["chain"]:
                   if read(item["pid"]) != item:
                       refuse("Worker ancestry changed")
-              if admission.runner_paths(current["worker"], system) != (current["root"], str(current["interpreter"])):
+              if admission.runner_paths(current["worker"], system) != (current["root"], current["selected"]):
                   refuse("runner layout changed")
+              if (externals_link(current["root"]) != current["link"]
+                      or admission.selected_interpreter(current["root"], current["selected"], system) != current["interpreter"]):
+                  refuse("runner externals link changed")
               if admission.sha256(current["worker"]["exe"]) != current["workerSha256"]:
                   refuse("Worker bytes changed")
               for role, (path, expected) in zip(("root", "externals", "node24", "bin"), current["directories"]):

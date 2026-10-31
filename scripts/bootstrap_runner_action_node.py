@@ -102,6 +102,16 @@ def plain(path, directory=False, role="artifact"):
     return info
 
 
+def externals_link(root):
+    """Identity of a linked runner externals entry, or None for a plain directory."""
+    try:
+        link = Path(root) / "externals"
+        info = link.lstat()
+        return (info.st_dev, info.st_ino, os.readlink(link)) if stat.S_ISLNK(info.st_mode) else None
+    except OSError as error:
+        refuse(filesystem_failure("path-externals", error))
+
+
 def identity(info):
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_nlink)
 
@@ -114,7 +124,9 @@ def context():
     read = admission.windows_process if system == "win32" else admission.linux_process
     worker, chain = admission.discover_worker(os.getpid(), read, system)
     root, selected = admission.runner_paths(worker, system)
-    interpreter = Path(selected)
+    link = externals_link(root)
+    # With a linked externals entry, custody covers the shared directory it names.
+    interpreter = admission.selected_interpreter(root, selected, system)
     folders = [Path(root), interpreter.parent.parent.parent, interpreter.parent.parent, interpreter.parent]
     directories = []
     for role, path in zip(("root", "externals", "node24", "bin"), folders):
@@ -126,8 +138,8 @@ def context():
     plain(Path(worker["exe"]), role="worker")
     admission.binary_x64(worker["exe"], system)
     admission.binary_x64(interpreter, system)
-    result = {"system": system, "worker": worker, "chain": chain, "root": root,
-              "interpreter": interpreter, "directories": directories, "original": identity(original),
+    result = {"system": system, "worker": worker, "chain": chain, "root": root, "selected": selected,
+              "link": link, "interpreter": interpreter, "directories": directories, "original": identity(original),
               "mode": stat.S_IMODE(original.st_mode), "oldSha256": admission.sha256(interpreter),
               "workerSha256": admission.sha256(worker["exe"])}
     verify_context(result, result["oldSha256"])
@@ -140,8 +152,11 @@ def verify_context(current, expected_sha=None):
     for item in current["chain"]:
         if read(item["pid"]) != item:
             refuse("Worker ancestry changed")
-    if admission.runner_paths(current["worker"], system) != (current["root"], str(current["interpreter"])):
+    if admission.runner_paths(current["worker"], system) != (current["root"], current["selected"]):
         refuse("runner layout changed")
+    if (externals_link(current["root"]) != current["link"]
+            or admission.selected_interpreter(current["root"], current["selected"], system) != current["interpreter"]):
+        refuse("runner externals link changed")
     if admission.sha256(current["worker"]["exe"]) != current["workerSha256"]:
         refuse("Worker bytes changed")
     for role, (path, expected) in zip(("root", "externals", "node24", "bin"), current["directories"]):

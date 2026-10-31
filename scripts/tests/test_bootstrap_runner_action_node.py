@@ -264,6 +264,91 @@ class RepairFixture(unittest.TestCase):
             os.fstat(descriptors[0])
         self.assertEqual(closed.exception.errno, errno.EBADF)
 
+    def link_externals(self):
+        """Hosted Ubuntu 20261025 layout: <root>/externals links to one shared tree."""
+        shared = self.directory / "runner-cache/externals"
+        shared.parent.mkdir()
+        (self.root / "externals").rename(shared)
+        (self.root / "externals").symlink_to(shared, target_is_directory=True)
+        self.node = shared / "node24/bin/node"
+        return shared
+
+    def test_shared_externals_link_is_repaired_at_its_target_and_kept(self):
+        shared = self.link_externals()
+        self.repair()
+        self.assertEqual(self.node.read_bytes(), self.patched)
+        self.assertTrue((self.root / "externals").is_symlink())
+        self.assertEqual(Path(os.readlink(self.root / "externals")), shared)
+        self.probe.assert_called_once()
+        self.assertEqual(self.probe.call_args.args[0], self.node)
+
+    def test_unsafe_externals_links_are_refused_before_download_or_probe(self):
+        cases = ("relative", "not-externals", "chained", "writable-target", "writable-ancestor",
+                 "foreign-ancestor", "linked-node24")
+        for case in cases:
+            with self.subTest(case=case):
+                self.setUp()
+                shared = self.link_externals()
+                link = self.root / "externals"
+                if case == "relative":
+                    link.unlink()
+                    link.symlink_to(os.path.relpath(shared, self.root), target_is_directory=True)
+                if case == "not-externals":
+                    renamed = shared.with_name("tools")
+                    shared.rename(renamed)
+                    link.unlink()
+                    link.symlink_to(renamed, target_is_directory=True)
+                    self.node = renamed / "node24/bin/node"
+                if case == "chained":
+                    alias = self.directory / "cache-alias"
+                    alias.symlink_to(shared.parent, target_is_directory=True)
+                    link.unlink()
+                    link.symlink_to(alias / "externals", target_is_directory=True)
+                if case == "writable-target":
+                    shared.chmod(0o777)
+                if case == "writable-ancestor":
+                    shared.parent.chmod(0o777)
+                if case == "linked-node24":
+                    moved = self.directory / "outside-node24"
+                    (shared / "node24").rename(moved)
+                    (shared / "node24").symlink_to(moved, target_is_directory=True)
+                    self.node = moved / "bin/node"
+                original_lstat = Path.lstat
+                def lstat(path, *args, **kwargs):
+                    info = original_lstat(path, *args, **kwargs)
+                    if case == "foreign-ancestor" and path == shared.parent:
+                        fields = list(info)
+                        fields[4] = 4242
+                        return os.stat_result(fields)
+                    return info
+                with mock.patch.object(Path, "lstat", lstat):
+                    with self.assertRaises((RuntimeError, OSError)):
+                        self.repair()
+                self.assertEqual(self.node.read_bytes(), self.old)
+                self.downloader.assert_not_called()
+                self.probe.assert_not_called()
+
+    def test_linked_externals_stay_refused_on_windows(self):
+        self.link_externals()
+        with self.assertRaisesRegex(RuntimeError, "admitted only on Linux"):
+            self.admission.shared_externals(self.root, "win32")
+
+    def test_externals_link_swapped_during_repair_is_refused(self):
+        shared = self.link_externals()
+        other = self.directory / "other-cache/externals"
+        shutil.copytree(shared, other, symlinks=True)
+        def swap(artifact, destination):
+            link = self.root / "externals"
+            link.unlink()
+            link.symlink_to(other, target_is_directory=True)
+            Path(destination).write_bytes(self.payload)
+        self.downloader.side_effect = swap
+        with self.assertRaisesRegex(self.module.RepairRefusal, "runner externals link changed|runner directory changed"):
+            self.repair()
+        self.assertEqual(self.node.read_bytes(), self.old)
+        self.assertEqual((other / "node24/bin/node").read_bytes(), self.old)
+        self.probe.assert_not_called()
+
     def test_symlink_target_is_refused_without_following_it(self):
         outside = self.directory / "outside-node"
         outside.write_bytes(self.old)

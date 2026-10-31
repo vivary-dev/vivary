@@ -712,7 +712,12 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 Build and publication have a runtime admission boundary separate from the
 application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
-hash-bound repair of known affected Node bytes. Jobs provision authenticated
+hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
+runner root links `externals` to one shared cache, admission follows only that
+link, only on Linux, and only when its absolute target and every ancestor are
+owned by root or the runner account and no other account can write them. It
+then binds the shared interpreter the Worker executes and pins the link and its
+target until repair ends. Every path below the target stays plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
 certificate overlay, export filtered task trust, and admit its loaded OpenSSL
 3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
@@ -743,6 +748,26 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-31 runner action Node admission on linked externals. Every GitHub job
+failed at its first step from the 2026-10-31 PR #312 run on, because hosted
+Ubuntu image 20261025 (runner 2.338.0) runs the Worker from
+`actions-runner/cached/<version>` and links its `externals` entry to a shared
+`/opt/runner-cache/externals`, and `plain()` refuses any symlink. The last green
+run was on 2026-10-26. `shared_externals` in `scripts/check_runner_action_node.py`
+now admits that one link on Linux when it names an absolute directory called
+`externals` in one step and the target and its ancestors are owned by root or the
+runner account and not group- or world-writable, except a root-owned sticky
+ancestor. `selected_interpreter` requires the Worker's selected path to resolve
+to the shared interpreter, which admission hashes and probes. The repair in
+`scripts/bootstrap_runner_action_node.py` takes custody of the shared target
+directories and re-checks the link's device, inode and text with the rest of its
+context, so a swapped link is refused. A symlinked interpreter, a symlink below
+the target, and any linked externals on Windows stay refused. The six workflows
+embed the regenerated step. The layout comes from a third-party report
+(plengauer/Thoth#4498), not from a GitHub release note, so the confirming check
+is a real GitHub run of these jobs. The rest of the admission boundary above
+still holds.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,

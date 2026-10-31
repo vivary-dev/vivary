@@ -7,6 +7,7 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import re
+import stat
 import struct
 import subprocess
 import sys
@@ -173,6 +174,48 @@ def runner_paths(worker, system):
     return str(root), str(node)
 
 
+def shared_externals(root, system):
+    """Return the directory the runner's externals entry names.
+
+    Hosted Ubuntu images from 20261025 (runner 2.338.0) run the Worker from
+    actions-runner/cached/<version>, whose externals entry is a symlink to one
+    externals tree that every cached version shares. Admit only that one link,
+    only on Linux, and only when no other account can change what it names.
+    Every path below the returned directory must still be plain and canonical.
+    """
+    link = Path(root) / "externals"
+    if not stat.S_ISLNK(link.lstat().st_mode):
+        return link
+    if system == "win32":
+        refuse("a linked runner externals directory is admitted only on Linux")
+    target = Path(os.readlink(link))
+    if not target.is_absolute() or ".." in target.parts or target.name != "externals":
+        refuse("linked runner externals must name an absolute externals directory")
+    if target.resolve(strict=True) != target:
+        refuse("linked runner externals must resolve in one step")
+    owners = (0, os.geteuid())
+    for folder in [*reversed(target.parents), target]:
+        info = folder.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
+            refuse("linked runner externals must sit in directories owned by root or the runner account")
+        # A root-owned sticky ancestor such as /tmp cannot have our entry replaced.
+        shared = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        if shared and not (folder != target and info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+            refuse("linked runner externals must sit in directories no other account can write")
+    return target
+
+
+def selected_interpreter(root, selected, system):
+    """The file the Worker executes for node24, through a validated externals link."""
+    externals = shared_externals(root, system)
+    if externals == Path(root) / "externals":
+        return Path(selected)
+    interpreter = externals / "node24" / "bin" / "node"
+    if Path(selected).resolve(strict=True) != interpreter:
+        refuse("the selected interpreter must resolve inside the linked externals directory")
+    return interpreter
+
+
 def binary_x64(file, system):
     with open(file, "rb") as stream:
         header = stream.read(64)
@@ -267,7 +310,7 @@ def check_runner_action_node():
     read_process = windows_process if system == "win32" else linux_process
     worker, chain = discover_worker(os.getpid(), read_process, system)
     root, selected = runner_paths(worker, system)
-    interpreter = Path(selected)
+    interpreter = selected_interpreter(root, selected, system)
     if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
         refuse("missing interpreter or a path outside the discovered runner root")
     binary_x64(worker["exe"], system)
@@ -290,6 +333,7 @@ def admission_failure(error):
         "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
         "linux_process": "process-identity", "windows_process": "process-identity",
         "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+        "shared_externals": "runner-layout", "selected_interpreter": "runner-layout",
         "binary_x64": "binary-identity", "sha256": "binary-hash",
         "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
         "node_version": "interpreter-version",

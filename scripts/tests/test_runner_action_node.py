@@ -376,6 +376,45 @@ class RunnerBootstrapTests(unittest.TestCase):
                 self.assertEqual(result, 1)
 
 
+class LinkedExternalsTests(unittest.TestCase):
+    """Hosted Ubuntu 20261025 runs the Worker from cached/<version>, whose externals links to one shared tree."""
+
+    def test_only_a_safe_shared_externals_tree_is_admitted_in_every_actual_source(self):
+        for name, source in sources():
+            for mode in ("shared", "relative", "chained", "writable-target", "interpreter-link"):
+                with self.subTest(source=name, mode=mode), tempfile.TemporaryDirectory() as directory:
+                    module = load_source(source)
+                    with controlled_runner(module, directory) as (root, worker, interpreter, chain, probing):
+                        shared = Path(directory) / "runner-cache/externals"
+                        shared.parent.mkdir()
+                        (root / "externals").rename(shared)
+                        link = root / "externals"
+                        if mode == "relative":
+                            link.symlink_to(os.path.relpath(shared, root), target_is_directory=True)
+                        elif mode == "chained":
+                            alias = Path(directory) / "cache-alias"
+                            alias.symlink_to(shared.parent, target_is_directory=True)
+                            link.symlink_to(alias / "externals", target_is_directory=True)
+                        else:
+                            link.symlink_to(shared, target_is_directory=True)
+                        canonical = shared / "node24/bin/node"
+                        if mode == "writable-target":
+                            shared.chmod(0o777)
+                        if mode == "interpreter-link":
+                            outside = Path(directory) / "outside-node"
+                            canonical.rename(outside)
+                            canonical.symlink_to(outside)
+                        if mode == "shared":
+                            actual = module.check_runner_action_node()
+                            self.assertEqual(actual["interpreter"], str(canonical))
+                            self.assertEqual(actual["sha256"], module.sha256(canonical))
+                            probing.assert_called_once_with(canonical, {"LANG": "C", "LC_ALL": "C"})
+                        else:
+                            with self.assertRaises((RuntimeError, OSError)):
+                                module.check_runner_action_node()
+                            probing.assert_not_called()
+
+
 class RunnerDiagnosticTests(unittest.TestCase):
     def all_sources(self):
         auxiliary = (ROOT / ".github/workflows" / name for name in ("review-gate.yml", "steward.yml", "track-stats.yml"))
