@@ -87,7 +87,7 @@ test("a new folder gets setup's marker before any payload file, and a rerun acce
   assert.ok(position(install, 'RMDir "$INSTDIR"') < position(install, 'IfFileExists "$INSTDIR\\*.*" 0 new_folder'));
   const created = position(install, "new_folder:");
   const marker = position(install, 'FileOpen $0 "$INSTDIR\\${SETUP_MARKER}" a');
-  const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
+  const payload = position(install, 'File /r "${PAYLOAD_DIR}\\*"');
   assert.ok(created < marker && marker < payload, "the marker precedes payload extraction");
   assert.equal(install[marker + 1], "IfErrors write_failed", "a marker that cannot be written stops setup");
   assert.equal(install.filter(line => line.includes("${SETUP_MARKER}") && line.startsWith("FileOpen")).length, 1,
@@ -111,7 +111,7 @@ test("setup checks the real install path against the payload's longest paths bef
   assert.ok(room.includes("SetErrorLevel 2") && room.some(line => line.startsWith("Abort ")), "exits with code 2");
   const install = sectionBody("Vivary");
   const check = position(install, "Call RequirePathRoom");
-  for (const step of ['RMDir "$INSTDIR"', "Call RemoveInstalledFiles", 'File /r "${PAYLOAD_DIR}/*"',
+  for (const step of ['RMDir "$INSTDIR"', "Call RemoveInstalledFiles", 'File /r "${PAYLOAD_DIR}\\*"',
     'FileOpen $0 "$INSTDIR\\${SETUP_MARKER}" a']) {
     assert.ok(check < position(install, step), `the path check precedes ${step}`);
   }
@@ -220,7 +220,7 @@ test("install writes the new list after removing the old files and before extrac
   assert.doesNotMatch(code, /AllowSkipFiles\s+on/i);
   const install = sectionBody("Vivary");
   const list = position(install, 'File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"');
-  const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
+  const payload = position(install, 'File /r "${PAYLOAD_DIR}\\*"');
   // The list is written under a temporary name and moved into place in one step.
   assert.deepEqual(install.slice(list + 1, list + 8), [
     "IfErrors write_failed",
@@ -229,7 +229,7 @@ test("install writes the new list after removing the old files and before extrac
     "owned_checked:",
     "System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'",
     "IntCmp $0 0 write_failed",
-    'File /r "${PAYLOAD_DIR}/*"',
+    'File /r "${PAYLOAD_DIR}\\*"',
   ], "the moved list is in place before the first payload file");
   assert.ok(!lines.some(line => line.includes('/oname=${INSTALL_LIST}"')), "the list is never written in place");
   const copy = position(install, "copy_files:");
@@ -273,7 +273,7 @@ test("setup refuses a file it does not own at a payload path before replacing an
   const skip = position(install, "StrCmp $R8 2 owned_checked");
   const check = position(install, "Call RequireNoUnownedFiles");
   const move = position(install, "System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'");
-  const payload = position(install, 'File /r "${PAYLOAD_DIR}/*"');
+  const payload = position(install, 'File /r "${PAYLOAD_DIR}\\*"');
   assert.ok(removal < temp && temp < skip && skip + 1 === check && check < move && move < payload,
     "after removal and the temporary list, before the move and extraction");
   assert.equal(install.filter(line => line === "Call RequireNoUnownedFiles").length, 1);
@@ -332,7 +332,7 @@ test("a user file at a new payload path survives an upgrade or a reinstall besid
     ["remove", at("Call RemoveInstalledFiles")],
     ["check", at("Call RequireNoUnownedFiles")],
     ["list", at("System::Call 'kernel32::MoveFileExW(w \"$INSTDIR\\${INSTALL_LIST_TEMP}\", w \"$INSTDIR\\${INSTALL_LIST}\", i 9) i .r0'")],
-    ["extract", at('File /r "${PAYLOAD_DIR}/*"')],
+    ["extract", at('File /r "${PAYLOAD_DIR}\\*"')],
   ].sort((a, b) => a[1] - b[1]).map(([name]) => name);
   const newFiles = ["vivary.exe", "shared.dll", "new-only.dll"];
   const cases = [
@@ -379,7 +379,7 @@ test("an interrupted upgrade, then uninstall, then setup recovers with the scrip
   const steps = [
     ["remove", at("Call RemoveInstalledFiles")],
     ["list", at('File "/oname=${INSTALL_LIST_TEMP}" "${INSTALL_LIST_FILE}"')],
-    ["extract", at('File /r "${PAYLOAD_DIR}/*"')],
+    ["extract", at('File /r "${PAYLOAD_DIR}\\*"')],
   ].sort((a, b) => a[1] - b[1]).map(([name]) => name);
   const uninstall = sectionBody("Uninstall");
   const rewritesMarker = uninstall.slice(position(uninstall, 'RMDir "$INSTDIR"'))
