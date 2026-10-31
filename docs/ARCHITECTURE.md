@@ -712,7 +712,11 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 Build and publication have a runtime admission boundary separate from the
 application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
-hash-bound repair of known affected Node bytes. Jobs provision authenticated
+hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
+runner root links `externals` to the pinned shared `/opt/runner-cache/externals`,
+admission follows only that link and only on Linux, and requires the Worker's
+selected interpreter to resolve to the shared one, which it hashes and probes at
+that moment. The repair keeps every directory below the target plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
 certificate overlay, export filtered task trust, and admit its loaded OpenSSL
 3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
@@ -766,6 +770,33 @@ unmeasured. 45.2.1 stays the admitted release, and Vivary does not patch Electro
 first 45.x whose `patches/chromium/.patches` lists `cherry-pick-3318e836e90b` or whose Chromium
 `element.cc` has the re-entrant append guard. Node 24.22.2, which a 45-x-y pull request adopts,
 is not a security release, so the 24.22.1 floor stands.
+
+2026-10-31 runner action Node admission on a linked externals entry. Every GitHub
+job failed at its first step from the 2026-10-31 PR #312 run on. Hosted
+ubuntu-latest 20261025 (runner 2.338.0) runs the Worker from
+`actions-runner/cached/<version>` and links its `externals` entry to a shared
+`/opt/runner-cache/externals`, and `plain()` refused every symlink. The last green
+run was on 2026-10-26. `shared_externals` in `scripts/check_runner_action_node.py`
+now follows that one link on Linux when its text equals a `SHARED_EXTERNALS` pin
+and it resolves in one step. `selected_interpreter` requires the Worker's selected
+path to resolve to the shared interpreter, which admission hashes and probes.
+Hosted runs on this branch showed `/opt` and `/opt/runner-cache` as root-owned
+mode 0777, so directory modes give no protection on that path and the guard does
+not rely on them. Admission requires the canonical interpreter path. The repair in
+`scripts/bootstrap_runner_action_node.py` keeps `plain()` on the target, `node24`
+and `bin`, records the link's device, inode and text with the directory inodes,
+and re-checks them before it replaces the interpreter, so a swapped link or a
+swapped target directory is refused. The Worker later runs through a link that
+any account could replace under those 0777 parents. That gap predates this
+change. Link refusals raise `ExternalsRefusal`, whose fixed text names no path,
+and the repair prints them instead of the redacted admission summary. Admission
+records the `externals` entry's device, inode and link text before its version probe
+and re-checks them, and re-resolves the selected interpreter, after it, so an entry
+swapped during the probe is refused. A symlinked
+interpreter, a symlink below the target, an unpinned or relative target, and any
+linked externals on Windows stay refused. The six workflows embed the regenerated
+step. A new hosted target needs its own review, like every other pin here. The
+rest of the admission boundary above still holds.
 
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
