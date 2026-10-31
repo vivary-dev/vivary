@@ -3505,6 +3505,24 @@ so its run stayed `resuming` and its job could not be deleted or moved.
 paths, and one checks the missing-table fallback with a stub executor. All seven
 failed against the previous patch and pass with this one.
 
+## Approval wait in Settings
+
+Issue #206, first two items. `executeJob` in `dist/jobs/scheduler.js` answered Run now on an
+automation with an unresolved approval through `refuseAlreadyRunning`, so the queued history row
+said "The automation is already running." while nothing ran. `refuseApprovalPending` now finishes
+that row as `error` with the code `automation_approval_pending` and the message "This automation
+is waiting for an approval decision in Past runs. Approve or decline it before running it again.
+No delivery was confirmed." The call returns `{ status: "skipped" }` as before. A run that is
+executing or holds the run lease keeps the already-running refusal.
+
+Settings showed stored statuses verbatim, such as `waiting_approval`. `automationStatusLabel` in
+`dist/client/agent-page/AutomationDetailsDialog.js` maps `running`, `waiting_approval`,
+`resuming`, `success`, `error`, `interrupted`, `declined` and `skipped` to words through
+`t("jobs.status.<status>")`. The Details field Last status in `AgentJobsTab.js`, the Past runs
+rows and run inspection use it. Any other value shows as stored. These sections are appended to
+the end of the patch, after the earlier sections for the same files, and pnpm applies them in
+order.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a

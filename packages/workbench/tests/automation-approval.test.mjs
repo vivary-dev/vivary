@@ -1059,7 +1059,10 @@ for (const decision of ["approve", "decline"]) test(`admission-refused queue can
   try {
     const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
     const refused = await until(async () => { const run = await history.getAutomationRun(queued.automationRunId); return run.finishedAt ? run : null; });
-    assert.equal(refused.status, "error"); assert.match(refused.error, /already running|approval/i);
+    // Vivary #206: the refusal names the approval wait, not a run that is not running.
+    assert.equal(refused.status, "error"); assert.equal(refused.errorCode, "automation_approval_pending");
+    assert.equal(refused.error, "This automation is waiting for an approval decision in Past runs. "
+      + "Approve or decline it before running it again. No delivery was confirmed.");
     assert.ok(refused.claimedAt); assert.equal(refused.threadId, null); assert.equal(refused.runId, null);
     assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
     await fixture.decide(original.id, await fixture.pending(original.id), decision);
