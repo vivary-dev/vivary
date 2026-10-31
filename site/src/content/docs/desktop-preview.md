@@ -4,19 +4,14 @@ description: "Download, verify, install, preserve data, and review the limits of
 editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/desktop-preview.md"
 ---
 
-This guide covers the unsigned Windows x64 desktop release of Vivary. This release
-adds a per-user installer, `Vivary-Setup-<version>.exe`, as the main download and
-keeps the portable ZIP as an option.
+This guide covers Vivary 0.1.0-beta.1, the unsigned Windows x64 desktop beta. Its
+main download is a per-user installer, `Vivary-Setup-<version>.exe`, and it keeps the
+portable ZIP as an option.
 
-Installer acceptance is pending. The installer steps below describe how setup is
-designed to behave, and they stay unverified until this release records its Windows
-results. See [Verification and known limits](#verification-and-known-limits).
-
-The portable ZIP facts were verified on 2026-09-22 for the published
-[GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22),
-which includes PR #78's desktop browser-link fix and the preceding application
-changes. That prerelease has only the portable ZIP. The repository and download are
-public. The complete desktop and self-hosted web acceptance journey remains unfinished.
+The installer passed an installed-Windows pass on 2026-10-31.
+[Verification and known limits](#verification-and-known-limits) says what that pass
+covered and what remains open. The repository and the download are public. The
+complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
@@ -39,22 +34,18 @@ $actual = (Get-FileHash $file -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw 'Vivary download checksum mismatch' }
 ```
 
-The 2026-09-22 prerelease's ZIP is `Vivary-windows-x64-9884670.zip`.
-It is 236,072,825 bytes. Its SHA-256 must be:
+The release also lists `SHA256SUMS`, which holds the digest of every asset, and
+`BUILD-INFO.json`, which names the exact source commit.
 
-```text
-e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0
-```
-
-If you already use GitHub CLI, download that prerelease's pinned assets with:
+If you already use GitHub CLI, download the installer and its checksum with:
 
 ```console
-gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --pattern Vivary-windows-x64-9884670.zip --pattern Vivary-windows-x64-9884670.zip.sha256
+gh release download v0.1.0-beta.1 --repo vivary-dev/vivary --pattern Vivary-Setup-0.1.0-beta.1.exe --pattern Vivary-Setup-0.1.0-beta.1.exe.sha256
 ```
 
 ## Install and launch
 
-### With the installer (acceptance pending)
+### With the installer
 
 1. Run `Vivary-Setup-<version>.exe` after its checksum matches. The installer is
    not code signed, so Windows can show **Windows protected your PC** with an
@@ -72,7 +63,7 @@ install does not start Vivary or create a desktop shortcut.
 
 ### With the portable ZIP (optional)
 
-1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\9884670`.
+1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\0.1.0-beta.1`.
 2. Keep all extracted files together. Do not move `Vivary.exe` out of `Vivary-win32-x64`.
 3. Open `Vivary-win32-x64\Vivary.exe` in File Explorer.
 
@@ -87,7 +78,7 @@ Windows Explorer can reject a deeply nested destination before the application s
 Both downloads hold the same application. It bundles Node, Python, and the
 original Vivary runtime. It does not require a source checkout or a separate
 global Node or Python install.
-Clean-profile first-run acceptance remains open, so report missing-runtime errors.
+A first launch in a new profile passed on 2026-10-31. Report missing-runtime errors.
 
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
 provider access require their own supported installation and authentication.
@@ -139,7 +130,7 @@ Use disposable projects for preview testing.
    installer keeps one version. To return to an earlier one, run that version's
    installer, within the rollback limits below.
 
-To move from the 2026-09-22 portable prerelease to the installer, close the
+To move from a September portable prerelease to the installer, close the
 portable Vivary first, because two copies must not use one profile at the same
 time. Then run setup. For setup this is a first install into
 `%LOCALAPPDATA%\Programs\Vivary`, and it does not touch the folder you extracted
@@ -256,8 +247,8 @@ journeys. This exact artifact's visual review did not repeat paid model calls.
 The bundled command launcher is available for command-line inspection:
 
 ```powershell
-& 'C:\Apps\Vivary\9884670\Vivary-win32-x64\resources\original-runtime\bin\vivary.cmd' --help
-& 'C:\Apps\Vivary\9884670\Vivary-win32-x64\resources\original-runtime\bin\vivary.cmd' adopt --help
+& "$env:LOCALAPPDATA\Programs\Vivary\resources\original-runtime\bin\vivary.cmd" --help
+& "$env:LOCALAPPDATA\Programs\Vivary\resources\original-runtime\bin\vivary.cmd" adopt --help
 ```
 
 The included creator contains approved adoption-request replay and bounded journal
@@ -266,8 +257,8 @@ do not add a general GUI Apply button or publish newer PyPI/npm packages.
 
 ### Automations
 
-The published `9884670` prerelease predates the issue #51 automation changes. This section
-describes later builds. The [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md)
+The September `9884670` prerelease predates the issue #51 automation changes. This section
+describes later builds, including 0.1.0-beta.1. The [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md)
 records their test on an unpublished package. The [#114 and #115 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/114-automation-quit-and-status.md)
 records a later package's test of quitting during a run and of LAST CHECKED. The [#109 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/109-automation-file-review.md)
 records a package's test of **Automation files**. Issue #108 approval waiting and retained run inspection have maintained regression controls. Test counts, builds and reviews are recorded per commit in the pull request and its receipts. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain pending. These results do not establish released-package or final GUI acceptance.
@@ -513,9 +504,10 @@ per-user folder, the exact-folder guard, removal limited to listed files with no
 recursive delete, the kept user data, and the current-user registry entry. Its
 build verifies every payload file against the package's file manifest, checks that
 every file went into the installer, and records the payload and installer commits
-in the installer's file properties and a build receipt. Installation, launch,
-upgrade, profile preservation, and uninstallation are pending acceptance on
-Windows. The installer is not code signed.
+in the installer's file properties and a build receipt. On 2026-10-31 a build of `32c2a26`
+passed silent installation, launch, profile preservation, and uninstallation on
+Windows, as described below. Upgrade over an earlier install is not yet accepted.
+The installer is not code signed.
 
 To build the installer from source, run
 `npm --prefix packages/desktop run package -- --windows-x64`. It writes the
@@ -524,43 +516,31 @@ folder. Then run `npm --prefix packages/desktop run installer` with `--payload` 
 to that `Vivary-win32-x64` folder, `--manifest` set to that
 `package-file-manifest.json`, and `--output` set to `Vivary-Setup-<version>.exe`.
 The [desktop package README](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#windows-installer)
-covers the tools it needs. The rest of this section describes the
-2026-09-22 portable prerelease.
+covers the tools it needs. The rest of this section describes the 0.1.0-beta.1 release.
 
-The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.
-This is the merged PR #78 source commit.
-The tag identifies the packaged source, rather than later documentation commits.
-`resources\workbench\build.json` reports `sourceDirty: false`, version `0.0.0`,
-and channel `private-preview`. These internal development labels remain in the
-reviewed binary. The GitHub artifact is publicly downloadable as a prerelease.
+The release's `BUILD-INFO.json` names the exact source commit and reports
+`sourceDirty: false` and version `0.1.0-beta.1`. The `desktop release` workflow built
+it on a GitHub Windows runner from that commit, and `SHA256SUMS` covers every asset.
+The application bundles Electron 45.2.1, Node 24.22.1, and Python 3.12.15.
 
-The prebuilt Workbench metadata reports `sourceCommitVerified: false`. The build
-log records a Workbench build immediately before packaging. The metadata does
-not assert complete compiler-input provenance. The executable is unsigned.
+The installed-Windows pass on 2026-10-31 used the build of `dev` commit `32c2a26`,
+which differs from the release commit only in documentation. In a separate profile it
+covered silent per-user installation, a byte-for-byte match with the portable ZIP,
+first launch without an account, Settings, project creation, project health with the
+bundled Python, saving and searching a fact, second-instance handoff, close and
+relaunch, and uninstallation that kept user data.
 
-Six applicable GitHub CI jobs passed on the reviewed PR #78 fix head. The site
-job skipped. Twenty-seven desktop and startup tests passed on Zo. These source
-checks are separate from packaged Windows evidence. Historical Entire trail
-approval failures remain recorded and are not relabeled as passing.
+Not yet accepted on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing. A File Explorer launch and native
+dialogs were not part of that pass. This release runs one coding conversation at a
+time on a computer.
 
-The exact Windows package displayed the complete destination with Cancel selected
-by default. Cancel dismissed the dialog without opening a preview tab. Confirming
-opened Chrome at the exact path, query, and fragment, and page interaction passed.
-Switching projects cleared the old preview. Graceful close stopped all observed
-app processes and released the listener. Restart retained the selected project
-and an empty Preview. Local profile backups were hash-verified before launch.
+Electron 45.2.1 lacks one Chromium fix that Electron backported to its 44 line,
+cherry-pick `3318e836e90b`. The [architecture review](https://github.com/vivary-dev/vivary/blob/dev/docs/ARCHITECTURE.md#last-change-review)
+records it. Vivary moves to the first Electron 45 release that carries the fix.
 
-The September 21 candidate retains its separate setup-preview, chooser-recovery,
-and 390-pixel browser evidence. Those journeys and earlier real model turns were
-not repeated on this package. Native minimum-width testing, full native existing-folder
-registration, conflict cases, clean-profile onboarding, upgrade/removal acceptance,
-Native-provider turns, full adoption, search/memory coverage,
-self-hosted phone access, and integrated debugging remain outside this bounded review.
-Automations were not part of this package's review either. In later builds they run only
-while Vivary is open. The original #51 candidate could not use MCP tools or wait for
-approval. Issue #108 changes that behavior in source and still needs acceptance.
-Ending Vivary without quitting during a run delays scheduling for up to ten minutes,
-and desktop webhook calls reach Vivary only from the same computer. The
+Automations run only while Vivary is open. Ending Vivary without quitting during a run
+delays scheduling for up to ten minutes, and desktop webhook calls reach Vivary only
+from the same computer. The
 [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md) lists each limit and its tracking issue.
 
 See the [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md)
