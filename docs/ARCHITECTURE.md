@@ -744,6 +744,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 Electron 45.2.1 qualified for packaging. The desktop shell moves from Electron
+45.0.0 to 45.2.1, and `ADMITTED_ELECTRON` in `runtime-security.mjs` admits it with Node
+24.22.1. At tag v45.2.1, Electron's DEPS pins node v24.22.1, and none of its 58
+`patches/node` files touches the October fix files under `lib/internal/dns/`. Its npm
+dependencies, engines and scripts match 45.0.0's, so only the electron lock entry changes.
+A beta-candidate dry run on 2026-10-31 had stopped at this hold. Packaging and payload
+checks are unchanged: they still admit only the pinned version, require the bundled Node to
+meet the October floor, and require the payload to name the pinned release. The shell's use
+of Electron APIs is unchanged, so the description above still holds.
+
 2026-10-25 Stack A review round on `6cdeebe6` (#291). `check_desktop_release_workflow.py`
 pins the build's release-file step and the draft job's attach step as exact reviewed text,
 `RELEASE_FILES_STEP` and `ATTACH_STEP`. Before, substring tests passed a

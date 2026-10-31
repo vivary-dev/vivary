@@ -127,9 +127,10 @@ export async function validateStagedNode(executable, target) {
 }
 
 // Electron releases admitted for packaging, each with the Node version that DEPS pins at its tag
-// and with no patches/node file touching the October fix files. Empty until a stable release
-// bundles Node 24.22.1 or later: 45.0.0 and 44.9.3 bundle 24.22.0.
-export const ADMITTED_ELECTRON = Object.freeze({});
+// and with no patches/node file touching the October fix files. 45.0.0 and 44.9.3 bundle
+// 24.22.0. Checked on 2026-10-31 at tag v45.2.1: DEPS pins node v24.22.1, and none of its 58
+// patches/node files touches lib/internal/dns/{callback_resolver,promises,utils}.js.
+export const ADMITTED_ELECTRON = Object.freeze({ "45.2.1": "24.22.1" });
 
 function pinnedElectron() {
   try {
