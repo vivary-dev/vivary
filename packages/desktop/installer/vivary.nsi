@@ -453,7 +453,9 @@ Section "Vivary"
   owned_checked:
   System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
   IntCmp $0 0 write_failed
-  File /r "${PAYLOAD_DIR}/*"
+  ; A backslash before the wildcard: makensis on Windows finds no files for "<dir>/*"
+  ; when <dir> is a Windows path, and makensis elsewhere converts "\" itself.
+  File /r "${PAYLOAD_DIR}\*"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
   CreateShortcut "$SMPROGRAMS\Vivary.lnk" "$INSTDIR\vivary.exe" "" "$INSTDIR\vivary.exe" 0
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Vivary"
