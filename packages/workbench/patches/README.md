@@ -3512,14 +3512,17 @@ automation with an unresolved approval through `refuseAlreadyRunning`, so the qu
 said "The automation is already running." while nothing ran. `refuseApprovalPending` now finishes
 that row as `error` with the code `automation_approval_pending` and the message "This automation
 is waiting for an approval decision in Past runs. Approve or decline it before running it again.
-No delivery was confirmed." The call returns `{ status: "skipped" }` as before. A run that is
-executing or holds the run lease keeps the already-running refusal.
+No delivery was confirmed." The call returns `{ status: "skipped" }` as before. The scheduler reads the unfinished
+approval run's status through `unresolvedAutomationApprovalStatus` in `dist/jobs/run-history.js`.
+Only `waiting_approval` gets this refusal. A run that is `resuming` after a claimed decision,
+executing, or holding the run lease keeps the already-running refusal.
 
 Settings showed stored statuses verbatim, such as `waiting_approval`. `automationStatusLabel` in
 `dist/client/agent-page/AutomationDetailsDialog.js` maps `running`, `waiting_approval`,
 `resuming`, `success`, `error`, `interrupted`, `declined` and `skipped` to words through
-`t("jobs.status.<status>")`. The Details field Last status in `AgentJobsTab.js`, the Past runs
-rows and run inspection use it. Any other value shows as stored. These sections are appended to
+`t("jobs.runStatus.<status>")`, because `jobs.status` is already the Status label. The list
+row badge and the Details field Last status in `AgentJobsTab.js`, the Past runs rows and run
+inspection use it. A refused Run now row is stored as `error`, so it still reads Failed. Any other value shows as stored. These sections are appended to
 the end of the patch, after the earlier sections for the same files, and pnpm applies them in
 order.
 
