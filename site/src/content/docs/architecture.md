@@ -770,7 +770,10 @@ and re-checks them before it replaces the interpreter, so a swapped link or a
 swapped target directory is refused. The Worker later runs through a link that
 any account could replace under those 0777 parents. That gap predates this
 change. Link refusals raise `ExternalsRefusal`, whose fixed text names no path,
-and the repair prints them instead of the redacted admission summary. A symlinked
+and the repair prints them instead of the redacted admission summary. Admission
+records the `externals` entry's device, inode and link text before its version probe
+and re-checks them, and re-resolves the selected interpreter, after it, so an entry
+swapped during the probe is refused. A symlinked
 interpreter, a symlink below the target, an unpinned or relative target, and any
 linked externals on Windows stay refused. The six workflows embed the regenerated
 step. A new hosted target needs its own review, like every other pin here. The

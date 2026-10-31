@@ -245,6 +245,14 @@ jobs:
               return interpreter
 
 
+          def externals_identity(root):
+              """Device, inode and link text of the runner's externals entry, compared across the probe."""
+              entry = Path(root) / "externals"
+              info = entry.lstat()
+              target = os.readlink(entry) if stat.S_ISLNK(info.st_mode) else None
+              return (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode), target)
+
+
           def binary_x64(file, system):
               with open(file, "rb") as stream:
                   header = stream.read(64)
@@ -339,6 +347,7 @@ jobs:
               read_process = windows_process if system == "win32" else linux_process
               worker, chain = discover_worker(os.getpid(), read_process, system)
               root, selected = runner_paths(worker, system)
+              externals = externals_identity(root)
               interpreter = selected_interpreter(root, selected, system)
               if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
                   refuse("missing interpreter or a path outside the discovered runner root")
@@ -348,6 +357,9 @@ jobs:
               version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
               if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
                   refuse("Worker or interpreter bytes changed during the probe")
+              # The hashes read the resolved path. Re-check that the Worker's path still resolves there.
+              if externals_identity(root) != externals or selected_interpreter(root, selected, system) != interpreter:
+                  refuse_externals("the runner externals entry changed during the probe")
               for item in chain:
                   if read_process(item["pid"]) != item:
                       refuse("Worker ancestry changed or reused a process identity")
@@ -363,6 +375,7 @@ jobs:
                   "linux_process": "process-identity", "windows_process": "process-identity",
                   "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
                   "shared_externals": "runner-layout", "selected_interpreter": "runner-layout",
+                  "externals_identity": "runner-layout",
                   "binary_x64": "binary-identity", "sha256": "binary-hash",
                   "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
                   "node_version": "interpreter-version",

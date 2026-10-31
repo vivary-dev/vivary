@@ -12,6 +12,7 @@ import re
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 import types
 import unittest
@@ -423,6 +424,42 @@ class LinkedExternalsTests(unittest.TestCase):
         for name, source in sources():
             with self.subTest(source=name):
                 self.assertEqual(load_source(source).SHARED_EXTERNALS, ("/opt/runner-cache/externals",))
+
+
+@unittest.skipIf(sys.platform == "win32", "externals swap fixtures need POSIX symlinks")
+class ExternalsSwapDuringProbeTests(unittest.TestCase):
+    """Independent review P1 on #313: hashes read the resolved path, so the Worker's path must still resolve there."""
+
+    def test_externals_entry_swapped_during_the_probe_is_refused_in_every_actual_source(self):
+        for name, source in sources():
+            for layout in ("linked", "plain"):
+                with self.subTest(source=name, layout=layout), tempfile.TemporaryDirectory() as directory:
+                    module = load_source(source)
+                    with controlled_runner(module, directory) as (root, worker, interpreter, chain, probing):
+                        shared = Path(directory) / "runner-cache/externals"
+                        other = Path(directory) / "other-cache/externals"
+                        shared.parent.mkdir()
+                        other.parent.mkdir()
+                        link = root / "externals"
+                        if layout == "linked":
+                            link.rename(shared)
+                            link.symlink_to(shared, target_is_directory=True)
+                            shutil.copytree(shared, other)
+                        else:
+                            shutil.copytree(link, other)
+                        def swap(*args):
+                            if layout == "linked":
+                                link.unlink()
+                                link.symlink_to(other, target_is_directory=True)
+                            else:
+                                link.rename(Path(directory) / "externals-aside")
+                                shutil.copytree(other, link)
+                            return "v24.22.1"
+                        probing.side_effect = swap
+                        with mock.patch.object(module, "SHARED_EXTERNALS", (str(shared), str(other))):
+                            with self.assertRaisesRegex(RuntimeError, "externals entry changed during the probe"):
+                                module.check_runner_action_node()
+                        probing.assert_called_once()
 
 
 class RunnerDiagnosticTests(unittest.TestCase):
