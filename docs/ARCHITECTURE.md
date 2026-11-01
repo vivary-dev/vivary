@@ -748,6 +748,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
+desktop package README, the acceptance register and the changelog now point at the
+`v0.1.0-beta.1` GitHub prerelease instead of the September `desktop-preview-*`
+prereleases, which are no longer published. The acceptance register records the
+installed-Windows pass of the `32c2a26` dry-run build, and every page names what that pass
+did not cover. No source, configuration or workflow changed, so the description above
+still holds. The release itself comes from `desktop-release.yml` on the tag, as the
+release workflow describes. The install guide links the release page in its introduction
+and download section, so a visitor without GitHub CLI can reach the assets.
+
 2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
 GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,
 and the lockfile changes only those lines. The lockfile is now in pnpm's own layout, and a

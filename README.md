@@ -52,33 +52,24 @@ and authentication. Provider accounts are separate.
 
 ## Release status
 
-**Public Windows prerelease available. Full desktop acceptance remains open.**
+**Windows beta: Vivary 0.1.0-beta.1. Full desktop acceptance remains open.**
 
-[Download the Windows preview](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22) and follow the
-[installation guide](docs/desktop-preview.md). The portable ZIP includes
-`Vivary.exe` and its runtime files. There is no setup wizard in this release.
+[Download Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) and follow the
+[installation guide](docs/desktop-preview.md). The release has a per-user installer,
+`Vivary-Setup-0.1.0-beta.1.exe`, and an optional portable ZIP. Both are unsigned
+Windows x64 builds, so Windows can show an unknown-publisher warning.
 
-The `9884670` artifact includes PR #78's desktop browser-link fix alongside
-Codex conversations, setup previews, project search, and adoption-request replay.
-**Open preview in a new tab** now shows a native confirmation before opening an
-HTTP or HTTPS address in your default browser. Cancel opens nothing.
+On 2026-10-31 the build of `dev` commit `32c2a26` passed an installed-Windows pass in
+a separate profile: silent install, first launch, Settings, project creation, project
+health, a saved fact, project search, second-instance handoff, close and relaunch, and
+uninstall with user data kept. The release is built from a later commit that changes
+only documentation. The [acceptance register](docs/product/multi-project/desktop-acceptance-status.md)
+lists each check.
 
-Windows checks covered the exact destination, Cancel, confirmed browser launch,
-project-preview clearing, graceful shutdown, and selected-project persistence
-after restart. Earlier setup and model-runtime journeys retain their dated evidence.
-Six applicable GitHub CI jobs passed on the reviewed fix head. The site job skipped.
-The historical Entire trail-approval failure remains separate from those checks.
-
-Later unpublished changes passed populated-folder adoption in the hosted app.
-The completed Windows EXE journey remains qualified evidence for its tested revision. See the [#17 receipt](docs/product/multi-project/receipts/08a-populated-folder-adoption.md).
-The public download above remains the earlier preview. Built-in workspace
-patterns under #16 are the next focused project increment.
-
-The [acceptance register](docs/product/multi-project/desktop-acceptance-status.md)
-separates these checks from earlier runtime journeys and unfinished work.
-Clean-profile onboarding, upgrade/removal acceptance, full native journeys,
-real Native-provider turns, automations, and remaining desktop/web work stay open.
-The executable is unsigned. The preview does not publish new PyPI/npm packages.
+Not yet accepted on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing. Coding needs Claude Code or Codex,
+installed and signed in separately. This release runs one coding conversation at a
+time. It publishes no PyPI or npm package. The September `desktop-preview-*`
+downloads are no longer published.
 
 ## Start here
 

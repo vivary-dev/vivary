@@ -15,6 +15,26 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
 
+## [Desktop 0.1.0-beta.1] - 2026-10-31
+
+The first Windows beta of the Vivary desktop app, published as the GitHub prerelease
+`v0.1.0-beta.1`. It publishes no PyPI or npm package.
+
+- A per-user installer, `Vivary-Setup-0.1.0-beta.1.exe`, and a portable ZIP, both
+  unsigned Windows x64 builds from one GitHub Actions run, with `SHA256SUMS`,
+  `BUILD-INFO.json`, a runtime inventory, and a licenses ZIP.
+- Bundles Electron 45.2.1 with Node 24.22.1, and Python 3.12.15.
+- Includes PRs #312 to #316: the approval-wait label and word statuses for
+  automations, the CI runner guard, the follow-redirects 1.16.2 update with the
+  better-auth precondition test, the Electron 45.2.1 qualification, and the Windows
+  build fixes.
+
+### Verification
+
+The build of `32c2a26` passed an installed-Windows pass on 2026-10-31. See the
+[acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md#installed-windows-beta-october-31). Not yet accepted
+on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing.
+
 ## [Unreleased: Optional MCP SDK update] - 2026-10-18
 
 Staged source versions are optional **vivary-mcp 0.1.4** and the already-staged

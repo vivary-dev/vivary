@@ -11,27 +11,17 @@ See [Electron's security guidance](https://www.electronjs.org/docs/latest/tutori
 
 ## Current acceptance
 
-Published checkpoint: 2026-09-22. The publicly downloadable
-[Windows prerelease](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-22) pins source `98846706227432e26f519d1b546889261eb08ff1`.
-This is the merged PR #78 source. Follow the
-[installation guide](../../docs/desktop-preview.md) for extraction, launch,
-runtime setup, profile preservation, upgrades, rollback limits, and troubleshooting.
+Current release: [Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1), with the per-user installer
+and the portable ZIP, both unsigned. Follow the
+[installation guide](../../docs/desktop-preview.md) for download, verification,
+installation, runtime setup, profile preservation, upgrades, rollback limits, and
+troubleshooting. Its `BUILD-INFO.json` names the source commit, and `SHA256SUMS`
+covers every asset.
 
-The unsigned portable ZIP is 236,072,825 bytes with SHA-256 `e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0`.
-It retains development metadata version `0.0.0`, channel `private-preview`, and
-prebuilt Workbench `sourceCommitVerified: false`. These labels describe the tested
-artifact. They do not prevent its authorized publication as a development prerelease.
-
-Direct Windows checks verified the native browser confirmation, Cancel without
-a new tab, confirmed Chrome launch at the exact path/query/fragment, and page
-interaction. Project switching cleared the old preview. Graceful close stopped
-observed processes and released the listener. Restart retained the selected
-project and an empty Preview. Profile backups were hash-verified before launch.
-
-The package retains Codex integration and adoption-request replay. Earlier setup,
-chooser, narrow-layout, and real model journeys remain evidence for their named
-candidates. Six applicable GitHub CI jobs passed on the reviewed PR #78 fix head.
-The site job skipped. Historical Entire trail-approval failures remain recorded.
+The build of `dev` commit `32c2a26` passed an installed-Windows pass on 2026-10-31.
+The [acceptance register](../../docs/product/multi-project/desktop-acceptance-status.md#installed-windows-beta-october-31)
+lists each check. The September `desktop-preview-*` prereleases are no longer
+published.
 
 A later unpublished `df4aedc` Windows package completed a fresh application-profile
 journey under the existing Windows account. It showed missing-CLI and sign-in
@@ -41,7 +31,7 @@ file tools, displayed and stopped an npm project preview, reused the first
 instance, and cleaned up on idle and active shutdown. Its
 [Windows receipt](../../docs/product/multi-project/receipts/23b-windows-desktop-acceptance.md)
 records the artifact hash, checks, and limits. Independent review accepted
-this candidate's Windows journey. This does not replace the published prerelease.
+this candidate's Windows journey. It predates the 0.1.0-beta.1 release.
 
 The [acceptance register](../../docs/product/multi-project/desktop-acceptance-status.md)
 owns evidence boundaries. Full existing-folder and managed-creation acceptance
@@ -307,7 +297,7 @@ For this portable preview, extract the archive to a short path such as
 nested destination before the application starts.
 
 Windows users need their own installed and signed-in coding CLI. The package does
-not include credentials. The published `9884670` package verified confirmed
+not include credentials. The September `9884670` prerelease package verified confirmed
 browser opening, project-preview clearing, restart, and graceful shutdown.
 The unpublished `df4aedc` package verified missing-runtime guidance and a real
 Codex/Astra file turn in a fresh application profile. Its reviewed npm preview
