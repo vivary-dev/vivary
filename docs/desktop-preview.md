@@ -1,6 +1,6 @@
 # Install the Windows prerelease
 
-This guide covers Vivary 0.1.0-beta.1, the unsigned Windows x64 desktop beta. Its
+This guide covers [Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1), the unsigned Windows x64 desktop beta. Its
 main download is a per-user installer, `Vivary-Setup-<version>.exe`, and it keeps the
 portable ZIP as an option.
 
@@ -11,7 +11,7 @@ complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
-A release's Assets list holds the desktop downloads. Choose one:
+The [0.1.0-beta.1 release page](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) lists the desktop downloads under Assets. Choose one:
 
 - `Vivary-Setup-<version>.exe` is the installer. Use it unless you need a portable copy.
 - `Vivary-<version>-windows-x64.zip` is the optional portable ZIP.

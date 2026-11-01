@@ -759,7 +759,8 @@ prereleases, which are no longer published. The acceptance register records the
 installed-Windows pass of the `32c2a26` dry-run build, and every page names what that pass
 did not cover. No source, configuration or workflow changed, so the description above
 still holds. The release itself comes from `desktop-release.yml` on the tag, as the
-release workflow describes.
+release workflow describes. The install guide links the release page in its introduction
+and download section, so a visitor without GitHub CLI can reach the assets.
 
 2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
 GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,

@@ -6463,7 +6463,7 @@ container resize.
 
 # Install the Windows prerelease
 
-This guide covers Vivary 0.1.0-beta.1, the unsigned Windows x64 desktop beta. Its
+This guide covers [Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1), the unsigned Windows x64 desktop beta. Its
 main download is a per-user installer, `Vivary-Setup-<version>.exe`, and it keeps the
 portable ZIP as an option.
 
@@ -6474,7 +6474,7 @@ complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
-A release's Assets list holds the desktop downloads. Choose one:
+The [0.1.0-beta.1 release page](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) lists the desktop downloads under Assets. Choose one:
 
 - `Vivary-Setup-<version>.exe` is the installer. Use it unless you need a portable copy.
 - `Vivary-<version>-windows-x64.zip` is the optional portable ZIP.
@@ -8269,7 +8269,8 @@ prereleases, which are no longer published. The acceptance register records the
 installed-Windows pass of the `32c2a26` dry-run build, and every page names what that pass
 did not cover. No source, configuration or workflow changed, so the description above
 still holds. The release itself comes from `desktop-release.yml` on the tag, as the
-release workflow describes.
+release workflow describes. The install guide links the release page in its introduction
+and download section, so a visitor without GitHub CLI can reach the assets.
 
 2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
 GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,
