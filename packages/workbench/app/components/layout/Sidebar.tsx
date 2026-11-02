@@ -1,5 +1,5 @@
 import { openCommandMenu } from "@agent-native/core/client/navigation";
-import { IconBook2, IconLayoutSidebarLeftCollapse, IconSearch, IconSettings } from "@tabler/icons-react";
+import { IconBook2, IconSearch, IconSettings } from "@tabler/icons-react";
 import { Link } from "react-router";
 import { useProjects } from "../projects/ProjectContext";
 import { ProjectNavigation } from "../projects/ProjectNavigation";
@@ -7,13 +7,7 @@ import { ProjectHistory } from "./ProjectHistory";
 import { ChatHistory } from "./ChatHistory";
 import { useVivaryChatIdentity } from "./use-vivary-chat-identity";
 
-type SidebarProps = {
-  collapsed?: boolean;
-  collapsible?: boolean;
-  onCollapsedChange?: (collapsed: boolean) => void;
-};
-
-export function Sidebar({ collapsible = true, onCollapsedChange }: SidebarProps) {
+export function Sidebar() {
   const { identity } = useVivaryChatIdentity("unassigned");
   const { activeProject } = useProjects();
   return <aside className="vivary-sidebar flex h-full min-w-0 flex-col overflow-hidden" aria-label="Projects and conversations">
@@ -21,9 +15,6 @@ export function Sidebar({ collapsible = true, onCollapsedChange }: SidebarProps)
       <Link to="/" className="flex min-w-0 flex-1 items-center gap-3" aria-label="Vivary home">
         <span className="vivary-mark" aria-hidden>V</span><span className="text-sm font-semibold">Vivary</span>
       </Link>
-      {collapsible && <button className="vivary-sidebar-utility" onClick={() => onCollapsedChange?.(true)} aria-label="Close project navigation">
-        <IconLayoutSidebarLeftCollapse size={18} aria-hidden />
-      </button>}
     </div>
     <div className="vivary-sidebar-content">
       <div className="vivary-project-navigation"><ProjectNavigation /></div>
