@@ -1,12 +1,10 @@
 import { readAppState } from "@agent-native/core/application-state";
-import { eq } from "@agent-native/core/db/schema";
+import { getDbExec } from "@agent-native/core/db";
 import { z } from "zod";
 
 import { selectionSchema } from "../app/lib/project-catalog-schema.ts";
 import { VIVARY_LOCAL_OWNER_EMAIL } from "../shared/owner-session";
 import { desktopHostAvailable } from "./desktop-host.ts";
-import { getDb } from "./db/index.mjs";
-import { projects } from "./db/schema.mjs";
 import { getVivaryCodeHostState } from "./local-code-agent.ts";
 import {
   readDesktopSettings,
@@ -48,9 +46,12 @@ async function readSelectedProjectId(): Promise<string | null> {
 }
 
 async function readProjectLabel(projectId: string): Promise<string | null> {
-  const [row] = await getDb().select({ displayName: projects.displayName })
-    .from(projects).where(eq(projects.projectId, projectId)).limit(1);
-  return sanitizeLabel(row?.displayName ?? null);
+  const { rows } = await getDbExec().execute({
+    sql: "SELECT display_name FROM vivary_registry_projects WHERE project_id = ? LIMIT 1",
+    args: [projectId],
+  });
+  const displayName = rows[0]?.display_name;
+  return sanitizeLabel(typeof displayName === "string" ? displayName : null);
 }
 
 function resolvePhase(

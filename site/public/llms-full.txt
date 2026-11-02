@@ -8262,6 +8262,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-02 Discord presence typecheck fixes. The settings view calls Core's
+one-argument error helper and supplies its own fallback message. The presence
+snapshot reads the project display name through Core's typed `getDbExec`
+parameterised query, following the existing server database access pattern.
+Settings writes reject a missing or nonabsolute data directory before filesystem
+access, preserving the existing absolute-directory contract. Project selection,
+desktop IPC, opt-in settings and persistence ownership remain as described above.
+The three source changes pass direct TypeScript checking. Installed Discord
+behaviour and pending-login opt-out handling remain outside this typecheck proof.
+
 2026-11-02 optional desktop Discord Rich Presence (issue #70). The Electron main process
 may connect to the user's local Discord client when the owner enables it in desktop
 settings and supplies a Developer Portal application id. The workbench server builds a

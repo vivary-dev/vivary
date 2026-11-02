@@ -37,7 +37,7 @@ export function DiscordPresenceSettings() {
       setApplicationId(next.discord.applicationId);
       await query.refetch();
     } catch (cause) {
-      setError(actionErrorMessage(cause, "Desktop settings could not be saved."));
+      setError(actionErrorMessage(cause) ?? "Desktop settings could not be saved.");
     } finally {
       setBusy(false);
     }

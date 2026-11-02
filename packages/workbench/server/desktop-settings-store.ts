@@ -56,6 +56,9 @@ export async function readDesktopSettings(dataDir = process.env.VIVARY_DATA_DIR)
 
 export async function writeDesktopSettings(next: unknown, dataDir = process.env.VIVARY_DATA_DIR): Promise<DesktopSettings> {
   const settings = normalizeDesktopSettings(next);
+  if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) {
+    throw new TypeError("Desktop settings require an absolute data directory.");
+  }
   const target = desktopSettingsPath(dataDir);
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const temp = `${target}.${process.pid}.tmp`;
