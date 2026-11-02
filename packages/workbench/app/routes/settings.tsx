@@ -1,4 +1,5 @@
 import { BrowserAccessSettings } from "@/components/settings/BrowserAccessSettings";
+import { DiscordPresenceSettings } from "@/components/settings/DiscordPresenceSettings";
 import { useAppearancePreferences } from "@/components/layout/AppearancePreferences";
 import { AppearancePicker } from "@agent-native/core/client/ui";
 import {
@@ -9,6 +10,7 @@ import {
   type SettingsSearchEntry,
 } from "@agent-native/core/client/settings";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { Button } from "@agent-native/toolkit/ui";
 import { IconFileCheck, IconTerminal2 } from "@tabler/icons-react";
 import { AutomationFileReview } from "@/components/settings/AutomationFileReview";
@@ -38,6 +40,12 @@ const generalSearchEntries: SettingsSearchEntry[] = [
     hash: "appearance",
   },
   {
+    id: "vivary-discord",
+    label: "Discord presence",
+    keywords: "discord rich presence status activity desktop",
+    hash: "discord",
+  },
+  {
     id: "vivary-runtimes",
     label: "Coding runtimes",
     keywords: "local cli claude code codex sign in",
@@ -61,6 +69,10 @@ export default function SettingsRoute() {
   const {
     ready, error, retryAppearance, retrySession, setTheme, setAppearance,
   } = useAppearancePreferences();
+  const desktopStatus = useActionQuery<{ folderPicker: boolean }>("vivary-desktop-status", {}, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const nativeTabs = useAgentSettingsTabs({
     appName: "Vivary",
     usageAppId: "vivary",
@@ -158,6 +170,7 @@ export default function SettingsRoute() {
               }
             />
           </SettingsGroup>
+          {desktopStatus.data?.folderPicker ? <DiscordPresenceSettings /> : null}
           <SettingsGroup title="Models and tools">
             <SettingsRow
               label="Coding runtimes"
