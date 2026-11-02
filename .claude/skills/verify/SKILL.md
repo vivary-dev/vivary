@@ -99,6 +99,11 @@ For project creation also inspect the previewed folder and resulting files in
 scratch. Reload must retain Beta through the real persistence path. A screenshot
 or source inspection cannot establish persistence by itself.
 
+Every report.md must state that Files, Search, Preview, draft preservation
+and conversation preservation are outside this five-feature seed. Project
+selection proves selection and reload only. Keep these coverage limits
+visible even when all five mapped journeys pass.
+
 Overall PASS requires all five rows passing on the unchanged candidate, followed
 by a final git status and HEAD check. A run against an earlier head cannot pass
 the merge gate. Keep private sign-in URLs, cookies and tokens out of logs and
