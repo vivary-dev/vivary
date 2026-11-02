@@ -1,0 +1,26 @@
+[
+  {
+    "name": "desktop-menu-does-nothing",
+    "path": "packages/workbench/app/components/layout/Layout.tsx",
+    "find": "else changeCollapsed(!collapsed)",
+    "replace": "else changeCollapsed(collapsed)",
+    "journey": "Desktop navigation",
+    "expected_failure": "Topbar click leaves navigation visible and aria-expanded true"
+  },
+  {
+    "name": "narrow-sheet-does-not-open",
+    "path": "packages/workbench/app/components/layout/Layout.tsx",
+    "find": "if (narrow) setMobileOpen(true)",
+    "replace": "if (narrow) setMobileOpen(false)",
+    "journey": "Narrow navigation",
+    "expected_failure": "No visible Projects and conversations sheet after Open navigation"
+  },
+  {
+    "name": "settings-return-stays-in-settings",
+    "path": "packages/workbench/app/components/layout/Layout.tsx",
+    "find": "to=\"/\">Return to workspace</Link>",
+    "replace": "to=\"/settings\">Return to workspace</Link>",
+    "journey": "Settings return",
+    "expected_failure": "Return to workspace leaves URL at /settings"
+  }
+]
