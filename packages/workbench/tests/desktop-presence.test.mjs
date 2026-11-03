@@ -76,10 +76,11 @@ test("a run in another project leaves the selected project idle", async () => {
   assert.equal(snapshot.projectLabel, "Launch checklist");
 });
 
-test("the publisher publishes changed snapshots once and survives failures", async () => {
+test("the publisher publishes changed snapshots once and hides presence when a snapshot fails", async () => {
   const published = [];
   let failing = false;
   const publisher = createDesktopPresencePublisher({
+    readEnabled: async () => true,
     buildSnapshot: async () => {
       if (failing) throw new Error("project services are unavailable");
       return { phase: "idle", projectLabel: "Launch checklist", startedAt: 1 };
@@ -91,6 +92,35 @@ test("the publisher publishes changed snapshots once and survives failures", asy
   await publisher.tick();
   assert.equal(published.length, 1);
   failing = true;
-  assert.equal(await publisher.tick(), null);
-  assert.equal(published.length, 1);
+  assert.equal((await publisher.tick())?.phase, "hidden", "a failed snapshot build hides presence");
+  assert.deepEqual(published.map((snapshot) => [snapshot.phase, snapshot.projectLabel]),
+    [["idle", "Launch checklist"], ["hidden", null]]);
+  assert.equal(await publisher.tick(), null, "a second failure sends nothing new");
+  failing = false;
+  assert.equal((await publisher.tick())?.phase, "idle", "presence returns once a snapshot builds again");
+  assert.equal(published.length, 3);
+});
+
+// PR #323 regression review. With sharing Off a tick must not touch the selection, org, scope or code host.
+test("with sharing Off the publisher reads the setting and no other reader", async () => {
+  const calls = [];
+  const reader = (name, value) => async () => {
+    calls.push(name);
+    return value;
+  };
+  const published = [];
+  const publisher = createDesktopPresencePublisher({
+    readEnabled: reader("settings", false),
+    buildSnapshot: () => buildDesktopPresenceSnapshot(OWNER, {
+      readSelection: reader("selection", selectionOf("project_launch")),
+      readScopeKey: reader("scope", SCOPE),
+      readHost: reader("host", hostOf("project_launch")),
+      readLabel: reader("label", "Launch checklist"),
+    }),
+    notify: (snapshot) => published.push(snapshot),
+  });
+  await publisher.tick();
+  await publisher.tick();
+  assert.deepEqual(calls, ["settings", "settings"]);
+  assert.deepEqual(published.map((snapshot) => snapshot.phase), ["hidden"]);
 });

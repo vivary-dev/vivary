@@ -30,7 +30,7 @@ test("personal workspace hides activity", () => {
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-function controllerFixture() {
+function controllerFixture({ readSettings } = {}) {
   const clients = [];
   let settings = { discord: { enabled: false, applicationId: "123456789012345678" } };
   class FakeClient {
@@ -55,7 +55,7 @@ function controllerFixture() {
   }
   const controller = createDiscordPresenceController({
     ClientImpl: FakeClient,
-    readSettings: async () => settings,
+    readSettings: readSettings ?? (async () => settings),
   });
   return {
     controller,
@@ -164,6 +164,74 @@ test("controller clears and destroys an active client on dispose", async () => {
   f.select();
   await flush();
   assert.equal(f.clients.length, 1);
+});
+
+// PR #323 review B3. Startup and each settings message start their own reload. These reads finish in the order the
+// test chooses, as a slow disk read can. A stale reload that wrongly connects waits on a login the test never
+// finishes, so the tests flush instead of awaiting the older reload.
+const ON = { discord: { enabled: true, applicationId: "123456789012345678" } };
+const OFF = { discord: { enabled: false, applicationId: "123456789012345678" } };
+const ON_OTHER_ID = { discord: { enabled: true, applicationId: "223456789012345678" } };
+
+function heldReads() {
+  const reads = [];
+  return { reads, readSettings: () => {
+    const read = Promise.withResolvers();
+    reads.push(read);
+    return read.promise;
+  } };
+}
+
+test("an older On read that finishes after a newer Off read does not start sharing", async (t) => {
+  const held = heldReads();
+  const f = controllerFixture({ readSettings: held.readSettings });
+  t.after(() => f.controller.dispose());
+  f.select();
+  void f.controller.reloadSettings();
+  const newer = f.controller.reloadSettings();
+  held.reads[1].resolve(OFF);
+  await newer;
+  held.reads[0].resolve(ON);
+  await flush();
+  assert.equal(f.clients.length, 0, "the superseded On read must not connect to Discord");
+});
+
+test("an older On read that finishes before a newer Off read leaves sharing off", async (t) => {
+  const held = heldReads();
+  const f = controllerFixture({ readSettings: held.readSettings });
+  t.after(() => f.controller.dispose());
+  f.select();
+  void f.controller.reloadSettings();
+  const newer = f.controller.reloadSettings();
+  held.reads[0].resolve(ON);
+  await flush();
+  held.reads[1].resolve(OFF);
+  await newer;
+  for (const client of f.clients) client.finishLogin();
+  await flush();
+  assert.equal(f.clients.some((client) => client.events.some((event) => event.activity)), false,
+    "no project is published once the newer Off read applies");
+  assert.ok(f.clients.every((client) => client.events.includes("destroy")), "any started client is destroyed");
+});
+
+test("an older read of another application id does not replace the newer one", async (t) => {
+  const held = heldReads();
+  const f = controllerFixture({ readSettings: held.readSettings });
+  t.after(() => f.controller.dispose());
+  f.select();
+  void f.controller.reloadSettings();
+  const newer = f.controller.reloadSettings();
+  held.reads[1].resolve(ON_OTHER_ID);
+  await flush();
+  assert.equal(f.clients.length, 1);
+  f.clients[0].finishLogin();
+  await newer;
+  held.reads[0].resolve(ON);
+  await flush();
+  assert.equal(f.clients.length, 1, "the superseded read must not open a second client");
+  assert.equal(f.clients[0].applicationId, "223456789012345678");
+  assert.equal(f.clients[0].events.includes("destroy"), false);
+  assert.equal(f.clients[0].events.at(-1).activity.details, "Private launch");
 });
 
 test("controller does not revive an old login after enabling the same application again", async (t) => {

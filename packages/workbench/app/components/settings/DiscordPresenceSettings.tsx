@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Input } from "@agent-native/toolkit/ui";
 import { SettingsGroup, SettingsRow } from "@agent-native/core/client/settings";
 import { useActionQuery, callAction, actionErrorMessage } from "@agent-native/core/client/hooks";
@@ -17,9 +17,11 @@ export function DiscordPresenceSettings() {
   });
   const [enabled, setEnabled] = useState(false);
   const [applicationId, setApplicationId] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [pendingSaves, setPendingSaves] = useState(0);
   const [error, setError] = useState("");
   const [initialized, setInitialized] = useState(false);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const busy = pendingSaves > 0;
 
   useEffect(() => {
     if (!query.data || initialized) return;
@@ -28,8 +30,16 @@ export function DiscordPresenceSettings() {
     setInitialized(true);
   }, [initialized, query.data]);
 
-  async function save(next: DesktopSettings) {
-    setBusy(true);
+  // Saves run one at a time in the order they were asked for. A toggle clicked while the application id saves on
+  // blur therefore waits its turn instead of being lost, and an older save cannot land after a newer one.
+  function save(next: DesktopSettings) {
+    setPendingSaves(count => count + 1);
+    saveQueue.current = saveQueue.current
+      .then(() => persist(next))
+      .finally(() => setPendingSaves(count => count - 1));
+  }
+
+  async function persist(next: DesktopSettings) {
     setError("");
     try {
       await callAction("vivary-update-desktop-settings", next);
@@ -42,8 +52,6 @@ export function DiscordPresenceSettings() {
       setEnabled(saved?.enabled ?? false);
       setApplicationId(saved?.applicationId ?? "");
       setError(actionErrorMessage(cause) ?? "Desktop settings could not be saved.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -52,7 +60,7 @@ export function DiscordPresenceSettings() {
   }
 
   return (
-    <SettingsGroup title="Discord presence">
+    <SettingsGroup id="discord" title="Discord presence">
       <SettingsRow
         id="discord-enabled"
         label="Share project activity"
@@ -62,11 +70,11 @@ export function DiscordPresenceSettings() {
             <input
               type="checkbox"
               checked={enabled}
-              disabled={!initialized || busy}
+              disabled={!initialized}
               onChange={(event) => {
                 const checked = event.target.checked;
                 setEnabled(checked);
-                void save({ discord: { enabled: checked, applicationId: applicationId.trim() } });
+                save({ discord: { enabled: checked, applicationId: applicationId.trim() } });
               }}
             />
             <span>{enabled ? "On" : "Off"}</span>
@@ -88,8 +96,9 @@ export function DiscordPresenceSettings() {
               aria-label="Discord application id"
               onChange={(event) => setApplicationId(event.target.value)}
               onBlur={() => {
-                if (!initialized) return;
-                void save({ discord: { enabled, applicationId: applicationId.trim() } });
+                const trimmed = applicationId.trim();
+                if (!initialized || trimmed === query.data?.discord.applicationId) return;
+                save({ discord: { enabled, applicationId: trimmed } });
               }}
             />
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -100,7 +109,7 @@ export function DiscordPresenceSettings() {
                 variant="outline"
                 className="self-start"
                 disabled={!initialized}
-                onClick={() => { void save({ discord: { enabled, applicationId: applicationId.trim() } }); }}
+                onClick={() => { save({ discord: { enabled, applicationId: applicationId.trim() } }); }}
               >
                 Save Discord settings
               </Button>

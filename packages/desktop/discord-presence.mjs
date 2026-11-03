@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { Client } from "@xhayper/discord-rpc";
-
 import { readDesktopSettings } from "./desktop-settings.mjs";
 
 const RETRY_MS = 30_000;
@@ -43,7 +41,8 @@ export function presenceFingerprint(snapshot) {
 
 export function createDiscordPresenceController({
   readSettings = readDesktopSettings,
-  ClientImpl = Client,
+  ClientImpl = null,
+  importClient = () => import("@xhayper/discord-rpc"),
   pid = process.pid,
 } = {}) {
   let settings = defaultSettings();
@@ -53,8 +52,21 @@ export function createDiscordPresenceController({
   let connecting = null;
   let pendingClient = null;
   let generation = 0;
+  let reloadRequest = 0;
   let retryTimer = null;
   let disposed = false;
+  let Client = ClientImpl;
+
+  // The RPC package loads only once sharing is on, so a missing or broken package cannot stop the desktop app.
+  // Without it presence stays off.
+  async function loadClient() {
+    if (Client) return;
+    try {
+      ({ Client } = await importClient());
+    } catch {
+      console.error("[vivary-desktop] Discord presence is off because its RPC package could not load.");
+    }
+  }
 
   function defaultSettings() {
     return { discord: { enabled: false, applicationId: "" } };
@@ -110,10 +122,10 @@ export function createDiscordPresenceController({
   async function ensureClient() {
     if (client?.user) return client;
     if (connecting) return connecting;
-    if (disposed || !settings.discord.enabled || !settings.discord.applicationId) return null;
+    if (disposed || !Client || !settings.discord.enabled || !settings.discord.applicationId) return null;
     const connectionGeneration = generation;
     const applicationId = settings.discord.applicationId;
-    const next = new ClientImpl({ clientId: applicationId });
+    const next = new Client({ clientId: applicationId });
     pendingClient = next;
     next.on("disconnected", () => {
       if (!isCurrent(connectionGeneration, applicationId) || client !== next) return;
@@ -180,7 +192,11 @@ export function createDiscordPresenceController({
 
   return {
     async reloadSettings() {
+      // Reloads overlap, and an older read can finish after a newer one. Only the newest request applies.
+      const request = ++reloadRequest;
       const next = await readSettings();
+      if (next.discord.enabled) await loadClient();
+      if (request !== reloadRequest || disposed) return;
       const applicationChanged = next.discord.applicationId !== settings.discord.applicationId
         || next.discord.enabled !== settings.discord.enabled;
       settings = next;

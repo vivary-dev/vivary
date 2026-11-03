@@ -33,9 +33,9 @@ const stubs = new Map([
       return settingsProof.update(params);
     }
     export function actionErrorMessage(cause) { return cause instanceof Error ? cause.message : null; }`],
+  // Core's real layout, without the settings index and its panels, so the anchor Settings search scrolls to is real.
   ["@agent-native/core/client/settings", `
-    export function SettingsGroup({ title, children }) { return <section aria-label={title}>{children}</section>; }
-    export function SettingsRow({ id, label, control }) { return <div id={id}><span>{label}</span>{control}</div>; }`],
+    export { SettingsGroup, SettingsRow } from ${JSON.stringify(join(CORE, "dist", "client", "settings", "SettingsRow.js"))};`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
     export const Button = forwardRef(function Button({ size, variant, ...props }, ref) {
@@ -53,12 +53,16 @@ import { settingsProof } from "@agent-native/core/client/hooks";
 
 const APPLICATION_ID = "123456789012345678";
 
+const PASTED_ID = "987654321098765432";
+
 async function flush() {
-  await act(async () => { for (let turn = 0; turn < 10; turn += 1) await Promise.resolve(); });
+  for (let round = 0; round < 3; round += 1) {
+    await act(async () => { for (let turn = 0; turn < 10; turn += 1) await Promise.resolve(); });
+  }
 }
 
-async function mount(enabled, update) {
-  settingsProof.saved = { discord: { enabled, applicationId: APPLICATION_ID } };
+async function mount(enabled, update, applicationId = APPLICATION_ID) {
+  settingsProof.saved = { discord: { enabled, applicationId } };
   settingsProof.calls = [];
   settingsProof.update = update;
   const host = document.createElement("div");
@@ -73,18 +77,80 @@ async function mount(enabled, update) {
 }
 
 const toggle = host => host.querySelector("#discord-enabled input[type=checkbox]");
+const idInput = host => host.querySelector("input[aria-label='Discord application id']");
 const shown = host => ({ checked: toggle(host).checked, label: toggle(host).nextElementSibling.textContent,
-  applicationId: host.querySelector("input[aria-label='Discord application id']").value });
+  applicationId: idInput(host).value });
 
-// A browser flips the box before it dispatches the click, and React then puts back the value its state holds.
-// linkedom has no checked property, so React keeps checked as a plain field on the element and reads it on click.
+// A browser ignores a click on a disabled box. Otherwise it flips the box before it dispatches the click, and React
+// then puts back the value its state holds. linkedom has no checked property, so React keeps checked as a plain
+// field on the element and reads it on click.
 async function clickToggle(host) {
   const box = toggle(host);
+  if (box.disabled) return;
   await act(async () => {
     box.checked = !box.checked;
     box.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   await flush();
+}
+
+// A paste sets the value through the DOM setter React tracks, then fires input and change, as
+// files-handoff-components.test.mjs does, because React reads change under linkedom. Leaving the field fires focusout.
+async function pasteApplicationId(host, value) {
+  const input = idInput(host);
+  input.type = "text"; // Browser default absent in linkedom. React needs it to treat the field as text.
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
+async function leaveApplicationId(host) {
+  await act(async () => { idInput(host).dispatchEvent(new window.Event("focusout", { bubbles: true })); });
+}
+
+export async function theSectionCarriesTheSearchAnchor() {
+  const { host, dispose } = await mount(false, async () => undefined);
+  try {
+    assert.equal(host.querySelector("section#discord")?.querySelector("h2")?.textContent, "Discord presence");
+  } finally { await dispose(); }
+}
+
+export async function aClickRightAfterPastingTheIdIsNotLost() {
+  let releaseBlurSave;
+  const { host, dispose } = await mount(false, async params => {
+    // The blur save is still in flight when the click lands, as it is when a real save crosses IPC.
+    if (settingsProof.calls.length === 1) await new Promise(resolve => { releaseBlurSave = resolve; });
+    settingsProof.saved = structuredClone(params);
+  }, "");
+  try {
+    await pasteApplicationId(host, PASTED_ID);
+    await leaveApplicationId(host);
+    await clickToggle(host);
+    releaseBlurSave?.();
+    await flush();
+    assert.deepEqual(settingsProof.calls.map(call => call.params.discord), [
+      { enabled: false, applicationId: PASTED_ID },
+      { enabled: true, applicationId: PASTED_ID },
+    ], "the blur save and then the toggle save ran in order");
+    assert.deepEqual(settingsProof.saved.discord, { enabled: true, applicationId: PASTED_ID });
+    assert.deepEqual(shown(host), { checked: true, label: "On", applicationId: PASTED_ID });
+  } finally { await dispose(); }
+}
+
+export async function leavingAnUnchangedIdSavesNothing() {
+  const { host, dispose } = await mount(true, async params => { settingsProof.saved = structuredClone(params); });
+  try {
+    await pasteApplicationId(host, " " + APPLICATION_ID + " ");
+    await leaveApplicationId(host);
+    assert.deepEqual(settingsProof.calls, [], "the trimmed id matches the saved id");
+    await pasteApplicationId(host, PASTED_ID);
+    await leaveApplicationId(host);
+    await flush();
+    assert.deepEqual(settingsProof.calls.map(call => call.params.discord), [{ enabled: true, applicationId: PASTED_ID }],
+      "a changed id still saves when the field is left");
+  } finally { await dispose(); }
 }
 
 export async function aRejectedSaveKeepsTheSavedSetting(savedEnabled) {
@@ -156,6 +222,9 @@ async function buildProof() {
 function installDom() {
   const linkedom = createRequire(join(CORE, "package.json"))("linkedom");
   const view = linkedom.parseHTML("<!doctype html><html><body></body></html>");
+  // A browser document has an oninput handler property. Without it React DOM treats input events as unsupported
+  // and never reads a typed or pasted value.
+  view.document.oninput = null;
   // React schedules through MessageChannel. Open ports keep Node alive, so the proof closes them.
   const channels = [];
   class TrackedMessageChannel extends MessageChannel {
@@ -175,14 +244,20 @@ function installDom() {
 const proofDirectory = await mkdtemp(join(tmpdir(), "vivary-discord-settings-"));
 const proofFile = join(proofDirectory, "proof.mjs");
 await writeFile(proofFile, await buildProof());
-const proof = await import(pathToFileURL(proofFile).href);
+// React DOM chooses its input events when it loads, so the DOM must exist first or it ignores input and change.
 const closeChannels = installDom();
+const proof = await import(pathToFileURL(proofFile).href);
 
 test("a rejected opt-in leaves sharing shown as Off", () => proof.aRejectedSaveKeepsTheSavedSetting(false));
 test("a rejected opt-out leaves sharing shown as On", () => proof.aRejectedSaveKeepsTheSavedSetting(true));
 test("a save that wrote the setting and then failed shows the written setting", () =>
   proof.aSaveThatFailsAfterWritingShowsTheWrittenSetting());
 test("a successful save shows the new setting", () => proof.aSuccessfulSaveShowsTheNewSetting());
+test("the Discord section carries the anchor its Settings search entry scrolls to", () =>
+  proof.theSectionCarriesTheSearchAnchor());
+test("a toggle clicked right after pasting the application id is saved", () =>
+  proof.aClickRightAfterPastingTheIdIsNotLost());
+test("leaving the application id field unchanged saves nothing", () => proof.leavingAnUnchangedIdSavesNothing());
 
 test.after(async () => {
   closeChannels();

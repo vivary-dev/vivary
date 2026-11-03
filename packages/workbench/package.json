@@ -59,7 +59,7 @@
     "test:core-esbuild": "node --test tests/core-esbuild-binary.test.mjs",
     "test:project-services": "node --test tests/project-services.test.mjs",
     "test:desktop-presence": "node --import tsx --test tests/desktop-presence.test.mjs",
-    "test:discord-presence": "node --import tsx --test --test-concurrency=1 tests/desktop-presence-timer.test.ts tests/discord-presence-settings-component.test.mjs",
+    "test:discord-presence": "node --import tsx --test --test-concurrency=1 tests/desktop-presence-timer.test.ts tests/discord-presence-settings-component.test.mjs && node --test ../desktop/tests/discord-isolation.test.mjs",
     "test:browser-access": "node --import tsx --test tests/browser-access.test.mjs tests/preview-socket-owner.test.ts ../desktop/tests/browser-capability.test.mjs",
     "test:browser-access-app": "node --test tests/browser-access-app.test.mjs",
     "test:owner-sign-in-app": "node --test tests/owner-sign-in-app.test.mjs",

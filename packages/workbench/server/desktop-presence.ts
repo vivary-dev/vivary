@@ -184,27 +184,33 @@ export { readDesktopSettings, writeDesktopSettings };
 export type { DesktopSettings };
 
 export function createDesktopPresencePublisher({
+  readEnabled = async () => (await readDesktopSettings()).discord.enabled,
   buildSnapshot = () => buildDesktopPresenceSnapshot(),
   notify = notifyParent,
   pollMs = PRESENCE_POLL_MS,
 }: {
+  readEnabled?: () => Promise<boolean>;
   buildSnapshot?: () => Promise<DesktopPresenceSnapshot>;
   notify?: (snapshot: DesktopPresenceSnapshot) => void;
   pollMs?: number;
 } = {}) {
   let lastPayload = "";
+  const hidden = (): DesktopPresenceSnapshot => ({ phase: "hidden", projectLabel: null, startedAt: phaseStartedAt });
   const tick = async () => {
+    let snapshot: DesktopPresenceSnapshot;
     try {
-      const snapshot = await buildSnapshot();
-      const payload = JSON.stringify(snapshot);
-      if (payload === lastPayload) return null;
-      lastPayload = payload;
-      notify(snapshot);
-      return snapshot;
+      // With sharing Off a tick reads only the settings file. The selection, org, scope and code host stay untouched.
+      snapshot = await readEnabled() ? await buildSnapshot() : hidden();
     } catch {
-      // Discord presence must never disturb the local server.
-      return null;
+      // Discord presence must never disturb the local server. A snapshot that cannot be built hides presence,
+      // so Discord does not keep showing the last project.
+      snapshot = hidden();
     }
+    const payload = JSON.stringify(snapshot);
+    if (payload === lastPayload) return null;
+    lastPayload = payload;
+    notify(snapshot);
+    return snapshot;
   };
   const start = () => {
     const timer = setInterval(() => { void tick(); }, pollMs);

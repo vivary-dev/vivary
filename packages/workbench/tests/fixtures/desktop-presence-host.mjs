@@ -26,10 +26,14 @@ const { createNativeRegistry } = await import("../../server/native-registry.mjs"
 const { createProjectCatalog } = await import("../../server/project-catalog.mjs");
 const { evaluateRegistryOperation, deriveMutationKeys } = await import("../../../../scripts/registry_contract_model.mjs");
 const { installDesktopPresencePublisher } = await import("../../server/desktop-presence.ts");
+const { writeDesktopSettings } = await import("../../server/desktop-settings-store.ts");
+
+const share = enabled => writeDesktopSettings({ discord: { enabled, applicationId: "123456789012345678" } });
 
 const alpha = path.join(process.argv[2], "Alpha");
 const beta = path.join(process.argv[2], "Beta");
-await Promise.all([mkdir(alpha), mkdir(beta)]);
+const gamma = path.join(process.argv[2], "Gamma");
+await Promise.all([mkdir(alpha), mkdir(beta), mkdir(gamma)]);
 await withMigrationRuntime(async () => {
   await runMigrations(ORG_MIGRATIONS, { table: "presence_test_org_migrations" })();
   await migrateRegistry();
@@ -46,16 +50,18 @@ globalThis[Symbol.for("vivary.local-project-services.v1")] = {
   provider, registry, catalog, controller: { snapshot: () => ({ status: "open" }) },
 };
 
-async function register(locationRef, displayName) {
+async function register(key, locationRef, displayName) {
   const current = await catalog.run({}, context);
-  const result = await registry.registration.run({ operationId: `presence-${displayName.replace(/\W/g, "-")}`,
+  const result = await registry.registration.run({ operationId: `presence-${key}`,
     expectedPolicyRevision: current.policyRevision, expectedRegistryRevision: current.registryRevision,
     locationRef, displayName, contentIdentity: null, attachProjectId: null }, context);
   return result.projectId;
 }
 const projects = {
-  a: await register((await catalog.run({}, context)).locations[0].locationRef, "Project A"),
-  b: await register((await provider.addGrantedFolder(context, beta)).locationRef, "Project B"),
+  a: await register("a", (await catalog.run({}, context)).locations[0].locationRef, "Project A"),
+  b: await register("b", (await provider.addGrantedFolder(context, beta)).locationRef, "Project B"),
+  // 150 code points and 300 UTF-16 units, past the 128 code points a presence label may hold.
+  emoji: await register("emoji", (await provider.addGrantedFolder(context, gamma)).locationRef, "🚀".repeat(150)),
 };
 const { scopeKey } = await catalog.run({}, context);
 
@@ -65,6 +71,7 @@ const select = projectId => runWithRequestContext({ userEmail: OWNER, orgId: ORG
 
 process.on("message", async message => {
   if (message?.type === "test:select") await select(message.projectId);
+  else if (message?.type === "test:share") await share(message.enabled);
   else if (message?.type === "test:host") host = message.host;
   else if (message?.type === "test:tick") mock.timers.tick(5_000);
   else return;
@@ -72,5 +79,6 @@ process.on("message", async message => {
 });
 
 await select(projects.a);
+await share(true);
 installDesktopPresencePublisher();
 process.send({ type: "test:ready", projects });

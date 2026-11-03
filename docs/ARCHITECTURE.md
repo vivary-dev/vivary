@@ -748,6 +748,32 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-03 Discord presence reload order, isolation and settings fixes. The
+desktop controller numbers each settings reload before it reads the file and
+applies only the newest request. An older On read that finishes after a newer
+Off read no longer starts sharing. The controller keeps its connection
+generations. The RPC package now loads through a dynamic import, only when a
+read reports sharing On. A missing or broken package logs one line and leaves
+presence off. The desktop main module therefore loads without the package, as
+beta.1 did. While the saved setting is Off, the workbench poller reads only the
+settings file and skips the selection, org, scope and code host readers. A tick
+whose snapshot cannot be built publishes hidden. Before, it sent nothing, so
+Discord kept the last project. The Discord settings section carries the
+`discord` anchor that its search entry scrolls to. The entry appears only where
+the section renders, in the desktop app. Settings saves run one at a time in
+order, and the toggle stays enabled while a save runs. A click made while the
+application id saves on blur is no longer lost. Leaving the id field saves only
+when the trimmed id changed. The snapshot label still counts code points, because
+pinned Zod 4.6.7 measures string length in code points. A 150-emoji project name
+is cut to 128 code points and sent. Tests cover both completion orders of the
+reloads, an application id change, the main module and controller with the
+package absent, Off with no other reader calls, the anchor, a toggle click right
+after pasting an id, and an unchanged blur. Each fails on `9f026b1` where it
+describes a change. `test:discord-presence` also runs the desktop isolation test,
+because `ci.yml` lists the desktop tests and this change leaves it alone. That
+test needs no desktop packages. The IPC messages, the settings file and the snapshot fields
+are unchanged, so the description above still holds.
+
 2026-11-03 Discord presence saved-state refetch and end-to-end timer test. A
 settings save can write the file and then fail while it publishes the presence
 snapshot. After a failed save, the settings view now refetches the settings and

@@ -40,12 +40,6 @@ const generalSearchEntries: SettingsSearchEntry[] = [
     hash: "appearance",
   },
   {
-    id: "vivary-discord",
-    label: "Discord presence",
-    keywords: "discord rich presence status activity desktop",
-    hash: "discord",
-  },
-  {
     id: "vivary-runtimes",
     label: "Coding runtimes",
     keywords: "local cli claude code codex sign in",
@@ -59,6 +53,14 @@ const generalSearchEntries: SettingsSearchEntry[] = [
     hash: "llm",
   },
 ];
+
+// Only the desktop app renders the Discord section, which carries the "discord" anchor this entry scrolls to.
+const discordSearchEntry: SettingsSearchEntry = {
+  id: "vivary-discord",
+  label: "Discord presence",
+  keywords: "discord rich presence status activity desktop",
+  hash: "discord",
+};
 
 export function meta() {
   return [{ title: "Settings | Vivary" }];
@@ -106,7 +108,8 @@ export default function SettingsRoute() {
       ariaLabel="Vivary settings"
       searchPlaceholder="Search settings"
       extraTabs={tabs}
-      generalSearchEntries={generalSearchEntries}
+      generalSearchEntries={desktopStatus.data?.folderPicker
+        ? [...generalSearchEntries, discordSearchEntry] : generalSearchEntries}
       general={
         <div className="mx-auto w-full max-w-2xl space-y-6">
           <div>

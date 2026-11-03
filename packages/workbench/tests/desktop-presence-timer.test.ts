@@ -14,13 +14,14 @@ const WORKBENCH = fileURLToPath(new URL("..", import.meta.url));
 const MESSAGE_WAIT_MS = 10_000;
 
 type Snapshot = { phase: string; projectLabel: string | null; startedAt: number };
-type Message = { type: string; snapshot?: Snapshot; projects?: { a: string; b: string } };
+type Message = { type: string; snapshot?: Snapshot; projects?: { a: string; b: string; emoji: string } };
 
 const fixture = await mkdtemp(path.join(tmpdir(), "vivary-desktop-presence-"));
 const database = `file:${path.join(fixture, "native.sqlite")}`;
 const env = { ...process.env, APP_NAME: "Vivary", VIVARY_ACCESS_MODE: "local", VIVARY_DESKTOP_HOST: "1",
   DATABASE_URL: database, DATABASE_URL_UNPOOLED: database, VIVARY_DATABASE_URL: database,
-  VIVARY_DATABASE_URL_UNPOOLED: database, AGENT_NATIVE_CODE_AGENTS_HOME: path.join(fixture, "code-runs") };
+  VIVARY_DATABASE_URL_UNPOOLED: database, AGENT_NATIVE_CODE_AGENTS_HOME: path.join(fixture, "code-runs"),
+  VIVARY_DATA_DIR: path.join(fixture, "data") };
 delete env.AGENT_USER_EMAIL;
 const child = fork(path.join(WORKBENCH, "tests", "fixtures", "desktop-presence-host.mjs"), [fixture], {
   cwd: WORKBENCH,
@@ -30,7 +31,7 @@ const child = fork(path.join(WORKBENCH, "tests", "fixtures", "desktop-presence-h
 });
 const messages: Message[] = [];
 child.on("message", message => { messages.push(message as Message); });
-let projects = { a: "", b: "" };
+let projects = { a: "", b: "", emoji: "" };
 
 async function next(type: string): Promise<Message> {
   const signal = AbortSignal.timeout(MESSAGE_WAIT_MS);
@@ -95,4 +96,19 @@ test("a timer tick follows the code host from idle to agent to review and back",
   assert.deepEqual(await presenceAfterTick(), { phase: "review", projectLabel: "Project B" });
   await step({ type: "test:host", host: { activeRun: null, pendingApproval: null } });
   assert.deepEqual(await presenceAfterTick(), { phase: "idle", projectLabel: "Project B" });
+});
+
+// PR #323 review r4450011913 feared that a long emoji label fails the snapshot schema. Zod 4 counts a string's
+// maximum in code points, as the label cut does, so the label is cut and still sent.
+test("a long emoji project name is cut to a well-formed label and still sent", async () => {
+  await step({ type: "test:select", projectId: projects.emoji });
+  const { phase, projectLabel } = await presenceAfterTick();
+  assert.equal(phase, "idle");
+  assert.equal(projectLabel, `${"🚀".repeat(127)}…`, "127 whole emoji and the ellipsis make 128 code points");
+  assert.equal(projectLabel?.isWellFormed(), true, "no surrogate pair is split");
+});
+
+test("a timer tick after sharing is turned off hides presence", async () => {
+  await step({ type: "test:share", enabled: false });
+  assert.deepEqual(await presenceAfterTick(), { phase: "hidden", projectLabel: null });
 });
