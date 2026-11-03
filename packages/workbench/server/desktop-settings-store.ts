@@ -15,7 +15,12 @@ export type DesktopSettings = z.infer<typeof settingsSchema>;
 
 export const DESKTOP_SETTINGS_FILE = "desktop-settings.json";
 
-export function desktopSettingsPath(dataDir = process.env.VIVARY_DATA_DIR) {
+function defaultDataDir() {
+  // guard:allow-env-credential - Nonsecret path to Vivary's own data folder, set by the desktop parent.
+  return process.env.VIVARY_DATA_DIR;
+}
+
+export function desktopSettingsPath(dataDir = defaultDataDir()) {
   if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) {
     throw new TypeError("Desktop settings require an absolute data directory.");
   }
@@ -41,7 +46,7 @@ export function defaultDesktopSettings(): DesktopSettings {
   return normalizeDesktopSettings({ discord: { enabled: false, applicationId: "" } });
 }
 
-export async function readDesktopSettings(dataDir = process.env.VIVARY_DATA_DIR): Promise<DesktopSettings> {
+export async function readDesktopSettings(dataDir = defaultDataDir()): Promise<DesktopSettings> {
   try {
     const parsed = JSON.parse(await readFile(desktopSettingsPath(dataDir), "utf8"));
     return normalizeDesktopSettings(parsed);
@@ -54,7 +59,7 @@ export async function readDesktopSettings(dataDir = process.env.VIVARY_DATA_DIR)
   }
 }
 
-export async function writeDesktopSettings(next: unknown, dataDir = process.env.VIVARY_DATA_DIR): Promise<DesktopSettings> {
+export async function writeDesktopSettings(next: unknown, dataDir = defaultDataDir()): Promise<DesktopSettings> {
   const settings = normalizeDesktopSettings(next);
   if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) {
     throw new TypeError("Desktop settings require an absolute data directory.");

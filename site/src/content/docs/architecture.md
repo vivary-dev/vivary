@@ -752,6 +752,12 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-03 Desktop settings data folder read. The desktop settings store
+reads `VIVARY_DATA_DIR` through one default helper with the repository's
+`guard:allow-env-credential` opt-out, because the value is a nonsecret path
+to Vivary's own data folder and not a user credential. Behaviour and the
+absolute-path refusal are unchanged, so no design section changes.
+
 2026-11-03 Discord presence connection lifetime. Pending clients are retained
 and destroyed when presence is disabled, cleared, disposed or moved to another
 application ID. Generation checks after login and before activity publication
