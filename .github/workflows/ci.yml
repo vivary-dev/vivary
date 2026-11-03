@@ -4,7 +4,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [dev, main]
+    branches: [dev, main, prod]
   workflow_dispatch:
     inputs:
       head_sha:

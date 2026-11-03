@@ -192,7 +192,7 @@ named dangerous failure. Select controls for that risk.
 ## Delivery and authority
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md). Branch from current `origin/dev`,
-use a typed topic branch, and open a PR into `dev`. Review and verify each
+name the branch `task/<id>-<slug>` after its OpenBot `tasks` row, and open a PR into `dev`. Review and verify each
 increment before committing and pushing to GitHub and Entire.
 Never create draft PRs. Open PRs ready for review.
 Keep each PR within the size rule in [CONTRIBUTING.md](CONTRIBUTING.md#size).
@@ -251,3 +251,7 @@ Update durable docs when behavior, architecture, contracts, or lasting
 constraints change. Give each fact one owner and refresh generated views when
 their inputs change. Keep the existing handoff concise. Failed or unrun
 verification remains incomplete regardless of a policy change.
+
+## Git
+
+- Follow the Git law in Jeff's `~/AGENTS.md` (2026-11-03). `prod` is the default branch and the finished product. All work happens on `dev`. Branch `task/<id>-<slug>` from `origin/dev`, open the PR into `dev`, never push or force-push `prod`, `main` or `dev`, and end every commit with `Task:`, `Agent:` and `Agent-Session:` trailers. `prod` changes only through a promotion PR from `dev`, and every merge waits for Jeff's approval.
