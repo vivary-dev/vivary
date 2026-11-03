@@ -748,6 +748,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-03 Discord presence poller identity and failed-save state. The presence
+snapshot now runs inside the owner's request context, because the desktop
+poller starts outside a request and Core's app-state read has no session of its
+own. A saved project selection also only counts while its `scopeKey` matches the
+scope the catalog would return now, read through the registry's existing
+`readScope` with the local owner admission; presence degrades to hidden when
+project services are not ready. The publisher's single tick is exported for a
+direct test that runs without a request, and the settings view restores the
+last saved values when the server rejects a save. Selection, desktop IPC,
+opt-in settings, and persistence ownership remain as described above.
+
 2026-11-03 Desktop settings data folder read. The desktop settings store
 reads `VIVARY_DATA_DIR` through one default helper with the repository's
 `guard:allow-env-credential` opt-out, because the value is a nonsecret path
