@@ -1,8 +1,9 @@
 import { desktopCapability, createDesktopCapabilityHandler, attachBrowserAccessDialogs } from "./browser-access.mjs";
+import { createDiscordPresenceController } from "./discord-presence.mjs";
+import { desktopDataDir } from "./desktop-settings.mjs";
 import { fork, spawnSync } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +32,7 @@ let shutdownPromise = null;
 let serverOrigin = null;
 let serverCapability = null;
 let disposeProjectChooser = () => undefined;
+let disposeDiscordPresence = () => undefined;
 
 app.setName("Vivary");
 process.once("exit", () => {
@@ -73,9 +75,7 @@ export async function selectLoopbackPort({ isFree = loopbackPortIsFree, random =
  * The desktop passes it to the server, so the saved port and the data always
  * share one folder.
  */
-export function desktopDataDir(home = homedir()) {
-  return path.join(home, ".vivary", "workbench");
-}
+export { desktopDataDir } from "./desktop-settings.mjs";
 
 async function loopbackPortIsFree(port) {
   const probe = createServer();
@@ -225,6 +225,7 @@ export async function launchServer({ root, node, entry, dataDir, port }) {
   const disposeBrowserDialogs = attachBrowserAccessDialogs(child, () => mainWindow, (window, options) => dialog.showMessageBox(window, options));
   child.once("exit", disposeBrowserDialogs);
   disposeProjectChooser = attachProjectFolderChooser(child, () => mainWindow);
+  disposeDiscordPresence = attachDiscordPresence(child);
 
   await new Promise((resolve, reject) => {
     let settled = false;
@@ -261,6 +262,7 @@ export async function launchServer({ root, node, entry, dataDir, port }) {
   }).catch((error) => {
     forceServerTree(child);
     disposeProjectChooser();
+    disposeDiscordPresence();
     serverChild = null;
     throw error;
   });
@@ -299,6 +301,7 @@ function forceServerTree(child) {
 
 async function stopServer() {
   disposeProjectChooser();
+  disposeDiscordPresence();
   const child = serverChild;
   if (!child) return;
   if (child.exitCode !== null || child.signalCode !== null) {
@@ -574,6 +577,24 @@ export function attachProjectFolderChooser(child, getWindow, showOpenDialog = (w
   child.once("error", dispose);
   child.once("exit", dispose);
   return dispose;
+}
+
+export function attachDiscordPresence(child) {
+  const controller = createDiscordPresenceController();
+  void controller.reloadSettings();
+  const onMessage = (message) => {
+    if (message?.type === "vivary:desktop:presence" && message.snapshot) {
+      controller.updateSnapshot(message.snapshot);
+    }
+    if (message?.type === "vivary:desktop:settings") {
+      void controller.reloadSettings();
+    }
+  };
+  child.on("message", onMessage);
+  return () => {
+    child.off("message", onMessage);
+    controller.dispose();
+  };
 }
 
 export async function runDesktop() {

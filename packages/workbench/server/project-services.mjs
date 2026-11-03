@@ -425,6 +425,17 @@ export async function getLocalProjectAccess(context) {
   return service.catalog.run({}, owner);
 }
 
+/**
+ * Current registry scope for an in-process caller that has no request, such as
+ * the desktop presence poller. It passes the same local-owner admission as a
+ * request; a caller that is not authorized gets the usual 403 instead of a
+ * narrowed read.
+ */
+export async function readLocalProjectScope(context) {
+  const { service, owner } = localService(context);
+  return service.registry.readScope(owner);
+}
+
 /** The desktop picker or trusted launcher supplies folder. No public action accepts a path. */
 export async function connectLocalProjectFolder(context, folder, displayName) {
   const { service, owner } = localService(context);

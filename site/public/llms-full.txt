@@ -8161,7 +8161,7 @@ Refresh preview replaces only the frame for the same identity. Separate transpor
 required. This source slice does not establish packaged Windows or actual-phone
 acceptance.
 
-The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) own those limits.
+The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. Optional Discord Rich Presence is off by default. When enabled in desktop settings, the workbench server publishes a sanitized project label and coarse activity phase to the Electron parent over existing IPC; the main process sets Discord activity through a local IPC client (`@xhayper/discord-rpc`). No conversation text, file paths, or credentials leave the machine through that path. The controller owns pending login clients as well as the connected client. Disabling presence, changing the application ID, clearing activity or disposing the controller invalidates that connection generation and destroys both clients. Login continuations and activity publication check that the generation and enabled application ID still match, so a cancelled login cannot publish an old project label or replace a newer connection. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) own those limits.
 
 OS sandbox coverage belongs to each execution surface. Full chat production code
 execution defaults off; optional QuickJS evaluation does not contain host bridge
@@ -8261,6 +8261,101 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-11-03 Discord presence reload order, isolation and settings fixes. The
+desktop controller numbers each settings reload before it reads the file and
+applies only the newest request. An older On read that finishes after a newer
+Off read no longer starts sharing. The controller keeps its connection
+generations. The RPC package now loads through a dynamic import, only when a
+read reports sharing On. A missing or broken package logs one line and leaves
+presence off. The desktop main module therefore loads without the package, as
+beta.1 did. While the saved setting is Off, the workbench poller reads only the
+settings file and skips the selection, org, scope and code host readers. A tick
+whose snapshot cannot be built publishes hidden. Before, it sent nothing, so
+Discord kept the last project. The Discord settings section carries the
+`discord` anchor that its search entry scrolls to. The entry appears only where
+the section renders, in the desktop app. Settings saves run one at a time in
+order, and the toggle stays enabled while a save runs. A click made while the
+application id saves on blur is no longer lost. Leaving the id field saves only
+when the trimmed id changed. The snapshot label still counts code points, because
+pinned Zod 4.6.7 measures string length in code points. A 150-emoji project name
+is cut to 128 code points and sent. Tests cover both completion orders of the
+reloads, an application id change, the main module and controller with the
+package absent, Off with no other reader calls, the anchor, a toggle click right
+after pasting an id, and an unchanged blur. Each fails on `9f026b1` where it
+describes a change. `test:discord-presence` also runs the desktop isolation test,
+because `ci.yml` lists the desktop tests and this change leaves it alone. That
+test needs no desktop packages. The IPC messages, the settings file and the snapshot fields
+are unchanged, so the description above still holds.
+
+2026-11-03 Discord presence saved-state refetch and end-to-end timer test. A
+settings save can write the file and then fail while it publishes the presence
+snapshot. After a failed save, the settings view now refetches the settings and
+shows the saved values, instead of the copy cached before the save.
+`tests/discord-presence-settings-component.test.mjs` renders the real component
+under linkedom with stubbed actions. It checks a rejected opt-in, a rejected
+opt-out, a save that fails after it writes and a successful save. Only the third
+case failed on `b133d23`. `tests/desktop-presence-timer.test.ts` forks a desktop
+server child with real Core app state, the owner's org, the local folder
+provider, the registry and the catalog. It has no request and no
+`AGENT_USER_EMAIL`, and only the code host is a stand-in. The installed timer
+must follow a switch to the personal workspace, from project A to project B, and
+from idle to agent to review and back. It passes on `b133d23` and fails on the
+`c5ea21e` poller. When the catalog scope read is broken so that presence always
+hides, the reader-replacing `desktop-presence.test.mjs` still passes and this
+test fails. The poller, the scope check, the IPC messages and the settings file
+are unchanged, so the description above still holds. `test:maintained` runs
+both files.
+
+2026-11-03 Discord presence poller identity and failed-save state. The presence
+snapshot now runs inside the owner's request context, because the desktop
+poller starts outside a request and Core's app-state read has no session of its
+own. A saved project selection also only counts while its `scopeKey` matches the
+scope the catalog would return now, read through the registry's existing
+`readScope` with the local owner admission; presence degrades to hidden when
+project services are not ready. The publisher's single tick is exported for a
+direct test that runs without a request, and the settings view restores the
+last saved values when the server rejects a save. Selection, desktop IPC,
+opt-in settings, and persistence ownership remain as described above.
+
+2026-11-03 Desktop settings data folder read. The desktop settings store
+reads `VIVARY_DATA_DIR` through one default helper with the repository's
+`guard:allow-env-credential` opt-out, because the value is a nonsecret path
+to Vivary's own data folder and not a user credential. Behaviour and the
+absolute-path refusal are unchanged, so no design section changes.
+
+2026-11-03 Discord presence connection lifetime. Pending clients are retained
+and destroyed when presence is disabled, cleared, disposed or moved to another
+application ID. Generation checks after login and before activity publication
+reject cancelled work. An old connection's completion or rejection cannot clear
+the newer connection attempt. Controller tests cover pending disable, clear,
+dispose and application-ID changes, normal enable and shutdown, and late login
+rejection. The local test run injects a fake RPC transport because the sandbox
+lacks the dependency. Real Discord and installed-desktop acceptance remain open.
+
+2026-11-02 Discord presence typecheck fixes. The settings view calls Core's
+one-argument error helper and supplies its own fallback message. The presence
+snapshot reads the project display name through Core's typed `getDbExec`
+parameterised query, following the existing server database access pattern.
+Settings writes reject a missing or nonabsolute data directory before filesystem
+access, preserving the existing absolute-directory contract. Project selection,
+desktop IPC, opt-in settings and persistence ownership remain as described above.
+The three source changes pass direct TypeScript checking. Installed Discord
+behaviour and pending-login opt-out handling remain outside this typecheck proof.
+
+2026-11-02 optional desktop Discord Rich Presence (issue #70). The Electron main process
+may connect to the user's local Discord client when the owner enables it in desktop
+settings and supplies a Developer Portal application id. The workbench server builds a
+read-only snapshot from project selection and code-host phase
+([`desktop-presence.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/desktop-presence.ts)), notifies
+the parent over existing desktop IPC, and persists the toggle beside other workbench data
+in `desktop-settings.json`. The main adapter
+([`discord-presence.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/discord-presence.mjs)) maps that snapshot to
+Discord activity through `@xhayper/discord-rpc`; packaging installs that dependency into
+the staged desktop app. Personal workspace clears presence; disabled or absent Discord
+stays silent. Loopback-only server binding, renderer isolation, and owner-proof admission
+are unchanged. `node --test packages/desktop/tests/*.mjs` (with desktop `npm ci`) and
+HLDD enforcement requested this review entry.
 
 2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
 second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
