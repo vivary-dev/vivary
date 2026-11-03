@@ -647,7 +647,7 @@ Refresh preview replaces only the frame for the same identity. Separate transpor
 required. This source slice does not establish packaged Windows or actual-phone
 acceptance.
 
-The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. Optional Discord Rich Presence is off by default. When enabled in desktop settings, the workbench server publishes a sanitized project label and coarse activity phase to the Electron parent over existing IPC; the main process sets Discord activity through a local IPC client (`@xhayper/discord-rpc`). No conversation text, file paths, or credentials leave the machine through that path. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](../packages/desktop/main.mjs) own those limits.
+The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. Optional Discord Rich Presence is off by default. When enabled in desktop settings, the workbench server publishes a sanitized project label and coarse activity phase to the Electron parent over existing IPC; the main process sets Discord activity through a local IPC client (`@xhayper/discord-rpc`). No conversation text, file paths, or credentials leave the machine through that path. The controller owns pending login clients as well as the connected client. Disabling presence, changing the application ID, clearing activity or disposing the controller invalidates that connection generation and destroys both clients. Login continuations and activity publication check that the generation and enabled application ID still match, so a cancelled login cannot publish an old project label or replace a newer connection. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](../packages/desktop/main.mjs) own those limits.
 
 OS sandbox coverage belongs to each execution surface. Full chat production code
 execution defaults off; optional QuickJS evaluation does not contain host bridge
@@ -747,6 +747,15 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-11-03 Discord presence connection lifetime. Pending clients are retained
+and destroyed when presence is disabled, cleared, disposed or moved to another
+application ID. Generation checks after login and before activity publication
+reject cancelled work. An old connection's completion or rejection cannot clear
+the newer connection attempt. Controller tests cover pending disable, clear,
+dispose and application-ID changes, normal enable and shutdown, and late login
+rejection. The local test run injects a fake RPC transport because the sandbox
+lacks the dependency. Real Discord and installed-desktop acceptance remain open.
 
 2026-11-02 Discord presence typecheck fixes. The settings view calls Core's
 one-argument error helper and supplies its own fallback message. The presence

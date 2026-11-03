@@ -51,6 +51,8 @@ export function createDiscordPresenceController({
   let fingerprint = "";
   let client = null;
   let connecting = null;
+  let pendingClient = null;
+  let generation = 0;
   let retryTimer = null;
   let disposed = false;
 
@@ -64,7 +66,7 @@ export function createDiscordPresenceController({
   }
 
   function scheduleRetry(delayMs = RETRY_MS) {
-    if (disposed || retryTimer) return;
+    if (disposed || retryTimer || !settings.discord.enabled || !settings.discord.applicationId) return;
     retryTimer = setTimeout(() => {
       retryTimer = null;
       void syncActivity();
@@ -72,51 +74,79 @@ export function createDiscordPresenceController({
     retryTimer.unref?.();
   }
 
-  async function closeClient() {
-    clearRetry();
-    connecting = null;
-    if (!client) return;
-    const active = client;
-    client = null;
+  function isCurrent(connectionGeneration, applicationId) {
+    return !disposed && generation === connectionGeneration
+      && settings.discord.enabled && settings.discord.applicationId === applicationId;
+  }
+
+  async function destroyClient(connection) {
     try {
-      await active.destroy();
+      await connection.destroy();
     } catch {
       // Discord may already be gone during shutdown.
     }
   }
 
+  async function closeClient(clearActivity = false) {
+    generation += 1;
+    clearRetry();
+    connecting = null;
+    const active = client;
+    const pending = pendingClient;
+    client = null;
+    pendingClient = null;
+    await Promise.all([...new Set([active, pending])].filter(Boolean).map(async (connection) => {
+      if (clearActivity && connection === active && connection.user) {
+        try {
+          await connection.user.clearActivity(pid);
+        } catch {
+          // Destroy the connection even when Discord cannot clear activity.
+        }
+      }
+      await destroyClient(connection);
+    }));
+  }
+
   async function ensureClient() {
     if (client?.user) return client;
     if (connecting) return connecting;
-    if (!settings.discord.enabled || !settings.discord.applicationId) return null;
-    connecting = (async () => {
-      const next = new ClientImpl({ clientId: settings.discord.applicationId });
-      next.on("disconnected", () => {
-        if (client === next) client = null;
-        scheduleRetry();
-      });
+    if (disposed || !settings.discord.enabled || !settings.discord.applicationId) return null;
+    const connectionGeneration = generation;
+    const applicationId = settings.discord.applicationId;
+    const next = new ClientImpl({ clientId: applicationId });
+    pendingClient = next;
+    next.on("disconnected", () => {
+      if (!isCurrent(connectionGeneration, applicationId) || client !== next) return;
+      client = null;
+      scheduleRetry();
+    });
+    const attempt = (async () => {
       await next.login();
-      if (disposed) {
-        await next.destroy();
+      if (!isCurrent(connectionGeneration, applicationId) || pendingClient !== next) {
+        await destroyClient(next);
         return null;
       }
       client = next;
       return next;
     })();
+    connecting = attempt;
     try {
-      return await connecting;
+      return await attempt;
     } catch {
-      client = null;
-      scheduleRetry();
+      await destroyClient(next);
+      if (isCurrent(connectionGeneration, applicationId)) scheduleRetry();
       return null;
     } finally {
-      connecting = null;
+      if (connecting === attempt) connecting = null;
+      if (pendingClient === next) pendingClient = null;
     }
   }
 
   async function pushActivity(activity) {
+    const connectionGeneration = generation;
+    const applicationId = settings.discord.applicationId;
     const live = await ensureClient();
-    if (!live?.user) return;
+    if (!isCurrent(connectionGeneration, applicationId) || live !== client || !live?.user) return;
     if (!activity) {
       await live.user.clearActivity(pid);
       return;
@@ -135,12 +165,16 @@ export function createDiscordPresenceController({
       await closeClient();
       return;
     }
+    const connectionGeneration = generation;
+    const applicationId = settings.discord.applicationId;
     const activity = buildDiscordActivity(snapshot);
     try {
       await pushActivity(activity);
     } catch {
-      await closeClient();
-      scheduleRetry();
+      if (isCurrent(connectionGeneration, applicationId)) {
+        await closeClient();
+        scheduleRetry();
+      }
     }
   }
 
@@ -164,13 +198,7 @@ export function createDiscordPresenceController({
     async clear() {
       fingerprint = "";
       snapshot = null;
-      try {
-        if (client?.user) await client.user.clearActivity(pid);
-      } catch {
-        // Discord may already be gone during shutdown.
-      } finally {
-        await closeClient();
-      }
+      await closeClient(true);
     },
     dispose() {
       disposed = true;
