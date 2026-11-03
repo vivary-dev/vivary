@@ -37,7 +37,8 @@ export function DiscordPresenceSettings() {
       setApplicationId(next.discord.applicationId);
       await query.refetch();
     } catch (cause) {
-      const saved = query.data?.discord;
+      // A save can write the file and then fail while it publishes, so the cached settings can be stale.
+      const saved = (await query.refetch()).data?.discord;
       setEnabled(saved?.enabled ?? false);
       setApplicationId(saved?.applicationId ?? "");
       setError(actionErrorMessage(cause) ?? "Desktop settings could not be saved.");

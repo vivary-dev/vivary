@@ -748,6 +748,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-03 Discord presence saved-state refetch and end-to-end timer test. A
+settings save can write the file and then fail while it publishes the presence
+snapshot. After a failed save, the settings view now refetches the settings and
+shows the saved values, instead of the copy cached before the save.
+`tests/discord-presence-settings-component.test.mjs` renders the real component
+under linkedom with stubbed actions. It checks a rejected opt-in, a rejected
+opt-out, a save that fails after it writes and a successful save. Only the third
+case failed on `b133d23`. `tests/desktop-presence-timer.test.ts` forks a desktop
+server child with real Core app state, the owner's org, the local folder
+provider, the registry and the catalog. It has no request and no
+`AGENT_USER_EMAIL`, and only the code host is a stand-in. The installed timer
+must follow a switch to the personal workspace, from project A to project B, and
+from idle to agent to review and back. It passes on `b133d23` and fails on the
+`c5ea21e` poller. When the catalog scope read is broken so that presence always
+hides, the reader-replacing `desktop-presence.test.mjs` still passes and this
+test fails. The poller, the scope check, the IPC messages and the settings file
+are unchanged, so the description above still holds. `test:maintained` runs
+both files.
+
 2026-11-03 Discord presence poller identity and failed-save state. The presence
 snapshot now runs inside the owner's request context, because the desktop
 poller starts outside a request and Core's app-state read has no session of its
