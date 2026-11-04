@@ -196,9 +196,9 @@ test("payload runtime evidence must match the staged Node exactly", {
 
     // #292 review: the payload's own Electron must be the admitted pin, named by build.json and Electron's version file.
     const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
-    const admitted = { [pinned]: "24.22.1" };
+    const admitted = { [pinned]: "24.22.2" };
     const versionFile = path.join(directory, "version");
-    for (const [electron, shipped] of [[undefined, pinned], [pinned, undefined], [pinned, "44.9.3"], ["44.9.3", "44.9.3"]]) {
+    for (const [electron, shipped] of [[undefined, pinned], [pinned, undefined], [pinned, "45.2.1"], ["45.2.1", "45.2.1"]]) {
       await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron }));
       await rm(versionFile, { force: true });
       if (shipped) await writeFile(versionFile, shipped + "\n");
