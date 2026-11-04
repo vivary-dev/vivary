@@ -118,9 +118,10 @@ is the desktop package's only runtime npm dependency.
 npm --prefix packages/desktop run package
 ```
 
-While Electron publication is held, this command refuses before it stages anything,
-because no Electron release is admitted. The rest of this section describes what it
-does once one is.
+Packaging requires the exact Electron pin in `package.json` to appear in
+`ADMITTED_ELECTRON` in [`runtime-security.mjs`](../workbench/bin/runtime-security.mjs).
+Electron 45.2.3, with embedded Node 24.22.2, is admitted. Standalone Node checks
+still apply.
 
 The packager writes a dated directory under `dist/`. It stages the desktop
 entry, compiled Workbench output, startup scripts, ordinary Node, the original
@@ -289,8 +290,8 @@ folder, with forward slashes, to its lowercase SHA-256. The
 are the asset authorities. [Electron Packager](https://github.com/electron/packager/blob/v20.3.0/README.md)
 supports cross-platform assembly, but Vivary's mandatory native runtime
 collector requires matching Windows x64 evidence and refuses that collection
-on Linux. Electron publication remains held because standalone Node admission
-does not resolve its incomplete advisory backport evidence.
+on Linux. Electron admission is separate from standalone Node admission; neither
+check establishes Windows acceptance.
 
 `vivary.exe` carries the Vivary name and icon. The icon is
 `assets/vivary.ico`, made from the site mark `site/src/assets/vivary-mark.png`
@@ -336,9 +337,9 @@ npm --prefix packages/desktop run package -- --windows-x64
 npm --prefix packages/desktop run installer -- --payload <dist>/<time>/Vivary-win32-x64 --output Vivary-Setup-<version>.exe --manifest <dist>/<time>/package-file-manifest.json
 ```
 
-While Electron publication is held, both commands refuse: the packager before it
-stages anything, and the installer build at its runtime check. The rest of this
-section describes them once an Electron release is admitted.
+Both commands enforce runtime admission. The installer also checks that the
+payload's build metadata and shipped version file identify the pinned Electron
+release.
 
 The first command writes the dated `<dist>/<time>/` folder, which holds both the
 `Vivary-win32-x64` payload and its `package-file-manifest.json`.
