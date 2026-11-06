@@ -748,6 +748,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-06 Specification reader data embedding. The guide and atlas pages now
+hold their generated data in the page script instead of a JSON script element
+that the page read back from the DOM. The atlas link base is now a fixed value.
+Both pages stay generated, read-only documentation with no server, so the
+description of the specification reader still holds. No runtime or product
+boundary changed.
+
 2026-11-03 Discord presence reload order, isolation and settings fixes. The
 desktop controller numbers each settings reload before it reads the file and
 applies only the newest request. An older On read that finishes after a newer
