@@ -8262,6 +8262,11 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-06 Repository README rewrite. The README now describes the published
+beta, with its download, status and an architecture diagram simplified from the
+existing system diagram. Images sit under `assets/`. No package, runtime or
+boundary changed, so the architecture described here still holds.
+
 2026-11-06 Specification reader data embedding. The guide and atlas pages now
 hold their generated data in the page script instead of a JSON script element
 that the page read back from the DOM. The atlas link base is now a fixed value.
