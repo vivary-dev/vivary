@@ -187,7 +187,7 @@ describe("Vivary owner sign-in page", () => {
       assert.doesNotMatch(html, /http-equiv|src=|href=|https?:\/\//i);
       assert.doesNotMatch(html, /email|password|signup|<form/i);
     }
-    const pageCopy = (html: string) => html.replace(/<script>[\s\S]*<\/script>/, "");
+    const pageCopy = (html: string) => html.slice(0, html.indexOf("<script>")) + html.slice(html.lastIndexOf("</script>") + "</script>".length);
     const storageMessage = /\n {2}<div id="storage-blocked" hidden>[\s\S]*?<\/div>/;
     assert.match(VIVARY_OWNER_SIGN_IN_HTML["private-proxy"], storageMessage);
     assert.doesNotMatch(VIVARY_OWNER_SIGN_IN_HTML.local, storageMessage);
