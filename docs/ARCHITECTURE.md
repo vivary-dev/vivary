@@ -748,6 +748,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-06 PR #319 Actions contract repair. The CI, review and npm workflows
+already select setup-python 7.1.0 and setup-node 7.1.0 by immutable commit.
+Their checkers now require those exact identities, after reading each pinned
+upstream action manifest: both keep Node24 setup/cache-save entrypoints, no pre
+entrypoint and a success-only post. Previous or mutable refs remain refused.
+The Python/OpenSSL and Node runtime admission steps, base-owned review script,
+publication consent and permissions are unchanged. Diagnostic contract checks
+failed on the original head and pass on the correction; qualified hosted
+execution and independent/human review remain required. No publication or
+application runtime behavior changed, so the architecture above remains accurate.
+
 2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
 desktop package README, the acceptance register and the changelog now point at the
 `v0.1.0-beta.1` GitHub prerelease instead of the September `desktop-preview-*`

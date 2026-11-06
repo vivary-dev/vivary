@@ -47,6 +47,22 @@ def test_actual_workflow_passes_without_changing_it():
     assert WORKFLOW.read_bytes() == before
 
 
+def test_action_updates_reject_previous_or_mutable_refs_in_either_job():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    replacements = (
+        ("actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+         "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"),
+        ("actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+         "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"),
+    )
+    for current, previous in replacements:
+        assert text.count(current) == 2
+        for occurrence in (0, 1):
+            start = [match.start() for match in re.finditer(re.escape(current), text)][occurrence]
+            for replacement in (previous, current.split("@", 1)[0] + "@v7.1.0"):
+                assert check(text[:start] + replacement + text[start + len(current):]), (occurrence, replacement)
+
+
 def test_each_job_must_guard_its_own_runtime_before_npm():
     text = WORKFLOW.read_text()
     command = "          " + load().NODE_GUARD + "\n"
