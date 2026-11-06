@@ -21,8 +21,8 @@ is a separate delivery target.
 
 Before merging, resolve review findings and require passing applicable CI plus
 one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
-gate script from the pull request's base commit, or, while the base has no script (`prod`
-before its next promotion), from the commit pinned in the workflow, so a pull request's
+gate script from the pull request's base commit, or, while a base has no script,
+from the commit pinned in the workflow, so a pull request's
 edits to the script apply only after merge. PR #193, which introduced the gate, ran its own
 earlier commit, whose script is identical to its reviewed final script.
 It requires a completed independent review of the exact head and base, published by the
