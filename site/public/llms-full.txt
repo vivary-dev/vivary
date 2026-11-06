@@ -7087,11 +7087,12 @@ content scan. The run keeps these files:
 A manual run (`workflow_dispatch`) or a push to a branch named
 `release-dry-run/<name>` is a dry run. It keeps the files as a workflow artifact
 and creates no tag or release. GitHub starts a manual run only for a workflow on
-the default branch, so until this workflow is on `main`, push a dry-run branch
+the default branch, so until this workflow is on `prod`, push a dry-run branch
 instead. A pushed `v<version>` tag that matches
 `packages/desktop/package.json`, such as `v0.1.0-beta.1`, also creates a draft
 prerelease with Latest off and attaches the same files. Only the owner pushes the
-tag and publishes the draft. `scripts/check_ci_workflow.py` checks the admission
+tag and publishes the draft. Push the tag on `prod`, after the `dev` to `prod`
+promotion merges, so every release is built from the release branch. `scripts/check_ci_workflow.py` checks the admission
 step and the pinned Actions. `scripts/check_desktop_release_workflow.py` checks that
 the toolchain steps match `ci.yml` and that every Node pin matches the Node the
 Windows package bundles. It also checks the triggers, the permissions, and the
@@ -8261,6 +8262,20 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-11-06 Release branch name. `AGENTS.md`, `CONTRIBUTING.md` and
+`docs/RELEASE-WORKFLOW.md` named `main` as the default branch and the target of
+promotions from `dev`. The repository has no `main`. Its default branch is
+`prod`, so promotions had no named target, and `v0.1.0-beta.1` was tagged on a
+`dev` commit that `prod` did not contain. Those three files now name `prod`,
+and they state that a release promotes `dev` into `prod` first and puts its tag
+on `prod`. The push trigger in `.github/workflows/ci.yml` changes from
+`[dev, main]` to `[dev, prod]`, so CI runs on pushes to the branch releases
+come from. No package, runtime, persistence or trust boundary changed. Entries
+below that say `main` record what happened at the time and stay as written.
+Evidence: `git ls-remote` lists `dev` and `prod` and no `main`, the GitHub API
+reports `prod` as the default branch, `python scripts/check_ci_workflow.py`
+passes, and `scripts/tests/test_ci_workflow.py` passes 62 of 62.
 
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the

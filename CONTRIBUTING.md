@@ -10,16 +10,18 @@ The original `vivary-dev/vivary-cli` repository retains its release workflow and
 is a separate delivery target.
 
 - `dev` integrates reviewed work.
-- `main` is the default branch and receives reviewed promotions from `dev`.
+- `prod` is the default branch and the release branch. It receives reviewed
+  promotions from `dev`. Every release promotes `dev` into `prod` first, and the
+  release tag goes on `prod`.
 - Topic branches start from current `origin/dev`. Use `feat/`, `fix/`, `docs/`,
   `chore/`, `refactor/`, `test/`, or `perf/` followed by a short purpose.
-- Open topic PRs into `dev`. Do not commit directly to `dev` or `main`.
+- Open topic PRs into `dev`. Do not commit directly to `dev` or `prod`.
 - Push reviewed source branches to GitHub (`origin`) and the Entire mirror
   (`entire`). Source mirroring does not establish agent-session capture.
 
 Before merging, resolve review findings and require passing applicable CI plus
 one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
-gate script from the pull request's base commit, or, while the base has no script (`main`
+gate script from the pull request's base commit, or, while the base has no script (`prod`
 before its next promotion), from the commit pinned in the workflow, so a pull request's
 edits to the script apply only after merge. PR #193, which introduced the gate, ran its own
 earlier commit, whose script is identical to its reviewed final script.
@@ -42,16 +44,16 @@ Actions billing or runner failures do not block this verification path. Record
 executed checks, omissions, logs, and review evidence as Zo CI. Keep GitHub service
 failures separate from test failures. Do not relabel an unrun Actions or Windows
 job as successful. Passing applicable Zo CI satisfies the CI gate, subject to the
-same review and product acceptance requirements. Promotion to `main` also needs Jeff's acceptance of
+same review and product acceptance requirements. Promotion to `prod` also needs Jeff's acceptance of
 the delivered product milestone. This does not authorize a public release.
 
 On 2026-09-13, GitHub refused branch-protection configuration while this
 repository was private under the organization's Free plan. These rules remain
 contributor policy. On 2026-09-24, `dev` still had no branch protection.
 
-Dependabot reads configuration from `main`. Its version updates target `dev`
-once this configuration reaches `main`. GitHub security updates still target
-`main`, so review those changes and bring equivalent fixes into `dev` before
+Dependabot reads configuration from `prod`. Its version updates target `dev`
+once this configuration reaches `prod`. GitHub security updates still target
+`prod`, so review those changes and bring equivalent fixes into `dev` before
 promotion. Do not merge a security update that leaves the integration branch
 unfixed. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
 
