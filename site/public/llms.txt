@@ -68,8 +68,9 @@ sources are the same canonical procedures.
 - White paper: https://vivary.vercel.app/white-paper/
 - Advanced recipes: https://vivary.vercel.app/howto/
 - Public signals: https://vivary.vercel.app/signals/
+- Windows prerelease installation: https://vivary.vercel.app/desktop-preview/
 - Release workflow: https://vivary.vercel.app/release-workflow/
-- Architecture: https://vivary.vercel.app/architecture/
+- High-level design: https://vivary.vercel.app/architecture/
 - Migration status: https://vivary.vercel.app/migration-status/
 - Decisions: https://vivary.vercel.app/decisions/
 - Obsidian (optional): https://vivary.vercel.app/obsidian/

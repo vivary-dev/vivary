@@ -2,12 +2,14 @@ import { HeaderActionsProvider } from "@agent-native/toolkit/app-shell";
 import { Button, ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@agent-native/toolkit/ui";
 import { IconMenu2 } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigationType } from "react-router";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Header } from "./Header";
 import { CodeRunControl } from "./CodeRunControl";
 import { Sidebar } from "./Sidebar";
+import { SettingsPromptAlert } from "./SettingsPromptAlert";
 import { Workspace } from "../workspace/Workspace";
+import { useSettingsChatHandoff } from "@/lib/settings-chat-handoff";
 import { readPanelWidth, savePanelWidth, useNarrowLayout, type PanelHandle } from "./use-workspace-layout";
 
 const WIDTH_KEY = "vivary.navigation.width";
@@ -18,7 +20,10 @@ function readClosed() {
 
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigationType = useNavigationType();
+  const previousPathname = useRef(location.pathname);
   const settings = location.pathname.startsWith("/settings");
+  const handoff = useSettingsChatHandoff(settings);
   const narrow = useNarrowLayout();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readClosed);
@@ -39,7 +44,12 @@ export function Layout({ children }: { children: ReactNode }) {
     if (narrow || collapsed) panel.current?.collapse();
     else panel.current?.resize(readPanelWidth(WIDTH_KEY, width, 200, 400));
   }, [narrow, collapsed, width, shellWidth]);
-  useEffect(() => { setMobileOpen(false); }, [location.pathname, location.search]);
+  useEffect(() => {
+    const changedPage = previousPathname.current !== location.pathname;
+    previousPathname.current = location.pathname;
+    // Conversation restoration replaces query state without a navigation choice.
+    if (changedPage || navigationType !== "REPLACE") setMobileOpen(false);
+  }, [location.key, location.pathname, navigationType]);
 
   function changeCollapsed(next: boolean) {
     setCollapsed(next);
@@ -64,7 +74,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <ResizablePanel id="projects" panelRef={panel} defaultSize={narrow || collapsed ? 0 : width}
           minSize={200} maxSize={400} collapsible collapsedSize={0} groupResizeBehavior="preserve-pixel-size">
           <div className="h-full" hidden={narrow || collapsed}>
-            <Sidebar collapsed={false} onCollapsedChange={changeCollapsed} />
+            <Sidebar />
           </div>
         </ResizablePanel>
         <ResizableHandle className="workspace-resize-handle" disabled={narrow || collapsed}
@@ -79,6 +89,9 @@ export function Layout({ children }: { children: ReactNode }) {
               {settings && <Link className="ml-auto text-sm underline" to="/">Return to workspace</Link>}
             </header>
             <CodeRunControl />
+            {handoff.undelivered && <SettingsPromptAlert
+              key={handoff.undelivered.submitMessageId ?? handoff.undelivered.prompt}
+              undelivered={handoff.undelivered} onDismiss={handoff.dismiss} />}
             <main id="workbench-content" tabIndex={-1} className="relative min-h-0 min-w-0 flex-1">
               {!settings && <div className="h-full"><Workspace /></div>}
               {settings && <div className="h-full overflow-auto"><Header />{children}</div>}
@@ -91,7 +104,7 @@ export function Layout({ children }: { children: ReactNode }) {
           onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus(); }}>
           <SheetTitle className="sr-only">Projects and conversations</SheetTitle>
           <SheetDescription className="sr-only">Choose a project, open its conversation, or change settings.</SheetDescription>
-          <Sidebar collapsed={false} collapsible={false} />
+          <Sidebar />
         </SheetContent>
       </Sheet>
     </div>

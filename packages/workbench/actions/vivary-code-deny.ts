@@ -7,7 +7,7 @@ import {
 } from "../server/local-code-agent.ts";
 
 export default defineAction({
-  description: "Deny one exact pending Vivary coding request without starting a model or tools.",
+  description: "Decline a pending native Codex action or question.",
   schema: z.object({
     projectId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
     runId: z.string().trim().min(1).max(128),

@@ -6,7 +6,10 @@ import { installRouteChunkRecovery } from "@agent-native/core/client/route-chunk
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
+import { installOwnerSessionFetch } from "./lib/owner-session-fetch";
+
 installRouteChunkRecovery();
+installOwnerSessionFetch();
 
 const basePath = appBasePath();
 const pathname = window.location.pathname;

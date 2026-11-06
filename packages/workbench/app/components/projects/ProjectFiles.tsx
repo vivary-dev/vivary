@@ -5,11 +5,9 @@ import { Link, useSearchParams } from "react-router";
 import { useProjects } from "./ProjectContext";
 import type { ProjectFilesResult } from "@/lib/project-file-schema";
 
-export function projectFileHref(projectId: string, path: string, search = "") {
-  const params = new URLSearchParams(search);
-  params.set("panel", "files"); params.set("project", projectId); params.set("path", path);
-  return "/?" + params.toString();
-}
+import { projectFileHref } from "@/lib/project-file-location";
+
+export { projectFileHref };
 
 export function ProjectFiles() {
   const { activeProject, workspaceAvailable, checking } = useProjects();

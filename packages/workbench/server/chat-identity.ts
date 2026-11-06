@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import type { ChatThread } from "@agent-native/core/server";
 import { vivaryChatScope, type VivaryChatIdentity } from "../app/lib/chat-scope";
+import { projectChatScopeId } from "./chat-project-scope.mjs";
 
 /** Identity excludes mutable labels, paths and grant revisions. Native still owns access and messages. */
 export function createVivaryChatIdentity(
@@ -17,8 +18,14 @@ export function createVivaryChatIdentity(
   if (target.projectId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(target.projectId)) {
     throw new Error("Choose a registered project.");
   }
-  const key = createHash("sha256").update(JSON.stringify([owner, orgId, target.projectId])).digest("hex");
+  const id = projectChatScopeId(owner, orgId, target.projectId);
   return { kind: "project", projectId: target.projectId,
-    scope: { type: "workspace-app", id: `vivary-project-chat-v2:${key}`, label: target.label },
-    storageKey: `vivary-project-chat-v2:${key}` };
+    scope: { type: "workspace-app", id, label: target.label }, storageKey: id };
+}
+
+export function threadBelongsToChatIdentity(identity: VivaryChatIdentity,
+  thread: Pick<ChatThread, "ownerEmail" | "orgId" | "scope">, ownerEmail: string, orgId: string): boolean {
+  return thread.ownerEmail.toLowerCase() === ownerEmail.toLowerCase()
+    && (thread.orgId === null || thread.orgId === orgId)
+    && thread.scope?.type === identity.scope.type && thread.scope.id === identity.scope.id;
 }

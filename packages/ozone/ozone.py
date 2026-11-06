@@ -24,6 +24,7 @@ evidence · 2 for a refused governed request or invalid request document.
 """
 import argparse
 import datetime
+import functools
 import importlib.util
 import json
 import math
@@ -1369,8 +1370,9 @@ class OzoneError(Exception):
     pass
 
 
+@functools.cache
 def _load_tropo():
-    """Load the tropo engine in-process. Returns (module, tropo_dir).
+    """Load the tropo engine in-process once. Returns (module, tropo_dir).
 
     Prefers the in-repo sibling `../tropo/tropo.py` (so repo work uses the repo
     engine); when installed, falls back to the `vivary-tropo` dependency (`import
@@ -1389,6 +1391,18 @@ def _load_tropo():
     except ImportError as e:
         raise OzoneError(f"tropo engine not found (install vivary-tropo): {e}")
     return module, os.path.dirname(os.path.abspath(module.__file__))
+
+
+_TROPO_FACADE_ERRORS = ("TropoFacadeError", "TargetUnavailableError")
+
+
+def __getattr__(name):
+    # The public reads raise Tropo's facade errors, and the front door catches
+    # them as `ozone.TropoFacadeError`. Reading one loads the engine, so
+    # importing Ozone never runs Tropo.
+    if name in _TROPO_FACADE_ERRORS:
+        return getattr(_load_tropo()[0], name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_workspace_graph(root):
@@ -1451,15 +1465,22 @@ def structure_pack(nodes, edges):
 
     # Broken edges are surfaced here for the reviewer, but tropo `check` is the
     # enforcing authority (it fails on the same W220 condition) — no double-enforcement.
+    findings.extend(finding for _edge, finding in _broken_edge_findings(nodes, edges))
+    return findings
+
+
+def _broken_edge_findings(nodes, edges):
+    """Pair each broken edge with its structure finding, in stable edge order."""
+    pairs = []
     for e in sorted(edges, key=lambda x: (x["from"], x["field"], x["to"])):
         if e.get("broken"):
             n = nodes.get(e["from"])
-            findings.append({
+            pairs.append((e, {
                 "severity": "warn", "rule": "broken-edge", "id": e["from"],
                 "type": n["type"] if n else None, "path": n["path"] if n else None,
                 "message": f"edge {e['from']} --{e['field']}--> {e['to']} is broken "
-                           f"(target missing); tropo check enforces this"})
-    return findings
+                           f"(target missing); tropo check enforces this"}))
+    return pairs
 
 
 def workspace_rel(root, path):
@@ -1709,6 +1730,96 @@ def selected_packs(name):
     if name not in known:
         raise OzoneError(f"unknown review pack {name!r}")
     return [name]
+
+
+PUBLIC_REVIEW_SCHEMA = "vivary.review-result/v0"
+PUBLIC_IMPACT_SCHEMA = "vivary.impact-result/v0"
+# Context-budget reads routing files from disk, so only the packs that take
+# nothing but the graph run over the privacy-filtered one.
+PUBLIC_REVIEW_PACKS = {"structure": structure_pack, "editorial": editorial_pack}
+PUBLIC_REVIEW_RULES = (
+    "change-unverified",
+    "change-ungated",
+    "module-unverified",
+    "orphan",
+    "broken-edge",
+    "draft-unreviewed",
+    "draft-unedited",
+    "draft-structure-missing",
+    "review-unlinked",
+    "edit-unlinked",
+)
+
+
+def _public_finding(finding, edge=None):
+    row = {key: finding[key] for key in ("severity", "rule", "id", "type", "path")}
+    if edge is not None:
+        row["field"] = edge["field"]
+    return row
+
+
+def public_review(root, *, pack, allowlist):
+    """Review the privacy-filtered graph without naming anything private.
+
+    Findings drop the pack's free-text `message`, which names a broken edge's
+    target. A broken-edge finding keeps its source node and adds `field`, the
+    frontmatter key that holds the broken ref, so a ref to a private note and a
+    ref to a missing id give the same finding.
+    """
+    if pack not in PUBLIC_REVIEW_PACKS:
+        raise ValueError("pack must be structure or editorial")
+    tropo, _ = _load_tropo()
+    graph = tropo.public_graph(root, allowlist=allowlist)
+    nodes, edges = graph["nodes"], graph["edges"]
+    findings = [
+        _public_finding(finding)
+        for finding in PUBLIC_REVIEW_PACKS[pack](nodes, edges)
+        if finding["rule"] != "broken-edge"
+    ]
+    if pack == "structure":
+        findings.extend(
+            _public_finding(finding, edge)
+            for edge, finding in _broken_edge_findings(nodes, edges)
+        )
+    warnings = sum(finding["severity"] == "warn" for finding in findings)
+    return {
+        "schema": PUBLIC_REVIEW_SCHEMA,
+        "pack": pack,
+        "reviewed": len(nodes),
+        "warnings": warnings,
+        "notes": len(findings) - warnings,
+        "complete": graph["complete"],
+        "findings": findings,
+        "omissions": graph["omissions"],
+    }
+
+
+def public_impact(root, node_id, *, allowlist):
+    """List what depends on one public node, through public edges only.
+
+    A dependent that reaches the target only through a private note is not
+    counted, so `impacted` is a lower bound whenever the omissions list a
+    privacy exclusion.
+    """
+    tropo, _ = _load_tropo()
+    graph = tropo.public_graph(root, allowlist=allowlist)
+    nodes = graph["nodes"]
+    if not isinstance(node_id, str) or node_id not in nodes:
+        raise tropo.TargetUnavailableError()
+    impacted = tropo.blast_radius(graph["edges"], node_id)
+    items = sorted(impacted.items(), key=lambda kv: (kv[1]["distance"], kv[0]))
+    return {
+        "schema": PUBLIC_IMPACT_SCHEMA,
+        "target": node_id,
+        "impacted": len(items),
+        "complete": graph["complete"],
+        "nodes": [
+            {"id": nid, "distance": d["distance"], "via": d["via"],
+             "type": nodes[nid]["type"], "path": nodes[nid]["path"]}
+            for nid, d in items
+        ],
+        "omissions": graph["omissions"],
+    }
 
 
 def cmd_review(args):

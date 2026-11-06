@@ -59,6 +59,75 @@ Use the installed Toolkit resizable components. Proposed desktop starting dimens
 
 The [W3C splitter pattern](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/) informs keyboard and accessibility behavior; validate the actual component and its caveats. Do not treat a splitter role or a passing typecheck as accessibility proof.
 
+## Conversation content search
+
+Project conversations and Unassigned conversations each have a search input for
+words in titles or saved messages. Include archived is explicit. Unassigned
+follows the existing Native history list; project-less Code runs belong to
+Personal workspace. Results show project, runtime, title, a highlighted excerpt
+and relative message/session time. Stable IDs remain in links and data attributes,
+so duplicate titles have distinct destinations without showing internal IDs.
+
+Typing waits briefly; Enter starts immediately. An active query replaces the
+ordinary list; Clear or Escape restores it. The client automatically continues
+up to twelve bounded requests, a page of 25 hits, completion or three seconds
+(checked between requests). Progress counts authorized conversations and offers
+Cancel. Search more history appears when automatic work stops with a cursor.
+Retry and Resume retain earlier hits and continue at the same cursor. A new query,
+filter or scope cancels previous work and rejects stale replies. Expired cursors
+explicitly offer Start again.
+
+Opening a result preserves project context and focuses a visibly marked message,
+with a brief arrival fade that respects reduced motion. Scroll settling leaves
+Core's follow-bottom mode and yields to subsequent user scrolling. Native replay
+imports the head path containing the match, or the branch through it to its newest
+retained leaf. Code replay loads up to 400 events around the checked byte anchor,
+including up to 60 preceding events, with the normal assistant deduplication.
+The ordinary twenty-run list and latest-400-event window remain unchanged. Match
+views disable the composer, omit saved queues and refuse runtime execution,
+including retry/edit paths. Core's standalone Native replay has no persistence
+opt-out; its supported cleanup API removes the transient session-storage import
+on exit. Search and replay always read the authoritative stores, including after
+restart. Forgotten or removed active-memory facts can remain findable in history.
+
+Native match reads verify archive state before Return to latest conversation can
+open an editable view. Return stays disabled while the read is loading and for a
+proven-archived match. Project and Personal matches explain that the user must
+restore the conversation from Archived conversations, then reopen it to continue.
+Unassigned history has no restore control: its archived match notice and disabled
+composer say, "This conversation is archived and read-only here."
+If the match read fails, a short explanation offers Return or another search.
+Return removes the unread thread and all match anchors, then uses the existing
+saved-selection restore, which refuses archived threads. Read-only replay preserves
+the saved latest selection; returning from a verified active match keeps that thread.
+
+Each request returns at most 25 hits and scans at most 25 authorized sessions,
+500 messages and 16 MiB of store bytes. Native repositories above 8 MiB, Native
+message text above 64 Ki characters, Code records above 64 KiB and transcript
+lines above 256 KiB are skipped with a coverage notice. Native JSON is parsed once
+per session page; malformed repositories are skipped without blocking the cursor.
+Code metadata checks precede the session cap and transcript access, with a separate
+4 MiB metadata budget and 10,000 directory-entry cap. Metadata admission favors
+newest timestamp-based run filenames within that budget; coverage outside it
+remains incomplete. Foreign runs contribute no
+public counts or excerpts. An incomplete final transcript line retains its offset
+until its writer appends a newline. Each runtime scans newest sessions first using
+updated time and stable ID; cursors retain the ordering key and search start time.
+A search fixes its admission snapshot at startup, using the later of the wall
+clock and the largest saved update timestamp among eligible Native conversations.
+This includes saves already present when Core's monotonic timestamps lead the
+clock. Continuations keep that snapshot. New conversations wait for a new search.
+Existing conversations updated past the snapshot before admission are skipped until
+the search is started again; the coverage notice explains this and says to start
+again. A partly-read, admitted conversation finishes even if it changes, using
+its original ordering key and current authorized content. Ownership, scope,
+archive and size checks still apply.
+The client merges retrieved hits by session recency across runtimes. Cursors bind
+owner, organization, scope, filters and query, and expire at server restart. Native
+results remain available when the Personal Code workspace is unavailable, with a
+specific notice. There is no derived index, new transcript owner or project-folder
+copy.
+
 ## Harness choice and observed availability
 
 The control presents a grouped list. Group headings identify the harness, use a small reviewed logo or a neutral fallback, and expose readiness when it affects selection. Rows show models actually observed through that harness. Different registered instances remain distinguishable by a short account/endpoint label when needed, without exposing credentials. The selected harness owns its tools, MCP configuration, models and native permission semantics. Vivary does not provide a second general tool picker.
@@ -73,6 +142,63 @@ An active or approval-pending run is not transferred by selecting another model.
 
 Three facts must be visible on demand: recorded history available, context supplied for this turn, and harness-native session continuity. These are not interchangeable. Paginated read tools retrieve exact existing messages and artifact references. Do not copy transcripts into another app-state store, replay raw tool calls as new commands, or share opaque resume state between harnesses. If full context exceeds capacity or an event type cannot be translated, describe what is omitted or summarized and retain access to the original.
 
+### Linked conversation first unit
+
+Saved Code conversations now offer **Linked conversation** beside the composer.
+Choose a different configured Code harness or Native chat. A saved project Native
+conversation offers either configured Code harness. The new target opens inactive
+in the same selected project. The original draft is saved in its original owner.
+A source whose send waits for review can still be linked, and its pending send
+stays in the source unchanged.
+Pending approvals stay in the source. Nothing is sent by selection. If saving or
+creation fails, the source remains selected and **Retry link** is available.
+
+The linked-history notice names the original conversation and gives its available
+completed-history count. An archived Native original has no link. The notice says
+to restore it from Archived conversations, and its history is still supplied. It distinguishes prepared context from an accepted Code
+send. Preparation can precede a refused request. Code acceptance is bound to the
+actual user event after final project and host checks. A Code target that resumes
+its own provider session gets the linked history once, and later sends in that
+session do not repeat it. Neither stage confirms
+provider ingestion. The notice updates while mounted through the ordinary request
+lifecycle. Expanded inspection shows the exact completed boundary, excerpt size
+and detailed session identity explanation.
+Source-to-target native session continuity is absent. Each target retains its own
+normal harness session. Code session Details continues to report that target's
+recorded continuity. A send's excerpt is at most 100 entries and 12,000
+characters, taken from the latest entries that end at the boundary. **Inspect linked history** and **More recorded history** page through
+the same frozen source boundary, rechecking current authority on every read.
+Later source work is excluded. Actual recorded tool results and artifact labels
+and references are quoted as history, never replayed as tool calls. Runtime
+bookkeeping and private reasoning are excluded. A Native attachment, image or
+other unsupported part appears as a placeholder that names it as not included.
+An empty saved Native conversation
+has no completed portion and can link onward to Code. An entry that does not fit
+a page starts the next one. Only an entry longer than a whole page is shortened,
+and its text says so. A shortened entry or omitted page is labeled as truncated,
+and the original stays readable. New linking refuses sources beyond
+the 8 MiB read limit. A source that grows past it after linking keeps its
+frozen prefix. An active source with no completed work links with an empty
+completed-history notice. Optimistic unsent Native drafts are not saved sources.
+
+Metadata stays in the existing Workbench Native-backed database. Native keeps
+messages and Code transcripts. The link binds both creation identities, project
+binding, owner and organization, and an exact completed-prefix digest. A project
+folder reconnect keeps the binding, so the link and its older sources stay usable.
+Revoked membership, a replaced binding, an invalid target link record or a
+foreign page cursor is refused. Editing or regenerating a Native source message
+keeps the linked prefix, because it is read from the retained boundary message.
+When the original is deleted, revoked or no longer matches its frozen prefix, the
+notice shows it as unavailable and sends continue without linked history. No
+prepared or accepted portion is recorded for those sends. Historical text and tool results are quoted data, with
+no raw tool replay, transferred grant or copied provider resume ID. The target's
+existing project tools, permission policy and host admission still apply.
+
+The maintained `test:linked-conversations` target covers production stores and
+controls. Independent review and a built normal-app journey remain required.
+Prepare handoff, execution leases and concurrency are not implemented by this
+unit and remain part of the full issue #38 scope.
+
 ## Prepare handoff
 
 This action submits a named workflow to the existing agent conversation. It does not happen automatically just because the user picks another harness. The agent reviews the actual project and updates the designated existing handoff/documentation surface. Deterministic actions gather facts, check scope and versions, validate required fields, and write through existing conflict-aware file owners.
@@ -80,6 +206,32 @@ This action submits a named workflow to the existing agent conversation. It does
 Proposed handoff fields: goal, current source/file versions, decisions, changes, checks with actual outcomes, unfinished work, risks, linked source conversation/event boundary, and the next concrete action. A dirty working tree is a legitimate reported state. No automatic clean, discard, commit, merge or deletion is part of preparing a handoff.
 
 Freshness is explicit. A reviewed handoff records the project version and completed-event boundary it covers. Later changes can mark it Out of date deterministically. Jeff accepted **Manual by default** on 2026-09-14 through his submitted review of guide snapshot `e86d06ed592a2d3c`. The agent updates the narrative when the user requests it, and the work follows normal authorization. A failed update retains the previous readable version and shows Retry. It does not report a fresh handoff. A future project may propose named completion checkpoints through a separate explicit opt-in.
+
+Implementation status, 2026-10-18: a first unit is implemented in PR #236.
+Jeff decided three details on 2026-10-16. Save happens only on a second owner click, **Save handoff**. A project with
+no designated state document, such as a plain workspace or one without its
+`STATE.md`, refuses Prepare with a message that says so. The handoff block goes
+at the end of `STATE.md`, so the first 1,200 characters that load into each
+turn stay as they were.
+
+**Prepare handoff** in a saved project conversation sends a request to that
+conversation. The agent replies with one `vivary-handoff` block, and Vivary
+writes nothing until the owner clicks **Save handoff**. Vivary then checks the
+reply, adds the project version and conversation boundary itself, and replaces
+or appends one marked block in the state document. Every other byte stays. A
+dirty working tree is reported as a count. A changed file or a changed project
+binding stops the save and leaves the file as it is. If the write fails, Vivary
+rereads the state document and offers Retry only when it still holds the
+version from Prepare. Otherwise, and when the save record cannot be stored,
+Vivary reports that the file may have changed, and the owner inspects it and
+prepares again. A conflict needs a new Prepare, offered as **Update handoff**. The
+control then reads Fresh, Out of date with its reasons, Unverifiable, Pending
+or Failed. Freshness is checked when the conversation updates, with no timer
+and no model call. Switching harness does not prepare or send anything.
+
+The maintained `test:handoff` target covers these rules with production stores.
+Independent review, the built normal-app journey with a real agent in Code and
+Native, and Windows acceptance remain required.
 
 ## Template distribution
 
@@ -98,7 +250,9 @@ Implementation status: the first shell merged in [PR #42](https://github.com/viv
 | Owner | Reuse and change boundary |
 | --- | --- |
 | `app/root.tsx`, `app/components/layout/Layout.tsx` | Preserve Native, query, appearance, project, and file-draft providers. `Layout` now mounts the canonical `Workspace` below those owners while settings keep their separate utility view. |
-| `app/components/workspace/Workspace.tsx` | Own the selected conversation area, header-first Details control, optional Files and Preview panels, responsive single-surface behavior, and panel focus/width preferences. |
+| `app/components/workspace/Workspace.tsx` | Own the selected conversation area, header-first Details control, optional Files, Preview, and Search panels, responsive single-surface behavior, and panel focus/width preferences. |
+| `app/components/projects/ProjectSearch.tsx`, `app/lib/project-search-state.ts`, `app/lib/project-file-location.ts` | Scoped filename, text, and regex search inside the optional Search panel; results open the file at a line. The reducer owns request staleness; file locations are URL state with one href owner. |
+| `actions/vivary-project-search.ts`, `server/project-search.ts`, `app/lib/project-search-schema.ts` | Bounded, read-only project search that reuses the project file boundary, skip, and secret rules. No index, shell, or bundled binary; limits and a continuation cursor replace streaming. |
 | `app/components/workspace/CodeConversation.tsx` | Compose existing Code history, selected run, approval, Stop, model control, and draft behavior in the canonical workspace. The current runtime still permits one active run. |
 | `app/components/workspace/NativeConversation.tsx` | Compose Native `AgentChatSurface` with server-derived actor/organization/project scope and thread URL synchronization. Legacy v1 chats use their unchanged identity under Unassigned. |
 | `app/components/projects/ProjectFiles.tsx`, `app/routes/files.tsx` | Open the real project file browser and document view inside the optional panel. Documents remain read-first. Edit, Save, Rename, conflict recovery, and drafts retain their existing owners. |
@@ -142,7 +296,7 @@ Each implementation unit gets focused checks and affected real hosted verificati
 | Open an existing project | One workspace appears; metadata is compact and no file opens automatically. |
 | Open a previous conversation | Existing history, harness identity and unsent draft remain intact. No duplicate session. |
 | Start another conversation in the same project | The new chat has separate history, bounded context and draft state. The earlier conversation remains available. |
-| Inspect potentially concurrent work | Each thread has visible activity and approvals. Conflicting edits to shared files are controlled. Until concurrency lands, the interface states that only one run can be active. |
+| Inspect potentially concurrent work | Deferred to issue #228. This release accepts the interim row: the interface states that only one run can be active and offers Open. |
 | Open a file, edit, close and reopen | Formatted read view first; explicit edits and recoverable draft survive. Composer and run are unchanged. |
 | Resize and close panels | Pointer and keyboard work; focus returns; minimum chat space and remembered widths remain usable. |
 | Use a 390 px viewport and 200% zoom | Navigation, composer, context, approval and Stop remain reachable without crushed columns. |
@@ -151,6 +305,6 @@ Each implementation unit gets focused checks and affected real hosted verificati
 | Select an unavailable model | Accurate readiness state and supported recovery; no invented capability or silent fallback. |
 | Prepare handoff, then change files | Existing designated document updates with actual evidence; later changes mark it stale; failure retains previous content. |
 | Close all panels during work | Active work and Stop remain visible; no hidden execution or lost approval. |
-| Use a non-Git writing/research project | Plans and documents work normally; Git-specific controls explain absence only when relevant. |
+| Use a non-Git writing/research project | Plans and documents work normally; Git-specific controls explain absence only when relevant. Project details offers an on-demand health check that shows the same result as `vivary doctor --json`: redundant or unknown frontmatter stays a warning, a missing required field or a broken link is an error, and no Git or npm fact appears for a folder without a repository or a package manifest. |
 
 The first shell and integrated file, conversation, project-recovery, and panel journeys passed on the tested private hosted candidate and merged in PR #42. The acceptance evidence above defines that scope. No model ran, and no Windows artifact was tested. The supported harness catalog, cross-harness linking, handoff workflow, and concurrent runtime remain incomplete.

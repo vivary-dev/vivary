@@ -4,7 +4,8 @@ module_refs: [root-observation, project-registry, native-runtime, project-writeb
 
 # Vivary source map
 
-Use this bounded graph after selecting work from the [program frontier](../index.md).
+Use this bounded graph after selecting a live owning GitHub issue. The
+[program frontier](../index.md) is a navigation reference, not a second task ledger.
 It routes from a product responsibility to its canonical contract, implementation,
 tests, and evidence without copying those sources.
 

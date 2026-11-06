@@ -1,7 +1,7 @@
 ---
 title: "Vivary guides"
 description: "Task-based Vivary guides for creating or adopting a workspace, connecting agents, retrieving context, writing records, and recovering safely."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/LEARN-BY-DOING.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/LEARN-BY-DOING.md"
 ---
 
 Use these Vivary guides to complete one governed workspace task at a time.

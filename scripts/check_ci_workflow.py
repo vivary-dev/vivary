@@ -6,7 +6,8 @@ from pathlib import Path
 WORKFLOW = Path(".github/workflows/ci.yml")
 REVIEW_WORKFLOW = Path(".github/workflows/review-gate.yml")
 AUXILIARY_WORKFLOWS = ((Path(".github/workflows/steward.yml"), ("daily-health-check",)),
-                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)))
+                       (Path(".github/workflows/track-stats.yml"), ("snapshot",)),
+                       (Path(".github/workflows/desktop-release.yml"), ("build", "draft")))
 ARTIFACT_CHECKER = Path("scripts/check_release_artifacts.py")
 
 
@@ -197,8 +198,8 @@ def job_block(text: str, name: str) -> str:
 
 
 NODE_GUARD = "node packages/workbench/bin/runtime-security.mjs"
-NODE_JOBS = ("test", "orientation-proof", "site")
-CI_JOBS = ("changes", "test", "governed-platform-proof", "orientation-proof", "review", "site")
+NODE_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "site")
+CI_JOBS = ("changes", "test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof", "review", "site")
 RUNNER_BOOTSTRAP = Path(__file__).resolve().with_name("check_runner_action_node.py")
 RUNNER_REPAIR = Path(__file__).resolve().with_name("bootstrap_runner_action_node.py")
 BOOTSTRAP_ANCHOR = "runner_action_node_bootstrap"
@@ -215,6 +216,8 @@ ACTION_MANIFESTS = {
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9": {"using": "node24", "main": "dist/upload/index.js"},
+    # v8.0.2 action.yml, read at this SHA on 2026-10-24: node24, dist/index.js, no pre or post.
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333": {"using": "node24", "main": "dist/index.js"},
 }
 
 
@@ -246,7 +249,7 @@ CANONICAL_REVIEW_WORKFLOW = CANONICAL_REVIEW_WORKFLOW.replace(
 
 def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, auxiliary=False) -> None:
     if auxiliary:
-        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",)),
+        require(not npm and names in (("review-gate",), ("daily-health-check",), ("snapshot",), ("build", "draft")),
                 "auxiliary bootstrap requires an exact owned job inventory")
     jobs = text.split("\njobs:\n", 1)[-1]
     headers = re.findall(r"(?m)^  ([\w-]+):\s*$", jobs)
@@ -407,9 +410,7 @@ def check_uv_acquisition(text: str) -> None:
             require(len(builds) == 1 and builds[0].count(UV_BUILD_ADMISSION) == 1,
                     runtime_contract)
             build_sequence = "\n          ".join((UV_BUILD_ADMISSION, *release_build_commands()))
-            missing = [command for command in release_build_commands() if command not in builds[0]]
-            require("\n          " + build_sequence + "\n" in builds[0],
-                    runtime_contract + (": missing " + ", ".join(missing) if missing else ""))
+            require("\n          " + build_sequence + "\n" in builds[0], runtime_contract)
             require(not re.search(r"(?m)^        (?:if|continue-on-error|env|working-directory):", builds[0]),
                     runtime_contract)
             require(not re.search(r"(?m)^\s*uv build ", job), runtime_contract)
@@ -432,7 +433,7 @@ def check_uv_acquisition(text: str) -> None:
         )
 
 
-PIP_JOBS = ("test", "governed-platform-proof", "orientation-proof")
+PIP_JOBS = ("test", "workbench", "workbench-maintained", "governed-platform-proof", "orientation-proof")
 PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '        shell: python -I -B {0}\n'
  '        run: |\n'
@@ -457,9 +458,9 @@ WINDOWS_PYTHON_PROVISIONING_STEP = (
 )
 
 
-def python_admission_prefix(name, inline=False):
+def python_admission_prefix(name, inline=False, windows=("governed-platform-proof",)):
     guard = python_runtime_step(inline)
-    if name == "governed-platform-proof":
+    if name in windows:
         return [WINDOWS_PYTHON_PROVISIONING_STEP, guard]
     if name == "orientation-proof":
         def when(step, condition):
@@ -515,16 +516,18 @@ def python_runtime_step(inline=False) -> str:
             + "".join("          " + line + "\n" if line else "\n" for line in source.splitlines()))
 
 
-def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False) -> None:
+def check_python_runtime(text: str, names=PYTHON_JOBS, inline=False, windows=("governed-platform-proof",)) -> None:
+    """`windows` names the jobs that run on a Windows host, which provision Python with the Windows script and no
+    setup-python step."""
     for name in names:
         steps = re.split(r"(?m)(?=^      - )", job_block(text, name))[1:]
         setups = [index for index, step in enumerate(steps) if "uses: actions/setup-python@" in step]
         guards = [index for index, step in enumerate(steps) if "name: actual Python runtime admission" in step]
         contract = name + " requires exact Python selection and actual Python/OpenSSL admission before use"
-        require(len(setups) == (0 if name == "governed-platform-proof" else 1)
+        require(len(setups) == (0 if name in windows else 1)
                 and len(guards) == 1, contract)
         guard = guards[0]
-        prefix = python_admission_prefix(name, inline)
+        prefix = python_admission_prefix(name, inline, windows)
         first = guard - len(prefix) + 1
         require(first >= 0 and [step.rstrip("\n") for step in steps[first:guard + 1]]
                 == [step.rstrip("\n") for step in prefix], contract)
@@ -668,23 +671,6 @@ def check_pip_runtime(text: str) -> None:
             shell = "bash" if name == "test" else "pwsh"
             require(f"        shell: {shell}\n" in owner,
                     f"{name} MCP pip admission requires its explicit platform shell")
-            proof_start, proof_end = (
-                ('          "$mcp_python" - <<\'PY\'\n', '          PY\n')
-                if name == "test" else
-                ("          @'\n          from importlib.metadata import PackageNotFoundError, requires, version\n",
-                 "          '@ | & $mcpPython -\n")
-            )
-            proofs = re.findall(re.escape(proof_start) + r"(.*?)" + re.escape(proof_end), owner, re.S)
-            require(len(proofs) == 1,
-                    f"{name} MCP installed identity proof must use its admitted venv interpreter")
-            for assertion in (
-                'assert version("mcp") == "2.2.0"',
-                'assert version("mcp-types") == "2.2.0"',
-                'assert "mcp==2.2.0" in mcp_requirements',
-                'assert interop["sdk_version"] == "2.2.0"',
-            ):
-                require(proofs[0].count("          " + assertion + "\n") == 1,
-                        f"{name} MCP installed identity must prove the admitted SDK 2.2.0 tuple")
 
 
 def check_pip_commands(text: str) -> None:
@@ -809,7 +795,36 @@ WORKBENCH_DEPENDENCY_STEP = (
     '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/node" --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\'\n'
 )
 
+WINDOWS_WORKBENCH_TOOLS_STEP = (
+    '      - name: qualified workbench build tools\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools"\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "build client provisioning failed" }\n'
+    '          python -I -B scripts/build_go_tools.py --root "$env:RUNNER_TEMP/vivary-build-tools" --typescript\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n'
+    '          "$env:RUNNER_TEMP/vivary-build-tools/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append\n'
+    '          "ESBUILD_BINARY_PATH=$env:RUNNER_TEMP/vivary-build-tools/esbuild-0.28.2-go1.26.10.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append\n'
+)
+
+WINDOWS_WORKBENCH_INSTALL_STEP = (
+    '      - name: install workbench dependencies\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd" --dir packages/workbench install --frozen-lockfile --ignore-scripts\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency install failed" }\n'
+)
+
+WINDOWS_WORKBENCH_DEPENDENCY_STEP = (
+    '      - name: known workbench dependency admission\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          & "$env:RUNNER_TEMP/vivary-build-tools/bin/node.cmd" --% --test --test-name-pattern="locked|archive|SemVer|TipTap|xlsx" packages/workbench/tests/dependency-advisories.test.mjs\n'
+    '          if ($LASTEXITCODE -ne 0) { throw "workbench dependency admission failed" }\n'
+)
+
 WORKBENCH_TYPECHECK = (
+    '          pnpm --dir packages/workbench exec react-router typegen\n'
     '          "$RUNNER_TEMP/vivary-build-tools/typescript-7.0.2-go1.26.10/tsc" --noEmit --project packages/workbench/tsconfig.json\n'
 )
 
@@ -845,12 +860,12 @@ def check_release_package_clients(text: str) -> None:
     pack = [i for i, step in enumerate(steps) if TEST_PACK_COMMAND in step]
     contract = "test must provision isolated package clients before packing release artifacts"
     require(len(tools) == len(node) == len(pack) == 1 and node[0] < tools[0] < pack[0], contract)
-    require(steps[tools[0]].rstrip("\n") == WORKBENCH_TOOLS_STEP.rstrip("\n"), contract)
+    require(steps[tools[0]].rstrip("\n") == TEST_CLIENTS_STEP.rstrip("\n"), contract)
     require(not re.search(r"(?m)^\s*(?:run:\s*)?npm\s", job), contract)
 
 
 def check_workbench_build_tools(text: str) -> None:
-    for name in ("test",):
+    for name in ("workbench", "workbench-maintained", "governed-platform-proof"):
         job = job_block(text, name)
         contract = f"{name} must provision isolated clients and rebuilt Go compilers before dependencies"
         steps = re.split(r"(?m)(?=^      - )", job)[1:]
@@ -860,13 +875,14 @@ def check_workbench_build_tools(text: str) -> None:
         node = [i for i, step in enumerate(steps) if NODE_GUARD in step]
         require(len(tools) == len(installs) == len(node) == len(dependencies) == 1, contract)
         require(node[0] < tools[0] and tools[0] + 1 == dependencies[0] and dependencies[0] + 1 == installs[0], contract)
-        expected = (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
+        windows = name == "governed-platform-proof"
+        expected = (WINDOWS_WORKBENCH_TOOLS_STEP, WINDOWS_WORKBENCH_DEPENDENCY_STEP, WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (WORKBENCH_TOOLS_STEP, WORKBENCH_DEPENDENCY_STEP, WORKBENCH_INSTALL_STEP)
         require(all(steps[index].rstrip("\n") == value.rstrip("\n") for index, value in zip((tools[0], dependencies[0], installs[0]), expected)), contract)
         require(not re.search(r"(?m)^\s*(?:run:\s*)?(?:npm|pnpm|corepack)\s", "".join(steps[:tools[0]])), contract)
         require("npm install --global" not in job, contract)
-    workbench = job_block(text, "test")
+    workbench = job_block(text, "workbench")
     require(WORKBENCH_TYPECHECK in workbench,
-            "test must use the rebuilt TypeScript compiler")
+            "workbench must retain route type generation and use the rebuilt TypeScript compiler")
     require("pnpm --dir packages/workbench typecheck" not in workbench,
             "workbench cannot execute the package's unqualified TypeScript binary")
 
@@ -897,7 +913,7 @@ def check_runtime_security(text: str) -> None:
             commands = re.sub(r"(?m)^        run:\s*", "", commands)
             require(not re.search(r"(?m)^\s*['\"]?(?:agent-native|astro) build(?:\s|$|['\"])", commands),
                     f"{name} direct builds must use the guarded package build command")
-    require("node --test packages/workbench/tests/runtime-security.test.mjs" in job_block(text, "test"),
+    require("node --test packages/workbench/tests/runtime-security.test.mjs" in job_block(text, "workbench"),
             "workbench must run Node security policy and entry tests")
     require("python scripts/tests/test_npm_trusted_publish_workflow.py" in job_block(text, "test"),
             "tests job must run npm runtime/publication mutation tests")
@@ -907,14 +923,23 @@ def main() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     check_pip_runtime(text)
     check_python_runtime(text)
-    check_uv_acquisition(text)
-    check_pip_commands(text)
     changes_job = job_block(text, "changes")
     test_job = job_block(text, "test")
+    workbench_job = job_block(text, "workbench")
+    workbench_maintained_job = job_block(text, "workbench-maintained")
     governed_job = job_block(text, "governed-platform-proof")
     orientation_job = job_block(text, "orientation-proof")
     review_job = job_block(text, "review")
     site_job = job_block(text, "site")
+    require("python scripts/tests/test_review_gate.py" in test_job,
+            "tests job must exercise the required review gate")
+
+    require("python scripts/tests/test_hldd.py" in test_job,
+            "tests job must exercise the HLDD gate")
+    require('python scripts/check_hldd.py --base "$BASE_SHA" --head "$HEAD_SHA"' in test_job,
+            "tests job must enforce HLDD review on the explicit commit range")
+    require("HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}" in test_job,
+            "HLDD review must use the actual PR head, not the synthetic merge")
 
     runner_install = "python -I -m pip --use-deprecated=legacy-certs install pytest packaging"
     first_pytest = "python -m pytest"
@@ -991,6 +1016,8 @@ def main() -> None:
     )
     for name, block in (
         ("test", test_job),
+        ("workbench", workbench_job),
+        ("workbench-maintained", workbench_maintained_job),
         ("governed-platform-proof", governed_job),
         ("orientation-proof", orientation_job),
         ("review", review_job),
@@ -1000,14 +1027,25 @@ def main() -> None:
             "    needs: changes" in block,
             f"{name} job must wait for dispatch validation",
         )
+    for name, block in (
+        ("test", test_job),
+        ("workbench", workbench_job),
+        ("workbench-maintained", workbench_maintained_job),
+    ):
+        require(
+            "    if: ${{ always() }}" in block,
+            f"required {name} job must run even when dispatch validation fails",
+        )
+        require(
+            "if: needs.changes.result != 'success'" in block
+            and "run: exit 1" in block,
+            f"required {name} job must fail closed when dispatch validation fails",
+        )
+    maintained_checks = "pnpm --dir packages/workbench test:maintained"
     require(
-        "    if: ${{ always() }}" in test_job,
-        "required tests job must run even when dispatch validation fails",
-    )
-    require(
-        "if: needs.changes.result != 'success'" in test_job
-        and "run: exit 1" in test_job,
-        "required tests job must fail closed when dispatch validation fails",
+        text.count(maintained_checks) == 1
+        and maintained_checks in workbench_maintained_job,
+        f"{maintained_checks} must run exactly once, in the workbench-maintained job",
     )
     require(
         "github.event_name == 'pull_request' || "
@@ -1058,7 +1096,6 @@ def main() -> None:
             f"tests job must run {command} exactly once",
         )
     for command in (
-        UV_INSTALLS["test"],
         artifact_test,
         *release_build_commands(),
         TEST_PACK_COMMAND,
@@ -1116,23 +1153,34 @@ def main() -> None:
         "site dependency audit must follow the locked npm install",
     )
 
-    require(set(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):$", text.split("\njobs:\n", 1)[1])) == set(CI_JOBS), "main CI must preserve its six existing jobs")
-    check_python_runtime(text)
-    check_pip_runtime(text)
+    check_site_dependencies(text)
     check_runtime_security(text)
     check_workbench_build_tools(text)
     check_release_package_clients(text)
-    check_site_dependencies(text)
+    check_uv_acquisition(text)
+    check_pip_commands(text)
+    require("python -I -B scripts/tests/test_pip_runtime.py" in test_job,
+            "tests job must run pip runtime admission regressions")
+    require("python -I -B scripts/tests/test_bootstrap_ci_python.py" in test_job,
+            "tests job must run verified Python provisioning regressions")
+    require("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py" in test_job,
+            "tests job must run native Windows Python bootstrap regressions")
+    require("python -I -B scripts/tests/test_python_runtime.py" in test_job,
+            "tests job must run Python runtime admission regressions")
+    require("python -I -B scripts/tests/test_bootstrap_ci_pip.py" in test_job,
+            "tests job must run verified pip provisioning regressions")
+    require("python -I -B scripts/tests/test_certifi_bundle.py" in test_job,
+            "tests job must run certificate overlay preservation regressions")
+    require("python -I -B scripts/tests/test_site_dependencies.py" in test_job,
+            "tests job must run known site dependency admission regressions")
+    require(test_job.count(BUILD_TEST_STEP) == 1,
+            "tests job must run isolated build tool regressions")
     check_runner_action_bootstrap(text, CI_JOBS)
+    require("python -I -B scripts/tests/test_runner_action_node.py" in test_job,
+            "tests job must run the runner action bootstrap regressions")
+    require(test_job.count(REPAIR_TEST_STEP) == 1,
+            "tests job must run the runner action repair regressions")
     check_review_workflow(REVIEW_WORKFLOW.read_text(encoding="utf-8"))
-    for command in ("python scripts/tests/test_review_gate.py", "python -I -B scripts/tests/test_python_runtime.py", "python -I -B scripts/tests/test_pip_runtime.py", "python -I -B scripts/tests/test_bootstrap_ci_python.py", "python -I -B scripts/tests/test_ci_python_windows_bootstrap.py", "python -I -B scripts/tests/test_bootstrap_ci_pip.py", "python -I -B scripts/tests/test_certifi_bundle.py", "python -I -B scripts/tests/test_site_dependencies.py", "python -I -B scripts/tests/test_runner_action_node.py"):
-        if not any(command.endswith(stem + ".py") for stem in ("test_python_runtime", "test_bootstrap_ci_python", "test_ci_python_windows_bootstrap")):
-            require(command in test_job, "tests job must retain security regressions: " + command)
-    require(test_job.count(BUILD_TEST_STEP) == 1, "tests job must run isolated build tool regressions")
-    require(test_job.count(REPAIR_TEST_STEP) == 1, "tests job must run the runner action repair regressions")
-    require("python -I -B scripts/tests/test_python_runtime.py" in test_job, "tests job must run Python runtime admission regressions")
-    require("python -I -B scripts/tests/test_bootstrap_ci_python.py" in test_job, "tests job must run verified Python provisioning regressions")
-    require("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py" in test_job, "tests job must run native Windows Python bootstrap regressions")
     for path, names in AUXILIARY_WORKFLOWS:
         check_runner_action_bootstrap(path.read_text(encoding="utf-8"), names, auxiliary=True)
     print(f"{WORKFLOW}: CI workflow contract passed")

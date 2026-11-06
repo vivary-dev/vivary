@@ -136,7 +136,7 @@ if os.name == "nt":
             _WINDOWS_CLOSE_HANDLE(handle)
             raise
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 PROTOCOL_VERSION = "2026-07-28"
 MCP_SCHEMA_REVISION = "mcp-types==2.2.0"

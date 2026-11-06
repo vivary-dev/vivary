@@ -1,3 +1,4 @@
+import { BrowserConnection } from "./components/layout/BrowserConnection";
 import {
   AppProviders,
   createAgentNativeQueryClient,
@@ -122,7 +123,7 @@ function AppContent() {
 export default function Root() {
   const [queryClient] = useState(() => createAgentNativeQueryClient());
   return (
-    <ToolkitProvider designSystem={designSystem}>
+    <BrowserConnection><ToolkitProvider designSystem={designSystem}>
       <AppProviders
         queryClient={queryClient}
         defaultTheme="system"
@@ -141,7 +142,7 @@ export default function Root() {
           </ProjectProvider>
         </AppearancePreferencesProvider>
       </AppProviders>
-    </ToolkitProvider>
+    </ToolkitProvider></BrowserConnection>
   );
 }
 

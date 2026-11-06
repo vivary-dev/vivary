@@ -2,6 +2,7 @@ from contextlib import redirect_stdout
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -59,6 +60,34 @@ class ManagedProjectBridgeTests(unittest.TestCase):
                 })
             self.assertEqual(extra.read_text(encoding="utf-8"), "not approved\n")
 
+    def test_installed_choices_extend_exact_preview_and_apply(self):
+        with tempfile.TemporaryDirectory(prefix="vivary-managed-patterns-") as temporary:
+            target = Path(temporary) / "projects" / "sample"
+            catalog = managed_request({"operation": "catalog"})
+            self.assertEqual(catalog["code"], "catalog")
+            self.assertEqual(len(catalog["patterns"]), 4)
+            choices = [
+                {"id": "capture", "name": "My inbox", "path": "notes/inbox.md"},
+                {"id": "source-reference", "name": "Sources", "path": "sources/index.md"},
+            ]
+            request = {"operation": "plan", "target": str(target), "patternChoices": choices,
+                       "preset": "second-brain"}
+            preview = managed_request(request)
+            self.assertEqual(len(preview["plan"]["files"]), 7)
+            self.assertEqual(preview["plan"]["preset"], "second-brain")
+            self.assertFalse(target.exists())
+            target.parent.mkdir()
+            result = managed_request({"operation": "apply", "target": str(target),
+                                      "patternChoices": choices, "preset": "second-brain",
+                                      "acceptedPlanSha256": preview["plan"]["plan_sha256"]})
+            self.assertEqual(result["code"], "created")
+            for row in preview["plan"]["files"]:
+                self.assertEqual((target / row["path"]).read_bytes(),
+                                 row["content"].encode("utf-8"))
+            changed = managed_request({"operation": "plan", "target": str(target.parent / "another"),
+                                       "patternChoices": choices[:1]})
+            self.assertNotEqual(changed["plan"]["plan_sha256"], preview["plan"]["plan_sha256"])
+
     def test_cli_and_managed_bridge_consume_the_same_creator_plan(self):
         with tempfile.TemporaryDirectory(prefix="vivary-shared-init-") as temporary:
             target = Path(temporary) / "projects" / "sample"
@@ -91,6 +120,73 @@ class ManagedProjectBridgeTests(unittest.TestCase):
             for row in cli["plan"]["files"]:
                 self.assertEqual((target / row["path"]).read_bytes(),
                                  row["content"].encode("utf-8"))
+
+    def test_context_operation(self):
+        with tempfile.TemporaryDirectory(prefix="vivary-managed-context-") as temporary:
+            target = Path(temporary) / "projects" / "sample"
+            preview = managed_request({"operation": "plan", "target": str(target)})
+            target.parent.mkdir()
+            managed_request({"operation": "apply", "target": str(target),
+                             "acceptedPlanSha256": preview["plan"]["plan_sha256"]})
+            answer = managed_request({"operation": "context", "target": str(target)})
+            self.assertEqual(answer["code"], "context")
+            self.assertEqual(answer["context"]["status"], "thin")
+            self.assertEqual(answer["context"]["memory"], [".vivary/knowledge"])
+            self.assertEqual(answer["context"]["state"], "STATE.md")
+            self.assertNotIn(temporary, json.dumps(answer))
+            (target / ".gitignore").write_text(
+                (target / ".gitignore").read_text(encoding="utf-8") + "draft-*\n", encoding="utf-8")
+            checked = managed_request({"operation": "context", "target": str(target),
+                                       "candidates": [".vivary/knowledge/draft-a.md", ".vivary/knowledge/a.md"]})
+            self.assertEqual(checked["context"]["private_candidates"], [".vivary/knowledge/draft-a.md"])
+
+            bridge = SERVER / "managed_project_workspace.py"
+            result = subprocess.run(
+                [sys.executable, "-I", "-X", "utf8", "-B", str(bridge)],
+                input=json.dumps({"operation": "context", "target": str(target), "path": "x"}),
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stdout)["code"], "refused")
+
+    def test_observe_operation(self):
+        with tempfile.TemporaryDirectory(prefix="vivary-managed-observe-") as temporary:
+            # The Workbench passes an admitted canonical root, never a Windows short name.
+            target = Path(temporary).resolve() / "project"
+            target.mkdir()
+            self.assertEqual(managed_request({"operation": "observe", "target": str(target)}),
+                             {"code": "observe", "observation": {"kind": "plain"}})
+            env = {"PATH": os.environ.get("PATH", ""), "HOME": temporary, "GIT_CONFIG_NOSYSTEM": "1",
+                   **{name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ},
+                   "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+                   "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+
+            def git(*args):
+                return subprocess.run(["git", "-C", str(target), *args], check=True, env=env,
+                                      capture_output=True, text=True).stdout
+
+            (target / "a.txt").write_text("a\n", encoding="utf-8")
+            (target / "sub").mkdir()
+            (target / "sub" / "c.txt").write_text("c\n", encoding="utf-8")
+            git("init", "-q", "-b", "main")
+            git("add", ".")
+            git("-c", "commit.gpgSign=false", "commit", "-q", "-m", "fixture")
+            (target / "a.txt").write_text("changed\n", encoding="utf-8")
+            (target / "sub" / "b.txt").write_text("b\n", encoding="utf-8")
+            before = (git("status", "--porcelain=v1"), git("log", "--format=%H"), git("stash", "list"))
+
+            answer = managed_request({"operation": "observe", "target": str(target)})
+            observation = answer["observation"]
+            self.assertEqual(observation["kind"], "git")
+            self.assertEqual(observation["head"], git("rev-parse", "HEAD").strip())
+            self.assertEqual(observation["ref"], "main")
+            self.assertEqual(observation["entries"], [{"path": "a.txt", "state": "M"},
+                                                      {"path": "sub/b.txt", "state": "??"}])
+            self.assertNotIn(str(target), json.dumps(answer))
+            # A project folder inside a larger checkout reports only its own entries, relative to itself.
+            nested = managed_request({"operation": "observe", "target": str(target / "sub")})["observation"]
+            self.assertEqual(nested["entries"], [{"path": "b.txt", "state": "??"}])
+            self.assertEqual((git("status", "--porcelain=v1"), git("log", "--format=%H"), git("stash", "list")), before)
 
     def test_hardlinked_reviewed_file_is_not_accepted_on_retry(self):
         with tempfile.TemporaryDirectory(prefix="vivary-managed-hardlink-") as temporary:

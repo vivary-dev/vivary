@@ -1,7 +1,7 @@
 ---
 title: "White paper"
 description: "The technical case for a minimal, portable standard for agent-native workspaces."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/WHITE-PAPER.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/WHITE-PAPER.md"
 ---
 
 **Technical white paper · Version 0.2 · July 2026**

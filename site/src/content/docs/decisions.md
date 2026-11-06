@@ -1,7 +1,7 @@
 ---
 title: "Decisions"
 description: "Hard-to-reverse Vivary decisions and links to their canonical owners."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/DECISIONS.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/DECISIONS.md"
 ---
 
 This is a compact index, not a second specification. Follow the first link in each
@@ -11,7 +11,7 @@ reviewed on **2026-08-09**. Later decisions carry their approval date.
 - [**D-001 — Named trains coordinate independent package semvers.**](/release-workflow/#train-and-version-lifecycle)
   **Vivary Governed Context** is a release label, not a suite version. Packages bump only when their
   own surface changes; only `create-vivary` and `@vivary/create` use the same version.
-  This is the selected resolution of [#149](https://github.com/vivary-dev/vivary/issues/149).
+  This is the selected resolution of [#149](https://github.com/vivary-dev/vivary-cli/issues/149).
 - [**D-002 — `vivary-core` is a shared seam, not a fifth role or CLI.**](/architecture/#the-shared-seam-vivary-core)
   Tropo observes and retrieves, Strato decides, Ozone verifies and proposes, and Exo
   projects caller-owned control state. Their manifests provide the executable

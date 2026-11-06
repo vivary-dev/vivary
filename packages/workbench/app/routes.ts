@@ -7,5 +7,6 @@ export default [
   route("files", "routes/files-redirect.tsx"),
   route("chat", "routes/chat.tsx"),
   route("settings", "routes/settings.tsx"),
+  route("settings/architecture", "routes/architecture.tsx"),
   route("settings/*", "routes/settings.$.tsx"),
 ] satisfies RouteConfig;

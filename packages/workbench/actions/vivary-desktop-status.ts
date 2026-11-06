@@ -1,7 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 import { desktopHostAvailable } from "../server/desktop-host";
-import { VIVARY_LOCAL_OWNER_EMAIL } from "../server/local-access";
+import { VIVARY_LOCAL_OWNER_EMAIL } from "../shared/owner-session";
 
 export default defineAction({
   description: "Read the local desktop capabilities available to this window.",

@@ -75,8 +75,11 @@ prune unrelated resources.
 
 [CONTRIBUTING.md](../../../CONTRIBUTING.md) owns branch and PR rules.
 Prepare small changes from current remote `dev`, review their full diff, and
-satisfy required CI before merging. Preserve the user's approved scope.
-Do not replace protected-branch checks with local success or administrator bypass.
+satisfy the applicable CI gate before merging. Zo is the standing approved CI
+host under [AGENTS.md](../../../AGENTS.md); record the exact tested candidate,
+workflow commands, results, and platform omissions. GitHub billing does not block
+that authorized path. Preserve the user's approved scope and repository protections;
+a passing check alone does not authorize merge or administrator bypass.
 
 Keep private history and continuity files outside public integration changes.
 Bring over the reviewed source needed by each increment. Retain existing private

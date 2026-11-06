@@ -1,14 +1,18 @@
 # Getting started with Vivary
 
-This page installs the original command-line engine. A tested, unsigned
-[private Windows development preview](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-16)
-is available to people with repository access. It is incomplete and is not ready
-for public release. Before using it, read the [desktop acceptance register](https://github.com/vivary-dev/Vivary-New/blob/main/docs/product/multi-project/desktop-acceptance-status.md),
-then use [Workbench source setup](../packages/workbench/README.md#run-from-source)
-or [desktop development and packaging](../packages/desktop/README.md#development).
-Real Native-provider acceptance is tracked in [issue #50](https://github.com/vivary-dev/Vivary-New/issues/50),
-automation execution and recovery in [issue #51](https://github.com/vivary-dev/Vivary-New/issues/51),
-and selectable Codex/model behavior in [issue #38](https://github.com/vivary-dev/Vivary-New/issues/38).
+For the Windows application, use the public
+[September 22 prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22)
+and the [Windows installation guide](desktop-preview.md). The unsigned portable
+`9884670` package includes Codex conversations, project-file search, project health,
+setup previews, and project-owned page previews with confirmed desktop browser opening.
+Full desktop acceptance remains open.
+
+The rest of this page installs the original command-line engine. Its pinned
+registry versions remain separate from the desktop package. See the
+[desktop acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md)
+for candidate-specific evidence and remaining gaps. Source contributors can use
+[Workbench setup](../packages/workbench/README.md#run-from-source) or
+[desktop development](../packages/desktop/README.md#development).
 
 Vivary is a lightweight, local-first governed-context layer for agent work. It gives a
 project one bounded context capsule, one visible state surface, provenance and

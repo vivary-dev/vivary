@@ -240,6 +240,29 @@ def test_nesting_resolves_to_nearest_ancestor():
     assert tropo.type_for(readme, c) == "project"
 
 
+def test_proposed_markdown_uses_the_existing_validator_without_a_disk_file(tmp_path):
+    raw = {"base": {"allow_untyped": True}, "types": {"decision": {
+        "folders": ["decisions"], "required": {"status": "string"}, "optional": {}}}}
+    resolver = tropo.ConfigResolver(str(tmp_path), ROOT, base_data=raw)
+    proposed = tmp_path / "decisions" / "planned.md"
+    doc = tropo.analyze_file(str(proposed), "decisions/planned.md",
+                             resolver.for_dir(str(proposed.parent)),
+                             text="# Planned\n", use_git_dates=False,
+                             stat_result=tmp_path.stat())
+    assert not proposed.exists()
+    assert doc.type == "decision"
+    assert [finding.code for finding in doc.findings] == ["E101"]
+
+
+def test_path_scoped_type_does_not_claim_same_named_ordinary_folders(tmp_path):
+    raw = {"base": {"allow_untyped": True}, "types": {"change": {
+        "folders": [".vivary/records/changes"], "required": {}, "optional": {}}}}
+    config = tropo.Config(raw, str(tmp_path))
+    assert tropo.type_for(str(tmp_path / ".vivary/records/changes/one.md"), config) == "change"
+    assert tropo.type_for(str(tmp_path / "changes/ordinary.md"), config) is None
+    assert tropo.type_for(str(tmp_path / "notes/changes/ordinary.md"), config) is None
+
+
 def test_untyped_outside_type_roots():
     c = cfg()
     assert tropo.type_for(os.path.join(VAULT, "loose-note.md"), c) is None
@@ -816,6 +839,39 @@ def _graph_tree(tmp_path, files):
     for name, content in files.items():
         (tmp_path / name).write_text(content)
     return tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+
+
+def test_proposed_nested_markdown_replaces_windows_style_enumerated_path(tmp_path):
+    (tmp_path / "tropo.toml").write_text("[base]\nallow_untyped = true\n")
+    nested = tmp_path / "notes"
+    nested.mkdir()
+    source = nested / "guide.md"
+    source.write_text("# Original\n")
+    resolver = res(str(tmp_path))
+    proposed = tropo.analyze_file(
+        str(source), "notes/guide.md", resolver.for_dir(str(nested)),
+        text="# Reviewed replacement\n", use_git_dates=False,
+        stat_result=source.stat())
+    with mock.patch.object(tropo, "iter_markdown",
+                           return_value=iter([(str(source), "notes\\guide.md")])):
+        docs = tropo.analyze(str(tmp_path), [], resolver,
+                             additional_documents=[proposed])
+    assert len(docs) == 1
+    assert docs[0] is proposed
+
+
+def test_pack_names_keep_unicode_spaces_but_refuse_path_escape(tmp_path):
+    packs = tmp_path / ".tropo" / "packs"
+    packs.mkdir(parents=True)
+    (packs / "my notes ü.toml").write_text("[base]\nallow_untyped = true\n",
+                                          encoding="utf-8")
+    assert tropo._read_pack("my notes ü", str(tmp_path), SCRIPT_DIR)["base"]["allow_untyped"]
+    for name in ("../outside", "nested\\outside", "C:outside", ".", "..", "bad\x00name"):
+        try:
+            tropo._read_pack(name, str(tmp_path), SCRIPT_DIR)
+            assert False, f"expected ConfigError for {name!r}"
+        except tropo.ConfigError:
+            pass
 
 
 def test_build_graph_real_vault():
@@ -2884,6 +2940,94 @@ def test_public_context_non_git_fallback_refuses_unowned_ignore_policy(tmp_path)
         pass
     else:
         assert False, "expected non-Git fallback to refuse an unowned ignore policy"
+
+
+def _write_public_graph_vault(root):
+    (root / "notes").mkdir()
+    (root / "tropo.toml").write_text(
+        '[base]\nallow_untyped = true\n[types.note]\nfolder = "notes"\n'
+        '[types.note.optional]\nrelated = "ref-list"\n',
+        encoding="utf-8",
+    )
+    (root / ".gitignore").write_text("notes/hidden.md\n", encoding="utf-8")
+    notes = {
+        "public": "---\nrelated: [hidden, other]\n---\n# Public\n",
+        "other": "# Other\n",
+        "hidden": "---\nrelated: [public]\n---\n# Hidden\n",
+    }
+    for name, text in notes.items():
+        (root / "notes" / f"{name}.md").write_text(text, encoding="utf-8")
+
+
+def test_public_graph_leaves_out_a_git_ignored_note_and_its_edges(tmp_path):
+    _write_public_graph_vault(tmp_path)
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+
+    graph = tropo.public_graph(root, allowlist=[root])
+
+    assert graph == {
+        "nodes": {
+            "other": {"id": "other", "type": "note", "path": "notes/other.md"},
+            "public": {"id": "public", "type": "note", "path": "notes/public.md"},
+        },
+        "edges": [
+            {"from": "public", "field": "related", "to": "hidden", "broken": True},
+            {"from": "public", "field": "related", "to": "other", "broken": False},
+        ],
+        "complete": True,
+        "omissions": [{"kind": "privacy_excluded", "reason": "git_ignored", "count": 1}],
+    }
+
+
+def test_public_graph_counts_a_note_whose_id_fails_the_output_checks(tmp_path):
+    (tmp_path / "ghp_abcdefghijklmnopqrstuvwx.md").write_text("# Token\n", encoding="utf-8")
+    (tmp_path / "plain.md").write_text("# Plain\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+
+    graph = tropo.public_graph(root, allowlist=[root])
+
+    assert list(graph["nodes"]) == ["plain"]
+    assert graph["complete"] is False
+    assert graph["omissions"] == [
+        {"kind": "document", "reason": "unsafe_identifier", "count": 1}
+    ]
+
+
+def test_public_graph_counts_an_id_longer_than_256_characters(tmp_path):
+    (tmp_path / "long.md").write_text("# Long\n", encoding="utf-8")
+    (tmp_path / "edge.md").write_text("# Edge\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    root = _public_workspace_root(tmp_path)
+    # A filename caps a derived id near 252 characters, so the test stretches them.
+    stretched = {"long": "l" * 257, "edge": "e" * 256}
+    # The Windows CI job runs this file directly, which supplies tmp_path only.
+    derive_id = tropo._derive_id
+    tropo._derive_id = lambda full: stretched.get(derive_id(full), derive_id(full))
+    try:
+        graph = tropo.public_graph(root, allowlist=[root])
+    finally:
+        tropo._derive_id = derive_id
+
+    assert list(graph["nodes"]) == ["e" * 256]
+    assert graph["complete"] is False
+    assert graph["omissions"] == [
+        {"kind": "document", "reason": "unsafe_identifier", "count": 1}
+    ]
+
+
+def test_public_graph_refuses_a_folder_without_a_privacy_policy(tmp_path):
+    _write_public_graph_vault(tmp_path)
+    (tmp_path / ".gitignore").unlink()
+    root = _public_workspace_root(tmp_path)
+
+    try:
+        tropo.public_graph(root, allowlist=[root])
+    except tropo.PrivacyPolicyUnavailableError as error:
+        assert error.reason == "privacy_policy_unavailable"
+    else:
+        assert False, "expected a plain folder to be refused"
 
 
 def _write_public_thin_config(root, *, strict=True, allow_untyped=True):
@@ -5027,6 +5171,240 @@ def test_map_subtree_rebases_config_excludes(tmp_path):
     rc, out = _capture_rc(tropo.cmd_map, _map_args(str(tmp_path)))
     assert rc == 0
     assert not any("private" in d["path"] for d in out["directories"])
+
+
+# Authored project facts (issue #21) ------------------------------------------
+
+_FACT_WORKSPACE_TOML = (
+    'version = 1\n'
+    'exclude = [".git", ".agents", ".vivary/private", ".vivary/runtime"]\n'
+    '[workspace]\ncontract = "thin-v0.3"\npreset = "coding"\nstate = "STATE.md"\n'
+    'private = [".vivary/private"]\nruntime = [".vivary/runtime"]\n'
+    'adapters = []\ncapabilities = []\n'
+    '{vivary}'
+    '[base]\nderive = ["id", "title"]\nallow_untyped = true\n'
+    'optional = {{ tags = "string-list" }}\n'
+    '[types.project]\nfolder = [".vivary", "projects"]\n'
+    'required = {{ status = "enum:idea|active|paused|shipped|archived" }}\n'
+    '{types}'
+)
+_FACT_ROLES_TABLE = (
+    '[workspace.vivary]\nversion = 1\npatterns = ["thin-context"]\n'
+    '[workspace.vivary.roles]\nlaw = ["AGENTS.md", ".vivary/context.md"]\n'
+    'map = [".vivary/context.md"]\nrecord = []\nmemory = {memory}\n'
+    'boundary = [".gitignore", ".vivary/private", ".vivary/runtime"]\n'
+)
+
+
+def _write_fact_workspace(root, *, memory="[]", roles_table=True, types=""):
+    """A thin workspace shaped like create-vivary's template, without Git."""
+    vivary = root / ".vivary"
+    vivary.mkdir()
+    (root / ".gitignore").write_text(
+        "# >>> vivary private/runtime >>>\n"
+        ".vivary/private/\n.vivary/runtime/\n*.vivary-tmp\n"
+        "# <<< vivary private/runtime <<<\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    vivary_table = _FACT_ROLES_TABLE.format(memory=memory) if roles_table else ""
+    (vivary / "workspace.toml").write_text(
+        _FACT_WORKSPACE_TOML.format(vivary=vivary_table, types=types),
+        encoding="utf-8",
+        newline="\n",
+    )
+    (vivary / "context.md").write_text(
+        "---\nstatus: active\n---\n# Project context\n", encoding="utf-8"
+    )
+
+
+def _write_fact(root, folder, name, *, source='"Jeff, planning call"'):
+    directory = root / folder
+    directory.mkdir(parents=True, exist_ok=True)
+    source_line = f"source: {source}\n" if source is not None else ""
+    (directory / name).write_text(
+        f"---\n{source_line}confirmed: 2026-09-25\n---\n"
+        "# Relay budget\n\nThe relay budget is 40 dollars per month.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def _fact_check(root):
+    workspace = _public_workspace_root(root)
+    return tropo.check_workspace(workspace, allowlist=[workspace])
+
+
+def test_default_folder_fact_is_typed_and_clean(tmp_path):
+    _write_fact_workspace(tmp_path)
+    _write_fact(tmp_path, ".vivary/knowledge", "relay-budget.md")
+
+    checked = _fact_check(tmp_path)
+    assert checked["complete"] is True, checked["omissions"]
+    assert checked["findings"] == []
+    assert checked["errors"] == checked["warnings"] == 0
+
+    workspace = _public_workspace_root(tmp_path)
+    found = tropo.find_context(workspace, "relay budget", allowlist=[workspace])
+    assert [(row["path"], row["type"]) for row in found["results"]] == [
+        (".vivary/knowledge/relay-budget.md", tropo.FACT_TYPE)
+    ]
+
+
+def test_private_and_public_compose_agree(tmp_path):
+    _write_fact_workspace(tmp_path)
+    private = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert private.folder_map[".vivary/knowledge"] == tropo.FACT_TYPE
+
+    workspace = _public_workspace_root(tmp_path)
+    candidates, _complete = tropo._public_root_config_candidates(workspace, {})
+    public, _digest, complete = tropo._public_config_from_candidates(
+        workspace, candidates, {candidate["rel"] for candidate in candidates}, {}
+    )
+    assert complete is True
+    assert public.folder_map[".vivary/knowledge"] == tropo.FACT_TYPE
+    assert public.types[tropo.FACT_TYPE]["required"] == private.types[tropo.FACT_TYPE]["required"]
+
+
+def test_missing_source_reports_e101(tmp_path):
+    _write_fact_workspace(tmp_path)
+    _write_fact(tmp_path, ".vivary/knowledge", "unsourced.md", source=None)
+
+    checked = _fact_check(tmp_path)
+    assert [(row["level"], row["code"]) for row in checked["findings"]] == [("error", "E101")]
+    docs = tropo.analyze(str(tmp_path), [], res(str(tmp_path)))
+    assert [
+        (doc.type, finding.code, finding.message)
+        for doc in docs
+        for finding in doc.findings
+    ] == [(tropo.FACT_TYPE, "E101", "missing required field 'source' for type 'vivary_fact'")]
+
+
+def test_memory_role_folder_is_typed_and_default_stays_typed(tmp_path):
+    _write_fact_workspace(tmp_path, memory='["docs/facts"]')
+    _write_fact(tmp_path, "docs/facts", "relay-budget.md")
+    _write_fact(tmp_path, ".vivary/knowledge", "older-fact.md")
+
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == [".vivary/knowledge", "docs/facts"]
+    checked = _fact_check(tmp_path)
+    assert checked["checked"] == 3
+    assert checked["findings"] == []
+
+
+def test_owner_type_on_folder_wins(tmp_path):
+    _write_fact_workspace(
+        tmp_path,
+        types='[types.decision]\nfolder = ".vivary/knowledge"\n'
+        'required = { status = "enum:proposed|accepted" }\n',
+    )
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.folder_map[".vivary/knowledge"] == "decision"
+    assert tropo.FACT_TYPE not in config.types
+
+
+def test_owner_type_on_memory_basename_wins(tmp_path):
+    _write_fact_workspace(
+        tmp_path,
+        memory='["docs/facts"]',
+        types='[types.decision]\nfolder = "facts"\n'
+        'required = { status = "enum:proposed|accepted" }\n',
+    )
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == [".vivary/knowledge"]
+    assert tropo.type_for(str(tmp_path / "docs" / "facts" / "x.md"), config) == "decision"
+
+
+def test_slash_free_memory_path_types_only_the_root_folder(tmp_path):
+    _write_fact_workspace(tmp_path, memory='["facts"]')
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == [".vivary/knowledge", "./facts"]
+    assert tropo.type_for(str(tmp_path / "facts" / "x.md"), config) == tropo.FACT_TYPE
+    assert tropo.type_for(str(tmp_path / "tests" / "facts" / "x.md"), config) is None
+    _write_fact(tmp_path, "facts", "root-fact.md")
+    (tmp_path / "tests" / "facts").mkdir(parents=True)
+    (tmp_path / "tests" / "facts" / "x.md").write_text("# Not a fact\n", encoding="utf-8")
+    assert _fact_check(tmp_path)["findings"] == []
+
+
+def test_owner_folder_spelled_with_dot_slash_wins(tmp_path):
+    _write_fact_workspace(
+        tmp_path,
+        memory='["facts"]',
+        types='[types.decision]\nfolder = "./facts"\n'
+        'required = { status = "enum:proposed|accepted" }\n',
+    )
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == [".vivary/knowledge"]
+    assert tropo.type_for(str(tmp_path / "facts" / "x.md"), config) == "decision"
+
+
+def test_owner_folder_with_a_trailing_slash_keeps_the_fact_type(tmp_path):
+    _write_fact_workspace(
+        tmp_path,
+        memory='["facts"]',
+        types='[types.decision]\nfolder = "facts/"\n'
+        'required = { status = "enum:proposed|accepted" }\n',
+    )
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == [".vivary/knowledge", "./facts"]
+    assert tropo.type_for(str(tmp_path / "facts" / "x.md"), config) == tropo.FACT_TYPE
+
+
+def test_owner_defined_fact_type_wins(tmp_path):
+    _write_fact_workspace(
+        tmp_path,
+        types='[types.vivary_fact]\nfolder = "facts"\nrequired = { source = "string" }\n',
+    )
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert config.types[tropo.FACT_TYPE]["folders"] == ["facts"]
+    assert config.types[tropo.FACT_TYPE]["required"] == {"source": "string"}
+    assert ".vivary/knowledge" not in config.folder_map
+
+
+def test_authored_memory_paths():
+    default = [tropo.AUTHORED_MEMORY_DEFAULT]
+    assert tropo.authored_memory_paths(None) == default
+    assert tropo.authored_memory_paths({"roles": {"memory": []}}) == default
+    assert tropo.authored_memory_paths({"roles": {"memory": ["a", "b"]}}) == ["a", "b"]
+
+
+def test_workspace_context_thin_and_plain(tmp_path):
+    _write_fact_workspace(tmp_path, memory='["docs/facts"]')
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    assert tropo.workspace_context(config) == {
+        "status": "thin",
+        "roles": {
+            "law": ["AGENTS.md", ".vivary/context.md"],
+            "map": [".vivary/context.md"],
+            "record": [],
+            "memory": ["docs/facts"],
+            "boundary": [".gitignore", ".vivary/private", ".vivary/runtime"],
+        },
+        "state": "STATE.md",
+        "memory": ["docs/facts"],
+        "memory_assigned": True,
+        "protected": [".vivary/private", ".vivary/runtime"],
+    }
+    assert tropo.workspace_context(None) == {
+        "status": "plain",
+        "roles": None,
+        "state": None,
+        "memory": [".vivary/knowledge"],
+        "memory_assigned": False,
+        "protected": [],
+    }
+
+
+def test_legacy_roles_table_gets_default_memory(tmp_path):
+    _write_fact_workspace(tmp_path, roles_table=False)
+    _write_fact(tmp_path, ".vivary/knowledge", "relay-budget.md")
+
+    config = tropo.ConfigResolver(str(tmp_path), SCRIPT_DIR).base
+    context = tropo.workspace_context(config)
+    assert context["memory"] == [".vivary/knowledge"]
+    assert context["memory_assigned"] is False
+    assert _fact_check(tmp_path)["findings"] == []
 
 
 def test_version_constant_matches_pyproject(tmp_path):

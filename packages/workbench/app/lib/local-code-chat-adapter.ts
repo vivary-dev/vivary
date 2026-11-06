@@ -5,20 +5,36 @@ import {
 } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, callAction } from "@agent-native/core/client/hooks";
 import type { NativeActionCaller } from "./native-actions";
+import { codeConversationModelChoices } from "./code-conversation-model-choices";
 import type {
-  VivaryCodeModel,
   VivaryCodeState,
 } from "../../server/local-code-agent";
+
+const PRE_APPEND_CODE_REJECTIONS = new Set([
+  "vivary_code_engine_changed", "vivary_code_runtime_unavailable", "vivary_code_models_unavailable",
+  "vivary_code_model_changed", "vivary_code_model_unsupported", "vivary_code_project_changed",
+  "vivary_code_project_reconnecting", "vivary_code_host_closing", "vivary_code_run_active",
+  "vivary_code_workspace_unavailable", "vivary_code_run_not_found", "vivary_code_historical_engine",
+  "vivary_code_cleanup_required",
+  "vivary_linked_history_unavailable",
+]);
+
+function isPreAppendCodeRejection(error: unknown): boolean {
+  return error !== null && typeof error === "object" && "errorCode" in error
+    && typeof error.errorCode === "string" && PRE_APPEND_CODE_REJECTIONS.has(error.errorCode);
+}
 
 type LocalCodeChatOptions = {
   context: AssistantChatAdapterContext;
   call: NativeActionCaller;
   projectId: string | null;
+  draftThreadId: string;
   runIdRef: { current: string | null };
   engines: () => VivaryCodeState["engines"];
   onStarted: (runId: string) => void;
   onStreaming: (streaming: boolean) => void;
   onSettled: () => void;
+  onKnownRejected: (submitId: string) => Promise<void>;
 };
 
 export function createLocalCodeChatAdapter(
@@ -32,28 +48,51 @@ export function createLocalCodeChatAdapter(
   return {
     async *run(input) {
       const userMessage = input.messages.findLast(message => message.role === "user");
+      const marker = input.runConfig?.custom?.agentNativeQueuedMessageId;
+      const draftSubmitId = typeof marker === "string" ? marker : undefined;
+      const rejectLocal = async (reason: string) => {
+        if (draftSubmitId) await options.onKnownRejected(draftSubmitId);
+        return new Error(reason);
+      };
       const message = userMessage?.content
         .filter(part => part.type === "text")
         .map(part => part.text)
         .join("\n")
         .trim();
-      if (!message) throw new Error("Enter a message for the agent.");
-      if (message.length > 8_000) throw new Error("Keep the message under 8,000 characters.");
+      if (!message) throw await rejectLocal("Enter a message for the agent.");
+      if (message.length > 8_000) throw await rejectLocal("Keep the message under 8,000 characters.");
       if (userMessage?.attachments?.length || userMessage?.content.some(part => part.type !== "text")) {
-        throw new Error("Attachments are not connected to this runtime yet. Ask the agent to read a file already in the workspace.");
+        throw await rejectLocal("Attachments are not connected to this runtime yet. Ask the agent to read a file already in the workspace.");
       }
       const engine = options.engines().find(item => item.engine === options.context.engineRef.current);
       const model = options.context.modelRef.current;
-      if (!engine || !model || !isCodeModel(model) || !engine.models.includes(model)) {
-        throw new Error("Choose an available runtime and model.");
+      if (!engine || !model || !codeConversationModelChoices(engine, options.runIdRef.current !== null, model).includes(model)) {
+        throw await rejectLocal("Choose an available runtime and model.");
       }
-      if (input.abortSignal.aborted) return;
+      if (input.abortSignal.aborted) {
+        if (draftSubmitId) await options.onKnownRejected(draftSubmitId);
+        return;
+      }
 
+      const send = async (params: Record<string, unknown>) => {
+        try {
+          const state = await options.call<VivaryCodeState>("vivary-code-send", params);
+          if (state.run && !state.error && typeof window !== "undefined") window.dispatchEvent(new Event("agent-chat:threads-updated"));
+          return state;
+        } catch (error) {
+          if (draftSubmitId && isPreAppendCodeRejection(error)) await options.onKnownRejected(draftSubmitId);
+          // A late project or host refusal can follow linked preparation, which the server already recorded.
+          // Refresh only the linked-history notice. The request was not accepted, so no thread update is sent.
+          if (typeof window !== "undefined") window.dispatchEvent(new Event("vivary:linked-history-updated"));
+          throw error;
+        }
+      };
       options.onStreaming(true);
       try {
         const starting = options.runIdRef.current === null;
         if (starting) {
-          const state = scopedState(await options.call<VivaryCodeState>("vivary-code-send", { projectId, message, model, engine: engine.engine }));
+          const state = scopedState(await send({ projectId, message, model, engine: engine.engine,
+            draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined }));
           if (state.error) throw new Error(state.error);
           if (!state.run) throw new Error("The agent did not return a conversation.");
           options.runIdRef.current = state.run.id;
@@ -80,7 +119,8 @@ export function createLocalCodeChatAdapter(
           },
           sendFollowUp: async ({ runId, prompt, mode }) => {
             if (mode === "queued") return { ok: false, error: "Wait for the current response or stop it before sending another message." };
-            const state = scopedState(await options.call<VivaryCodeState>("vivary-code-send", { projectId, runId, message: prompt, model, engine: engine.engine }));
+            const state = scopedState(await send({ projectId, runId, message: prompt, model, engine: engine.engine,
+              draftSubmitId, draftThreadId: draftSubmitId ? options.draftThreadId : undefined }));
             return { ok: !state.error && !!state.run, run: state.run, error: state.error };
           },
           control: async ({ runId, command }) => {
@@ -112,8 +152,4 @@ export function createLocalCodeChatAdapter(
       }
     },
   };
-}
-
-function isCodeModel(value: string): value is VivaryCodeModel | "default" {
-  return value === "sonnet" || value === "opus" || value === "fable" || value === "default";
 }

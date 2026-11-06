@@ -2,12 +2,13 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/20
 Parent: 09
-Status: needs-info
+Status: done
 Depends-on: [09b, 07d]
+Evidence: [Original review and control tools receipt](../receipts/09c-original-review-control-tools.md)
+Verification-result: passed
 Owner: Root-assigned governed-tool integrator
 Scope: Expose decide, review, impact, and control without replacing original policies or records.
 Verification-kind: runtime
-Needs: Accept 09b and 07d. Resolve the supported operation set, actor binding, and record-write authority.
 Timebox: One governed-tool increment with focused refusals and a visible review journey.
 
 ## Goal
@@ -64,6 +65,32 @@ roots, bypass a source policy, launch workers, or create another executor/store.
 ## Log
 
 - 2026-09-13: Drafted for the desktop release. No new tool or authority is activated.
+- 2026-09-26: Claimed on `feat/review-control-tools` from `dev` `a08405d`.
+  Dependencies #19 and #15 are closed. The owner resolved the needs on the
+  issue. Review and impact get a privacy-filtered public path, so the panel and
+  the agent receive the same result. Native tool calls to decide and control
+  bind a server-derived agent actor with contributor authority. A tool caller
+  cannot submit decide's receipt or verdict, and control results are not
+  persisted.
+- 2026-09-26: Implemented in `60f78a0` to `e96871d`. Review and impact join
+  `vivary-project-read`. Decide and control move to the new
+  `vivary-project-evaluate` agent tool and an owner action. The agent may run
+  decide, claim, release, expire_leases, and dependencies. A three-model review
+  of `e96871d` found an existence oracle over private files, a codec that
+  rewrote capsule text, and Core refusals shown as successes. Fixes landed in
+  `5aa6aa6` and `24461c0`. A second review found four more refusals shown as
+  successes, fixed in `33cbcbb`. A third review of `33cbcbb` found no new
+  issues. The 22-step hosted journey passed three runs in a row on `33cbcbb`
+  with a fake provider. The [receipt](../receipts/09c-original-review-control-tools.md)
+  records the evidence. A real provider turn has not run. The PR is pending
+  owner approval, and the work is not accepted.
+- 2026-09-26: The unpublished `1249572d` Windows package, built from
+  `1249572`, passed Review, Impact, Decide, claim, and release in Project
+  details and a 14-check agent turn with a fake provider. Project files kept
+  their snapshots. Owner acceptance and issue closure are pending.
+- 2026-09-26: PR #95 merged into `dev` as `7fb73bd` after all checks passed
+  on its head `1513a82`, and the owner accepted the result and closed issue #20.
+  Marked done. No real provider turn has run. That belongs to issue #50.
 
 ## Shared desktop and web behavior
 

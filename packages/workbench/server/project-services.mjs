@@ -1,3 +1,4 @@
+import { PROJECT_CHAT_SCOPE_PREFIX, projectChatScopeId } from "./chat-project-scope.mjs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
@@ -314,7 +315,7 @@ export function startProjectServices(nitroApp, dependencies) {
         provider,
         locationLabels: local ? provider.locationLabels : installation.locationLabels,
         canReconnect: local
-          ? ref => provider.isManagedLocation(ref, environment.VIVARY_DATA_DIR) : undefined,
+          ? () => true : undefined,
       });
       const readiness = runtime.createProjectRuntimeReadiness({
         readScope: registry.readScope,
@@ -353,20 +354,66 @@ export function startProjectServices(nitroApp, dependencies) {
 }
 
 
-function localService(context) {
+// Native tool call contexts that matchChatProject admitted, each mapped to the
+// one project its chat is pinned to. Only the admitted object itself counts.
+const chatProjects = new WeakMap();
+const CHAT_CATALOG = Symbol("chat catalog");
+
+// `tool` is the project a Native tool call may reach: the catalog read inside
+// matchChatProject, or the project matchChatProject admitted it for.
+function localService(context, tool) {
   const service = globalThis[LOCAL_SERVICE];
   if (!service || service.controller.snapshot().status !== "open") {
     throw Object.assign(new Error("Local project folders are not ready."), { statusCode: 503 });
   }
+  const chatTool = context?.caller === "tool" && tool !== undefined
+    && (tool === CHAT_CATALOG || chatProjects.get(context) === tool);
   if (!context || !["vivary", "workbench"].includes(context.appId)
-    || !["frontend", "http"].includes(context.caller)
+    || !(["frontend", "http"].includes(context.caller) || chatTool)
     || context.userEmail?.trim().toLowerCase() !== "owner@local.vivary.test"
     || !identifier.safeParse(context.orgId).success) {
     throw Object.assign(new Error("Local project access is unavailable."), { statusCode: 403 });
   }
   // Both names belong to this app. Workbench retains its existing role namespace.
+  // The registry reads the owner's scope for an admitted tool call, which
+  // stays "tool" everywhere outside this module.
   return { service, owner: Object.freeze({ userEmail: context.userEmail, orgId: context.orgId,
-    appId: "workbench", caller: context.caller }) };
+    appId: "workbench", caller: chatTool ? "http" : context.caller }) };
+}
+
+/**
+ * Classifies the Native chat scope the current request is pinned to. The
+ * scope comes from the request, never from the caller. The owner's request
+ * gets its own context back. A Native tool call gets a context that the read
+ * entry points accept for that project only, and it stays a tool call. A
+ * project scope of the wrong type, without an identity, or that does not match
+ * exactly one registered project is refused.
+ */
+export async function matchChatProject(context) {
+  const { getRequestRunContext } = await import("@agent-native/core/server");
+  const scope = getRequestRunContext()?.chatScope;
+  if (!scope?.id.startsWith(PROJECT_CHAT_SCOPE_PREFIX)) return { kind: "not-project" };
+  const email = context?.userEmail?.trim().toLowerCase();
+  if (scope.type !== "workspace-app" || !email || !context.orgId) {
+    throw Object.assign(new Error("Project conversation access is unavailable."), { statusCode: 403 });
+  }
+  if (scope.id === projectChatScopeId(email, context.orgId, null)) return { kind: "personal" };
+  const tool = context?.caller === "tool";
+  const { service, owner } = localService(context, tool ? CHAT_CATALOG : undefined);
+  const catalog = await service.catalog.run({}, owner);
+  if (catalog.code !== "catalog") {
+    throw Object.assign(new Error("Project folder access changed."), { statusCode: 403 });
+  }
+  const matches = catalog.projects.filter(project =>
+    projectChatScopeId(owner.userEmail, owner.orgId, project.projectId) === scope.id);
+  if (matches.length !== 1) {
+    throw Object.assign(new Error("Project conversation access is unavailable."), { statusCode: 403 });
+  }
+  const { projectId } = matches[0];
+  if (!tool) return { kind: "project", projectId, context };
+  const admitted = Object.freeze({ ...context });
+  chatProjects.set(admitted, projectId);
+  return { kind: "project", projectId, context: admitted };
 }
 
 export function getLocalProjectReconnectionService(context) {
@@ -376,6 +423,17 @@ export function getLocalProjectReconnectionService(context) {
 export async function getLocalProjectAccess(context) {
   const { service, owner } = localService(context);
   return service.catalog.run({}, owner);
+}
+
+/**
+ * Current registry scope for an in-process caller that has no request, such as
+ * the desktop presence poller. It passes the same local-owner admission as a
+ * request; a caller that is not authorized gets the usual 403 instead of a
+ * narrowed read.
+ */
+export async function readLocalProjectScope(context) {
+  const { service, owner } = localService(context);
+  return service.registry.readScope(owner);
 }
 
 /** The desktop picker or trusted launcher supplies folder. No public action accepts a path. */
@@ -397,8 +455,10 @@ export async function connectLocalProjectFolder(context, folder, displayName) {
 }
 
 async function resolveLocalProjectBinding(context, projectId) {
-  const { service, owner } = localService(context);
-  if (!identifier.safeParse(projectId).success) throw new Error("Choose a registered project.");
+  const { service, owner } = localService(context, projectId);
+  if (!identifier.safeParse(projectId).success) {
+    throw Object.assign(new Error("Choose a registered project."), { statusCode: 400 });
+  }
   const scope = await service.registry.readScope(owner);
   if (!scope) throw Object.assign(new Error("Project folder access changed."), { statusCode: 403 });
   const [{ getDb }, { bindings, projects }, { and, eq, inArray }] = await Promise.all([
@@ -412,7 +472,7 @@ async function resolveLocalProjectBinding(context, projectId) {
       inArray(bindings.locationRef, scope.locationRefs))).limit(2);
   const binding = rows[0];
   if (rows.length !== 1 || binding.verificationKind !== LOCAL_VERIFICATION) {
-    throw new Error("This project does not have one connected local folder.");
+    throw Object.assign(new Error("This project does not have one connected local folder."), { statusCode: 409 });
   }
   return { service, owner, scope, binding };
 }
@@ -439,7 +499,8 @@ export async function resolveLocalProjectWorkspace(context, projectId) {
   const resolved = await service.provider.resolvePath(owner, binding.rootId, binding.locationRef);
   await requireCurrentProjectScope(service, owner, scope);
   if (!resolved) {
-    throw new Error("The project folder is missing or changed. Reconnect it before running an agent.");
+    throw Object.assign(new Error("The project folder is missing or changed. Reconnect it from Projects."),
+      { statusCode: 409 });
   }
   return Object.freeze({ root: resolved.path, label: binding.label, projectId, actorId: scope.actorId,
     bindingId: binding.bindingId, bindingRevision: binding.bindingRevision,

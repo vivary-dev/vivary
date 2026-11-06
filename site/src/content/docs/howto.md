@@ -1,7 +1,7 @@
 ---
 title: "Advanced recipes"
 description: "Focused recipes for types, review, coordination, CI, storage, and optional providers."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/HOWTO.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/HOWTO.md"
 ---
 
 Use these recipes after the [guide library](/learn-by-doing/).

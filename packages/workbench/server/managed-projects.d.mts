@@ -1,3 +1,4 @@
+import type { WorkspacePatternChoice, WorkspacePreset } from "../shared/workspace-patterns";
 import type { ActionRunContext } from "@agent-native/core/action";
 
 export type ManagedProjectFile = {
@@ -23,13 +24,15 @@ export type ManagedProjectPreview = {
 
 export function previewManagedProject(
   context: ActionRunContext | undefined,
-  input: { name: string },
+  input: { name: string; patternChoices?: WorkspacePatternChoice[];
+    preset?: WorkspacePreset },
   dependencies?: Record<string, unknown>,
 ): Promise<ManagedProjectPreview>;
 
 export function createManagedProject(
   context: ActionRunContext | undefined,
-  input: { name: string; displayName?: string; acceptedPlanSha256: string },
+  input: { name: string; displayName?: string; acceptedPlanSha256: string;
+    patternChoices?: WorkspacePatternChoice[]; preset?: WorkspacePreset },
   dependencies?: Record<string, unknown>,
 ): Promise<
   | { code: "plan-changed" }
@@ -40,3 +43,22 @@ export function createManagedProject(
       registration: Record<string, unknown>;
     }
 >;
+
+export function isWindowsReservedName(name: string): boolean;
+
+export function readWorkspaceContext(
+  workspace: { projectId: string; root: string },
+  candidates?: readonly string[],
+  dependencies?: Record<string, unknown>,
+): Promise<import("../app/lib/project-memory-schema").WorkspaceContextPaths>;
+
+export function observeProjectVersion(
+  workspace: { projectId: string; root: string },
+  dependencies?: Record<string, unknown>,
+): Promise<{ kind: "plain" } | { kind: "unknown" }
+  | { kind: "git"; head: string | null; ref: string | null; entries: Array<{ path: string; state: string }> | null }>;
+
+export function installedPatternCatalog(
+  context: ActionRunContext | undefined,
+  dependencies?: Record<string, unknown>,
+): Promise<import("../shared/workspace-patterns").WorkspacePatternCatalog>;

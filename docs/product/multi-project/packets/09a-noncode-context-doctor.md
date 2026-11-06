@@ -2,9 +2,11 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/18
 Parent: 09
-Status: ready-for-agent
+Status: done
 Depends-on: []
-Owner: Coordinating Codex, sole original context and Doctor behavior writer
+Evidence: [Non-code context and Doctor verification](../receipts/09a-noncode-context-doctor.md)
+Verification-result: passed
+Owner: Claude on Zo (Jeff's 2026-09-18 decision), sole original context and Doctor behavior writer; Codex (GPT-6 Astra) reviews
 Scope: Characterize supported non-code work, fix demonstrated context/schema/Doctor mismatches, and preserve valid behavior and existing budgets.
 Verification-kind: runtime
 Timebox: One coherent user-visible increment with focused checks and review.
@@ -80,3 +82,49 @@ capability choice, not permission for a broad parser or runtime rewrite.
   unresolved. No implementation or runtime acceptance is claimed.
 
 - 2026-09-13: Root selected code, Markdown notes, and writing fixtures. Reproduce the documented claims first and fix only actual mismatches.
+
+- 2026-09-18 reproduction (Claude, dev `fef865e`, disposable thin `writing`
+  fixtures: non-Git notes, typed records with one bad record, and a Git
+  writing root with `.txt` and `.docx` files and no test command):
+  - Non-Git notes: `vivary doctor`, `check`, and `find` return the same
+    result as the Git copy. No Git or npm fact appears in Doctor output. The
+    S5 claim stays disproved; no change.
+  - Edgeless and typed graphs: an edgeless workspace passes Doctor; edges come
+    from `ref`/`ref-list` fields; a missing required field (E101) and a
+    dangling ref (`graph.broken`) fail. Correct; no change.
+  - Doctor severity: **defect.** Every Tropo finding was appended to errors,
+    so a typed record with one unknown field (W202) or a redundant title
+    (W210) failed a healthy workspace. Fixed in `doctor_workspace`: findings
+    keep Tropo's level. Three repair tests that expected exit 1 from a W210
+    now expect exit 0 with the warning listed.
+  - Writing work without a test command: `required_checks` is empty and no
+    `required_check_undetermined` unknown appears. **Defect:** the capsule
+    carried an `npm_test_script: no_npm_test_script` unknown for a root with
+    no `package.json`. Core now omits the fact when no manifest exists; a
+    present but unusable or git-ignored manifest still yields the unknown.
+  - Caller mismatch: **defect.** The Workbench built `find --root … -- <query>`
+    and `impact --root … -- <id>`; tropo and ozone read their positional right
+    after the verb, and the `--` form only parses on Python 3.12.5 or newer.
+    The bundled 3.12.14 runtime accepted it; the CI pin (3.11) and pip
+    installs exit 2. The builder now places the value after the verb and the
+    schema refuses option-like text.
+  - Unsupported formats: Tropo indexes `.md` and `.markdown` only. Other files
+    are never counted as nodes, edges, or findings, and the public
+    `find`/`check` results do not list them as omissions either. Core's
+    content search still surfaces committed plain-text matches. Recorded as
+    the honest boundary; adding a per-format omission would be a separate
+    capability choice under the stop conditions, not taken here.
+  - GUI parity (Jeff chose the panel on 2026-09-18): Project details gained
+    an on-demand "Check project health" block that runs the existing
+    original-command `doctor` verb and shows Healthy or Needs attention with
+    node and link counts, errors, and warnings kept apart. Loopback journey
+    on the non-Git fixture: 10 of 10 steps, GUI findings identical to
+    `vivary doctor --json` on the same runtime for the healthy and the failed
+    case, readable at 390 px; screenshots retained privately on Zo.
+- 2026-09-18: PR #66 merged into dev as `43ae417` after Codex review, Zo CI
+  63/63, and GitHub Actions 8/8. Accepted and closed under Jeff's delegation
+  after the journey passed again on merged dev; evidence in the linked receipt.
+- 2026-09-18: Windows candidate `43ae417` passed the health-check journey on
+  the packaged EXE with output identical to headless Doctor; recorded in the
+  desktop acceptance register. Approval and denial were not rerun on it and
+  stay proven on `98515c9` with Codex Normal mode.

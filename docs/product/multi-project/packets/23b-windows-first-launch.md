@@ -2,29 +2,34 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/8
 Parent: 23
-Status: needs-info
+Status: done
 Depends-on: [23a]
 Owner: Root-assigned Windows desktop integration owner
 Scope: Validate and fix first launch, local dependencies, provider setup and shutdown on Windows.
 Verification-kind: runtime
-Needs: 23a accepted and its current Windows x64 artifact available for the authorized laptop journey.
+Evidence: [Windows desktop first-launch verification](../receipts/23b-windows-desktop-acceptance.md)
+Verification-result: passed
 Timebox: One Windows first-launch increment after the hosted application check.
 
 ## Goal
 
-Extract the private Windows package, open Vivary.exe from Explorer, connect a
+Extract the Windows package, open Vivary.exe from Explorer, connect a
 folder and use a configured coding runtime without installing the app's dependencies.
 
 ## Context
 
 Read [the desktop release target](../desktop-release.md),
 [ENGINEERING.md](../../../../ENGINEERING.md), and [desktop packaging](../../../../packages/desktop/README.md).
-The private `26798df` Windows candidate passed the focused extraction, launch,
-bundled-runtime, project, file, Claude Code, restart, second-instance, and cleanup
-journeys in the [desktop acceptance register](../desktop-acceptance-status.md).
-Earlier unsigned archives remain historical evidence. The live issue retains
-clean-profile and integration gates; focused candidate proof does not authorize
-publication or complete the final product journey.
+The unpublished `df4aedc` Windows candidate passed a fresh application-profile
+launch under the existing Windows account, bundled-runtime use, missing-CLI
+and login guidance, native Unicode folder selection, reviewed existing-folder
+setup, real Codex/Astra file tools, project preview, second-instance reuse,
+Stop, restart, and idle and active shutdown. See the
+[desktop acceptance register](../desktop-acceptance-status.md) and the
+[Windows receipt](../receipts/23b-windows-desktop-acceptance.md).
+Earlier Explorer extraction and launch checks remain evidence for their named
+candidates. This candidate
+is not the public prerelease, and the full product journey remains under #23.
 
 ## Owned files
 
@@ -63,6 +68,12 @@ Do not disable Defender, add exclusions, alter file associations, bundle provide
 credentials, or claim Windows support from a Linux cross-build. Signing and publication are separate.
 
 ## Log
+
+- 2026-09-23: The `df4aedc` package completed the current Windows first-launch
+  journey with fresh same-account application data. The receipt separates actual
+  packaged behavior from Zo source checks and earlier Explorer evidence.
+  Independent review accepted this candidate. Issues #14, #15, and #23 retain
+  their separate acceptance.
 
 - 2026-09-16: The private `26798df` Windows candidate passed focused extraction, launch, bundled-runtime, project, file, Claude Code, restart, second-instance, and cleanup checks. See the [desktop acceptance register](../desktop-acceptance-status.md). This does not close the live issue or establish public release readiness.
 

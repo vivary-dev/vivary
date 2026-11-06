@@ -1,11 +1,11 @@
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { actionErrorMessage, useActionQuery } from "@agent-native/core/client/hooks";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { Skeleton } from "@agent-native/toolkit/ui";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useNativeActionCaller } from "@/lib/native-actions";
+import { folderConnectionErrorMessage, useNativeActionCaller } from "@/lib/native-actions";
 import { CreateProjectForm } from "./CreateProjectForm";
 import { ReconnectProjectForm } from "./ReconnectProjectForm";
 import { useProjects } from "./ProjectContext";
@@ -82,6 +82,7 @@ function RegistrationForm({ catalog, disabled, onClose }: { catalog: ProjectCata
 
 export function ProjectNavigation() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     catalog, activeProject, checking, workspaceAvailable, selecting, error,
     refresh, selectProject, retrySelection,
@@ -108,7 +109,7 @@ export function ProjectNavigation() {
   async function chooseProject(projectId: string | null) {
     recoveryFocus.current = null;
     setRecoveryNotice(null);
-    if (await selectProject(projectId)) navigate("/");
+    if (await selectProject(projectId) && location.pathname !== "/") navigate("/");
   }
   const [registering, setRegistering] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -133,7 +134,7 @@ export function ProjectNavigation() {
         setFolderError(registrationMessage(result.code));
       }
     } catch (failure) {
-      setFolderError(actionErrorMessage(failure) ?? "The folder could not be connected. Try again.");
+      setFolderError(folderConnectionErrorMessage(failure));
     } finally {
       setChoosing(false);
     }
@@ -165,13 +166,13 @@ export function ProjectNavigation() {
             aria-pressed={activeProject?.projectId === project.projectId} onClick={() => void chooseProject(project.projectId)}>
             <span>{project.displayName}</span>{project.status !== "available" && <span className="project-unavailable-label">Unavailable</span>}
           </Button>
-          {project.managedReconnectEligible && activeProject?.projectId === project.projectId
+          {project.reconnectEligible && activeProject?.projectId === project.projectId
             && <ReconnectProjectForm key={catalog.scopeKey + ":" + project.projectId}
               projectId={project.projectId} disabled={checking || selecting}
               onReconnected={() => reconnected(project.projectId, project.displayName)} />}
-          {project.status !== "available" && !project.managedReconnectEligible
+          {project.status !== "available" && !project.reconnectEligible
             && activeProject?.projectId === project.projectId
-            && <p role="status">This folder cannot be reconnected here yet. Restore the original folder and refresh,
+            && <p role="status">This folder cannot be reconnected. Restore the original folder and refresh,
               or choose another project. Your conversations are saved.</p>}
         </li>)}</ul>}
       {!creating && <Button size="sm" className="register-project-button" onClick={() => {
@@ -185,8 +186,8 @@ export function ProjectNavigation() {
           setRegistering(true);
         }}>Register existing folder</Button>}
       {!catalog.locations.some(location => location.status === "available")
-        && <p>{catalog.projects.some(project => project.managedReconnectEligible)
-          ? "Select an unavailable managed project to review its connection. You can also create a project here."
+        && <p>{catalog.projects.some(project => project.reconnectEligible)
+          ? "Select an unavailable project to review its connection. You can also create a project here."
           : "No connected folders are available. You can create a managed project here."}</p>}
     </>}
     {creating && <CreateProjectForm disabled={checking || selecting}

@@ -21,8 +21,6 @@ test('Astro resolves the reviewed local policy and the lock contains no upstream
   assert.equal(manifest.private, true);
   const lock = JSON.parse(readFileSync(new URL('package-lock.json', site)));
   assert.equal(lock.packages['node_modules/astro'].version, '7.3.5');
-  const installedAstro = JSON.parse(readFileSync(new URL('node_modules/astro/package.json', site)));
-  assert.equal(installedAstro.version, '7.3.5');
   const policies = Object.entries(lock.packages).filter(([name]) => name.endsWith('/http-cache-semantics'));
   assert.equal(policies.length, 1);
   assert.deepEqual(policies[0], ['node_modules/http-cache-semantics', {

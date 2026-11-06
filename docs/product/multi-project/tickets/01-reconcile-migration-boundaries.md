@@ -41,4 +41,4 @@ they do not prove the behavior above.
 
 - 2026-09-05: Owner corrected the execution environment to BrowserPod and explicitly excluded Habitat/WSL. Historical checks retain their actual environment labels; BrowserPod proof is pending. Program and entry-point instructions now preserve this decision. Shared plan is in PR #328 for review.
 
-- 2026-09-05: Inspection acceptance complete; the two-reader review and [CI guard suite](https://github.com/vivary-dev/vivary/actions/runs/33990271792) passed. Supersedes earlier pending-review log entries. Final publication checks are tracked on PR #328. Source restoration and BrowserPod runtime behavior remain open.
+- 2026-09-05: Inspection acceptance complete; the two-reader review and [CI guard suite](https://github.com/vivary-dev/vivary-cli/actions/runs/33990271792) passed. Supersedes earlier pending-review log entries. Final publication checks are tracked on PR #328. Source restoration and BrowserPod runtime behavior remain open.

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -7,7 +8,8 @@ export async function resolveOriginalRuntime(directory) {
     throw new Error("The original Vivary runtime is not bundled with this installation.");
   }
   const root = await realpath(directory);
-  const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
+  const bytes = await readFile(path.join(root, "manifest.json"));
+  const manifest = JSON.parse(bytes.toString("utf8"));
   const relative = process.platform === "win32" ? "python/python.exe" : "python/bin/python3";
   if (manifest?.schemaVersion !== 1 || manifest.platform !== process.platform || manifest.arch !== process.arch
       || manifest.pythonExecutable !== relative || typeof manifest.pythonVersion !== "string") {
@@ -18,5 +20,8 @@ export async function resolveOriginalRuntime(directory) {
   if (inside.startsWith(`..${path.sep}`) || inside === ".." || path.isAbsolute(inside)) {
     throw new Error("The bundled Vivary runtime path is invalid.");
   }
-  return { root, executable, version: manifest.pythonVersion };
+  // The manifest records the source commit and the hash of every wheel, the bridge, and the interpreter,
+  // so its digest changes whenever the bundle's Python files can.
+  const build = createHash("sha256").update(bytes).digest("hex").slice(0, 8);
+  return { root, executable, version: manifest.pythonVersion, build };
 }

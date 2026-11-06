@@ -1,7 +1,7 @@
 ---
 title: "Adopt an existing project with Vivary"
 description: "Add Vivary to an existing project with a bounded dry-run plan, exact approval hash, privacy checks, and no project takeover."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/guides/adopt-project.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/adopt-project.md"
 ---
 
 Use this guide when the target already contains project files.

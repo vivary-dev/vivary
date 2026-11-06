@@ -60,8 +60,10 @@ def test_each_job_must_guard_its_own_runtime_before_npm():
     for header in ("        if: false\n", "        continue-on-error: true\n"):
         assert check(text.replace("        shell: bash\n", header + "        shell: bash\n", 1))
     # Leaving the correct command in the job, after npm, is insufficient.
-    assert check(text.replace(command + "          node --version\n          npm --version\n",
-                            "          npm --version\n" + command + "          node --version\n", 1))
+    moved = text.replace(command + "          node --version\n",
+                         '          "$RUNNER_TEMP/vivary-build-tools/bin/npm" --version\n' + command + "          node --version\n", 1)
+    assert moved != text
+    assert check(moved)
 
 
 def test_publication_requires_success_and_the_same_checked_candidate():
@@ -75,6 +77,8 @@ def test_publication_requires_success_and_the_same_checked_candidate():
         (load().PUBLISH, "npm publish packages/create-vivary/npm"),
         (load().PUBLISH, load().PUBLISH.replace("npm-candidate", "different-candidate")),
         (load().PUBLISH, load().PUBLISH + " || true"),
+        (load().PUBLISH, load().PUBLISH.replace(' "$RUNNER_TEMP/vivary-build-tools"', "")),
+        (load().PUBLISH, load().PUBLISH.replace('"$RUNNER_TEMP/vivary-build-tools/bin/node"', "node", 1)),
         ("      - name: Publish @vivary/create with npm trusted publishing\n",
          "      - name: Publish @vivary/create with npm trusted publishing\n        if: false\n"),
         ("      - name: Re-verify npm package contents\n",
@@ -85,6 +89,172 @@ def test_publication_requires_success_and_the_same_checked_candidate():
     # Matching commands in verify do not admit the protected publish job.
     before, publish = text.split("\n  publish:\n", 1)
     assert check(before + "\n  publish:\n" + publish.replace(load().PUBLISH, "echo omitted"))
+
+
+def test_each_job_runs_npm_only_through_the_qualified_client():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    module = load()
+    contract = python_contract()
+    client = module.CLIENT_STEP
+    for name in ("verify", "publish"):
+        job = contract.job_block(text, name)
+        assert job.count(client) == 1, name
+        pack_name = "Verify npm" if name == "verify" else "Re-verify npm"
+        pack = module.PACK_STEP.replace("Verify npm", pack_name, 1)
+        assert job.count(pack) == 1, name
+        mutations = {
+            "missing_client": job.replace(client, "", 1),
+            "late_client": job.replace(client, "", 1).replace(pack, client + "\n" + pack, 1),
+            "image_npm_pack": job.replace(module.PACK, 'npm pack --pack-destination "$RUNNER_TEMP/npm-candidate"', 1),
+            "image_npm_version": job.replace(client, client + "          npm --version\n", 1),
+            "older_client": job.replace('= "12.2.1"', '= "11.19.1"', 1),
+            "unchecked_client": job.replace('          test "$("$RUNNER_TEMP', '          echo "$("$RUNNER_TEMP', 1),
+            "ignored_client": job.replace(client, client.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+            "npx": job.replace(pack, "      - run: npx --yes pkg\n" + pack, 1),
+            "corepack": job.replace(pack, "      - run: corepack enable\n" + pack, 1),
+            "quoted_npm": job.replace(pack, "      - run: 'npm whoami'\n" + pack, 1),
+            "second_client_use": job.replace(pack, '      - run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" whoami\'\n' + pack, 1),
+            "registry_url": job.replace('          node-version: "24.22.1"\n',
+                                        '          node-version: "24.22.1"\n          registry-url: "https://registry.npmjs.org"\n', 1),
+        }
+        for label, mutation in mutations.items():
+            assert mutation != job, (name, label)
+            assert check(text.replace(job, mutation, 1)), (name, label)
+
+
+def test_package_managers_run_only_in_the_exact_reviewed_steps():
+    """Beta ticket 27: a command word anywhere on a line, or a reach into the provisioned tools, is refused."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    module = load()
+    contract = python_contract()
+    tools = '"$RUNNER_TEMP/vivary-build-tools'
+    for name, version_step in (("verify", "      - name: Verify release tag and package versions\n"),
+                               ("publish", "      - name: Re-verify release tag and package versions\n")):
+        job = contract.job_block(text, name)
+        start = job.index(version_step)
+        body = job.index("        run: |\n", start) + len("        run: |\n")
+        lines = {
+            "substitution": '          test "$(npm --version)" = "12.2.1"\n',
+            "after_and": "          node --version && npm whoami\n",
+            "after_semicolon": "          node --version; npx --yes pkg\n",
+            "bare_pnpm": "          pnpm publish\n",
+            "quoted_corepack": "          bash -c 'corepack enable'\n",
+            "tools_pnpm": "          " + tools + '/bin/pnpm" publish\n',
+            "tools_client": "          " + tools + '/bin/node" ' + tools + '/npm/client.cjs" npm publish\n',
+            # #306 review: setup-node's own npm reached through a path.
+            "beside_node": '          "$(dirname "$(command -v node)")/npm" publish\n',
+            "tool_cache": '          "$RUNNER_TOOL_CACHE/node/24.22.1/x64/bin/npm" publish\n',
+            "windows_path": '          C:\\hostedtoolcache\\node\\npm publish\n',
+            # #306 review: npm's own CLI entry started through node.
+            "npm_cli": '          node "$(dirname "$(command -v node)")/../lib/node_modules/npm/bin/npm-cli.js" publish\n',
+            "npx_cli": '          node /opt/hostedtoolcache/node/lib/node_modules/npm/bin/npx-cli.js --yes pkg\n',
+        }
+        for label, line in lines.items():
+            message = check(text.replace(job, job[:body] + line + job[body:], 1))
+            assert message and (f"{name} must run npm only through the qualified client" in message
+                                or f"{name} reaches the provisioned tools" in message), (name, label, message)
+        # #306 review round 4. Redirection, brace expansion, a variable and eval reach npm with no command word
+        # a pattern can see, so the exact step inventory refuses them.
+        hidden = {
+            "redirect": "          npm>/dev/null whoami\n",
+            "redirect_in": "          npx<&- --yes pkg\n",
+            "brace": "          {npm,} publish\n",
+            "variable": '          n=npm; "$n" publish\n',
+            "eval": "          eval \"$(printf 'np%s publish' m)\"\n",
+        }
+        for label, line in hidden.items():
+            message = check(text.replace(job, job[:body] + line + job[body:], 1))
+            assert message and f"{name} must consist of exactly the reviewed steps" in message, (name, label, message)
+        # Any new step, however harmless, needs review too.
+        extra = text.replace(job, job.replace(version_step, "      - run: echo hi\n" + version_step, 1), 1)
+        message = check(extra)
+        assert message and f"{name} must consist of exactly the reviewed steps" in message, (name, "extra_step", message)
+        # #306 review round 5. A default shell would run every reviewed step that names none.
+        header_end = job.index("    steps:\n")
+        defaults = job[:header_end] + "    defaults:\n      run:\n        shell: npx --yes some-wrapper {0}\n" + job[header_end:]
+        message = check(text.replace(job, defaults, 1))
+        assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "defaults", message)
+        message = check(text.replace(job, job[:header_end] + "    env:\n      npm_config_registry: https://example.test\n" + job[header_end:], 1))
+        assert message and f"the {name} job header must be exactly the reviewed text" in message, (name, "env", message)
+        # #306 review round 9. A bare dash right after steps: is a step the step split would drop.
+        hidden_first = job.replace("    steps:\n", '    steps:\n      -\n        run: n=npm; "$n" publish\n', 1)
+        message = check(text.replace(job, hidden_first, 1))
+        assert message and f"the {name} job must have nothing between its steps: line and its first reviewed step" in message, (name, "bare dash", message)
+        # A package manager in the step's shell runs the body too.
+        start = job.index("        run: |\n", start)
+        message = check(text.replace(job, job[:start] + "        shell: npx --yes bash-wrapper {0}\n" + job[start:], 1))
+        assert message and f"{name} must run npm only through the qualified client" in message, (name, "shell", message)
+    publish = contract.job_block(text, "publish")
+    step = module.PUBLISH_STEP
+    assert publish.count(step) == 1
+    message = check(text.replace(step, step + "        shell: bash\n", 1))
+    assert message == "publication must be exactly the reviewed step", message
+    dry_run = module.DRY_RUN_STEP
+    assert text.count(dry_run) == 1
+    message = check(text.replace(dry_run, dry_run.replace('approved."', 'approved."; npm publish'), 1))
+    assert message and "verify must run npm only through the qualified client" in message, message
+    # Workflow-level defaults reach both jobs, and a third job is not reviewed.
+    message = check(text.replace("\njobs:\n", "\ndefaults:\n  run:\n    shell: npx --yes some-wrapper {0}\n\njobs:\n", 1))
+    assert message == "the workflow name, triggers and permissions must be exactly the reviewed text", message
+    message = check(text.rstrip("\n") + "\n\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n")
+    # The runner contract already refuses a job it does not cover. The inventory names it if that check changes.
+    assert message and ("exactly the verify and publish jobs" in message
+                        or "runner bootstrap must cover the exact job inventory" in message), message
+    # #306 review round 6. A commented or flow-style job header escapes the job-name pattern.
+    for label, job in (("commented", "  extra:  # helper\n    runs-on: ubuntu-latest\n    permissions:\n      \"id-token\": write\n"
+                                     "    steps:\n      - run: corepack pnpm publish\n"),
+                       ("flow", "  extra: {runs-on: ubuntu-latest, steps: [{run: corepack pnpm publish}]}\n")):
+        message = check(text.replace("\njobs:\n", "\njobs:\n" + job, 1))
+        assert message and ("the jobs section must hold exactly the verify and publish jobs" in message
+                            or "runner bootstrap must cover the exact job inventory" in message), (label, message)
+    # A path and a data value that contain the word stay allowed.
+    assert "packages/create-vivary/npm/package.json" in text and "npm={npm_version}" in text
+    assert check(text) is None
+
+
+def test_workflow_publisher_and_provisioner_name_one_client():
+    module = load()
+    source = module.RUNTIME_SECURITY.read_text(encoding="utf-8")
+    pins = module.npm_pins()
+    assert pins == {"npm": "12.2.1", "undici": "6.29.1", "ip-address": "10.7.4"}
+    module.check_qualified_client(source, pins)
+    for label, mutated_source, mutated_pins in (
+        ("publisher npm", source.replace('npm: "12.2.1"', 'npm: "11.19.1"', 1), pins),
+        ("publisher undici", source.replace('undici: "6.29.1"', 'undici: "6.28.0"', 1), pins),
+        ("publisher missing", source.replace("export const QUALIFIED_NPM", "const QUALIFIED_NPM", 1), pins),
+        ("provisioner ip-address", source, {**pins, "ip-address": "10.5.0"}),
+        ("provisioner npm", source, {**pins, "npm": "12.2.2"}),
+    ):
+        assert mutated_source != source or mutated_pins != pins, label
+        try:
+            module.check_qualified_client(mutated_source, mutated_pins)
+        except SystemExit as error:
+            assert "qualified npm" in str(error), (label, error)
+        else:
+            raise AssertionError(label)
+    # The workflow pin itself is the third name for the client.
+    module.QUALIFIED_NPM = "12.2.2"
+    try:
+        module.check_qualified_client(source, pins)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("workflow pin")
+    # main() reads the publisher's pins from runtime-security.mjs.
+    with tempfile.TemporaryDirectory() as directory:
+        changed = Path(directory) / "runtime-security.mjs"
+        changed.write_text(source.replace('npm: "12.2.1"', 'npm: "11.19.1"', 1), encoding="utf-8")
+        workflow = Path(directory) / "npm.yml"
+        workflow.write_text(WORKFLOW.read_text(encoding="utf-8"), encoding="utf-8")
+        module = load()
+        module.WORKFLOW, module.RUNTIME_SECURITY = workflow, changed
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+        except SystemExit as error:
+            assert "qualified npm pins differ" in str(error), error
+        else:
+            raise AssertionError("main must compare the publisher's pins")
 
 
 def test_publisher_cannot_move_before_archive_validation():

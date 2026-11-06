@@ -1,7 +1,7 @@
 ---
 title: "Public signals"
 description: "Public npm, PyPI, and GitHub metrics snapshots."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/SIGNALS.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/SIGNALS.md"
 ---
 
 Vivary tracks a small public metrics snapshot so the README and site can show real

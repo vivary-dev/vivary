@@ -1,6 +1,6 @@
 # Harness adapter contract
 
-This is a target integration contract, not a shipped Vivary API. It composes the installed Native harness API and preserves the existing Code and Native thread owners. The current two-engine Code path does not yet implement this catalog or generic native resume. [M03, M04 and M05](modules.md) own the change boundaries.
+This is a target integration contract, not a shipped Vivary API. It composes the installed Native harness API and preserves the existing Code and Native thread owners. The current two-engine Code path implements Codex model discovery and native resume, but does not implement the generic catalog or linked cross-harness conversations. [M03, M04 and M05](modules.md) own the change boundaries.
 
 ## User flow first
 
@@ -27,7 +27,17 @@ Source basis: installed `@agent-native/core` 0.176.5, especially `docs/content/h
 
 Current code: [local-code-agent.ts](../../../../packages/workbench/server/local-code-agent.ts), [local-runtime-setup.ts](../../../../packages/workbench/server/local-runtime-setup.ts), [project-runtime-readiness.mjs](../../../../packages/workbench/server/project-runtime-readiness.mjs), [project-services.mjs](../../../../packages/workbench/server/project-services.mjs), and the [Code execution host](../../../../packages/workbench/server/code-execution-host.ts).
 
-The current Code follow-up reconstructs a bounded prompt. That is replay, not opaque native-session resume. Existing state must remain readable during migration. Never feed Claude resume state to Codex or infer a new session's authority from linked history.
+Codex execution uses its app-server protocol through the maintained Core patch. New runs store the native session ID, and follow-ups resume that exact session. Historical runs without an ID use bounded prompt replay once, then retain the created native session. The Claude compatibility path still reconstructs a bounded prompt. Runtime or model changes require a new conversation. Never feed one runtime's resume state to another.
+
+## Implemented Codex behavior
+
+New conversations offer Claude Code or Codex. Codex discovery reads its model catalog, subscription account, and configured connection names. A connection name is configuration evidence, not proof of a successful call. The same resolved executable handles discovery and execution. Codex retains its credentials, tools, skills, and connections.
+
+Send starts immediately. There is no per-message launch approval or fixed two-minute turn deadline. Runtime settings select Normal, Read only, or YOLO for the next turn. Active work keeps its captured mode. Native action requests remain pending until answered or canceled, including after navigation or reload. Allow once and Decline resolve the original request, and additional permission grants last for that turn. Stop, failure, and host shutdown end work. Startup and cleanup bounds remain.
+
+Commentary becomes a compact Progress card. Actual native child identity and activity produce Subagent cards with available public results. Multiple assistant messages never imply multiple agents. Final answers remain ordinary text. The host still admits one root conversation run at a time. Native child activity does not establish concurrent independent conversation support.
+
+The [Workbench runtime contract](../../../../packages/workbench/README.md) and [acceptance register](../desktop-acceptance-status.md) own detailed behavior and candidate evidence. The remaining sections describe the broader target adapter design.
 
 Vivary supplies its original engine and narrow deterministic workspace operations. When a user capability is missing, explain whether the boundary is the harness, the observed host state, project or host authorization, or an existing Vivary operation before proposing another tool.
 

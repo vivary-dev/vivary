@@ -1,11 +1,14 @@
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
+import { workspacePatternChoices, workspacePreset } from "../shared/workspace-patterns.ts";
 import { createManagedProject } from "../server/managed-projects.mjs";
 
 export default defineAction({
   description: "Create and register the exact reviewed managed Vivary project.",
   schema: z.strictObject({
     name: z.string().trim().min(1).max(128),
+    patternChoices: workspacePatternChoices.optional(),
+    preset: workspacePreset.optional(),
     displayName: z.string().trim().min(1).max(200),
     acceptedPlanSha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   }),

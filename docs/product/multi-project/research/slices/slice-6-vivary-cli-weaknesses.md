@@ -432,7 +432,7 @@ whose notes carry ordinary frontmatter.
   workspaces stay `unsupported` with read-only eligibility. The contract anticipates
   non-git roots; `governed_find` does not act on that.
 
-Matching issues, from `gh issue list --repo vivary-dev/vivary --state all --limit 60`:
+Matching issues, from `gh issue list --repo vivary-dev/vivary-cli --state all --limit 60`:
 
 - 85 CLOSED, "create-vivary: knowledge-work preset + capability registry". Its
   acceptance criterion "`create-vivary init --preset knowledge-work` scaffolds a clean

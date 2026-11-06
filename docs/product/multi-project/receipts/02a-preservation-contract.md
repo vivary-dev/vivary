@@ -26,7 +26,7 @@ Review status: two-reader contract review is complete. Root checked the structur
 setup, mutation operations, hash constants, validation order, positive resume,
 wrong-type refusal, and source aliases. JSON parsing succeeded with 33 unique
 cases. The unchanged planning guard and all 17 adversarial tests passed in
-[CI](https://github.com/vivary-dev/vivary/actions/runs/33990271792); final publication checks run on PR #328. Packet 02a is complete as
+[CI](https://github.com/vivary-dev/vivary-cli/actions/runs/33990271792); final publication checks run on PR #328. Packet 02a is complete as
 contract inspection. Runtime behavior remains unproved. No file
 operation or restoration command has been executed. [02b](../packets/02b-restore-fixture-harness.md)
 owns actual file operations and adversarial tests in BrowserPod. Outcome 02

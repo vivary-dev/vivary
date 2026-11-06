@@ -2,6 +2,8 @@
 
 These diagrams describe target responsibilities. A box is a logical module, not a request for a new package, service or database. [Modules](modules.md) names current code and planned composition. [Actions](actions.md) defines observable operations.
 
+The implemented Codex route keeps Native Code records and uses Codex app-server execution through the maintained Core patch. It supports native session resume and action approvals. The broader registry/linking design remains a target. See [the implemented behavior](harness-adapters.md#implemented-codex-behavior).
+
 ## Context
 
 ```mermaid

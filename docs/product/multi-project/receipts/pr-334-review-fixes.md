@@ -10,14 +10,14 @@ Runtime proof and application acceptance remain open.
 
 | Finding | Correction |
 | --- | --- |
-| [Iteration cap](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944672848) | 20a owns three Claude iterations and both fault cases. Its required continuation owns the same bounded Codex proof; no packet silently doubles its cap |
-| [Missing second-runtime proof](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944672849) | Outcome 04 requires both runtime proofs. A missing Codex prerequisite keeps parity incomplete while preserving accepted Claude evidence |
-| [Repeated owner decision](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944672852) | The design owns decision four. Packet and outcome logs link to it and record their scoped impact |
-| [Receipt index paths](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944672853) | Each runtime owns a receipt root, and roles read that root's index and detail files |
-| [One context window](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944894822) | Each runtime proof is one packet and one context window. Prepare the dependent parity packet at the first proof's verified checkpoint |
-| [Release truth](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944894828) | The Unreleased entry records the direction and proof requirements with their unimplemented limits. The existing sync script generates its mirrors |
-| [Adapter module ownership](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944894833) | 20a names its common protocol, Claude adapter, prompts, sequencer, fixture, and tests. The continuation names the Codex adapter and parity evidence |
-| [Decision provenance](https://github.com/vivary-dev/vivary/pull/334#discussion_r3944894843) | The design separates decision four from the three brief answers and links its subsequent source |
+| [Iteration cap](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944672848) | 20a owns three Claude iterations and both fault cases. Its required continuation owns the same bounded Codex proof; no packet silently doubles its cap |
+| [Missing second-runtime proof](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944672849) | Outcome 04 requires both runtime proofs. A missing Codex prerequisite keeps parity incomplete while preserving accepted Claude evidence |
+| [Repeated owner decision](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944672852) | The design owns decision four. Packet and outcome logs link to it and record their scoped impact |
+| [Receipt index paths](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944672853) | Each runtime owns a receipt root, and roles read that root's index and detail files |
+| [One context window](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944894822) | Each runtime proof is one packet and one context window. Prepare the dependent parity packet at the first proof's verified checkpoint |
+| [Release truth](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944894828) | The Unreleased entry records the direction and proof requirements with their unimplemented limits. The existing sync script generates its mirrors |
+| [Adapter module ownership](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944894833) | 20a names its common protocol, Claude adapter, prompts, sequencer, fixture, and tests. The continuation names the Codex adapter and parity evidence |
+| [Decision provenance](https://github.com/vivary-dev/vivary-cli/pull/334#discussion_r3944894843) | The design separates decision four from the three brief answers and links its subsequent source |
 | Independent review: mutable runtime starting state | Record an immutable baseline and matching spec/oracle/prompt hashes. Each healthy or fault run uses a separate disposable copy. Codex starts from the baseline |
 | Independent review: adapter invariant existed only in a log | Outcome 04's done condition owns the normative shared contract and incomplete-proof rule |
 | Independent review: incomplete starter verification | A passing baseline harness asserts the starter's exact expected failures. Product tests must pass in the completed disposable candidate |
@@ -68,16 +68,16 @@ implementation. The packet owns its schema and enforcement proof.
 
 | Finding | Correction |
 | --- | --- |
-| [Pre-call token bound](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993308) | Require an enforceable whole-invocation maximum before reserving usage; an unsupported bound stops live calls |
-| [Ignored export location](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993311) | Resolve the Littleagent checkout explicitly and require ignore and containment checks before export |
-| [Credential exposure](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993314) | Separate authenticated CLI state from model tool filesystems and prove canary denials |
-| [Closure release truth](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993317) | Both runtime closures own canonical changelog updates and generated mirrors |
-| [Parity cleanup](https://github.com/vivary-dev/vivary/pull/335#discussion_r3944993321) | The parity owner prepares itemized, restore-proven cleanup for explicit approval and retains archives for outcome 04 |
-| [Claimable deterministic preparation](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089814) | Packet 20c owns preparation and deterministic tests with a receipt; 20a depends on it and keeps only its actual native-call prerequisite blocked |
-| [Exact export paths](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945089827) | Check each archive, manifest, and temporary output path separately for an ignore match and resolved containment before writing |
-| [Preparation cleanup gate](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141057) | Retain stopped 20c containers and persistent test trees, export and restore evidence, then request each itemized removal |
-| [Enforced deadlines](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141063) | The sequencer owns the one-hour deadline, bounded process termination, and tests for stalled descendants and restart without resetting time |
-| [Executable evidence class](https://github.com/vivary-dev/vivary/pull/335#discussion_r3945141068) | 20c uses runtime verification for offline behavioral tests and retains the separate unproved native CLI acceptance |
+| [Pre-call token bound](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3944993308) | Require an enforceable whole-invocation maximum before reserving usage; an unsupported bound stops live calls |
+| [Ignored export location](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3944993311) | Resolve the Littleagent checkout explicitly and require ignore and containment checks before export |
+| [Credential exposure](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3944993314) | Separate authenticated CLI state from model tool filesystems and prove canary denials |
+| [Closure release truth](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3944993317) | Both runtime closures own canonical changelog updates and generated mirrors |
+| [Parity cleanup](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3944993321) | The parity owner prepares itemized, restore-proven cleanup for explicit approval and retains archives for outcome 04 |
+| [Claimable deterministic preparation](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3945089814) | Packet 20c owns preparation and deterministic tests with a receipt; 20a depends on it and keeps only its actual native-call prerequisite blocked |
+| [Exact export paths](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3945089827) | Check each archive, manifest, and temporary output path separately for an ignore match and resolved containment before writing |
+| [Preparation cleanup gate](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3945141057) | Retain stopped 20c containers and persistent test trees, export and restore evidence, then request each itemized removal |
+| [Enforced deadlines](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3945141063) | The sequencer owns the one-hour deadline, bounded process termination, and tests for stalled descendants and restart without resetting time |
+| [Executable evidence class](https://github.com/vivary-dev/vivary-cli/pull/335#discussion_r3945141068) | 20c uses runtime verification for offline behavioral tests and retains the separate unproved native CLI acceptance |
 
 The first remote review of `2c497d6` found five additional issues. The follow-up
 binds exports to the verified absolute Littleagent checkout and requires

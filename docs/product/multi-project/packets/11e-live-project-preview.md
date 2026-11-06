@@ -2,12 +2,13 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/31
 Parent: 11
-Status: needs-info
+Status: done
 Depends-on: [04a]
 Owner: Root-assigned project preview and Native browser-tool integrator
 Scope: Connect a project's running page and supported browser debugging to its existing agent session.
 Verification-kind: runtime
-Needs: Project session binding accepted.
+Evidence: [Live preview verification](../receipts/11e-live-project-preview.md)
+Verification-result: passed
 Timebox: One real preview, inspect, repair, and refresh loop using existing browser owners.
 
 ## Goal
@@ -16,12 +17,27 @@ The linked GitHub issue owns task scope and acceptance. This packet records
 implementation boundaries. Work with the agent while seeing and debugging the
 site or dashboard being built in the selected project.
 
-## Existing implementation
+## Implementation
 
-`BrowserPreview.tsx` accepts a URL and renders an isolated iframe with refresh
-and a new-tab fallback. It does not start a server or provide integrated browser
-inspection. The Electron shell already includes Chromium. Inspect supported Native
-browser and execution APIs before selecting another dependency or browser process.
+The Workbench preview uses the authenticated Native owner action
+`vivary-project-preview` for discovery, exact command review, start, status,
+inspection, and owned-process stop. The action binds caller, project, folder,
+manifest, launcher, and preview address. It rejects changed reviews and
+coalesces retries of the same start request.
+
+The live iframe uses credentialless storage, a restricted sandbox, and a
+separate origin. Vivary rejects same-origin preview addresses and sends
+anti-framing headers. Generated HTML previews keep their existing opaque sandbox.
+Host-local embedding requires confirmation for the exact project, host, and URL.
+
+The preview attaches context to the existing Code composer without replacing its
+draft or sending a turn. The selected coding runtime owns inspection and repair.
+Native's Codex adapter now projects real `imageView` events as `view_image`
+transcript records. It does not create image pixels absent from the protocol.
+
+The [Workbench reference](../../../../packages/workbench/README.md#projects-and-conversations)
+owns the controls and behavior. The [verification receipt](../receipts/11e-live-project-preview.md) records
+normal-app isolation, the real agent repair loop, and remaining platform limits.
 
 ## Context
 
@@ -69,7 +85,7 @@ Repeat failed journeys after repair. Preserve the existing test runners and limi
 
 ```console
 pnpm --dir packages/workbench test:shell
-pnpm --dir packages/workbench typecheck
+pnpm --dir packages/workbench exec tsc --noEmit -p tsconfig.json
 ```
 
 ## Stop conditions
@@ -83,3 +99,9 @@ remain unaccepted until demonstrated through a supported interface.
 
 - 2026-09-13: Added from Jeff's live website/dashboard preview and debugging request.
   Existing iframe source is established. Integrated agent debugging is unimplemented.
+
+- 2026-09-22: Claimed issue #31 after PR #81 merged. Added reviewed process
+  ownership, isolated module-capable preview, and project-scoped Code context.
+  The integrated and focused review browser journeys passed. Codex/Astra captured
+  the failure, repaired the fixture, and verified its page. Independent review
+  fixes passed. Image viewing and packaged platform limits remain explicit.

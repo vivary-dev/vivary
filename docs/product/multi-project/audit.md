@@ -38,7 +38,7 @@ unrelated ready work.
 
 ## Verification checkpoint
 
-[CI](https://github.com/vivary-dev/vivary/actions/runs/33990271792) passed all jobs, including the 17 adversarial planning-guard tests,
+[CI](https://github.com/vivary-dev/vivary-cli/actions/runs/33990271792) passed all jobs, including the 17 adversarial planning-guard tests,
 graph validation, line endings, diff hygiene, site build, and Windows checks.
 That audit completed outcome 01 and inspection packets 02a and 10a.
 [03a's later receipt](receipts/03a-registry-contract.md) records completed registry

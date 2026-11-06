@@ -32,3 +32,4 @@ they do not prove the behavior above.
 ## Log
 
 - 2026-09-05: Initial public plan recorded. Implementation has not started.
+- 2026-10-01: Issue #162 turned Native's MCP server, its connect and OAuth routes, and its `/.well-known/mcp.json` card off in every Vivary launch. This outcome still needs its own authenticated transport and a truthful card. It must not turn Native's endpoint back on.

@@ -6,6 +6,7 @@ import { register } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertNativeSqliteMatchesNode, ensureCorePackageJson, ensureProofRoot } from "./maintained-test-options.mjs";
 import { gzipSync } from "node:zlib";
 
 const TEST_FILE = fileURLToPath(import.meta.url);
@@ -29,6 +30,7 @@ function errorChain(error) {
   return chain;
 }
 
+ensureCorePackageJson();
 register(new URL("./native-http-dependency-loader.mjs", import.meta.url), {
   data: { corePackageJson: process.env.VIVARY_TEST_CORE_PACKAGE_JSON }, // guard:allow-env-credential — Existing dependency manifest path.
 });
@@ -297,14 +299,28 @@ async function makeFixture(base) {
 
 async function mainTest(t) {
   assert.ok(process.execArgv.includes(HEAP));
+  assertNativeSqliteMatchesNode(ensureCorePackageJson());
+  ensureProofRoot("VIVARY_17A_PROOF_ROOT");
   assert.ok(process.env.VIVARY_TEST_CORE_PACKAGE_JSON); // guard:allow-env-credential — Reviewed installed Core package manifest path.
   const requestedRoot = process.env.VIVARY_17A_PROOF_ROOT; // guard:allow-env-credential — Disposable proof path.
   assert.ok(requestedRoot && path.isAbsolute(requestedRoot));
   const base = await realpath(requestedRoot);
   const fixture = await makeFixture(base);
-  t.after(async () => rm(fixture.root, { recursive: true, force: true }));
-  const m = await modules();
-  t.after(async () => m.closeDbExec());
+  let m;
+  // Close the shared database before removing the fixture that holds it:
+  // Windows refuses to delete an open SQLite file. Also covers a failure
+  // part-way through module loading below.
+  t.after(async () => {
+    if (m) await m.closeDbExec();
+    await rm(fixture.root, { recursive: true, force: true });
+  });
+  // Parent and forked children share this database. Always use the fixture
+  // root the suite removes: never an inherited DATABASE_URL, and not Core's
+  // cwd-relative default. Core still creates an empty data/ directory under
+  // the working directory, which the package scripts keep in packages/workbench.
+  // guard:allow-env-mutation — Test-only fixture location shared with the forked children; process-scoped by design.
+  process.env.DATABASE_URL = `file:${path.join(fixture.root, "registry.sqlite")}`; // guard:allow-env-credential — Task-owned SQLite fixture file only.
+  m = await modules();
   const cases = [];
   const snapshotPool = new Map();
   const orgId = `org_${randomUUID().replaceAll("-", "")}`;

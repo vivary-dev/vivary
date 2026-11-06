@@ -95,10 +95,14 @@ export function ReconnectProjectForm({ projectId, disabled, onReconnected }: {
       </div>}
       {preview && <>
         <p className="project-reconnection-folder">{preview.folderName}</p>
-        <p>In Vivary's managed Projects folder on this host.</p>
+        <p>{preview.folderKind === "managed"
+          ? "In Vivary's managed Projects folder on this host."
+          : "Registered folder on this host:"}</p>
+        {preview.folderKind === "external" && <p><code>{preview.folderPath}</code></p>}
         {preview.recorded
           ? <p>This reconnection was recorded. Retry its exact confirmation to restore folder access.</p>
-          : <p>The folder's identity has changed since it was connected. Reconnect only if you recognize this project.</p>}
+          : <p>The folder identity changed at the saved path. A changed host filesystem view or a replacement folder can cause this.
+            Vivary cannot tell which occurred. Check the folder before reconnecting.</p>}
         <p>Reconnecting restores file and agent access. Your saved conversations stay with this project.
           Files stay unchanged, and no agent starts.</p>
       </>}

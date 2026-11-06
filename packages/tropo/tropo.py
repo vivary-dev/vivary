@@ -613,10 +613,15 @@ def _read_toml(path):
         raise ConfigError(f"{path}: {e}")
 
 
-def _read_pack(name, root, script_dir):
+def _read_pack(name, root, script_dir, read_toml=None):
+    if (not isinstance(name, str) or not name or name in (".", "..")
+        or any(char in "/\\:" or ord(char) < 32 or ord(char) == 127
+               for char in name)):
+        raise ConfigError("pack name must be a single installed filename")
+    reader = read_toml or _read_toml
     local_pack = os.path.join(root, ".tropo", "packs", name + ".toml")
     if os.path.isfile(local_pack):
-        return _read_toml(local_pack)
+        return reader(local_pack)
     if name in BUNDLED_PACKS:
         try:
             return tomllib.loads(BUNDLED_PACKS[name])
@@ -624,7 +629,7 @@ def _read_pack(name, root, script_dir):
             raise ConfigError(f"bundled pack {name!r}: {e}")
     repo_pack = os.path.join(script_dir, "packs", name + ".toml")
     if os.path.isfile(repo_pack):
-        return _read_toml(repo_pack)
+        return reader(repo_pack)
     raise ConfigError(f"pack {name!r} not found (looked in .tropo/packs and bundled packs)")
 
 
@@ -656,6 +661,16 @@ WORKSPACE_FILE_ROLES = ("law", "map", "record", "memory", "boundary")
 # [workspace]. Recognized legacy assignments still describe roles, while
 # unrelated or malformed workspace.patterns/workspace.roles values stay ignored.
 WORKSPACE_VIVARY_METADATA_VERSION = 1
+WORKSPACE_BUILTIN_PATTERNS = {
+    "thin-context", "capture", "source-reference", "navigation", "project-brief",
+}
+# Authored project facts, one Markdown file per fact. This is the only place the
+# default folder is spelled: the Workbench reads it back through
+# workspace_context. `confirmed` is the date the owner last saved or corrected
+# the statement. It is not named `updated`, which Tropo may derive.
+AUTHORED_MEMORY_DEFAULT = ".vivary/knowledge"
+FACT_TYPE = "vivary_fact"
+FACT_FIELDS = {"source": "string", "confirmed": "date"}
 
 
 def resolve_workspace_roles(workspace, protected_paths=None):
@@ -732,10 +747,10 @@ def _workspace_role_assignments(table, field):
     patterns = table.get("patterns", ["thin-context"])
     if (
         not isinstance(patterns, list)
-        or any(pattern != "thin-context" for pattern in patterns)
+        or any(pattern not in WORKSPACE_BUILTIN_PATTERNS for pattern in patterns)
         or len(patterns) != len(set(patterns))
     ):
-        raise ConfigError(f"{field}.patterns may contain thin-context once")
+        raise ConfigError(f"{field}.patterns must name distinct installed patterns")
     overrides = table.get("roles", {})
     if not isinstance(overrides, dict) or any(
         role not in WORKSPACE_FILE_ROLES for role in overrides
@@ -763,6 +778,91 @@ def _describe_workspace_roles(patterns, overrides, protected_paths, roles_field=
             raise ConfigError(f"{field} cannot repeat a path")
         roles[role] = paths
     return {"patterns": list(patterns), "roles": roles}
+
+
+def authored_memory_paths(workspace_roles):
+    """Folders that hold authored project facts, in role order.
+
+    The memory role's paths when it names any, otherwise the default folder.
+    An empty role (what thin templates write) describes no location, so the
+    default applies. Paths are descriptions only and grant no access.
+    """
+    memory = (workspace_roles or {}).get("roles", {}).get("memory") or []
+    return list(memory) or [AUTHORED_MEMORY_DEFAULT]
+
+
+def _add_fact_type(composed, workspace_roles):
+    """Type fact folders as FACT_TYPE in a fully composed thin config.
+
+    Both compose paths call this after every owner table, pack, and overlay
+    merged, so private and public checks type the same notes. The default
+    folder stays typed after the memory role moves, so facts left there remain
+    valid. The owner wins: an owner FACT_TYPE table, or an owner type that
+    names a fact folder by its path or its basename, is kept unchanged.
+
+    A role path without `/` is registered as `./<path>`, which type_for
+    matches only at the workspace root. A plain folder name would otherwise
+    type every folder with that basename anywhere in the tree.
+    """
+    if workspace_roles is None or FACT_TYPE in composed["types"]:
+        return composed
+    # Compare without a leading "./", so an owner's "./facts" names the role
+    # path "facts". A trailing "/" stays: type_for does not match an owner
+    # folder written "facts/", so the fact type must still cover that folder.
+    def normalized(folder):
+        folder = folder.strip()
+        while folder.startswith("./"):
+            folder = folder[2:]
+        return folder
+
+    mapped = {
+        normalized(folder)
+        for definition in composed["types"].values()
+        for folder in definition.get("folders", [])
+    }
+    folders = [
+        folder if "/" in folder else f"./{folder}"
+        for folder in dict.fromkeys(
+            normalized(path) for path in [AUTHORED_MEMORY_DEFAULT, *authored_memory_paths(workspace_roles)]
+        )
+        if folder not in mapped and os.path.basename(folder) not in mapped
+    ]
+    if folders:
+        _merge_config(
+            composed,
+            {"types": {FACT_TYPE: {"folder": folders, "required": dict(FACT_FIELDS)}}},
+        )
+    return composed
+
+
+def workspace_context(config):
+    """Paths an agent reads when a run starts, from configuration alone.
+
+    `config` is a thin workspace's base Config, or None for a folder without
+    thin settings. Every path is workspace-relative. Nothing here reads notes.
+    `protected` lists the declared private, runtime, and capability storage paths.
+    """
+    workspace_roles = config.workspace_roles if config is not None else None
+    if workspace_roles is None:
+        return {
+            "status": "plain",
+            "roles": None,
+            "state": None,
+            "memory": [AUTHORED_MEMORY_DEFAULT],
+            "memory_assigned": False,
+            "protected": [],
+        }
+    roles = workspace_roles["roles"]
+    return {
+        "status": "thin",
+        "roles": {role: list(roles[role]) for role in WORKSPACE_FILE_ROLES},
+        "state": config.workspace_state,
+        "memory": authored_memory_paths(workspace_roles),
+        "memory_assigned": bool(roles["memory"]),
+        # The declared private, runtime, and capability storage paths. Memory
+        # never uses them, even when the owner edits the boundary role.
+        "protected": list(config.workspace_protected),
+    }
 
 
 def _validate_thin_workspace(raw, thin_path, root):
@@ -873,6 +973,8 @@ class Config:
     def __init__(self, data, root):
         self.root = root
         self.workspace_roles = copy.deepcopy(data.get("workspace_roles"))
+        self.workspace_state = data.get("workspace_state")
+        self.workspace_protected = list(data.get("workspace_protected") or [])
         base = data.get("base", {})
         self.derive = base.get("derive", [])
         self.base_required = base.get("required", {})
@@ -906,12 +1008,13 @@ class Config:
         return required, known
 
 
-def _compose(root, script_dir, config_path=None):
+def _compose(root, script_dir, config_path=None, *, read_toml=None):
+    reader = read_toml or _read_toml
     thin_path = os.path.join(root, THIN_CONFIG_REL)
     selected_path = config_path or (
         thin_path if os.path.isfile(thin_path) else os.path.join(root, CONFIG_NAME)
     )
-    raw = _read_toml(selected_path)
+    raw = reader(selected_path)
     workspace_roles = None
     if (
         config_path is None
@@ -926,7 +1029,7 @@ def _compose(root, script_dir, config_path=None):
         workspace_roles = _validate_thin_workspace(raw, thin_path, root)
     composed = {"base": {}, "types": {}, "exclude": [], "workspace_roles": workspace_roles}
     for pack in raw.get("packs", []):
-        _merge_config(composed, _read_pack(pack, root, script_dir))
+        _merge_config(composed, _read_pack(pack, root, script_dir, reader))
     _merge_config(composed, raw)  # _merge_config normalizes each type's raw `folder`
     root_overlay = os.path.join(root, CONFIG_NAME)
     if (
@@ -935,8 +1038,13 @@ def _compose(root, script_dir, config_path=None):
         == os.path.normcase(os.path.abspath(thin_path))
         and os.path.isfile(root_overlay)
     ):
-        _merge_config(composed, _read_toml(root_overlay))
-    return composed
+        _merge_config(composed, reader(root_overlay))
+    if workspace_roles is not None:
+        composed["workspace_state"] = _workspace_relative_path(
+            raw["workspace"]["state"], "state"
+        )
+        composed["workspace_protected"] = _declared_protected_paths(raw["workspace"])
+    return _add_fact_type(composed, workspace_roles)
 
 
 def _rebase_overlay_config(raw, overlay_path, root):
@@ -989,10 +1097,15 @@ class ConfigResolver:
     """Resolves the effective Config at any directory by composing overlays
     (nested tropo.toml, SPEC §5.5) onto the root config — tighten-only, cached."""
 
-    def __init__(self, root, script_dir, config_path=None):
+    def __init__(self, root, script_dir, config_path=None, *, base_data=None,
+                 read_toml=None):
+        self._read_toml = read_toml or _read_toml
         self.root = os.path.abspath(root)
         self.script_dir = script_dir
-        self._base_dict = _compose(root, script_dir, config_path)
+        self._base_dict = (
+            copy.deepcopy(base_data) if base_data is not None
+            else _compose(root, script_dir, config_path, read_toml=self._read_toml)
+        )
         self.base = Config(copy.deepcopy(self._base_dict), self.root)
         self._cache = {}
 
@@ -1003,7 +1116,11 @@ class ConfigResolver:
             if overlays:
                 composed = copy.deepcopy(self._base_dict)
                 for ov in overlays:
-                    _merge_config(composed, _rebase_overlay_config(_read_toml(ov), ov, self.root))
+                    try:
+                        _merge_config(composed, _rebase_overlay_config(self._read_toml(ov), ov, self.root))
+                    except ConfigError as exc:
+                        exc.config_path = ov
+                        raise
                 self._cache[key] = Config(composed, self.root)
             else:
                 self._cache[key] = self.base
@@ -1035,6 +1152,12 @@ def type_for(full, config):
     d = os.path.dirname(os.path.abspath(full))
     root = os.path.abspath(config.root)
     while True:
+        relative_dir = os.path.relpath(d, root).replace("\\", "/")
+        if relative_dir in config.folder_map:
+            return config.folder_map[relative_dir]
+        # `./name` keys match only the root-level folder (see _add_fact_type).
+        if f"./{relative_dir}" in config.folder_map:
+            return config.folder_map[f"./{relative_dir}"]
         if os.path.basename(d) in config.folder_map:
             return config.folder_map[os.path.basename(d)]
         if os.path.normcase(os.path.normpath(d)) == os.path.normcase(os.path.normpath(root)):
@@ -1074,10 +1197,10 @@ def _derive_id(full):
     return slugify(base)
 
 
-def derive(full, body, *, use_git_dates=True):
+def derive(full, body, *, use_git_dates=True, stat_result=None):
     created, updated = _git_dates(full) if use_git_dates else (None, None)
     if not updated:
-        st = os.stat(full)
+        st = stat_result if stat_result is not None else os.stat(full)
         created = datetime.date.fromtimestamp(min(st.st_mtime, st.st_ctime)).isoformat()
         updated = datetime.date.fromtimestamp(st.st_mtime).isoformat()
     sid = _derive_id(full)
@@ -1181,7 +1304,7 @@ def iter_markdown(root, paths, exclude):
                     yield full, rel
 
 
-def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
+def analyze_file(full, rel, config, *, text=None, use_git_dates=True, stat_result=None):
     doc = Doc()
     doc.full, doc.rel = full, rel
     doc.findings, doc.refs, doc.declared, doc.noise = [], [], {}, []
@@ -1197,7 +1320,8 @@ def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
             return doc
 
     yaml_text, body = extract_frontmatter(text)
-    doc.derived = derive(full, body, use_git_dates=use_git_dates)
+    doc.derived = derive(full, body, use_git_dates=use_git_dates,
+                         stat_result=stat_result)
 
     fields, key_lines = {}, {}
     if yaml_text is not None:
@@ -1266,14 +1390,24 @@ def analyze_file(full, rel, config, *, text=None, use_git_dates=True):
     return doc
 
 
-def analyze(root, paths, config):
+def analyze(root, paths, config, *, additional_documents=(), read_document=None):
     resolver = config if hasattr(config, "for_dir") else _StaticResolver(config)
+    additional_documents = tuple(additional_documents)
+    proposed_paths = {doc.rel.replace("\\", "/") for doc in additional_documents}
     docs = []
     for full, rel in iter_markdown(root, paths, resolver.base.exclude):
+        if rel.replace("\\", "/") in proposed_paths:
+            continue
         effective = resolver.for_dir(os.path.dirname(full))
         if is_excluded(rel, effective.exclude):
             continue
-        docs.append(analyze_file(full, rel, effective))
+        if read_document is None:
+            docs.append(analyze_file(full, rel, effective))
+        else:
+            text, stat_result = read_document(full)
+            docs.append(analyze_file(full, rel, effective, text=text,
+                                     stat_result=stat_result))
+    docs.extend(additional_documents)
     ids = set()
     for d in docs:
         ids.add(d.derived.get("id"))
@@ -2232,6 +2366,16 @@ class WorkLimitExceededError(TropoFacadeError):
 class ProducerUnavailableError(TropoFacadeError):
     reason = "producer_unavailable"
 
+
+class TargetUnavailableError(TropoFacadeError):
+    """A public impact target that is private, missing, or unknown.
+
+    One reason covers all three, so a refusal never tells a private note's id
+    apart from an id that names nothing.
+    """
+
+    reason = "target_unavailable"
+
 def _public_cancel_if_requested(cancelled):
     if cancelled is None:
         return
@@ -2341,6 +2485,8 @@ _PUBLIC_MAX_QUERY_CHARS = 4_096
 _PUBLIC_MAX_FILTERS = 16
 _PUBLIC_MAX_CHECK_PATHS = 200
 _PUBLIC_MAX_PATH_CHARS = 512
+# A public graph id is also an impact query, which the app caps at 256.
+_PUBLIC_MAX_GRAPH_ID_CHARS = 256
 _PUBLIC_MAX_TYPE_FILTER_CHARS = 128
 _PUBLIC_MAX_EDGE_FILTER_CHARS = 256
 _PUBLIC_MAX_SNIPPET_CHARS = 1_000
@@ -3237,6 +3383,7 @@ def _public_config_from_candidates(
     thin_rel = THIN_CONFIG_REL.replace(os.sep, "/")
     has_thin = candidates[0].get("rel") == thin_rel
     parsed = []
+    thin_roles = None
     try:
         for candidate in candidates:
             if candidate["rel"] not in allowed:
@@ -3271,7 +3418,7 @@ def _public_config_from_candidates(
                 _public_add_omission(omissions, "config", "unsupported")
                 return _public_default_config(root), None, False
             if candidate["rel"] == thin_rel:
-                _validate_thin_workspace(
+                thin_roles = _validate_thin_workspace(
                     raw,
                     os.path.join(root, THIN_CONFIG_REL),
                     root,
@@ -3287,7 +3434,7 @@ def _public_config_from_candidates(
             _merge_config(composed, tomllib.loads(BUNDLED_PACKS[pack]))
         for _candidate, raw, _data in parsed:
             _merge_config(composed, raw)
-        config = Config(composed, root)
+        config = Config(_add_fact_type(composed, thin_roles), root)
     except (AttributeError, ConfigError, TypeError, ValueError, tomllib.TOMLDecodeError):
         if has_thin:
             raise PrivacyPolicyUnavailableError() from None
@@ -3985,6 +4132,49 @@ def check_workspace(
         "strict": strict_value,
         "complete": snapshot["complete"] and missing == 0,
         "workspace_fingerprint": snapshot["fingerprint"],
+        "omissions": _public_omission_rows(omissions),
+    }
+
+
+def public_graph(root, *, allowlist, cancelled=None):
+    """Build the typed graph from one privacy-filtered document snapshot.
+
+    Only documents the snapshot admits become nodes, so a private note's id,
+    path, type, and edges never enter the graph. A ref from a public note to a
+    private one is broken, exactly like a ref to a missing id. A document whose
+    id or path fails the facade's output checks is left out and counted.
+    Returns `{nodes, edges, complete, omissions}` shaped like `build_graph`.
+    """
+
+    snapshot = _public_document_snapshot(
+        root,
+        allowlist=allowlist,
+        cancelled=cancelled,
+    )
+    omissions = dict(snapshot["omissions"])
+    docs = []
+    for record in snapshot["documents"]:
+        _public_cancel_if_requested(cancelled)
+        doc = record["doc"]
+        if (
+            not _public_safe_relative_path(doc.rel)
+            or not _public_output_text_is_safe(
+                doc.derived.get("id"), _PUBLIC_MAX_GRAPH_ID_CHARS
+            )
+        ):
+            _public_add_omission(omissions, "document", "unsafe_identifier")
+            continue
+        docs.append(doc)
+    nodes, edges = build_graph(docs)
+    for node in nodes.values():
+        if node["type"] is not None and not _public_output_text_is_safe(
+            node["type"], _PUBLIC_MAX_TYPE_FILTER_CHARS
+        ):
+            node["type"] = None
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "complete": snapshot["complete"] and len(docs) == len(snapshot["documents"]),
         "omissions": _public_omission_rows(omissions),
     }
 

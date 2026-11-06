@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from test_support import UNPRIVILEGED_POSIX_REASON, unprivileged_posix  # noqa: E402
+
 from vivary_core.physical_observe import CaptureLimits, ObservationFailure
 from vivary_core.root_identity_lifecycle import (
     IdentityStateError, LiveRootIdentity, RootIdentityLifecycle,
@@ -608,6 +610,7 @@ class RootVcsIdentityLifecycleTests(unittest.TestCase):
                     self.owner()
                 self.assertEqual(self.state.read_text(encoding="utf8"), raw)
 
+    @unittest.skipUnless(unprivileged_posix(), UNPRIVILEGED_POSIX_REASON)
     def test_migration_write_failure_and_state_change_never_verify(self):
         legacy_raw = json.dumps(self.v1_state(), indent=2) + "\n"
         self.state.write_text(legacy_raw, encoding="utf8")

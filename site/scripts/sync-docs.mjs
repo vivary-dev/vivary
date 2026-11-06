@@ -13,7 +13,7 @@ const outDir = path.resolve(here, '..', 'src', 'content', 'docs');
 const docsWalkthroughAssetsDir = path.join(docsDir, 'assets', 'walkthrough');
 const publicWalkthroughAssetsDir = path.resolve(here, '..', 'public', 'assets', 'walkthrough');
 const GH = 'https://github.com/vivary-dev/vivary/blob/dev';
-const APP_GH = 'https://github.com/vivary-dev/Vivary-New/blob/dev';
+const APP_GH = 'https://github.com/vivary-dev/vivary/blob/dev';
 const noDelete = process.env.VIVARY_SYNC_NO_DELETE === '1';
 
 const normalizeForCompare = (p) => {
@@ -43,8 +43,9 @@ const pages = [
   ['WHITE-PAPER', 'white-paper', 'White paper', 'The technical case for a minimal, portable standard for agent-native workspaces.'],
   ['HOWTO', 'howto', 'Advanced recipes', 'Focused recipes for types, review, coordination, CI, storage, and optional providers.'],
   ['SIGNALS', 'signals', 'Public signals', 'Public npm, PyPI, and GitHub metrics snapshots.'],
+  ['desktop-preview', 'desktop-preview', 'Windows prerelease installation', 'Download, verify, install, preserve data, and review the limits of the Windows portable prerelease.'],
   ['RELEASE-WORKFLOW', 'release-workflow', 'Release workflow', 'End-of-update checklist for Vivary release truth, docs, publishing, and post copy.'],
-  ['ARCHITECTURE', 'architecture', 'Architecture', 'The four-layer model and the principles behind Vivary.'],
+  ['ARCHITECTURE', 'architecture', 'High-level design', 'Vivary purpose, success criteria, architecture, data boundaries, and verified delivery limits.'],
   ['MIGRATION-STATUS', 'migration-status', 'Migration status', 'Current status of stable, optional, experimental, held, deprecated, and planned Vivary surfaces.'],
   ['DECISIONS', 'decisions', 'Decisions', 'Hard-to-reverse Vivary decisions and links to their canonical owners.'],
   ['OBSIDIAN', 'obsidian', 'Obsidian (optional)', 'Optional Obsidian setup for fans, never required.'],
@@ -54,7 +55,9 @@ const retiredGeneratedSlugs = ['brand', 'faq', 'product-roadmap'];
 
 // rewrite relative repo-doc links to site routes; off-site files to GitHub blobs
 const rewrite = (s) =>
-  s.replaceAll('](CONCEPTS.md)', '](/concepts/)')
+  s.replaceAll('](desktop-preview.md)', '](/desktop-preview/)')
+   .replaceAll('](docs/desktop-preview.md)', '](/desktop-preview/)')
+   .replaceAll('](CONCEPTS.md)', '](/concepts/)')
    .replaceAll('](GETTING-STARTED.md)', '](/getting-started/)')
    .replaceAll('](GETTING-STARTED.md#', '](/getting-started/#')
    .replaceAll('](ORIGINAL-CLI.md)', '](/original-cli/)')
@@ -123,6 +126,11 @@ const rewrite = (s) =>
    .replaceAll('](SPEC-data-layer.md)', `](${GH}/docs/SPEC-data-layer.md)`)
    .replaceAll('](SPEC-data-layer.md#', `](${GH}/docs/SPEC-data-layer.md#`)
    .replaceAll('](bellamente-memory/', `](${GH}/docs/bellamente-memory/`)
+   .replaceAll('](product/multi-project/', `](${APP_GH}/docs/product/multi-project/`)
+   .replaceAll('](../.agents/', `](${APP_GH}/.agents/`)
+   .replaceAll('](../CONTRIBUTING.md', `](${APP_GH}/CONTRIBUTING.md`)
+   .replaceAll('](../packages)', `](${APP_GH.replace('/blob/', '/tree/')}/packages)`)
+   .replaceAll('](../packages/core/README.md)', `](${APP_GH}/packages/core/README.md)`)
    .replaceAll('](../packages/workbench/', `](${APP_GH}/packages/workbench/`)
    .replaceAll('](../packages/desktop/', `](${APP_GH}/packages/desktop/`)
    .replaceAll('](../packages/', `](${GH}/packages/`)
@@ -256,7 +264,7 @@ for (const slug of retiredGeneratedSlugs) {
 }
 for (const [src, slug, title, desc] of pages) {
   const raw = readCanonicalMarkdown(docsDir, `${src}.md`, `docs/${src}.md`);
-  const editUrl = `https://github.com/vivary-dev/Vivary-New/edit/dev/docs/${src}.md`;
+  const editUrl = `https://github.com/vivary-dev/vivary/edit/dev/docs/${src}.md`;
   const output = path.join(outDir, `${slug}.md`);
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, render(raw, title, desc, editUrl));
@@ -272,7 +280,7 @@ fs.writeFileSync(
     changelog,
     'Changelog',
     'Release history for the Vivary packages.',
-    'https://github.com/vivary-dev/Vivary-New/edit/dev/CHANGELOG.md',
+    'https://github.com/vivary-dev/vivary/edit/dev/CHANGELOG.md',
   ),
 );
 console.log('  synced CHANGELOG.md -> changelog.md');

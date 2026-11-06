@@ -1,0 +1,186 @@
+# Issue #10 Claude provider log reader
+
+2026-10-06. [PR #198](https://github.com/vivary-dev/vivary/pull/198) on
+`fix/provider-log-details` records the preceding reviewed increment at
+`2d29b16c31b3f49d8164669088fd469b27a1520f`, based on
+`5e2642e80020266e5c57cc875a1be471b0f73a3b`. The Unicode checkpoint is `16fdc8747f38fe0c6520d4d3590b9b95c0ca0579`.
+The later concurrency/excerpt/polling correction has the runtime evidence below;
+the PR records final exact-head review and CI gates. Issue #10 remains open; preceding acceptance
+covers the described Claude read behavior, not a new release or the whole issue.
+
+## Implemented contract
+
+The owner/org/project-scoped details action calls Native's public
+`readClaudeCodeSessionLog` with the retained run. No client path or arbitrary
+provider ID is accepted. Native derives the documented default Claude log from
+canonical cwd and UUID without scanning. Custom storage and encoded names over
+200 characters are unsupported. A private store inside the selected project,
+linked parents/files, hardlinks and changed file snapshots are refused. Matching
+session and source cwd metadata prevent authorization by lossy directory encoding.
+An absent project folder permits authorized retained history; existing project
+components still require canonical identity and link checks. Provider key and
+entry/session-info cwd comparisons apply SDK-compatible NFC normalization only
+on Darwin. Filesystem checks retain exact canonical spelling; Linux NFC/NFD
+directories remain distinct.
+
+The complete input is bounded to 256 KiB, 2,048 complete lines, 32 KiB per line
+and JSON nesting depth 32 before parsing. Invalid UTF-8, incomplete/malformed
+entries, identity mismatch, cyclic parent graphs and oversized identifiers fail
+safely. The official SDK 0.3.288 `getSessionInfo` and `getSessionMessages` interpret
+opaque entries through a read-only custom SessionStore. No query, start, resume
+or provider turn is invoked. See the [official session API](https://code.claude.com/docs/en/agent-sdk/sessions)
+and [default transcript location](https://code.claude.com/docs/en/sessions#where-transcripts-are-stored).
+
+Native admits one active inspection and up to four FIFO waiters. Waiting is
+limited to 15 seconds; queue overload or expiry returns unavailable without
+reading a file or starting another worker. Admission is released on every outcome.
+One terminable Node worker bounds semantic processing to three seconds, with
+64 MiB old heap and 16 MiB young heap. Its empty environment removes inherited
+environment values; it is **not an OS sandbox** and retains filesystem,
+subprocess and network rights. The [runtime boundary receipt](runtime-sandbox-coverage-2026-10-06.md)
+records an actual harmless canary with the same settings. That canary does not
+establish SDK malicious-code or hook containment.
+
+Only allowlisted user/assistant text is returned. Workbench redacts complete text
+before limiting it to 1,500 characters per message and the latest 40 messages,
+then retaining the newest 20,000 aggregate characters. Tools, thinking,
+authentication metadata and host paths are omitted.
+The UI labels provider and Native sources separately. Missing, malformed,
+unsupported, unavailable and resource-limited provider logs keep the session ID
+and Native transcript available. The panel fetches on open, polls every two
+seconds only while its selected run is active, refreshes once on active-to-settled
+transition while open, and offers manual Refresh. Other runs' activity does not
+start this panel's polling; parent host/status polling is unchanged. The final
+refresh stays pending while an older details request is in flight, then starts
+once after that fetch finishes. Closing the panel, changing run/project scope or
+returning to active state clears that intent.
+
+## Concurrent inspection, latest excerpt and settled-history correction
+
+Three supported review findings are corrected in source: ordinary overlapping
+readers serialize instead of receiving a false unavailable status; aggregate
+truncation retains the newest redacted text; and settled history no longer starts
+SDK workers every two seconds. The bounded FIFO has no cache or additional client
+inputs. Maintained public-reader/action cases cover overlapping same/different
+logs, a malformed predecessor followed by a valid read, bounded overload/recovery
+and a greater-than-20,000-character excerpt retaining its newest marker and held
+credential redaction. After frozen install and all nine preflight checks pass,
+the focused suite passes 57 tests with one existing installed-policy skip.
+The 36-test redaction suite, typecheck and 64.48-second guarded build also pass.
+
+The official SDK keeps a rooted transcript row's session ID when projecting a
+queued message, with cross-session provenance in separate origin metadata. A
+root-owned queued attachment fixture exercises that semantic path and rejects an
+explicitly foreign containing-row session ID. Strict session/cwd guards remain;
+this adds no child-log discovery or arbitrary sidechain support.
+
+A disposable public-reader probe observed concurrent calls return available /
+unavailable before the queue fix and available / available afterward. The
+maintained actual-SDK queued-origin fixture passes without relaxing authority.
+No new latency improvement or browser red-before-green result is claimed.
+
+The copied standalone application passes affected browser acceptance at
+19:42:27 UTC: settled history makes zero additional details requests over 4.6
+seconds; manual Refresh works and keeps the panel open; active polling and one
+final settlement refresh work, followed by zero idle polls. Holding the first
+response across completion produces a second request and the fresh excerpt.
+Activity transitions use a synthetic phase-only transport response; details
+still use the actual built server and SDK. This is not a new provider journey.
+The real retained log's checksum remains unchanged, the same 2,949-character
+excerpt is visible, and there are zero provider calls/browser errors. Server and
+browser stopped. Failed fixture attempts and their diagnoses remain preserved:
+query selection, incomplete active metadata, and status-triggered chat remounts
+initially prevented the intended still-open scenario. No production regression
+was inferred from those fixture failures. Earlier acceptance below retains its
+original scope and results.
+
+## Darwin Unicode compatibility correction
+
+The required published review found that decomposed macOS cwd names derived a
+different project key from SDK 0.3.288. Native now follows its Darwin-only NFC
+provider identity rule without normalizing filesystem authorization paths.
+The maintained public details fixture uses a decomposed `Cafe` plus combining
+accent directory and the independently specified encoded suffix (`Caf-` on
+Darwin, `Cafe-` elsewhere). It checks entry/session-info compatibility, owner/org
+denial and another project's encoded-name collision. A Linux-only regression
+checks that separate NFC/NFD directories cannot supply one another's metadata.
+No production platform override or semantic parser mock is added.
+
+After the updated frozen install, preflight passes all nine checks. The maintained
+focused suite passes 52 tests with one existing installed-policy skip; typecheck
+and the 65.59-second production build pass with the credential guard enforced.
+A private disposable probe uses the actual Native reader and SDK with Darwin
+platform behavior simulated in the controller and worker. It returns `missing`
+before the correction and `available` afterward, and rejects a foreign cwd as
+`malformed`. This observed red/green result covers the normalization boundary;
+it does not establish native macOS filesystem acceptance. The maintained public
+action tests on Linux also reject distinct NFC/NFD project metadata.
+
+The corrected copied standalone output passes real retained-session readiness,
+owner action and browser display at 19:09:28 UTC. It shows the same 2,949-character
+excerpt, unchanged provider-file checksum and zero provider calls/browser errors;
+server and browser stopped. Both independent delta reviews found no actionable
+finding. Native macOS acceptance remains unrun. The earlier acceptance below
+remains tied to its original increment; the PR owns final commit/check results.
+
+## Verified evidence before the Unicode correction
+
+| Check | Observed result |
+| --- | --- |
+| Preflight and dependencies | 9/9 pass; frozen install passes. Only Agent SDK 0.3.288 and API SDK 0.93.0 are new versions; Core retains API 0.90.0. Eight optional platform executors are excluded. |
+| Maintained focused suite | 50 pass, one existing installed-policy skip (`focused-final.log`). |
+| Redaction, public details and desktop host | 36, 15 and 20 pass respectively (`redaction-final.log`, `details-final-guardfix.log`, `desktop-main-tests.log`). |
+| Typecheck and production build | Pass; final build 65.6 seconds, with the doctor enforced. |
+| Built browser | Desktop and 390-pixel layout pass; Alpha/Beta/Alpha switching, cross-project 404, redaction and missing/malformed states pass (`browser-results.json`). |
+| Installed Native real-log reader | Retained 58,859-byte Claude log yields eight text messages; file hash unchanged (`native-reader-probe.json`). Controller syscall observation found Node only and no provider execution/network; this is an observation, not OS denial. |
+| Isolated copied production output | Outside the source checkout, readiness, owner action and browser pass at 18:40:34 UTC; 2,949-character excerpt, same session ID and unchanged SHA-256, zero provider calls (`standalone-real-browser-results.json`). SDK notice is present and optional executors absent (`standalone-package-composition.json`). |
+
+Browser/server processes were stopped after acceptance. Tests use the installed
+official semantic helper, not a mocked parser. Regressions cover scope denial,
+ID/cwd mismatch, encoded-path collision, malformed/incomplete/oversized/deep/cyclic
+input, bounds, unsupported settings, missing logs, missing project with intact
+log and link refusal. Deterministic in-flight file-mutation and forced worker-timeout
+regressions remain unrun; snapshot checks and termination limits are implemented,
+but no observed test result is claimed for those two paths. Redaction includes a delimited unknown token
+and a held synthetic credential concatenated across the truncation boundary.
+The earlier unknown-token fixture assumed pattern matching inside a longer word;
+that assumption was invalid under the existing redactor contract. No production
+privacy regression or runtime red-before-green result is claimed for that fixture
+or the missing-project correction.
+
+## Packaging and license
+
+Core declares the official SDK as a peer. Workbench pins Agent SDK 0.3.288,
+API SDK 0.93.0 and MCP SDK 1.30.0; root Zod 4.5.4 satisfies the remaining peer.
+Core keeps its API 0.90.0. Supported pnpm configuration excludes exactly eight
+SDK platform executors; installed package files are not edited.
+
+The worker's opaque import needs an explicit production trace seed.
+`nitro.config.ts` uses Nitro's supported `traceOpts.hooks.traceStart` and
+full-package `traceDeps` for **only** Agent SDK, preserving its resources/notices
+and existing Core/app peer bundling. Tracing every peer can mix installed versions;
+the isolated output check guards the actual portable result. No custom copier is
+used.
+
+The SDK is proprietary. Its [README license and terms](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/README.md#license-and-terms)
+and [Anthropic Commercial Terms](https://www.anthropic.com/legal/commercial-terms)
+cover normal customer-product integration. Preserve the license and notices;
+this is not an MIT or unrestricted relicensing grant. No additional vendor
+approval gate has been established for this integration. Existing release
+acceptance and publication approval still apply.
+
+## Remaining acceptance
+
+PR #197 merged before this increment. Its actual four-turn, 137-second Claude
+Stop/restart/resume journey remains accepted for the unchanged executor; these
+read checks required no additional provider turns. Existing Codex continuity and
+stored-thread RPC evidence is retained, but current details return unsupported
+for Codex provider logs. A bounded stored-thread view remains necessary to close
+issue #10. The current Windows candidate is unrun and no fresh release is claimed.
+
+The earlier Unicode correction has affected runtime/build acceptance and
+independent delta review. The concurrency/excerpt/polling correction has affected
+installed tests and built-browser acceptance. Its reviewed commit, published
+independent review, exact-head CI, Entire capture/delivery verification and owner
+approval remain the final PR gates. This Claude PR increment can proceed through
+those existing gates while issue #10 stays open.

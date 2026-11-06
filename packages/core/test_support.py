@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable, Dict, List
 
 
@@ -43,3 +44,19 @@ def content_git_runner(grep_stdout: str) -> Callable[[str, List[str]], Dict[str,
         raise AssertionError(f"unexpected git command: {command}")
 
     return run_git
+
+
+def unprivileged_posix() -> bool:
+    """True when directory mode bits refuse writes for this process.
+
+    UID 0 bypasses mode-bit refusals, so the chmod-based refusal proofs only
+    demonstrate the refusal path for an unprivileged POSIX user.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    return os.name == "posix" and geteuid is not None and geteuid() != 0
+
+
+UNPRIVILEGED_POSIX_REASON = (
+    "POSIX mode-bit refusal proof requires an unprivileged process; "
+    "UID 0 bypasses the directory mode"
+)

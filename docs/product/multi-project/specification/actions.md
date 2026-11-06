@@ -64,7 +64,7 @@ Every applicable action has a text label, keyboard operation, visible focus, and
 | --- | --- | --- | --- | --- |
 | A018 | Create conversation | release / local | Bind one project and runtime with a new durable reference | Retry cannot create duplicates |
 | A019 | Reopen conversation | release / read | Read exact authorized history and pending state | Removed harness does not erase history |
-| A020 | Send a message | release / agent | Bind request and context to current project. Show approval before work where required | Denial or stale scope starts nothing |
+| A020 | Send a message | release / agent | Bind request and context to current project. Start through the selected runtime and surface its native action decisions | Stale scope prevents launch. A denied native action does not run |
 | A021 | Continue existing conversation | release / agent | Use native resume only when supported. Expose replay otherwise | Incompatible resume offers linked conversation |
 | A022 | Preserve unsent message | release / local | Scope draft to conversation and survive panel/project changes | Failed persistence retains visible draft and Retry |
 | A023 | Select model in same harness | release / local | Keep conversation only if adapter supports compatible change | No silent model substitution |
@@ -90,10 +90,12 @@ Every applicable action has a text label, keyboard operation, visible focus, and
 
 ## M05: Authority and approvals
 
+For implemented Codex turns, Send starts immediately and approvals apply to native actions. Normal, Read only, and YOLO are execution modes, distinct from this catalog's action categories. See [implemented Codex behavior](harness-adapters.md#implemented-codex-behavior).
+
 | ID | Action | Scope / mode | Required result and precondition | Failure or recovery |
 | --- | --- | --- | --- | --- |
 | A034 | Approve a pending request | release / local | Authorize exact request, project and revisions once | Changed input invalidates approval |
-| A035 | Deny a pending request | release / local | Record denial. Start no model or tools | Retry cannot convert denial into approval |
+| A035 | Deny a pending request | release / local | Deny the exact requested action. An already running native turn may continue within its remaining permissions | Retry cannot convert denial into approval |
 | A036 | Stop active work | release / local | Use recorded ownership to request cancellation even if folder disappears | Stopping is not stopped until observed |
 | A037 | Inspect background activity | release / read | Show project, conversation, state, Stop and pending decision | Closed panel/browser never hides running work on return |
 | A038 | Reconnect after host restart | release / local | Reconcile Native records with observable process state | Interrupted or uncertain remains explicit. No automatic replay |

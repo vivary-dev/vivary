@@ -50,5 +50,6 @@ HANDOFF.md
 # Vivary runtime data (storage.toml is committed; data/ is not)
 /.vivary/data/
 
-# Entire local settings, metadata, logs, and transcripts
-/.entire/
+# Share only Entire routing. Keep local settings, metadata, logs and transcripts private.
+/.entire/*
+!/.entire/settings.json

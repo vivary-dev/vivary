@@ -2,11 +2,13 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/22
 Parent: 06
-Status: ready-for-agent
+Status: done
 Depends-on: [03c]
 Owner: Coordinating Codex, sole existing-test maintenance writer
 Scope: Correct named obsolete fixture assumptions and environment setup in the maintained application checks.
 Verification-kind: runtime
+Evidence: [Maintained regression checks verification](../receipts/06h-maintained-application-regressions.md)
+Verification-result: passed
 Timebox: One focused test-maintenance change with no new proof framework.
 
 ## Goal
@@ -62,6 +64,25 @@ Do not build a new verifier, evidence archive system, or test runner product.
 
 - 2026-09-13: Converted named recovery-test failures into bounded maintenance.
   Existing application checks and historical evidence remain unchanged.
+- 2026-09-18: Corrected the registry-actions metadata assertion, the stale
+  project-services gate expectation, the chat-title bootstrap teardown, and
+  the Doctor snapshot timestamp settle; supplied default proof roots and the
+  Core manifest; identified root and noexec hosts in the Core permission
+  proofs; documented `pnpm test:maintained`.
+- 2026-09-18 source disposition: `packages/workbench/tests/gui-zo-runner.test.mjs`
+  removed. Obsolete assumption: it statically imported
+  `docs/product/multi-project/fixtures/05b/gui_zo_runner.mjs`, deleted with the
+  05b Zo GUI-proof harness in the 2026-09-12 salvage, so the file failed at
+  load and no case ran. What it asserted (proof-token authorization, read-only
+  mount verification, source manifest validation, owned-child cleanup) were
+  contracts of that retired harness, not of product code. Replacement
+  coverage for the product behavior it drove: the title route in
+  `tests/chat-title.test.mjs`; worker-child cleanup in the maintained registry
+  and mutation suites; history and navigation in the real-application
+  journeys. The harness and test remain readable on
+  `salvage/handoff-2026-09-12`.
+- 2026-09-18: Accepted by Jeff after end-to-end verification of merged dev;
+  evidence in the linked receipt.
 
 ## Shared desktop and web behavior
 

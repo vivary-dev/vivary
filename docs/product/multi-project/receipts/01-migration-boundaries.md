@@ -75,7 +75,7 @@ Ticket 10 retains the real runtime acceptance work. Ticket 01 does not close AC-
 
 The public boundary map now covers the public repositories, private and local-only source classes, dirty-work categories, S-00A and S-00 through S-13 responsibilities, known license-file findings, proposed public owners, destination classes, and unresolved authority. The map deliberately omits private coordinates and does not state that any source has been restored.
 
-The documentation and provenance outcome is complete. Two-reader scope review, the generated-plan guard, all 17 adversarial guard tests, line endings, and diff hygiene passed in [CI](https://github.com/vivary-dev/vivary/actions/runs/33990271792). PR merge remains a separate human gate. This receipt does not authorize or prove source import.
+The documentation and provenance outcome is complete. Two-reader scope review, the generated-plan guard, all 17 adversarial guard tests, line endings, and diff hygiene passed in [CI](https://github.com/vivary-dev/vivary-cli/actions/runs/33990271792). PR merge remains a separate human gate. This receipt does not authorize or prove source import.
 
 ## Successor packets
 

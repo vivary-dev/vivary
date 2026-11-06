@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -5,6 +6,7 @@ import { startVivary, startupOptions } from "./start.mjs";
 
 const sourceFile = fileURLToPath(import.meta.url);
 const READY_TIMEOUT_MS = 8_000;
+const PARENT_LOSS_TIMEOUT_MS = 15_000;
 
 function send(message) {
   if (!process.connected || !process.send) return;
@@ -15,7 +17,19 @@ function send(message) {
   }
 }
 
+function forceDisconnectedTree() {
+  console.error("[vivary-desktop] Parent disconnected before shutdown completed. Ending the server tree.");
+  // guard:allow-env-credential - Windows provides the path to its tree cleanup tool.
+  const taskkill = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe");
+  spawnSync(taskkill, ["/PID", String(process.pid), "/T", "/F"], {
+    stdio: "ignore", windowsHide: true, timeout: 5_000,
+  });
+  console.error("[vivary-desktop] Tree cleanup returned without ending the server.");
+  process.exit(1);
+}
+
 export async function runDesktopServer(args = process.argv.slice(2)) {
+  const windows = process.platform === "win32";
   let stopping = false;
   let nativeHandlersReady = false;
   const requestShutdown = () => {
@@ -27,28 +41,40 @@ export async function runDesktopServer(args = process.argv.slice(2)) {
       return;
     }
     process.emit("SIGTERM");
-    try {
-      if (process.connected) process.disconnect();
-    } catch {
-      // The parent may disconnect while the signal handlers begin cleanup.
-    }
+    // Keep IPC open so the parent owns normal shutdown and later loss stays observable.
   };
   process.on("message", (message) => {
     if (message?.type === "shutdown") requestShutdown();
   });
-  process.once("disconnect", requestShutdown);
+  process.once("disconnect", () => {
+    // This must also run when the parent disappears during an existing shutdown.
+    if (windows) setTimeout(forceDisconnectedTree, PARENT_LOSS_TIMEOUT_MS);
+    requestShutdown();
+  });
 
+  const capability = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { process.off("message", receive); reject(new Error("Desktop capability handoff timed out.")); }, 8000);
+    const receive = message => {
+      if (message?.type !== "vivary:desktop:bootstrap" || typeof message.capability !== "string" || !/^[\w-]{43}$/.test(message.capability)) return;
+      clearTimeout(timer); process.off("message", receive); resolve(message.capability);
+    };
+    process.on("message", receive);
+    send({ type: "vivary:desktop:bootstrap-needed" });
+  });
+  globalThis[Symbol.for("vivary.desktop.bootstrap")] = Object.freeze({ capability });
   const options = startupOptions(args, process.env);
   if (options.help || options.mode !== "local") {
     throw new Error("The desktop server accepts only validated local startup options.");
   }
+  // guard:allow-env-credential - This dedicated server process owns its exit after cleanup.
+  process.env.VIVARY_STANDALONE_HOST = "1"; // guard:allow-env-mutation - Desktop process startup only.
   await startVivary(options);
   nativeHandlersReady = true;
-  await waitForWorkspace(options.appUrl);
+  await waitForWorkspace(options.appUrl, capability);
   send({ type: "ready", origin: options.appUrl });
 }
 
-export async function waitForWorkspace(origin) {
+export async function waitForWorkspace(origin, capability) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   let lastStatus;
   while (Date.now() < deadline) {
@@ -56,7 +82,7 @@ export async function waitForWorkspace(origin) {
     const timer = setTimeout(() => controller.abort(), 1_000);
     try {
       const response = await fetch(`${origin}/`, {
-        headers: { accept: "text/html" },
+        headers: { accept: "text/html", ...(capability ? { "x-vivary-desktop": capability } : {}) },
         method: "GET",
         redirect: "manual",
         signal: controller.signal,

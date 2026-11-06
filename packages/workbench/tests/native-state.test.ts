@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAppStateWriter } from "../app/lib/native-state";
+import { installOwnerSessionFetch } from "../app/lib/owner-session-fetch";
+import { VIVARY_OWNER_SESSION_STORAGE_KEY } from "../shared/owner-session";
 
 type Call = { input: RequestInfo | URL; init?: RequestInit };
 
@@ -192,6 +194,88 @@ test("a rejected token cannot be reused while Native refreshes it", async () => 
   await writer("selection", "third");
   assert.equal(calls.length, 2);
   assert.equal(new Headers(calls[1].init?.headers).get("X-Vivary-Session"), "fresh-token");
+});
+
+function ownerSessionWindow(storage: () => string | null) {
+  const calls: Call[] = [];
+  const original: typeof fetch = async (input, init) => {
+    calls.push({ input, init });
+    return new Response(null, { status: 204 });
+  };
+  const target = {
+    fetch: original,
+    location: { href: "https://private.example.test/workbench/agent", origin: "https://private.example.test" },
+    get localStorage() {
+      return { getItem: (key: string) => (key === VIVARY_OWNER_SESSION_STORAGE_KEY ? storage() : null) };
+    },
+  };
+  installOwnerSessionFetch(target);
+  return { calls, installed: target.fetch !== original, fetch: target.fetch };
+}
+
+test("the owner session fetch installs nothing without a valid stored token", () => {
+  for (const stored of [null, "", "bad token", "bad\ntoken", "x".repeat(4097)]) {
+    assert.equal(ownerSessionWindow(() => stored).installed, false, JSON.stringify(stored));
+  }
+  assert.equal(ownerSessionWindow(() => { throw new Error("storage is blocked"); }).installed, false);
+  const blocked = {
+    fetch: globalThis.fetch,
+    location: { href: "https://private.example.test/", origin: "https://private.example.test" },
+    get localStorage(): Storage { throw new Error("storage is blocked"); },
+  };
+  installOwnerSessionFetch(blocked);
+  assert.equal(blocked.fetch, globalThis.fetch);
+});
+
+test("the owner session fetch adds the header only to same-origin reads", async () => {
+  const proof = ownerSessionWindow(() => "owner-session-token");
+  assert.equal(proof.installed, true);
+  const controller = new AbortController();
+  await proof.fetch("/_agent-native/auth/session", { cache: "no-store", signal: controller.signal });
+  await proof.fetch("https://private.example.test/workbench/_agent-native/poll", { method: "head" });
+  await proof.fetch(new URL("https://private.example.test/assets/app.js"));
+  const request = new Request("https://private.example.test/workbench/_agent-native/actions/list", {
+    headers: { Accept: "application/json" },
+  });
+  await proof.fetch(request);
+
+  assert.equal(proof.calls.length, 4);
+  for (const call of proof.calls) {
+    assert.equal(new Headers(call.init?.headers).get("X-Vivary-Session"), "owner-session-token");
+  }
+  assert.equal(proof.calls[0].input, "/_agent-native/auth/session");
+  assert.equal(proof.calls[0].init?.cache, "no-store");
+  assert.equal(proof.calls[0].init?.signal, controller.signal);
+  assert.equal(proof.calls[3].input, request, "a Request input passes through as the same object");
+  assert.equal(new Headers(proof.calls[3].init?.headers).get("Accept"), "application/json");
+});
+
+test("the owner session fetch passes other requests through untouched", async () => {
+  const proof = ownerSessionWindow(() => "owner-session-token");
+  const explicit = { headers: { "x-vivary-session": "explicit-token" } };
+  const write = { method: "PUT", body: "{}", headers: { "Content-Type": "application/json" } };
+  const post = new Request("https://private.example.test/workbench/_agent-native/actions/run", {
+    method: "POST",
+    body: "{}",
+  });
+  const presetRequest = new Request("https://private.example.test/", { headers: { "X-Vivary-Session": "preset-token" } });
+  const sent: Array<[RequestInfo | URL, RequestInit | undefined]> = [
+    ["/_agent-native/auth/session", explicit],
+    [presetRequest, undefined],
+    ["https://attacker.example/steal", undefined],
+    ["//attacker.example/steal", { method: "GET" }],
+    ["http://private.example.test/insecure", undefined],
+    ["/_agent-native/application-state/selection", write],
+    [post, undefined],
+    ["/_agent-native/actions/run", { method: "DELETE" }],
+  ];
+  for (const [input, init] of sent) await proof.fetch(input, init);
+
+  assert.equal(proof.calls.length, sent.length);
+  proof.calls.forEach((call, index) => {
+    assert.equal(call.input, sent[index][0]);
+    assert.equal(call.init, sent[index][1], `request ${index} passes through unchanged`);
+  });
 });
 
 test("null is persisted as JSON null", async () => {

@@ -37,10 +37,11 @@ const { resolveLocalProjectHistory, resolveLocalProjectWorkspace } =
   await import("../server/project-services.mjs");
 const { previewManagedProjectReconnection, confirmManagedProjectReconnection } =
   await import("../server/managed-project-reconnection.mjs");
+const { projectReconnectionPending } = await import("../server/project-reconnection-admission.mjs");
 const { evaluateRegistryOperation, deriveMutationKeys } =
   await import("../../../scripts/registry_contract_model.mjs");
 
-test("an owner explicitly replaces only a recorded managed folder identity", async suite => {
+test("an owner explicitly reconnects one recorded local folder", async suite => {
   await mkdir(alpha, { recursive: true });
   await writeFile(path.join(alpha, "note.md"), "old marker");
   await withMigrationRuntime(async () => {
@@ -62,7 +63,7 @@ test("an owner explicitly replaces only a recorded managed folder identity", asy
       evaluate: evaluateRegistryOperation, deriveMutationKeys });
     catalog = createProjectCatalog({ readScope: registry.readScope, provider,
       locationLabels: provider.locationLabels,
-      canReconnect: ref => provider.isManagedLocation(ref, dataDir) });
+      canReconnect: () => true });
     globalThis[Symbol.for("vivary.local-project-services.v1")] = {
       provider, registry, catalog, controller: { snapshot: () => ({ status: "open" }) },
     };
@@ -106,7 +107,7 @@ test("an owner explicitly replaces only a recorded managed folder identity", asy
       await replace();
       const unavailable = await catalog.run({}, context);
       assert.equal(unavailable.projects[0].status, "unavailable");
-      assert.equal(unavailable.projects[0].managedReconnectEligible, true);
+      assert.equal(unavailable.projects[0].reconnectEligible, true);
       assert.ok(!JSON.stringify(unavailable).includes(dataDir));
       assert.deepEqual(await resolveLocalProjectHistory(actionContext, registered.projectId), {
         label: "Alpha", projectId: registered.projectId,
@@ -154,10 +155,31 @@ test("an owner explicitly replaces only a recorded managed folder identity", asy
       assert.deepEqual(await state(registered.projectId), originalState);
       updateCodeAgentRunRecord(pendingRun.id, { status: "paused", phase: "approval-denied",
         needsApproval: false, metadata: { pendingLaunch: undefined } });
-      firstResult = await confirmManagedProjectReconnection(actionContext, {
+      let releaseBarrier;
+      let enteredBarrier;
+      const barrier = new Promise(resolve => { releaseBarrier = resolve; });
+      const entered = new Promise(resolve => { enteredBarrier = resolve; });
+      const inFlight = confirmManagedProjectReconnection(actionContext, {
         projectId: registered.projectId, operationId: firstPlan.operationId,
         acceptedPlanSha256: firstPlan.planSha256,
-      });
+      }, { createExec: async () => {
+        enteredBarrier();
+        await barrier;
+        return createDbExec({ url: database });
+      } });
+      try {
+        await entered;
+        assert.equal(projectReconnectionPending(), true);
+        await assert.rejects(confirmManagedProjectReconnection(actionContext, {
+          projectId: registered.projectId, operationId: firstPlan.operationId,
+          acceptedPlanSha256: firstPlan.planSha256,
+        }), /Another project reconnection is in progress/);
+        assert.deepEqual(await state(registered.projectId), originalState);
+      } finally {
+        releaseBarrier();
+      }
+      firstResult = await inFlight;
+      assert.equal(projectReconnectionPending(), false);
       assert.equal(firstResult.code, "reconnected");
       assert.equal(firstResult.projectId, registered.projectId);
       assert.equal(firstResult.bindingId, originalState.binding.bindingId);
@@ -338,13 +360,87 @@ test("an owner explicitly replaces only a recorded managed folder identity", asy
       assert.equal((await catalog.run({}, context)).projects[0].status, "available");
     });
 
-    await suite.test("linked targets and foreign recorded folders never receive a preview", async () => {
+    await suite.test("a filesystem root has a nonempty reviewed folder name", async () => {
+      const rootOrgId = "reconnect-root-test-org";
+      const rootContext = { ...context, orgId: rootOrgId };
+      const rootActionContext = { ...actionContext, orgId: rootOrgId };
+      const filesystemRoot = path.parse(fixture).root;
+      await getDb().insert(organizations).values({ id: rootOrgId, name: "Root path test",
+        createdBy: email, createdAt: Date.now() });
+      await getDb().insert(orgMembers).values({ id: "reconnect_root_test_member", orgId: rootOrgId,
+        email, role: "owner", joinedAt: Date.now() });
+      await provider.resolveGrant(rootContext);
+      const rootGrant = await provider.addGrantedFolder(rootContext, filesystemRoot);
+      const rootCatalog = await catalog.run({}, rootContext);
+      const rootProject = await registry.registration.run({
+        operationId: "reconnect-register-root",
+        expectedPolicyRevision: rootCatalog.policyRevision,
+        expectedRegistryRevision: rootCatalog.registryRevision,
+        locationRef: rootGrant.locationRef, displayName: "Filesystem root",
+        contentIdentity: null, attachProjectId: null,
+      }, rootContext);
+      assert.equal(rootProject.code, "registered");
+      await mutateSetting(localRootInventoryKey(email, rootOrgId), current => ({
+        ...current, grants: current.grants.map(grant => grant.locationRef === rootGrant.locationRef
+          ? { ...grant, ino: grant.ino === "1" ? "2" : "1" } : grant),
+      }));
+      const preview = await previewManagedProjectReconnection(rootActionContext,
+        { projectId: rootProject.projectId });
+      assert.equal(preview.folderName, filesystemRoot);
+      assert.equal(preview.folderPath, filesystemRoot);
+      assert.equal(preview.folderKind, "external");
+      assert.equal(preview.identityChanged, true);
+    });
+
+    await suite.test("picked folder beside managed projects keeps external reconnection semantics", async () => {
+      const picked = path.join(parent, "My Project");
+      await mkdir(picked);
+      await writeFile(path.join(picked, "note.md"), "picked folder marker");
+      const pickedGrant = await provider.addGrantedFolder(context, picked);
+      assert.equal(await provider.isManagedLocation(pickedGrant.locationRef, dataDir), false);
+      const current = await catalog.run({}, context);
+      const pickedProject = await registry.registration.run({
+        operationId: "reconnect-register-picked-sibling",
+        expectedPolicyRevision: current.policyRevision,
+        expectedRegistryRevision: current.registryRevision,
+        locationRef: pickedGrant.locationRef, displayName: "My Project",
+        contentIdentity: null, attachProjectId: null,
+      }, context);
+      assert.equal(pickedProject.code, "registered");
+      await rename(picked, path.join(fixture, "old-picked-sibling"));
+      await mkdir(picked);
+      await writeFile(path.join(picked, "note.md"), "restored picked marker");
+      const unavailable = (await catalog.run({}, context)).projects.find(
+        row => row.projectId === pickedProject.projectId);
+      assert.equal(unavailable.status, "unavailable");
+      assert.equal(unavailable.reconnectEligible, true);
+      const before = await state(pickedProject.projectId);
+      const reviewed = await previewManagedProjectReconnection(actionContext,
+        { projectId: pickedProject.projectId });
+      assert.equal(reviewed.folderName, "My Project");
+      assert.equal(reviewed.folderPath, picked);
+      assert.equal(reviewed.folderKind, "external");
+      assert.deepEqual(await state(pickedProject.projectId), before);
+      const result = await confirmManagedProjectReconnection(actionContext, {
+        projectId: pickedProject.projectId, operationId: reviewed.operationId,
+        acceptedPlanSha256: reviewed.planSha256,
+      });
+      assert.equal(result.code, "reconnected");
+      assert.equal(result.projectId, pickedProject.projectId);
+      assert.equal((await catalog.run({}, context)).projects.find(
+        row => row.projectId === pickedProject.projectId).status, "available");
+      assert.equal((await resolveLocalProjectWorkspace(actionContext, pickedProject.projectId)).root,
+        picked);
+    });
+
+    await suite.test("external folder recovery checks the saved path and changed parent", async () => {
       await rename(alpha, path.join(fixture, "moved-current"));
       await symlink(path.join(fixture, "moved-current"), alpha, "dir");
       await assert.rejects(previewManagedProjectReconnection(actionContext,
         { projectId: registered.projectId }), /linked|managed Projects/);
-      const foreign = path.join(fixture, "Foreign");
-      await mkdir(foreign);
+      const externalParent = path.join(fixture, "external-parent");
+      const foreign = path.join(externalParent, "Foreign");
+      await mkdir(foreign, { recursive: true });
       const foreignGrant = await provider.addGrantedFolder(context, foreign);
       const latest = await catalog.run({}, context);
       const foreignProject = await registry.registration.run({
@@ -354,22 +450,59 @@ test("an owner explicitly replaces only a recorded managed folder identity", asy
         locationRef: foreignGrant.locationRef, displayName: "Foreign",
         contentIdentity: null, attachProjectId: null,
       }, context);
-      await rename(foreign, path.join(fixture, "old-foreign"));
+      await rename(foreign, path.join(externalParent, "old-foreign"));
       await mkdir(foreign);
       assert.equal(await provider.isManagedLocation(foreignGrant.locationRef, dataDir), false);
       const catalogAfterReplacement = await catalog.run({}, context);
       const external = catalogAfterReplacement.projects.find(row => row.projectId === foreignProject.projectId);
       assert.equal(external.status, "unavailable");
-      assert.equal(external.managedReconnectEligible, false);
+      assert.equal(external.reconnectEligible, true);
       assert.ok(!JSON.stringify(catalogAfterReplacement).includes(foreign));
+      const externalBefore = await state(foreignProject.projectId);
+      const externalPlan = await previewManagedProjectReconnection(actionContext,
+        { projectId: foreignProject.projectId });
+      assert.equal(externalPlan.folderKind, "external");
+      assert.equal(externalPlan.folderPath, foreign);
+      assert.equal(externalPlan.recorded, false);
+      assert.deepEqual(await state(foreignProject.projectId), externalBefore);
+      const externalResult = await confirmManagedProjectReconnection(actionContext, {
+        projectId: foreignProject.projectId, operationId: externalPlan.operationId,
+        acceptedPlanSha256: externalPlan.planSha256,
+      });
+      assert.equal(externalResult.code, "reconnected");
+      assert.equal((await catalog.run({}, context)).projects.find(
+        row => row.projectId === foreignProject.projectId).status, "available");
+      assert.equal((await resolveLocalProjectWorkspace(actionContext, foreignProject.projectId)).projectId,
+        foreignProject.projectId);
+      assert.equal((await confirmManagedProjectReconnection(actionContext, {
+        projectId: foreignProject.projectId, operationId: externalPlan.operationId,
+        acceptedPlanSha256: externalPlan.planSha256,
+      })).code, "already-reconnected");
+      await rename(foreign, path.join(externalParent, "second-old-foreign"));
+      await mkdir(foreign);
+      const staleParentPlan = await previewManagedProjectReconnection(actionContext,
+        { projectId: foreignProject.projectId });
+      const movedParent = path.join(fixture, "old-external-parent");
+      await rename(externalParent, movedParent);
+      await mkdir(foreign, { recursive: true });
+      await assert.rejects(confirmManagedProjectReconnection(actionContext, {
+        projectId: foreignProject.projectId, operationId: staleParentPlan.operationId,
+        acceptedPlanSha256: staleParentPlan.planSha256,
+      }), /parent changed|Review the reconnection again/);
+      await rm(foreign, { recursive: true });
+      await assert.rejects(previewManagedProjectReconnection(actionContext,
+        { projectId: foreignProject.projectId }), /missing/);
+      await symlink(path.join(movedParent, "Foreign"), foreign, "dir");
+      await assert.rejects(previewManagedProjectReconnection(actionContext,
+        { projectId: foreignProject.projectId }), /linked|changed/);
       const originalBinding = (await state(registered.projectId)).binding;
       await getDb().insert(bindings).values({ ...originalBinding,
         bindingId: "reconnect-test-extra-binding", rootId: "reconnect-test-extra-root",
         locationRef: foreignGrant.locationRef });
       const multiple = (await catalog.run({}, context)).projects.find(row => row.projectId === registered.projectId);
-      assert.equal(multiple.managedReconnectEligible, false);
+      assert.equal(multiple.reconnectEligible, false);
       await assert.rejects(previewManagedProjectReconnection(actionContext,
-        { projectId: foreignProject.projectId }), /recorded managed project/);
+        { projectId: registered.projectId }), /single recorded local folder/);
       const savedParent = path.join(fixture, "saved-projects-parent");
       await rename(parent, savedParent);
       await symlink(savedParent, parent, "dir");

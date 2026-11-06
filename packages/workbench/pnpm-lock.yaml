@@ -12,8 +12,9 @@ overrides:
   '@modelcontextprotocol/client': 2.3.0
   '@modelcontextprotocol/core': 2.3.0
   '@modelcontextprotocol/server': 2.3.0
+  '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
   markdown-it: 14.3.3
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   hono: 4.13.11
   '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
   '@azure/msal-node@2.16.3>uuid': 11.1.1
@@ -40,10 +41,15 @@ overrides:
   '@agent-native/toolkit@0.19.3>@tiptap/react': 3.30.5
   '@agent-native/toolkit@0.19.3>@tiptap/starter-kit': 3.30.5
 
+packageExtensionsChecksum: sha256-5afwoDjnrcA3Xj410YtDCh7Wr20eAlayPUyqmc//pao=
+
 patchedDependencies:
   '@agent-native/core@0.176.5':
-    hash: 6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b
+    hash: b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758
     path: patches/@agent-native__core@0.176.5.patch
+  '@agent-native/toolkit@0.19.3':
+    hash: 8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb
+    path: patches/@agent-native__toolkit@0.19.3.patch
 
 importers:
 
@@ -51,19 +57,52 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(2bfec636aa8faf4b338fa1e60c48a68a)
+        version: 0.176.5(patch_hash=b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758)(d6a1c2ef55e65b164b866a026e4270c5)
       '@agent-native/toolkit':
         specifier: 0.19.3
-        version: 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
+        version: 0.19.3(patch_hash=8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
+      '@ai-sdk/cohere':
+        specifier: 3.0.60
+        version: 3.0.60(zod@4.6.7)
+      '@ai-sdk/google':
+        specifier: 3.0.121
+        version: 3.0.121(zod@4.6.7)
+      '@ai-sdk/groq':
+        specifier: 3.0.64
+        version: 3.0.64(zod@4.6.7)
+      '@ai-sdk/mistral':
+        specifier: 3.0.63
+        version: 3.0.63(zod@4.6.7)
+      '@ai-sdk/openai':
+        specifier: 3.0.108
+        version: 3.0.108(zod@4.6.7)
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.288
+        version: 0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.0(zod@4.6.7))(zod@4.6.7)
+      '@anthropic-ai/sdk':
+        specifier: 0.93.0
+        version: 0.93.0(zod@4.6.7)
       '@fontsource-variable/inter':
         specifier: 5.3.0
         version: 5.3.0
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.0
+        version: 1.32.0(zod@4.6.7)
+      '@openrouter/ai-sdk-provider':
+        specifier: 2.10.0
+        version: 2.10.0(ai@6.0.258(zod@4.6.7))(zod@4.6.7)
       '@tabler/icons-react':
         specifier: 3.46.0
         version: 3.46.0(react@19.2.8)
       '@tanstack/react-query':
         specifier: 5.102.8
         version: 5.102.8(react@19.2.8)
+      ai:
+        specifier: 6.0.258
+        version: 6.0.258(zod@4.6.7)
+      ai-sdk-ollama:
+        specifier: 3.8.8
+        version: 3.8.8(ai@6.0.258(zod@4.6.7))(zod@4.6.7)
       h3:
         specifier: 2.0.1-rc.31
         version: 2.0.1-rc.31(crossws@0.4.12(srvx@0.11.22))
@@ -79,6 +118,9 @@ importers:
       react-router:
         specifier: 8.3.1
         version: 8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      xlsx:
+        specifier: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+        version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -130,6 +172,7 @@ packages:
       '@ai-sdk/groq': '>=3'
       '@ai-sdk/mistral': '>=3'
       '@ai-sdk/openai': '>=3'
+      '@anthropic-ai/claude-agent-sdk': 0.3.288
       '@excalidraw/excalidraw': '>=0.18'
       '@excalidraw/mermaid-to-excalidraw': '>=2'
       '@openrouter/ai-sdk-provider': '>=2'
@@ -317,6 +360,14 @@ packages:
   '@amplitude/plugin-web-vitals-browser@1.1.46':
     resolution: {integrity: sha512-Pko9gf7yDNmiEhGq2aJmJmSFckN155AYJWn/3t8NPQXakzWLagFjmOuxvPx4OefIJtyROU1rYmGM/hwTrBSvBQ==}
 
+  '@anthropic-ai/claude-agent-sdk@0.3.288':
+    resolution: {integrity: sha512-W0axvKSBKC8E1rMvriV8NVMFfNv8uwN3HnJxUiFLJOQcJLp1MDp0SoAugkAKTn3WLx3JnqCxxME6bGvfNJzJoA==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      '@anthropic-ai/sdk': '>=0.93.0'
+      '@modelcontextprotocol/sdk': 1.32.0
+      zod: ^4.0.0
+
   '@anthropic-ai/sdk@0.93.0':
     resolution: {integrity: sha512-q9vaSZQVFx6B/gPxetGYfLXSJD5v0sOmh0OpZDq7yCrTSA+Rscvrtyol7JJTW40wEpQB4U1B4JXzxQitbQ3CAA==}
     hasBin: true
@@ -454,20 +505,20 @@ packages:
     resolution: {integrity: sha512-nyxsA6NA4SVKh5YyRpbSXiMr7oQbwark7JU9LMeg6tJYTSPyAGkdx61wPT4gyxZfxlSxMMEyAsWaubBlNyIa1w==}
     engines: {node: '>=0.8.0'}
 
-  '@azure/msal-common@16.13.0':
-    resolution: {integrity: sha512-rOAy0KUcyBbdwVJ+f3uPpthXatFLLZN+/KWAsTLzk1aB23Xl9DRmmXYwSvBFOZyXj4jUQQ5FKxxRkhAFW1fOow==}
-    engines: {node: '>=0.8.0'}
-
   '@azure/msal-common@16.14.0':
     resolution: {integrity: sha512-A4rb55hI86Q9tBl/+jBj7TMz7iX2RFgQs/nExFzcAtoI/BFRVdaH5SL/MivrYD7qvweMpN8AgVvVMHV8UBYxew==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-common@16.14.2':
+    resolution: {integrity: sha512-HOBR0Gfo39TMrkxNG8k6cfjRkrRjXZc3JQs3ebMWQc9S4cihuknMYra3sgmzbZB752oQBqBN9+WF7c826p2vIQ==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-node@2.16.3':
     resolution: {integrity: sha512-CO+SE4weOsfJf+C5LM8argzvotrXw252/ZU6SM2Tz63fEblhH1uuVaaO4ISYFuN4Q6BhTo7I3qIdi8ydUQCqhw==}
     engines: {node: '>=16'}
 
-  '@azure/msal-node@5.6.0':
-    resolution: {integrity: sha512-uFY9NxrWHw8PwZx7gAX6PDn+9vdfS05+levc/kwkx77IkjfaldnQbbcQzzDIZ5Hq5Zdr6/z92oAIoRWKp6MnOA==}
+  '@azure/msal-node@7.1.0':
+    resolution: {integrity: sha512-s1O6hSY/C/dmqykTmmeHY6GhSkDuY8N1gxyhuLyaCwbY7N+UBvU2Wu4flas7+NxZiAPcXNPVpgt3n/HP/5yL+w==}
     engines: {node: '>=20'}
 
   '@babel/code-frame@7.29.7':
@@ -1297,7 +1348,6 @@ packages:
   '@opentelemetry/sdk-trace-base@2.11.0':
     resolution: {integrity: sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==}
     engines: {node: ^18.19.0 || >=20.6.0}
-    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -3217,8 +3267,8 @@ packages:
   bmp-js@0.1.0:
     resolution: {integrity: sha512-vHdS19CnY3hwiNdkaqk93DvjVLfbEcI8mys4UjuWrlX1haDmroo8o4xCzh4wD6DGV6HxRCyauwhHRqMTfERtjw==}
 
-  body-parser@2.3.0:
-    resolution: {integrity: sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==}
+  body-parser@2.4.0:
+    resolution: {integrity: sha512-Ifk1KcLrxaGt1occQagQNFNNOqRt1LFuehEnHHzB8Z6cRgIxRU1TBaiIsUiCdA+gy5PL7Y1IX31DNKkRmxtXjQ==}
     engines: {node: '>=18'}
 
   boolbase@1.0.0:
@@ -3826,8 +3876,8 @@ packages:
   fast-string-width@3.0.2:
     resolution: {integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==}
 
-  fast-uri@3.1.8:
-    resolution: {integrity: sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==}
+  fast-uri@3.1.9:
+    resolution: {integrity: sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==}
 
   fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
@@ -3863,8 +3913,8 @@ packages:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
 
-  follow-redirects@1.16.1:
-    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -4909,6 +4959,10 @@ packages:
     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
     engines: {node: '>=0.6'}
 
+  qs@6.16.1:
+    resolution: {integrity: sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==}
+    engines: {node: '>=0.6'}
+
   radix-ui@1.6.7:
     resolution: {integrity: sha512-QBdhh1arIEUvPC0dQ5+nwWAxt7+N+oP/9jPwjJkGFoSk/sqxg32gJtSXGtFh8frAIcS6oC9cx2Q+7KYCQLOAeA==}
     peerDependencies:
@@ -5831,13 +5885,24 @@ packages:
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-darwin-arm64'
+  - '@anthropic-ai/claude-agent-sdk-darwin-x64'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl'
+  - '@anthropic-ai/claude-agent-sdk-win32-arm64'
+  - '@anthropic-ai/claude-agent-sdk-win32-x64'
+
 snapshots:
 
-  '@agent-native/core@0.176.5(patch_hash=6d6ee8682d9c6d23da3a5f7ad2ae1ce2eacb987e07d42d2f94961aea698c036b)(2bfec636aa8faf4b338fa1e60c48a68a)':
+  '@agent-native/core@0.176.5(patch_hash=b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758)(d6a1c2ef55e65b164b866a026e4270c5)':
     dependencies:
       '@agent-native/recap-cli': 0.5.25
-      '@agent-native/toolkit': 0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
+      '@agent-native/toolkit': 0.19.3(patch_hash=8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
       '@amplitude/analytics-browser': 2.45.8
+      '@anthropic-ai/claude-agent-sdk': 0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.0(zod@4.6.7))(zod@4.6.7)
       '@anthropic-ai/sdk': 0.93.0(zod@4.6.7)
       '@anthropic-ai/tokenizer': 0.0.4
       '@assistant-ui/react': 0.12.28(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -6052,7 +6117,7 @@ snapshots:
     optionalDependencies:
       playwright: 1.63.0
 
-  '@agent-native/toolkit@0.19.3(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))':
+  '@agent-native/toolkit@0.19.3(patch_hash=8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))':
     dependencies:
       '@assistant-ui/react': 0.12.28(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
       '@radix-ui/react-accordion': 1.2.20(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -6153,7 +6218,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/gateway@3.0.176(zod@4.6.7)':
     dependencies:
@@ -6161,35 +6225,30 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.46(zod@4.6.7)
       '@vercel/oidc': 3.2.0
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/google@3.0.121(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/groq@3.0.64(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/mistral@3.0.63(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/openai@3.0.108(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.50(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/provider-utils@4.0.46(zod@4.6.7)':
     dependencies:
@@ -6198,7 +6257,6 @@ snapshots:
       eventsource-parser: 3.1.1
       undici: 6.29.1
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/provider-utils@4.0.50(zod@4.6.7)':
     dependencies:
@@ -6207,12 +6265,10 @@ snapshots:
       eventsource-parser: 3.1.1
       undici: 6.29.1
       zod: 4.6.7
-    optional: true
 
   '@ai-sdk/provider@3.0.15':
     dependencies:
       json-schema: 0.4.0
-    optional: true
 
   '@amplitude/analytics-browser@2.45.8':
     dependencies:
@@ -6276,6 +6332,12 @@ snapshots:
       '@amplitude/analytics-core': 2.55.0
       tslib: 2.8.1
       web-vitals: 5.1.0
+
+  '@anthropic-ai/claude-agent-sdk@0.3.288(@anthropic-ai/sdk@0.93.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.0(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@anthropic-ai/sdk': 0.93.0(zod@4.6.7)
+      '@modelcontextprotocol/sdk': 1.32.0(zod@4.6.7)
+      zod: 4.6.7
 
   '@anthropic-ai/sdk@0.93.0(zod@4.6.7)':
     dependencies:
@@ -6451,7 +6513,7 @@ snapshots:
       '@azure/core-util': 1.14.0
       '@azure/logger': 1.4.0
       '@azure/msal-browser': 5.21.0
-      '@azure/msal-node': 5.6.0
+      '@azure/msal-node': 7.1.0
       open: 10.2.0
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -6470,9 +6532,9 @@ snapshots:
 
   '@azure/msal-common@14.16.1': {}
 
-  '@azure/msal-common@16.13.0': {}
-
   '@azure/msal-common@16.14.0': {}
+
+  '@azure/msal-common@16.14.2': {}
 
   '@azure/msal-node@2.16.3':
     dependencies:
@@ -6480,9 +6542,9 @@ snapshots:
       jsonwebtoken: 9.0.3
       uuid: 11.1.1
 
-  '@azure/msal-node@5.6.0':
+  '@azure/msal-node@7.1.0':
     dependencies:
-      '@azure/msal-common': 16.13.0
+      '@azure/msal-common': 16.14.2
       jsonwebtoken: 9.0.3
 
   '@babel/code-frame@7.29.7':
@@ -7184,7 +7246,6 @@ snapshots:
     dependencies:
       ai: 6.0.258(zod@4.6.7)
       zod: 4.6.7
-    optional: true
 
   '@opentelemetry/api-logs@0.214.0':
     dependencies:
@@ -8829,8 +8890,7 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@vercel/oidc@3.2.0':
-    optional: true
+  '@vercel/oidc@3.2.0': {}
 
   '@vitest/expect@4.1.12':
     dependencies:
@@ -8914,7 +8974,6 @@ snapshots:
       ollama: 0.6.3
     transitivePeerDependencies:
       - zod
-    optional: true
 
   ai@6.0.258(zod@4.6.7):
     dependencies:
@@ -8923,7 +8982,6 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.46(zod@4.6.7)
       '@opentelemetry/api': 1.9.1
       zod: 4.6.7
-    optional: true
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -8932,7 +8990,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.8
+      fast-uri: 3.1.9
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -8971,7 +9029,7 @@ snapshots:
 
   axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.1
+      follow-redirects: 1.16.2
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -9048,7 +9106,7 @@ snapshots:
   bmp-js@0.1.0:
     optional: true
 
-  body-parser@2.3.0:
+  body-parser@2.4.0:
     dependencies:
       bytes: 3.1.2
       content-type: 2.1.0
@@ -9056,7 +9114,7 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       on-finished: 2.4.1
-      qs: 6.16.0
+      qs: 6.16.1
       raw-body: 3.0.2
       type-is: 2.1.0
     transitivePeerDependencies:
@@ -9525,7 +9583,7 @@ snapshots:
   express@5.2.1:
     dependencies:
       accepts: 2.0.0
-      body-parser: 2.3.0
+      body-parser: 2.4.0
       content-disposition: 1.1.0
       content-type: 1.0.5
       cookie: 0.7.2
@@ -9569,7 +9627,7 @@ snapshots:
     dependencies:
       fast-string-truncated-width: 3.0.3
 
-  fast-uri@3.1.8: {}
+  fast-uri@3.1.9: {}
 
   fast-wrap-ansi@0.2.2:
     dependencies:
@@ -9624,7 +9682,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  follow-redirects@1.16.1: {}
+  follow-redirects@1.16.2: {}
 
   form-data@4.0.6:
     dependencies:
@@ -9891,13 +9949,11 @@ snapshots:
 
   json-schema-typed@8.0.2: {}
 
-  json-schema@0.4.0:
-    optional: true
+  json-schema@0.4.0: {}
 
   json5@2.2.3: {}
 
-  jsonrepair@3.15.0:
-    optional: true
+  jsonrepair@3.15.0: {}
 
   jsonwebtoken@9.0.3:
     dependencies:
@@ -10641,7 +10697,6 @@ snapshots:
   ollama@0.6.3:
     dependencies:
       whatwg-fetch: 3.6.20
-    optional: true
 
   on-finished@2.4.1:
     dependencies:
@@ -10859,6 +10914,11 @@ snapshots:
   punycode.js@2.3.1: {}
 
   qs@6.16.0:
+    dependencies:
+      es-define-property: 1.0.1
+      side-channel: 1.1.1
+
+  qs@6.16.1:
     dependencies:
       es-define-property: 1.0.1
       side-channel: 1.1.1
@@ -11534,8 +11594,7 @@ snapshots:
 
   undici-types@7.24.6: {}
 
-  undici@6.29.1:
-    optional: true
+  undici@6.29.1: {}
 
   undici@7.30.1: {}
 
@@ -11736,8 +11795,7 @@ snapshots:
 
   webidl-conversions@3.0.1: {}
 
-  whatwg-fetch@3.6.20:
-    optional: true
+  whatwg-fetch@3.6.20: {}
 
   whatwg-url@5.0.0:
     dependencies:
@@ -11761,8 +11819,7 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
 
-  xlsx@https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz:
-    optional: true
+  xlsx@https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz: {}
 
   xml-naming@0.3.0:
     optional: true

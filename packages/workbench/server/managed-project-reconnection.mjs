@@ -1,4 +1,4 @@
-/** Owner-confirmed replacement of one recorded managed folder identity. */
+/** Owner-confirmed replacement of one recorded local folder identity. */
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
@@ -11,11 +11,11 @@ import {
   localRootActorId, localRootIdentity, localRootInventoryKey, parseLocalRootInventory,
 } from "./local-root-provider.mjs";
 import { getLocalProjectReconnectionService } from "./project-services.mjs";
+import { claimProjectReconnection } from "./project-reconnection-admission.mjs";
 import { managedProjectDataDirectory } from "./managed-projects.mjs";
 
 const identifier = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
-const managedName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const LOCAL = "local-stat-revalidated-v1";
 const OPERATION = "reconnect-managed-folder";
 
@@ -49,7 +49,7 @@ function replacementRootId(scope, operationId) {
 async function localExec() {
   const url = getRuntimeDatabaseUrl();
   if (!url.startsWith("file:")) {
-    throw refuse("Managed-folder reconnection requires the local Vivary database.", 503);
+    throw refuse("Project reconnection requires the local Vivary database.", 503);
   }
   return createDbExec({ url });
 }
@@ -114,27 +114,34 @@ async function loadSnapshot(tx, owner, projectId) {
     registryRevision: Number(revision.revision) };
 }
 
-async function managedFolder(grant, dataDir) {
-  if (!dataDir || !path.isAbsolute(dataDir)) {
-    throw refuse("The managed Projects directory is not configured.", 503);
+async function reconnectFolder(grant, dataDir, provider) {
+  if (!path.isAbsolute(grant.canonicalPath)) {
+    throw refuse("The saved project folder path is invalid.", 409);
   }
-  const canonicalData = await realpath(dataDir);
-  const parent = path.join(canonicalData, "projects");
-  const name = path.basename(grant.canonicalPath);
-  if (!managedName.test(name) || name.endsWith(".")
-    || path.dirname(grant.canonicalPath) !== parent
-    || path.join(parent, name) !== grant.canonicalPath) {
-    throw refuse("Only a recorded managed project inside Vivary's Projects directory can be reconnected.", 403);
+  const parent = path.dirname(grant.canonicalPath);
+  const name = path.basename(grant.canonicalPath) || path.parse(grant.canonicalPath).root;
+  const canonicalData = dataDir && path.isAbsolute(dataDir) ? await realpath(dataDir) : null;
+  const managed = canonicalData !== null && parent === path.join(canonicalData, "projects")
+    && await provider.isManagedLocation(grant.locationRef, dataDir);
+  let parentInfo;
+  let targetInfo;
+  try {
+    parentInfo = await lstat(parent, { bigint: true });
+    targetInfo = await lstat(grant.canonicalPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw refuse("The saved project folder is missing. Restore it at the recorded path, then review again.", 409);
+    }
+    throw refuse("The saved project folder cannot be checked. Restore access, then review again.", 409);
   }
-  const parentInfo = await lstat(parent, { bigint: true });
-  const targetInfo = await lstat(grant.canonicalPath, { bigint: true });
   if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()
     || !targetInfo.isDirectory() || targetInfo.isSymbolicLink()
     || await realpath(parent) !== parent
     || await realpath(grant.canonicalPath) !== grant.canonicalPath) {
-    throw refuse("The recorded project path is linked or has left the managed Projects directory.", 409);
+    throw refuse("The saved project path is linked or changed. Restore the recorded folder, then review again.", 409);
   }
-  return { folderName: name, parent, target: grant.canonicalPath,
+  return { folderName: name, folderPath: grant.canonicalPath,
+    folderKind: managed ? "managed" : "external", parent, target: grant.canonicalPath,
     parentIdentity: { dev: String(parentInfo.dev), ino: String(parentInfo.ino),
       birthtimeNs: String(parentInfo.birthtimeNs) } };
 }
@@ -151,6 +158,7 @@ function plan(snapshot, managed, observed, operationId) {
     newRootId: rootId, newIdentity: physical(observed),
     canonicalPath: snapshot.grant.canonicalPath,
     managedParent: managed.parent, managedParentIdentity: managed.parentIdentity,
+    folderKind: managed.folderKind,
     settingRaw: snapshot.settingRaw, settingUpdatedAt: snapshot.settingUpdatedAt,
     policyRevision: snapshot.scope.policyRevision,
     bindingRevision: snapshot.binding.bindingRevision,
@@ -193,22 +201,23 @@ async function assertCommittedPath(managed, observed) {
   }
 }
 
-function assertStillManagedSync(snapshot, managed, observed, dataDir) {
-  const currentData = realpathSync(dataDir);
-  const parent = path.join(currentData, "projects");
-  const parentInfo = lstatSync(parent, { bigint: true });
-  const targetInfo = lstatSync(managed.target, { bigint: true });
+function assertStillFolderSync(snapshot, folder, observed, dataDir) {
+  const parentInfo = lstatSync(folder.parent, { bigint: true });
+  const targetInfo = lstatSync(folder.target, { bigint: true });
   const currentParentIdentity = { dev: String(parentInfo.dev), ino: String(parentInfo.ino),
     birthtimeNs: String(parentInfo.birthtimeNs) };
   const currentTargetIdentity = { platform: process.platform, dev: String(targetInfo.dev),
     ino: String(targetInfo.ino), birthtimeNs: String(targetInfo.birthtimeNs) };
-  if (parent !== managed.parent || snapshot.grant.canonicalPath !== managed.target
+  const managedParent = folder.folderKind === "managed"
+    ? path.join(realpathSync(dataDir), "projects") : null;
+  if (snapshot.grant.canonicalPath !== folder.target
+    || (managedParent !== null && managedParent !== folder.parent)
     || !parentInfo.isDirectory() || parentInfo.isSymbolicLink()
     || !targetInfo.isDirectory() || targetInfo.isSymbolicLink()
-    || realpathSync(parent) !== parent || realpathSync(managed.target) !== managed.target
-    || JSON.stringify(currentParentIdentity) !== JSON.stringify(managed.parentIdentity)
+    || realpathSync(folder.parent) !== folder.parent || realpathSync(folder.target) !== folder.target
+    || JSON.stringify(currentParentIdentity) !== JSON.stringify(folder.parentIdentity)
     || localRootIdentity(currentTargetIdentity) !== localRootIdentity(observed)) {
-    throw refuse("The managed project path changed. Review the reconnection again.");
+    throw refuse("The saved project path or its parent changed. Review the reconnection again.");
   }
 }
 
@@ -296,7 +305,7 @@ async function currentRecordedPreview(exec, snapshot, projectId) {
 async function reconcileReplay(exec, owner, request, replay, dataDir) {
   let observed;
   try {
-    const managed = await managedFolder(replay.newGrant, dataDir);
+    const managed = await reconnectFolder(replay.newGrant, dataDir, owner.service.provider);
     observed = await owner.service.provider.captureReplacement(owner.owner, managed.target);
     if (localRootIdentity(observed) !== localRootIdentity(replay.newGrant)) {
       throw refuse("The completed project folder changed again. Review its current identity.");
@@ -306,7 +315,7 @@ async function reconcileReplay(exec, owner, request, replay, dataDir) {
     await exec.transaction(async tx => {
       const current = await loadSnapshot(tx, owner, request.projectId);
       await readReceipt(tx, current, request);
-      assertStillManagedSync(current, managed, observed, dataDir);
+      assertStillFolderSync(current, managed, observed, dataDir);
     });
     await assertCommittedPath(managed, observed);
     const installed = observed;
@@ -330,8 +339,8 @@ export async function previewManagedProjectReconnection(context, input, dependen
   let observed;
   try {
     const snapshot = await loadSnapshot(exec, owner, projectId);
-    const managed = await managedFolder(snapshot.grant,
-      managedProjectDataDirectory(dependencies));
+    const managed = await reconnectFolder(snapshot.grant,
+      managedProjectDataDirectory(dependencies), owner.service.provider);
     observed = await owner.service.provider.captureReplacement(owner.owner, managed.target);
     await assertStillObserved(managed, observed);
     const current = await requireCurrentPreviewSnapshot(exec, owner, projectId, snapshot);
@@ -342,13 +351,15 @@ export async function previewManagedProjectReconnection(context, input, dependen
       }
       return { code: "reconnect-preview", projectId,
         displayName: snapshot.binding.displayName, folderName: managed.folderName,
+        folderPath: managed.folderPath, folderKind: managed.folderKind,
         recorded: true, identityChanged: false, ...recorded };
     }
     assertReplacement(current, observed);
     const operationId = randomUUID().replaceAll("-", "");
     const reviewed = plan(current, managed, observed, operationId);
     return { code: "reconnect-preview", projectId, displayName: snapshot.binding.displayName,
-      folderName: managed.folderName, recorded: false, identityChanged: true, operationId,
+      folderName: managed.folderName, folderPath: managed.folderPath,
+      folderKind: managed.folderKind, recorded: false, identityChanged: true, operationId,
       planSha256: reviewed.planSha256 };
   } finally {
     await observed?.handle.close();
@@ -375,10 +386,13 @@ export async function confirmManagedProjectReconnection(context, input, dependen
   const acceptedPlanSha256 = digest.parse(input.acceptedPlanSha256);
   const request = { projectId, operationId, acceptedPlanSha256 };
   const owner = getLocalProjectReconnectionService(context);
-  requireIdleCodeHost();
-  const exec = await (dependencies.createExec ?? localExec)();
+  const release = claimProjectReconnection();
+  if (!release) throw refuse("Another project reconnection is in progress. Retry after it finishes.");
+  let exec;
   let observed;
   try {
+    requireIdleCodeHost();
+    exec = await (dependencies.createExec ?? localExec)();
     // A completed exact retry is checked before the folder or plan is recalculated.
     const replay = await exec.transaction(async tx => {
       const snapshot = await loadSnapshot(tx, owner, projectId);
@@ -388,8 +402,8 @@ export async function confirmManagedProjectReconnection(context, input, dependen
       managedProjectDataDirectory(dependencies));
 
     const before = await loadSnapshot(exec, owner, projectId);
-    const managed = await managedFolder(before.grant,
-      managedProjectDataDirectory(dependencies));
+    const managed = await reconnectFolder(before.grant,
+      managedProjectDataDirectory(dependencies), owner.service.provider);
     observed = await owner.service.provider.captureReplacement(owner.owner, managed.target);
     assertReplacement(before, observed);
     await assertStillObserved(managed, observed);
@@ -402,7 +416,7 @@ export async function confirmManagedProjectReconnection(context, input, dependen
         throw refuse("Stop or deny the active coding request before reconnecting this folder.");
       }
       assertReplacement(snapshot, observed);
-      assertStillManagedSync(snapshot, managed, observed,
+      assertStillFolderSync(snapshot, managed, observed,
         managedProjectDataDirectory(dependencies));
       const reviewed = plan(snapshot, managed, observed, operationId);
       if (reviewed.planSha256 !== acceptedPlanSha256) {
@@ -470,7 +484,11 @@ export async function confirmManagedProjectReconnection(context, input, dependen
     const { newGrant: _grant, settingKey: _key, ...output } = result;
     return output;
   } finally {
-    if (observed) await observed.handle.close().catch(() => {});
-    await exec.close?.();
+    try {
+      if (observed) await observed.handle.close().catch(() => {});
+      await exec?.close?.();
+    } finally {
+      release();
+    }
   }
 }

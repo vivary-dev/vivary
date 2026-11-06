@@ -198,7 +198,16 @@ The implementing agent is allowed to inspect, test, fix, and retest its own work
 
 ## Documentation
 
-Keep documentation aligned with the product, but do not let documentation block ordinary implementation.
+Keep documentation aligned with the product. Implementation can proceed while
+the design evolves, but commit it with the corresponding HLDD review.
+Jeff requested this gate on 2026-09-25.
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) is the canonical high-level design.
+The [maintenance skill](.agents/skills/maintain-hldd/SKILL.md) owns the procedure.
+The staged hook and CI require a substantive update for relevant changes.
+For an internal change with no design impact, Last change review explains what
+changed and why the existing design remains accurate. Test-only changes are
+exempt. These checks enforce a recorded review, not semantic correctness.
 
 Update durable docs when:
 
@@ -228,7 +237,7 @@ If the answer to #4 or #5 is yes, use the simpler method.
 
 ## Issue-led delivery
 
-Approved by Jeff on 2026-09-13. GitHub `vivary-dev/Vivary-New` issues own task
+Approved by Jeff on 2026-09-13. GitHub `vivary-dev/vivary` issues own task
 goals, acceptance, dependencies, ownership, priority, and lifecycle. Documents
 own architecture, code contracts, implementation guidance, and retained
 evidence. Packets and the generated graph are synchronized references, not an

@@ -1,5 +1,6 @@
 import type { ActionRunContext } from "@agent-native/core/action";
 import type { CatalogResult, RegistrationResult } from "../app/lib/project-catalog-schema";
+import type { ProjectScopeIdentity } from "./project-scope.mjs";
 
 export type LocalProjectWorkspace = Readonly<{
   root: string;
@@ -20,6 +21,18 @@ export type LocalProjectHistory = Readonly<Pick<
 >>;
 
 export function getLocalProjectAccess(context: ActionRunContext | undefined): Promise<CatalogResult>;
+export type LocalProjectScope = ProjectScopeIdentity & Readonly<{
+  policyRevision: number;
+  locationRefs: readonly string[];
+}>;
+export function readLocalProjectScope(
+  context: ActionRunContext | undefined,
+): Promise<LocalProjectScope | null>;
+export type ChatScopeMatch =
+  | { kind: "not-project" }
+  | { kind: "personal" }
+  | { kind: "project"; projectId: string; context: ActionRunContext };
+export function matchChatProject(context: ActionRunContext): Promise<ChatScopeMatch>;
 export function connectLocalProjectFolder(
   context: ActionRunContext | undefined,
   folder: string,

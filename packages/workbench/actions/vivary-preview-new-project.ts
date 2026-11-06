@@ -1,10 +1,13 @@
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { z } from "zod";
+import { workspacePatternChoices, workspacePreset } from "../shared/workspace-patterns.ts";
 import { previewManagedProject } from "../server/managed-projects.mjs";
 
 export default defineAction({
   description: "Preview the exact guidance files for a new managed Vivary project.",
-  schema: z.strictObject({ name: z.string().trim().min(1).max(128) }),
+  schema: z.strictObject({ name: z.string().trim().min(1).max(128),
+    patternChoices: workspacePatternChoices.optional(),
+    preset: workspacePreset.optional() }),
   requiresAuth: true,
   agentTool: false,
   mcpTool: false,

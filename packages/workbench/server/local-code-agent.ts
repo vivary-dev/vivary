@@ -1,19 +1,44 @@
-import { lstat, realpath, readdir, readFile, stat } from "node:fs/promises";
+import { getCodePermissionMode, type CodePermissionMode } from "./code-permissions";
+import { readCodeTranscriptWindow } from "./code-transcript-page";
+import { codexApprovalResponse, supportsCodexRequest, type CodexApprovalDecision } from "./codex-approval";
+import type { CodexActionRequest } from "./code-execution-protocol";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, open, realpath, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 
 import { fail, type ActionRunContext } from "@agent-native/core/action";
 import {
   appendCodeAgentTranscriptEvent,
-  createCodeAgentRunRecord,
+  codeAgentRunTranscriptPath,
+  getCodeAgentRunRecord,
   isActiveCodeAgentRun,
   listCodeAgentRunRecords,
   listCodeAgentTranscriptEvents,
+  readClaudeCodeSessionLog,
+  readCodexCodeSessionLog,
   updateCodeAgentRunRecord,
   type CodeAgentRunRecord,
   type CodeAgentTranscriptEvent,
 } from "@agent-native/core/code-agents";
+import { createCodeRun, transitionCodeRun } from "./code-run-transitions";
 
-import { executeVivaryCodeWorker, VivaryCodeWorkerCleanupError } from "./code-execution-host";
+import { getCodexModels, type CodexModelCatalog } from "./codex-models";
+import { CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_LEGACY_ALIASES, CLAUDE_CODE_MODELS,
+  claudeCodeModelChoices, type ClaudeCodeModelId } from "../shared/claude-models";
+import { codexSessionLogLifecycle } from "./codex-session-process";
+import { projectReconnectionPending } from "./project-reconnection-admission.mjs";
+
+import {
+  WINDOWS_SCAN_FAILURES, type WindowsScanFailure,
+  BOOT_ID_PATTERN, checkWorkerCleanup, endWorkerLeftovers, executeVivaryCodeWorker, isTraced, VivaryCodeWorkerCleanupError,
+  type CleanupCheck, type CleanupFailure, type CleanupTarget, type EndAttempt, type EndOutcome, type LeftoverProcess,
+} from "./code-execution-host";
+import { redactCredentialsInValue, refreshHeldCredentials } from "./credential-redaction.ts";
+import { repeatsAssistantReply } from "./linked-history";
+import type { PreparedLinkedContext } from "../shared/linked-conversation";
+import type { ProjectContextBlock, ProjectContextLoad } from "./project-memory.ts";
 import { getVivaryRuntimeStatus, type VivaryCodeEngine, type VivaryRuntimeStatus } from "./local-runtime-setup.ts";
 
 export const VIVARY_CODE_ENGINES = ["claude-cli", "codex-cli"] satisfies [VivaryCodeEngine, ...VivaryCodeEngine[]];
@@ -21,13 +46,9 @@ export const VIVARY_CODE_DEFAULT_ENGINE: VivaryCodeEngine = "claude-cli";
 
 const VIVARY_CODE_GOAL_ID = "vivary-local-code";
 const VIVARY_CODE_APP_MARKER = "vivary-workbench-local-code";
-export type VivaryCodeModel = "sonnet" | "opus" | "fable";
-export const VIVARY_CODE_MODELS = [
-  "sonnet",
-  "opus",
-  "fable",
-] satisfies [VivaryCodeModel, ...VivaryCodeModel[]];
-export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = "sonnet";
+export type VivaryCodeModel = ClaudeCodeModelId;
+export const VIVARY_CODE_MODELS = CLAUDE_CODE_MODELS.map(model => model.id);
+export const VIVARY_CODE_DEFAULT_MODEL: VivaryCodeModel = CLAUDE_CODE_DEFAULT_MODEL;
 const MAX_RUNS = 20;
 const MAX_TRANSCRIPT_EVENTS = 400;
 const MAX_FOLLOW_UP_EVENTS = 24;
@@ -37,39 +58,31 @@ const MAX_FILE_BYTES = 64 * 1024;
 const MAX_LISTED_FILES = 200;
 const MAX_SCANNED_ENTRIES = 2_000;
 const MAX_SCAN_DEPTH = 6;
-const RUN_TIMEOUT_MS = 120_000;
 const SHUTDOWN_WAIT_MS = 10_000;
 const ALLOWED_FILE_EXTENSIONS = new Set([".json", ".md", ".txt"]);
+const MAX_CLEANUP_LISTED = 50;
+const MAX_CLEANUP_NAMED_IN_MESSAGES = 5;
+const MAX_CLEANUP_ENDS = 20;
 
 type ActiveRun = {
   controller: AbortController;
   ownerEmail: string;
   orgId?: string;
   execution: Promise<void> | null;
-  stopReason: "shutdown" | "timeout" | "user" | null;
-  timeout: ReturnType<typeof setTimeout>;
-};
-
-type PendingLaunch = {
-  requestId: string;
-  message: string;
-  engine: VivaryCodeEngine;
-  model: string;
-  ownerEmail: string;
-  orgId?: string;
-  isFollowUp: boolean;
+  stopReason: "shutdown" | "user" | null;
   workspace: VivaryCodeWorkspace;
-  timeoutMs: typeof RUN_TIMEOUT_MS;
-  continuesAfterBrowserClose: true;
+  permissionMode: CodePermissionMode;
+  requests: Map<string, { request: CodexActionRequest; resolve: (response: Record<string, unknown>) => void }>;
 };
 
 export type VivaryCodeRunSummary = Pick<
   CodeAgentRunRecord,
-  "id" | "status" | "title" | "updatedAt"
+  "id" | "status" | "phase" | "title" | "updatedAt"
 > & {
   engine: VivaryCodeEngine;
   engineLabel: string;
   model: string;
+  draftThreadId: string | null;
 };
 
 export type VivaryCodeRunState = VivaryCodeRunSummary & {
@@ -91,26 +104,64 @@ export type VivaryCodeWorkspace = Readonly<{
   bindingId?: string;
   rootId?: string;
   bindingRevision?: number;
+  policyRevision?: number;
 }>;
 
-type VivaryCodeReadScope = VivaryCodeProjectHistory | VivaryCodeWorkspace;
+export type VivaryCodeReadScope = VivaryCodeProjectHistory | VivaryCodeWorkspace
+  | Readonly<{ kind: "unassigned"; label: string; projectId?: never }>;
 
-export type VivaryCodePendingApproval = {
+export type VivaryCodePendingApproval = CodexActionRequest & {
   runId: string;
-  requestId: string;
   title: string;
-  message: string;
   projectId: string | null;
   workspaceLabel: string;
-  engine: VivaryCodeEngine;
-  engineLabel: string;
-  model: string;
-  timeoutMs: typeof RUN_TIMEOUT_MS;
-  continuesAfterBrowserClose: true;
 };
 
 export type VivaryCodeRecentRun = Pick<CodeAgentRunRecord, "id" | "status" | "title" | "phase"> & {
   projectId: string | null;
+  /** Beta ticket 05. A request this run was waiting on when the previous host ended. It cannot be answered. */
+  expiredApproval: { method: string; summary: string | null; reason: string } | null;
+};
+
+/**
+ * Beta ticket 05. A Codex request the run waits on, listed in the run record's `metadata.pendingApprovals` until it is
+ * answered or the run ends. A fresh host marks each one still listed Expired, because its answer channel died with
+ * the previous host.
+ */
+type RecordedCodexApproval = {
+  requestId: string;
+  method: string;
+  summary: string | null;
+  requestedAt: string;
+  expiredAt?: string;
+  reason?: "host-restart";
+};
+
+const APPROVAL_EXPIRED_REASON = "Vivary restarted before this request was answered.";
+
+/** Issue #121. The refusal's state for the host strip and the Code panel. The server owns the wording. */
+export type VivaryCodeCleanupView = {
+  /** Names the list shown here. A decision carries it back, so it acts only on what the owner saw. */
+  version: string;
+  heading: string;
+  /** Commands appear in backticks. */
+  instruction: string;
+  /** `confirmed` means Vivary traced the process to the run, so End them may end it. */
+  remaining: { pid: number; name: string; confirmed: boolean }[];
+  /** How many more processes the last check found than `remaining` lists. */
+  unlisted: number;
+  /** A scan can find the listed processes, and at least one is confirmed, so End them can act. */
+  canEnd: boolean;
+  /** End them has run on this refusal, or cannot act, so the owner may continue past what is left. */
+  canContinue: boolean;
+  /** What the last End them on this refusal did, or null before any. */
+  notice: string | null;
+  /** The Code composer's placeholder while the refusal holds. */
+  composer: string;
+  /** A check or an End is running. */
+  checking: boolean;
+  /** Set only for the run's owner. */
+  run: { id: string; title: string; projectId: string | null } | null;
 };
 
 export type VivaryCodeHostState = {
@@ -118,6 +169,7 @@ export type VivaryCodeHostState = {
   pendingApproval: VivaryCodePendingApproval | null;
   recentRun: VivaryCodeRecentRun | null;
   busy: boolean;
+  cleanup: VivaryCodeCleanupView | null;
 };
 
 export type VivaryCodeState = VivaryCodeHostState & {
@@ -128,7 +180,9 @@ export type VivaryCodeState = VivaryCodeHostState & {
   defaultModel: VivaryCodeModel;
   defaultEngine: VivaryCodeEngine;
   runtime: VivaryRuntimeStatus;
-  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus }[];
+  permissionMode: CodePermissionMode;
+  engines: { engine: VivaryCodeEngine; label: string; models: string[]; configured: boolean; runtime: VivaryRuntimeStatus; modelCatalog: CodexModelCatalog | null;
+    claudeModels: ReturnType<typeof claudeCodeModelChoices> | null }[];
   runs: VivaryCodeRunSummary[];
   run: VivaryCodeRunState | null;
   error?: string;
@@ -148,11 +202,90 @@ export type VivaryCodeFileState = {
   truncated: boolean;
 };
 
+type CleanupScan = "done" | "unavailable" | "not-recorded";
+
+/**
+ * Issue #121. Coding processes from a run outlived its stop, or Vivary could not confirm that they did not, so the host
+ * refuses new runs. The run record keeps it as `metadata.cleanupRefusal`, without `runId`.
+ */
+export type CleanupRefusal = {
+  runId: string;
+  /** Null when the run predates recorded targets, or on a platform Vivary cannot check. */
+  target: CleanupTarget | null;
+  /** The processes last observed, at most `MAX_CLEANUP_LISTED`. */
+  remaining: LeftoverProcess[];
+  /** How many processes that observation found, listed or not. */
+  total: number;
+  /**
+   * Names every process that observation found and whether one was hidden, from `leftoverFingerprint`. Null until a
+   * check lists processes for the refusal.
+   */
+  fingerprint: string | null;
+  hidden: boolean;
+  /** Whether the last check could scan. `not-recorded` is a marker that never had a target. */
+  scan: CleanupScan;
+  scanFailure?: WindowsScanFailure;
+  step: CleanupFailure["step"] | null;
+  refusedAt: string;
+  checkedAt: string;
+  /** Each End them on this refusal, oldest first. */
+  ends: CleanupEnd[];
+};
+
+/** One End them: who chose it, when, and what it did to each process it tried. */
+type CleanupEnd = { at: string; by: string; attempts: EndAttempt[] };
+
+/**
+ * How a refusal ended, kept as `metadata.cleanupLifted` on the run. Continue anyway records the list the owner was
+ * shown, and what the check right before it found: `scan` says whether that check ran, and `remaining` lists at most
+ * `MAX_CLEANUP_LISTED` of the `total` processes it found.
+ */
+type CleanupLift = { ends: CleanupEnd[] } & (
+  | { how: "rechecked"; checkedAt: string }
+  | { how: "ended"; endedAt: string; by: string }
+  | { how: "owner-confirmed"; confirmedAt: string; by: string; shown: LeftoverProcess[]; hidden: boolean;
+    scan: CleanupScan; remaining: LeftoverProcess[]; total: number });
+
+const tracedSchema = z.object({ pid: z.number().int().positive(), start: z.number().int().nonnegative() });
+// A Linux `comm` can be empty, so an empty name must not discard the whole refusal.
+const leftoverSchema = tracedSchema.extend({ name: z.string().max(260) });
+const storedCleanupRefusalSchema = z.object({
+  // A boot id that is not a UUID fails to parse, so a damaged one refuses rather than reading as a reboot.
+  target: z.discriminatedUnion("platform", [
+    z.object({ platform: z.literal("linux"), groupId: z.number().int().positive(),
+      bootId: z.string().regex(BOOT_ID_PATTERN).nullable(), traced: z.array(tracedSchema).max(200).default([]) }),
+    z.object({ platform: z.literal("win32"), tracked: z.array(z.object({
+      pid: z.number().int().positive(), createdFrom: z.number(), createdTo: z.number(), childrenTo: z.number().nullable(),
+    })).min(1).max(200), traced: z.array(tracedSchema).max(200).default([]),
+      overflow: z.literal(true).optional() }),
+  ]).nullable(),
+  remaining: z.array(leftoverSchema).max(MAX_CLEANUP_LISTED),
+  total: z.number().int().nonnegative().optional(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+  hidden: z.boolean(),
+  scan: z.enum(["done", "unavailable", "not-recorded"]),
+  scanFailure: z.enum(WINDOWS_SCAN_FAILURES).optional(),
+  step: z.enum(["taskkill", "exit", "group", "worker-exited"]).nullable(),
+  refusedAt: z.string(),
+  checkedAt: z.string(),
+  ends: z.array(z.object({ at: z.string(), by: z.string(), attempts: z.array(leftoverSchema.extend({
+    outcome: z.enum(["ended", "mismatched", "gone", "failed", "unknown"]),
+  })).max(MAX_CLEANUP_LISTED) })).max(MAX_CLEANUP_ENDS).default([]),
+  // A refusal written without a count counts what it lists.
+}).transform(stored => ({ ...stored, total: stored.total ?? stored.remaining.length }));
+
 type CodeHostState = {
   activeRuns: Map<string, ActiveRun>;
   initialization: Promise<void> | null;
+  /** Shutdown only. */
   closing: boolean;
   shutdown: Promise<void> | null;
+  /** The oldest refusal still in force. */
+  cleanup: CleanupRefusal | null;
+  /** One check or End at a time. Never rejects. */
+  cleanupCheck: Promise<void> | null;
+  /** Refusals whose last write failed, by run. They stay in force from memory until a write succeeds or they lift. */
+  unsaved: Map<string, CleanupRefusal>;
 };
 
 // Nitro bundles plugins while Native loads action source modules. Both must own
@@ -166,6 +299,9 @@ const hostState = hostProcess[codeHostKey] ??= {
   initialization: null,
   closing: false,
   shutdown: null,
+  cleanup: null,
+  cleanupCheck: null,
+  unsaved: new Map<string, CleanupRefusal>(),
 };
 const activeRuns = hostState.activeRuns;
 export async function initializeVivaryCodeAgent(): Promise<void> {
@@ -184,33 +320,441 @@ async function ensureVivaryCodeHostInitialized(): Promise<void> {
   hostState.initialization ??= Promise.resolve().then(() => {
     for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
       if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER) continue;
-      if (run.metadata?.cleanupUnverified === true) hostState.closing = true;
-      if (run.phase === "launch-approval" && pendingLaunchFromRun(run)) continue;
       if (!isActiveCodeAgentRun(run)) continue;
-      appendCodeAgentTranscriptEvent({
-        runId: run.id,
-        kind: "status",
-        message: "The previous Vivary code host ended before this run finished.",
-        metadata: {
-          status: "paused",
-          phase: "interrupted",
-          reason: "host-restart",
-        },
-      });
-      updateCodeAgentRunRecord(run.id, {
-        status: "paused",
-        phase: "interrupted",
-        progress: {
-          label: "Interrupted",
-          completed: 0,
-          total: 1,
-          failed: 0,
-          percent: 0,
-        },
-      });
+      recordInterruptedRun(run.id, "The previous Vivary code host ended before this run finished.");
     }
+    // Beta ticket 05. A run can end without clearing its list when the previous host died mid-cleanup, so every run
+    // is checked, not only the interrupted ones.
+    for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
+      if (metadataString(run, "app") === VIVARY_CODE_APP_MARKER) expireRecordedApprovals(run);
+    }
+    // Issue #121. The oldest persisted refusal is in force before any send. The check that may lift it runs behind it.
+    reloadCleanup();
+    if (hostState.cleanup) void recheckVivaryCodeCleanup().catch(() => undefined);
   });
   await hostState.initialization;
+}
+
+/** Issue #121. Checks every persisted refusal again, after any check or End already running. */
+export function recheckVivaryCodeCleanup(): Promise<void> {
+  return exclusiveCleanupWork(async () => {
+    for (const refusal of settledCleanupRefusals()) {
+      if (refusal.target) recordCleanupCheck(refusal, await checkWorkerCleanup(refusal.target));
+    }
+  });
+}
+
+/**
+ * Issue #121. The owner's decision on the refusal the host strip shows, the oldest one, and only on the version of its
+ * list the owner saw. End them ends each listed process it can, and lifts the refusal when the check after that is
+ * empty. Continue anyway lifts it on the owner's word after one more check, which lifts it on its own when nothing is
+ * left, and which must find exactly the processes the owner was told of.
+ */
+export async function resolveVivaryCodeCleanup(input: {
+  ownerEmail: string; orgId?: string; decision: "end" | "continue"; version: string;
+}): Promise<VivaryCodeHostState> {
+  await ensureVivaryCodeHostInitialized();
+  const outcome = await exclusiveCleanupWork(async (): Promise<"done" | "changed" | "not-offered"> => {
+    const refusal = settledCleanupRefusals()[0];
+    if (!refusal) return "done";
+    if (cleanupVersion(refusal) !== input.version) return "changed";
+    const offers = cleanupOffers(refusal);
+    if (input.decision === "continue") return offers.canContinue ? continueAnyway(refusal, input.ownerEmail) : "not-offered";
+    if (!offers.canEnd || !refusal.target) return "not-offered";
+    const { attempts, check } = await endWorkerLeftovers(refusal.target, refusal.remaining);
+    const end: CleanupEnd = { at: new Date().toISOString(), by: input.ownerEmail, attempts };
+    const ended = attemptsWith([end], "ended");
+    // The credential redaction plugin redacts server output. Process names stay out of the log.
+    console.error(`[vivary-code-host] cleanup-end run=${refusal.runId} tried=${attempts.length} ended=${ended.length} `
+      + `unknown=${attemptsWith([end], "unknown").length} result=${check.result}`);
+    const recorded = { ...refusal, ends: [...refusal.ends, end].slice(-MAX_CLEANUP_ENDS) };
+    if (check.result === "clean" && ended.length) {
+      liftCleanupRefusal(recorded, { how: "ended", endedAt: end.at, by: input.ownerEmail, ends: recorded.ends });
+    } else {
+      recordCleanupCheck(recorded, check);
+    }
+    return "done";
+  });
+  if (outcome === "changed") {
+    fail("The list of leftover coding processes changed. Review it again before you choose.", {
+      errorCode: "vivary_code_cleanup_changed", statusCode: 409,
+    });
+  }
+  if (outcome === "not-offered") {
+    fail(input.decision === "continue"
+      ? "Choose End them first. Continue anyway is offered when End them cannot end everything."
+      : "End them cannot act on this list. Choose Continue anyway.", {
+      errorCode: "vivary_code_cleanup_not_offered", statusCode: 409,
+    });
+  }
+  return getVivaryCodeHostState(input.ownerEmail, input.orgId);
+}
+
+/**
+ * What the strip offers. End them when a listed process may be ended. Continue anyway once End them has run on this
+ * refusal, or when End them cannot act, so the owner tries End them first whenever it can help.
+ */
+function cleanupOffers(refusal: CleanupRefusal): { canEnd: boolean; canContinue: boolean } {
+  const canEnd = refusal.scan === "done" && refusal.remaining.some(leftover => confirmedFromRun(refusal, leftover));
+  return { canEnd, canContinue: !canEnd || refusal.ends.length > 0 };
+}
+
+/**
+ * Whether Vivary traced a listed process to the run, so End them may end it. A process linked only through an exited
+ * parent or a reused group id could belong to another program.
+ */
+function confirmedFromRun(refusal: CleanupRefusal, leftover: LeftoverProcess): boolean {
+  return refusal.target !== null && leftover.pid !== process.pid && isTraced(refusal.target.traced, leftover);
+}
+
+/** Every process these End them runs gave this outcome. */
+function attemptsWith(ends: readonly CleanupEnd[], outcome: EndOutcome): LeftoverProcess[] {
+  return ends.flatMap(({ attempts }) => attempts.filter(attempt => attempt.outcome === outcome)
+    .map(({ pid, name, start }) => ({ pid, name, start })));
+}
+
+/** Names the processes End them was sent but could not report on, or is empty when there are none. */
+function unreadNote(ends: readonly CleanupEnd[]): string {
+  const unknown = attemptsWith(ends, "unknown");
+  return unknown.length ? `Vivary could not read what End them did to ${processList(unknown)}.` : "";
+}
+
+/**
+ * Continue anyway, after one more check. A clean check lifts the refusal as rechecked. A check whose processes differ
+ * from those the owner was told of, listed or not, records them and lifts nothing, so the strip shows them and offers
+ * End them when it can.
+ */
+async function continueAnyway(refusal: CleanupRefusal, by: string): Promise<"done" | "changed"> {
+  const check = refusal.target ? await checkWorkerCleanup(refusal.target) : null;
+  if (check?.result === "clean") {
+    recordCleanupCheck(refusal, check);
+    return "done";
+  }
+  if (check?.result === "remaining" && leftoverFingerprint(check.remaining, check.hidden) !== refusal.fingerprint) {
+    recordCleanupCheck(refusal, check);
+    return "changed";
+  }
+  const found = check?.result === "remaining" ? check.remaining : [];
+  liftCleanupRefusal(refusal, {
+    how: "owner-confirmed", confirmedAt: new Date().toISOString(), by, shown: refusal.remaining,
+    hidden: refusal.hidden, scan: !check ? refusal.scan : check.result === "remaining" ? "done" : "unavailable",
+    remaining: found.slice(0, MAX_CLEANUP_LISTED), total: found.length, ends: refusal.ends,
+  });
+  return "done";
+}
+
+/**
+ * Names every process a check found, however many a refusal lists, by PID and start time, and whether the check found
+ * a hidden one. The same processes give the same fingerprint in any order.
+ */
+function leftoverFingerprint(found: readonly LeftoverProcess[], hidden: boolean): string {
+  const processes = found.map(({ pid, start }) => `${pid}:${start}`).sort();
+  return createHash("sha256").update(JSON.stringify([hidden, processes])).digest("hex");
+}
+
+/**
+ * Names what the strip shows: the run, when it was refused, what the last check could do and found, listed or not, and
+ * how many End them ran. A later check that finds the same processes keeps it.
+ */
+function cleanupVersion(refusal: CleanupRefusal): string {
+  return createHash("sha256").update(JSON.stringify([refusal.runId, refusal.refusedAt, refusal.scan, refusal.hidden,
+    refusal.remaining.map(({ pid, start, name }) => [pid, start, name]), refusal.fingerprint, refusal.ends.length]))
+    .digest("hex").slice(0, 16);
+}
+
+/** Runs one piece of cleanup work after any other, then reloads the refusal in force. */
+function exclusiveCleanupWork<T>(work: () => Promise<T>): Promise<T> {
+  const run = (hostState.cleanupCheck ?? Promise.resolve()).then(work).finally(reloadCleanup);
+  const settled: Promise<void> = run.then(() => undefined, error => {
+    console.error(`[vivary-code-host] cleanup-check-failed ${error instanceof Error ? error.name : "unknown"}`);
+  }).finally(() => {
+    if (hostState.cleanupCheck === settled) hostState.cleanupCheck = null;
+  });
+  hostState.cleanupCheck = settled;
+  return run;
+}
+
+/**
+ * Every refusal in force for this app's runs, oldest first: each run record's, or the one in memory when its last write
+ * failed.
+ */
+function cleanupRefusalsInForce(): CleanupRefusal[] {
+  const refusals = new Map<string, CleanupRefusal>();
+  for (const run of listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID)) {
+    if (metadataString(run, "app") !== VIVARY_CODE_APP_MARKER) continue;
+    const refusal = cleanupRefusalFromRun(run);
+    if (refusal) refusals.set(run.id, refusal);
+  }
+  for (const [runId, refusal] of hostState.unsaved) refusals.set(runId, refusal);
+  return [...refusals.values()].sort((left, right) => left.refusedAt.localeCompare(right.refusedAt));
+}
+
+/** The refusals a check or a decision acts on. A run still stopping takes its own check first. */
+function settledCleanupRefusals(): CleanupRefusal[] {
+  return cleanupRefusalsInForce().filter(refusal => !stopStillChecking(refusal));
+}
+
+/** Whether the refusal's run is still stopping, so the check right after its failed stop has not ended. */
+function stopStillChecking(refusal: CleanupRefusal): boolean {
+  return activeRuns.has(refusal.runId);
+}
+
+function reloadCleanup(): void {
+  hostState.cleanup = cleanupRefusalsInForce()[0] ?? null;
+}
+
+/** Parses a run's refusal once, at the record boundary. A marker it cannot read still refuses. */
+function cleanupRefusalFromRun(run: CodeAgentRunRecord): CleanupRefusal | null {
+  const stored = run.metadata?.cleanupRefusal;
+  if (stored === undefined && run.metadata?.cleanupUnverified !== true) return null;
+  const parsed = storedCleanupRefusalSchema.safeParse(stored);
+  if (parsed.success) return { runId: run.id, ...parsed.data };
+  // A `cleanupUnverified: true` marker from before part B recorded no target.
+  return { runId: run.id, target: null, remaining: [], total: 0, fingerprint: null, hidden: false, scan: "not-recorded",
+    step: null, refusedAt: run.updatedAt, checkedAt: run.updatedAt, ends: [] };
+}
+
+function storedCleanupRefusal(refusal: CleanupRefusal): Omit<CleanupRefusal, "runId"> {
+  const { target, remaining, total, fingerprint, hidden, scan, scanFailure, step, refusedAt, checkedAt, ends } = refusal;
+  return { target, remaining, total, fingerprint, hidden, scan, ...(scanFailure ? { scanFailure } : {}), step, refusedAt, checkedAt, ends };
+}
+
+/** What a refusal records from a check that found processes. It lists at most `MAX_CLEANUP_LISTED` and counts them all. */
+function listedFromCheck(check: Extract<CleanupCheck, { result: "remaining" }>) {
+  return { target: check.target, remaining: check.remaining.slice(0, MAX_CLEANUP_LISTED), total: check.remaining.length,
+    fingerprint: leftoverFingerprint(check.remaining, check.hidden), hidden: check.hidden, scan: "done" as const, scanFailure: undefined };
+}
+
+/** Records one check of a refusal. A check keeps the run's place in history, and only a lift adds to its transcript. */
+function recordCleanupCheck(refusal: CleanupRefusal, check: CleanupCheck): void {
+  const checkedAt = new Date().toISOString();
+  if (check.result === "clean") {
+    liftCleanupRefusal(refusal, { how: "rechecked", checkedAt, ends: refusal.ends });
+    return;
+  }
+  writeCleanupRefusal(check.result === "remaining" ? { ...refusal, ...listedFromCheck(check), checkedAt }
+    : { ...refusal, scan: "unavailable", scanFailure: check.reason, checkedAt });
+}
+
+/**
+ * Writes a refusal to its run and puts it in force. A write keeps the run's place in history unless it also records the
+ * run's failure. When the write fails, the refusal stays in force from memory and the next write retries it, so a
+ * failed write never lifts it.
+ */
+function writeCleanupRefusal(refusal: CleanupRefusal, failure?: { executionError: string }): void {
+  try {
+    const metadata = { cleanupRefusal: storedCleanupRefusal(refusal), ...failure };
+    const written = failure ? transitionCodeRun(refusal.runId, "cleanupUnverified", { metadata })
+      : updateCodeAgentRunRecord(refusal.runId, record => ({ updatedAt: record.updatedAt, metadata }));
+    if (!written) throw new Error("The run record is missing.");
+    hostState.unsaved.delete(refusal.runId);
+  } catch (error) {
+    hostState.unsaved.set(refusal.runId, refusal);
+    logCleanupRecordFailure(refusal.runId, error);
+  }
+  reloadCleanup();
+}
+
+function logCleanupRecordFailure(runId: string, error: unknown): void {
+  // The credential redaction plugin redacts server output. The log names the error kind only.
+  console.error(`[vivary-code-host] cleanup-record-failed run=${runId} ${error instanceof Error ? error.name : "unknown"}`);
+}
+
+/** Takes a failed stop's early refusal off when the check after it found nothing left, so the stop did finish. */
+function clearStopRefusal(runId: string): void {
+  hostState.unsaved.delete(runId);
+  // A clear that fails leaves the refusal on the record, and the next check lifts it.
+  try { updateCodeAgentRunRecord(runId, { metadata: { cleanupRefusal: undefined } }); }
+  catch (error) { logCleanupRecordFailure(runId, error); }
+  reloadCleanup();
+}
+
+function liftCleanupRefusal(refusal: CleanupRefusal, lift: CleanupLift): void {
+  const remaining = lift.how === "owner-confirmed" ? lift.remaining.length : 0;
+  const scan = lift.how === "owner-confirmed" ? lift.scan : "done";
+  // The credential redaction plugin redacts server output. Process names stay out of the log.
+  console.error(`[vivary-code-host] cleanup-lifted run=${refusal.runId} how=${lift.how} scan=${scan} remaining=${remaining}`);
+  try {
+    // Another refusal in force still refuses every send.
+    const othersInForce = cleanupRefusalsInForce().some(other => other.runId !== refusal.runId);
+    appendCodeAgentTranscriptEvent({ runId: refusal.runId, kind: "status",
+      message: cleanupLiftMessage(lift, refusal, othersInForce), metadata: { phase: "cleanup-lifted", how: lift.how } });
+    const recorded = updateCodeAgentRunRecord(refusal.runId, {
+      metadata: { cleanupRefusal: undefined, cleanupUnverified: undefined, cleanupLifted: lift },
+    });
+    if (!recorded) throw new Error("The run record is missing.");
+  } catch (error) {
+    // The refusal stays in force from memory, with any End them it now holds, until its run records the lift.
+    hostState.unsaved.set(refusal.runId, refusal);
+    throw error;
+  }
+  hostState.unsaved.delete(refusal.runId);
+}
+
+/** The refusal a failed stop leaves, from the one check the host took right after it. */
+function cleanupRefusalFromFailedStop(runId: string, error: VivaryCodeWorkerCleanupError,
+  refusedAt: string | null): CleanupRefusal {
+  const now = new Date().toISOString();
+  const check = error.leftovers?.check;
+  const common = { runId, step: error.cause?.step ?? null, refusedAt: refusedAt ?? now, checkedAt: now, ends: [] };
+  return check?.result === "remaining" ? { ...common, ...listedFromCheck(check) }
+    : { ...common, target: error.leftovers?.target ?? null, remaining: [], total: 0, fingerprint: null, hidden: false,
+      scan: "unavailable", ...(check?.reason ? { scanFailure: check.reason } : {}) };
+}
+
+function cleanupPlatform(refusal: CleanupRefusal): "linux" | "win32" {
+  return refusal.target?.platform ?? (process.platform === "win32" ? "win32" : "linux");
+}
+
+/**
+ * Names processes by name and PID, and counts the rest of `total`, which exceeds the processes given when their list was
+ * cut. With a refusal, it marks each one Vivary could not trace to the run.
+ */
+function processList(processes: readonly LeftoverProcess[], refusal?: CleanupRefusal, total = processes.length): string {
+  const named = processes.slice(0, MAX_CLEANUP_NAMED_IN_MESSAGES).map(leftover => `${leftover.name} (PID ${leftover.pid}`
+    + `${!refusal || confirmedFromRun(refusal, leftover) ? "" : ", not confirmed from that run"})`);
+  const more = total - named.length;
+  return more > 0 ? `${named.join(", ")}, and ${more} more` : named.join(", ");
+}
+
+/** The heading while the check right after a failed stop runs. */
+const STOP_CHECK_HEADING = "Vivary is checking whether coding processes stopped";
+
+function cleanupHeading(refusal: CleanupRefusal): string {
+  if (refusal.scan !== "done") return "Vivary could not confirm that an earlier run's coding processes stopped";
+  if (!refusal.remaining.length) return "A coding process from an earlier run is still running";
+  return refusal.remaining.every(leftover => confirmedFromRun(refusal, leftover))
+    ? "Coding processes from an earlier run are still running"
+    : "Processes that may be left from an earlier run are still running";
+}
+
+/**
+ * What the owner does next. The strip sits beside the controls, and a transcript or refusal message adds where they
+ * are. Commands are in backticks.
+ */
+function cleanupInstruction(refusal: CleanupRefusal, where: "strip" | "message"): string {
+  const at = where === "message" ? " at the top of Vivary" : "";
+  const windows = cleanupPlatform(refusal) === "win32";
+  const group = refusal.target?.platform === "linux" ? refusal.target.groupId : null;
+  if (refusal.scan === "not-recorded") {
+    return "This run ended before Vivary recorded which processes it started. End any codex, claude, or node processes "
+      + `left from it ${windows ? "in Task Manager" : "in your process list"}, then choose Continue anyway${at}.`;
+  }
+  if (refusal.scan === "unavailable") {
+    if (group !== null) {
+      return `Vivary could not list the processes. Check them with \`pgrep -l -g ${group}\`, stop them with `
+        + `\`kill -KILL -- -${group}\`, then choose Continue anyway${at}.`;
+    }
+    return `Vivary could not list the processes. Check ${windows ? "Task Manager" : "your process list"} for codex, `
+      + `claude, or node processes from that run and end them, then choose Continue anyway${at}.`;
+  }
+  if (!refusal.remaining.length && group !== null) {
+    return `Vivary cannot read its name. Stop process group ${group} with \`kill -KILL -- -${group}\`, which may need `
+      + `sudo, then choose Continue anyway${at}. Vivary checks once more before it continues.`;
+  }
+  const yourself = group !== null ? `stop them with \`kill -KILL -- -${group}\``
+    : `end them ${windows ? "in Task Manager" : "in your process list"} by PID`;
+  // The list names only what the scan could read, as under `hidepid=1`.
+  const unread = refusal.hidden && group !== null
+    ? `Process group ${group} may also hold a process that Vivary cannot read or end. ` : "";
+  const confirmed = refusal.remaining.filter(leftover => confirmedFromRun(refusal, leftover)).length;
+  if (!confirmed) {
+    return `${unread}Vivary cannot confirm that these came from that run, so it does not end them. `
+      + `If they did, ${yourself}, then choose Continue anyway${at}.`;
+  }
+  const orContinue = cleanupOffers(refusal).canContinue ? ` Or choose Continue anyway${at}.` : "";
+  if (confirmed === refusal.remaining.length) {
+    return `${unread}Choose End them${at} to stop these processes. Vivary ends only listed processes it can confirm `
+      + `came from that run, then checks again.${orContinue}`;
+  }
+  return `${unread}Choose End them${at} to stop the processes confirmed from that run, then Vivary checks again. It `
+    + `does not end the others. If they came from that run, ${yourself}.${orContinue}`;
+}
+
+/** The refusal a send gets. */
+function cleanupRefusalMessage(refusal: CleanupRefusal): string {
+  if (stopStillChecking(refusal)) {
+    return `${STOP_CHECK_HEADING}. The choices appear at the top of Vivary when the check ends.`;
+  }
+  const names = refusal.scan === "done" && refusal.remaining.length
+    ? `: ${processList(refusal.remaining, refusal, refusal.total)}` : "";
+  return `${cleanupHeading(refusal)}${names}. ${cleanupInstruction(refusal, "message")}`;
+}
+
+/** The transcript status when a stop fails. */
+function cleanupFailureMessage(refusal: CleanupRefusal): string {
+  const names = refusal.remaining.length
+    ? `Still running: ${processList(refusal.remaining, refusal, refusal.total)}. ` : "";
+  return `The coding process could not be stopped completely. ${names}${cleanupInstruction(refusal, "message")}`;
+}
+
+/** What the last End them did, in the strip's words. */
+function cleanupNotice(refusal: CleanupRefusal): string | null {
+  const last = refusal.ends.at(-1);
+  if (!last) return null;
+  const ended = attemptsWith([last], "ended");
+  const failed = attemptsWith([last], "failed");
+  const unread = unreadNote([last]);
+  if (!ended.length && !failed.length && !unread) {
+    return "End them ended nothing, because the listed processes had already exited or changed.";
+  }
+  return [ended.length ? `End them ended ${processList(ended)}.` : "",
+    failed.length ? `Vivary could not end ${processList(failed)}.` : "", unread].filter(Boolean).join(" ");
+}
+
+/** The Code composer's placeholder, which names the choices the strip offers. */
+function cleanupComposer(refusal: CleanupRefusal): string {
+  const { canEnd, canContinue } = cleanupOffers(refusal);
+  const choice = canEnd && canContinue ? "End them or Continue anyway" : canEnd ? "End them" : "Continue anyway";
+  return `${cleanupHeading(refusal)}. Choose ${choice} above before sending another message.`;
+}
+
+/**
+ * The transcript status when a refusal lifts. It marks any listed process Vivary did not trace to the run, and it says
+ * that Vivary accepts new messages again only when no other refusal is in force.
+ */
+function cleanupLiftMessage(lift: CleanupLift, refusal: CleanupRefusal, othersInForce: boolean): string {
+  const ended = attemptsWith(lift.ends, "ended");
+  // What Vivary could not read about End them comes last in every lift, before what the lift means for new messages.
+  const outcome = [unreadNote(lift.ends), othersInForce
+    ? "This run no longer keeps Vivary from accepting new messages, but another run still does."
+    : "Vivary accepts new messages again."].filter(Boolean).join(" ");
+  if (lift.how === "ended") {
+    return `You chose End them. Vivary ended ${processList(ended)} and found no coding processes left. ${outcome}`;
+  }
+  const endedNote = ended.length ? ` End them ended ${processList(ended)}.` : "";
+  if (lift.how === "rechecked") return `The leftover coding processes are gone.${endedNote} ${outcome}`;
+  if (lift.scan !== "done") {
+    return `You chose to continue. Vivary could not check whether this run's coding processes stopped.${endedNote} `
+      + outcome;
+  }
+  const which = lift.remaining.every(leftover => confirmedFromRun(refusal, leftover)) ? "these coding processes"
+    : "these processes";
+  return lift.remaining.length
+    ? `You chose to continue while ${which} were still running: ${processList(lift.remaining, refusal, lift.total)}.`
+      + `${endedNote} ${outcome}`
+    : `You chose to continue while a coding process from this run was still running.${endedNote} ${outcome}`;
+}
+
+function cleanupView(refusal: CleanupRefusal, runs: readonly CodeAgentRunRecord[], ownerEmail: string,
+  orgId?: string): VivaryCodeCleanupView {
+  const run = runs.find(candidate => candidate.id === refusal.runId && isOwnedIdentity(candidate, ownerEmail, orgId));
+  const shown = {
+    version: cleanupVersion(refusal),
+    remaining: refusal.remaining.map(leftover => ({ pid: leftover.pid, name: leftover.name,
+      confirmed: confirmedFromRun(refusal, leftover) })),
+    unlisted: refusal.total - refusal.remaining.length,
+    notice: cleanupNotice(refusal),
+    run: run ? { id: run.id, title: run.title, projectId: metadataString(run, "projectId") } : null,
+  };
+  // The check right after the failed stop decides what is left, so nothing is offered until it ends.
+  if (stopStillChecking(refusal)) {
+    return { ...shown, heading: STOP_CHECK_HEADING, instruction: "The choices appear here when the check ends.",
+      canEnd: false, canContinue: false, checking: true,
+      composer: `${STOP_CHECK_HEADING}. Wait for the check to end before sending another message.` };
+  }
+  return { ...shown, heading: cleanupHeading(refusal), instruction: cleanupInstruction(refusal, "strip"),
+    ...cleanupOffers(refusal), composer: cleanupComposer(refusal), checking: hostState.cleanupCheck !== null };
 }
 
 async function stopActiveRunsForShutdown(): Promise<void> {
@@ -261,23 +805,63 @@ export async function getVivaryCodeHostState(
   orgId?: string,
 ): Promise<VivaryCodeHostState> {
   await ensureVivaryCodeHostInitialized();
+  return readVivaryCodeHostState(ownerEmail, orgId);
+}
+
+function readVivaryCodeHostState(ownerEmail: string, orgId?: string): VivaryCodeHostState {
   const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
-  const owned = runs.filter(run => isOwnedIdentity(run, ownerEmail, orgId));
+  const owned = runs.filter(run => isListedRun(run) && isOwnedIdentity(run, ownerEmail, orgId));
   const active = owned.find(run => activeRuns.has(run.id));
-  const pending = owned.find(run => run.phase === "launch-approval" && pendingLaunchFromRun(run));
-  const recent = owned.find(run => !activeRuns.has(run.id) && !isPendingVivaryLaunch(run));
+  const pending = active ? activeRuns.get(active.id)?.requests.values().next().value?.request : undefined;
+  const recent = owned.find(run => !activeRuns.has(run.id));
+  const expired = recent ? recordedApprovals(recent).find(approval => approval.expiredAt) : undefined;
   return {
     activeRun: active ? { id: active.id, title: active.title, projectId: metadataString(active, "projectId") } : null,
-    pendingApproval: pending ? toPendingApproval(pending) : null,
+    // The card shows a redacted copy. The stored request stays as Codex sent it, so the answer matches it.
+    pendingApproval: pending && active ? { ...redactCredentialsInValue(pending), runId: active.id, title: active.title, projectId: metadataString(active, "projectId"), workspaceLabel: activeRuns.get(active.id)!.workspace.label } : null,
     recentRun: recent ? {
       id: recent.id,
       title: recent.title,
       status: recent.status,
       phase: recent.phase,
       projectId: metadataString(recent, "projectId"),
+      expiredApproval: expired ? { method: expired.method, summary: expired.summary, reason: APPROVAL_EXPIRED_REASON } : null,
     } : null,
-    busy: activeRuns.size > 0 || runs.some(isPendingVivaryLaunch),
+    busy: activeRuns.size > 0,
+    // Every user of the host sees the refusal, because it refuses them all.
+    cleanup: hostState.cleanup ? cleanupView(hostState.cleanup, runs, ownerEmail, orgId) : null,
   };
+}
+
+export function linkedCodeDraftRuns(ownerEmail: string, orgId: string, scope: VivaryCodeReadScope | undefined,
+  draftThreadIds: readonly string[]): Map<string, Pick<VivaryCodeRunSummary, "id" | "title" | "updatedAt" | "engineLabel">> {
+  const wanted = new Set(draftThreadIds);
+  const linked = new Map<string, Pick<VivaryCodeRunSummary, "id" | "title" | "updatedAt" | "engineLabel">>();
+  if (wanted.size === 0) return linked;
+  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID);
+  for (const run of runs) {
+    if (!isListedRun(run)) continue;
+    if (scope ? !isOwnedRun(run, ownerEmail, orgId, scope)
+      : !isOwnedIdentity(run, ownerEmail, orgId) || metadataString(run, "projectId") !== null) continue;
+    const draftThreadId = runDraftThreadId(run);
+    if (!draftThreadId || !wanted.has(draftThreadId) || linked.has(draftThreadId)) continue;
+    linked.set(draftThreadId, { id: run.id, title: run.title, updatedAt: run.updatedAt,
+      engineLabel: engineLabelFromRun(run) });
+    if (linked.size === wanted.size) break;
+  }
+  return linked;
+}
+
+export function hasOwnedVivaryCodeSubmit(
+  ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope | undefined,
+  draftThreadId: string, submitId: string,
+): boolean {
+  const runs = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(run => isListedRun(run) && (
+    scope ? isOwnedRun(run, ownerEmail, orgId, scope)
+      : isOwnedIdentity(run, ownerEmail, orgId) && metadataString(run, "projectId") === null));
+  return runs.some(run => listCodeAgentTranscriptEvents(run.id).some(event =>
+    event.kind === "user" && event.metadata?.draftThreadId === draftThreadId
+      && event.metadata?.draftSubmitId === submitId));
 }
 
 export async function getVivaryCodeState(
@@ -285,30 +869,70 @@ export async function getVivaryCodeState(
   runId?: string,
   selectedWorkspace?: VivaryCodeReadScope,
   orgId?: string,
+  modelDiscoveryRoot?: string,
+  anchor?: { eventId: string; eventOffset: number },
 ): Promise<VivaryCodeState> {
   const workspace = selectedWorkspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
-  const runs = ownedRuns(ownerEmail, orgId, workspace);
-  const selected = runId
+  let runs = ownedRuns(ownerEmail, orgId, workspace);
+  let selected = runId
     ? requireOwnedRun(runId, ownerEmail, orgId, workspace)
     : runs[0] ?? null;
 
   const engines = await Promise.all(VIVARY_CODE_ENGINES.map(async engine => {
     const runtime = await getVivaryRuntimeStatus(engine);
-    return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex",
-      models: engine === "claude-cli" ? [...VIVARY_CODE_MODELS] : ["default"],
-      configured: runtime.status === "ready", runtime };
+    const discoveryRoot = "root" in workspace ? workspace.root : modelDiscoveryRoot;
+    const modelCatalog = engine === "codex-cli" && runtime.status === "ready" && discoveryRoot
+      ? await getCodexModels(discoveryRoot) : null;
+    const models = engine === "claude-cli" ? [...VIVARY_CODE_MODELS]
+      : modelCatalog?.status === "ready" ? modelCatalog.models.map(model => model.id) : [];
+    return { engine, label: engine === "claude-cli" ? "Claude Code" : "Codex", models, modelCatalog,
+      claudeModels: engine === "claude-cli" ? claudeCodeModelChoices(runtime.version) : null,
+      configured: runtime.status === "ready" && (engine !== "codex-cli" || modelCatalog?.status === "ready"), runtime };
   }));
-  const selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
-  const runtime = await getVivaryRuntimeStatus(selectedEngine);
+
+  const permissionMode = await getCodePermissionMode(ownerEmail, orgId);
+  let selectedEngine: VivaryCodeEngine;
+  let runtime: VivaryRuntimeStatus;
+  do {
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    selectedEngine = selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE;
+    // Discovery may outlast the runtime-status cache. Probe again before taking the final snapshot.
+    runtime = await getVivaryRuntimeStatus(selectedEngine);
+    runs = ownedRuns(ownerEmail, orgId, workspace);
+    selected = runId ? requireOwnedRun(runId, ownerEmail, orgId, workspace) : runs[0] ?? null;
+    // A newer default conversation can select another engine while its predecessor's probe awaits.
+  } while ((selected ? engineFromRun(selected) : VIVARY_CODE_DEFAULT_ENGINE) !== selectedEngine);
+  // No awaits separate run status, transcript and host activity in the returned snapshot.
+  const host = readVivaryCodeHostState(ownerEmail, orgId);
+  const selectedRuntime = engines.find(engine => engine.engine === selectedEngine);
+  if (!selectedRuntime) fail("Choose an available coding runtime.", {
+    errorCode: "vivary_code_runtime_unavailable", statusCode: 503,
+  });
+  if (selected && !selectedRuntime.models.includes(modelFromRun(selected))) {
+    selectedRuntime.models.push(modelFromRun(selected));
+  }
+  selectedRuntime.runtime = runtime;
+  if (selectedEngine === "claude-cli") selectedRuntime.claudeModels = claudeCodeModelChoices(runtime.version);
+  selectedRuntime.configured = runtime.status === "ready"
+    && (selectedEngine !== "codex-cli" || selectedRuntime.modelCatalog?.status === "ready");
+
+  // A search link opens a retained page after the same ownership check as the default transcript.
+  // The stable ID checks the byte hint against edits or deletion; a stale link never opens a different event.
+  const anchored = selected && anchor ? await readCodeTranscriptWindow(selected.id, anchor.eventOffset, MAX_TRANSCRIPT_EVENTS) : null;
+  if (anchor && (!runId || anchored?.anchor?.id !== anchor.eventId)) {
+    fail("This matching event is no longer available. Search again.", { statusCode: 404 });
+  }
 
   return {
-    ...await getVivaryCodeHostState(ownerEmail, orgId),
+    ...host,
     projectId: workspace.projectId ?? null,
     workspaceLabel: workspace.label,
     defaultEngine: VIVARY_CODE_DEFAULT_ENGINE,
     engines,
     runtime,
+    permissionMode,
     engineLabel: selected ? engineLabelFromRun(selected) : "Claude Code",
     models: VIVARY_CODE_MODELS,
     defaultModel: VIVARY_CODE_DEFAULT_MODEL,
@@ -316,7 +940,7 @@ export async function getVivaryCodeState(
     run: selected
       ? {
           ...toRunSummary(selected),
-          events: dedupeAdjacentAssistantEvents(
+          events: anchored ? dedupeAdjacentAssistantEvents(anchored.entries.map(entry => entry.event), anchor?.eventId) : dedupeAdjacentAssistantEvents(
             listCodeAgentTranscriptEvents(selected.id),
           ).slice(-MAX_TRANSCRIPT_EVENTS),
         }
@@ -331,22 +955,81 @@ export async function sendVivaryCodeMessage(input: {
   model?: string;
   engine?: VivaryCodeEngine;
   runId?: string;
+  draftSubmitId?: string;
+  draftThreadId?: string;
   workspace?: VivaryCodeWorkspace;
   revalidateWorkspace?: () => Promise<VivaryCodeWorkspace | undefined>;
+  /**
+   * The project's context for this message, loaded from the same workspace.
+   * It goes into the engine prompt only. The transcript keeps the raw
+   * message, so follow-up quoting never repeats an old block.
+   */
+  projectContext?: ProjectContextLoad;
+  /** Called once the send has passed its refusals and claimed the host slot, so the panel's last load is true. */
+  recordProjectContext?: (load: ProjectContextLoad) => void;
+  /** Revalidate the frozen link after runtime discovery, before claiming the host. */
+  loadLinkedContext?: () => Promise<PreparedLinkedContext | null>;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
   await ensureVivaryCodeHostInitialized();
+  // Issue #121. A send is when a refusal matters, so it waits for a check. The host-state polls never start one.
+  if (hostState.cleanup) await (hostState.cleanupCheck ?? recheckVivaryCodeCleanup()).catch(() => undefined);
   assertCodeHostAvailable();
 
   const existing = input.runId ? requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace) : null;
+  if (existing?.metadata?.linkedCreationPending || (existing?.metadata?.linkedHistoryId && !input.loadLinkedContext)) {
+    fail("The linked history could not be verified. Retry from the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
+  }
   const selectedEngine = existing ? engineFromRun(existing) : input.engine ?? VIVARY_CODE_DEFAULT_ENGINE;
   if (input.engine && input.engine !== selectedEngine) {
     fail("Start a new conversation to change coding runtimes.", { errorCode: "vivary_code_engine_changed", statusCode: 409 });
   }
-  const selectedModel = resolveVivaryCodeModel(selectedEngine, input.model ?? (existing ? modelFromRun(existing) : undefined));
+  // Refuse before any run record, transcript append, or worker launch.
+  // Ownership and pinned project checks still apply to retained conversations.
+  if (existing && input.model && input.model !== modelFromRun(existing)) {
+    fail("Start a new conversation to change its model.", { errorCode: "vivary_code_model_changed", statusCode: 409 });
+  }
+  if (input.revalidateWorkspace) {
+    const current = await input.revalidateWorkspace();
+    if (!current || !sameWorkspace(current, workspace)) {
+      fail("The selected project changed. Select it again.", { errorCode: "vivary_code_project_changed", statusCode: 409 });
+    }
+  }
   const runtime = await getVivaryRuntimeStatus(selectedEngine);
   if (runtime.status !== "ready") {
     fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
+  }
+  const catalog = selectedEngine === "codex-cli" ? await getCodexModels(workspace.root) : null;
+  if (selectedEngine === "codex-cli" && catalog?.status !== "ready") {
+    fail(catalog?.message ?? "Codex models are unavailable. Refresh Runtime settings.", { errorCode: "vivary_code_models_unavailable", statusCode: 503 });
+  }
+  const supportedModels = catalog?.status === "ready" ? catalog.models.map(model => model.id) : [];
+  const recordedModel = existing ? modelFromRun(existing) : undefined;
+  const selectedModel = resolveVivaryCodeModel(selectedEngine,
+    input.model ?? recordedModel ?? (catalog?.status === "ready" ? catalog.defaultModel : undefined),
+    recordedModel ? [...supportedModels, recordedModel] : supportedModels, recordedModel);
+  const claudeModel = selectedEngine === "claude-cli"
+    ? claudeCodeModelChoices(runtime.version).find(model => model.id === selectedModel) : undefined;
+  if (claudeModel && claudeModel.support !== "supported") {
+    fail(claudeModel.message, { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  }
+  if (!existing && selectedEngine === "codex-cli" && selectedModel === "default") {
+    fail("Choose a model reported by Codex before starting a conversation.", { errorCode: "vivary_code_model_unsupported", statusCode: 400 });
+  }
+  const permissionMode = await getCodePermissionMode(input.ownerEmail, input.orgId);
+  // The worker's fingerprints and the transcript's user event use the credentials held now.
+  await refreshHeldCredentials();
+  let linkedContext: PreparedLinkedContext | null = null;
+  if (input.loadLinkedContext) {
+    try { linkedContext = await input.loadLinkedContext(); }
+    catch { fail("The linked source history could not be verified. Open the original conversation.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    }); }
+    if (existing?.metadata?.linkedHistoryId && !linkedContext) fail("The retained history link is missing.", {
+      errorCode: "vivary_linked_history_unavailable", statusCode: 409,
+    });
   }
   if (input.revalidateWorkspace) {
     const current = await input.revalidateWorkspace();
@@ -357,34 +1040,18 @@ export async function sendVivaryCodeMessage(input: {
     }
   }
 
-  // Runtime and project checks await external state. Recheck the single host slot
-  // immediately before persisting this exact request for approval.
+  // Claim the host slot synchronously after all runtime and project checks.
   assertCodeHostAvailable();
-  const requestId = crypto.randomUUID();
-  const pendingLaunch: PendingLaunch = {
-    requestId,
-    message: input.message,
-    engine: selectedEngine,
-    model: selectedModel,
-    ownerEmail: input.ownerEmail,
-    orgId: input.orgId,
-    isFollowUp: existing !== null,
-    workspace,
-    timeoutMs: RUN_TIMEOUT_MS,
-    continuesAfterBrowserClose: true,
-  };
-  const run = existing ?? createCodeAgentRunRecord({
+  const run = existing ?? createCodeRun("queue", {
     goalId: VIVARY_CODE_GOAL_ID,
     title: titleFromMessage(input.message),
-    status: "needs-approval",
-    phase: "launch-approval",
-    needsApproval: true,
+    needsApproval: false,
     permissionMode: "auto-edit",
     cwd: workspace.root,
     metadata: {
       app: VIVARY_CODE_APP_MARKER,
       engine: selectedEngine,
-      model: selectedEngine === "claude-cli" ? selectedModel : null,
+      model: selectedModel === "default" ? null : selectedModel,
       ownerEmail: input.ownerEmail,
       orgId: input.orgId,
       workspaceRoot: workspace.root,
@@ -394,163 +1061,168 @@ export async function sendVivaryCodeMessage(input: {
         rootId: workspace.rootId,
         bindingRevision: workspace.bindingRevision,
       } : {}),
-      pendingLaunch,
+      codexPermissionMode: permissionMode,
+      ...(input.draftThreadId ? { draftThreadId: input.draftThreadId } : {}),
     },
   });
 
-  if (existing) {
-    updateCodeAgentRunRecord(run.id, {
-      status: "needs-approval",
-      phase: "launch-approval",
-      needsApproval: true,
-      progress: { label: "Approval required", completed: 0, total: 1, percent: 0 },
-      metadata: {
-        model: selectedEngine === "claude-cli" ? selectedModel : null,
-        pendingLaunch,
-      },
-    });
+  const executionMessage = buildVivaryCodeExecutionPrompt(existing, selectedEngine,
+    linkedContext?.block ? `${linkedContext.block}\n\n# Current request\n${input.message}` : input.message,
+    input.projectContext?.block);
+  appendCodeAgentTranscriptEvent({ runId: run.id, kind: "user", message: input.message,
+    metadata: { source: "vivary-workbench", permissionMode,
+      // This event is appended only after final project and host admission. It proves accepted context, not provider ingestion.
+      // An unavailable source supplies no block and no portion, so nothing claims linked context.
+      ...(linkedContext?.portion ? { linkedHistory: linkedContext.portion } : {}),
+      ...(input.draftSubmitId && input.draftThreadId ? { draftSubmitId: input.draftSubmitId,
+        draftThreadId: input.draftThreadId } : {}) } });
+  if (input.projectContext) {
+    recordProjectContextLoad(run, input.projectContext);
+    input.recordProjectContext?.(input.projectContext);
   }
-  appendCodeAgentTranscriptEvent({
-    runId: run.id,
-    kind: "status",
-    message: "Approval is required before this coding request starts.",
-    metadata: {
-      status: "needs-approval",
-      phase: "launch-approval",
-      requestId,
-      continuesAfterBrowserClose: true,
-      timeoutMs: RUN_TIMEOUT_MS,
-    },
-  });
-
+  // A new turn starts a new answer channel, so an expired request from an earlier turn leaves the record.
+  transitionCodeRun(run.id, "queue", { needsApproval: false,
+    metadata: { pendingLaunch: undefined, pendingApprovals: undefined, codexPermissionMode: permissionMode,
+      ...(input.projectContext ? { projectContextRevision: input.projectContext.revision } : {}) } });
+  startVivaryCodeRun({ runId: run.id, message: executionMessage, engine: selectedEngine, model: selectedModel,
+    ownerEmail: input.ownerEmail, orgId: input.orgId, workspace, permissionMode });
   return getVivaryCodeState(input.ownerEmail, run.id, workspace, input.orgId);
 }
 
-export async function approveVivaryCodeMessage(input: {
-  ownerEmail: string;
-  orgId?: string;
+export type VivaryCodeSessionDetails = {
   runId: string;
-  requestId: string;
-  workspace?: VivaryCodeWorkspace;
+  engineLabel: string;
+  sessionId: string | null;
+  continuity: "new-session" | "reconstructed-context" | "resume-requested" | "native-resume" | "not-recorded";
+  nextTurn: "native-resume" | "reconstructed-context";
+  log: { reference: string; status: "available" | "missing" | "unavailable"; excerpt: string; truncated: boolean };
+  providerLog: { reference: string | null; status: "available" | "missing" | "unavailable" | "unsupported" | "malformed" | "too-large";
+    excerpt: string; truncated: boolean };
+};
+
+/** Sanitize each complete Details text before either source applies its excerpt limits. */
+function sanitizeSessionDetailsText(text: string): string {
+  return redactCredentialsInValue(text)
+    // Match web URLs first so their scheme/path stay intact, including credential placeholders.
+    // Host paths consume through line end: spaces/apostrophes may be filename characters,
+    // so ambiguous trailing prose is also hidden. The next line stays intact.
+    .replace(/https?:\/\/(?:\[redacted [A-Za-z0-9_.:-]{1,64}\]|[^\s<>"'])+|(?<![A-Za-z0-9_+.-])file:[^\r\n]+|(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+|(?<![A-Za-z0-9:])\/[^\r\n]+/gi, value => /^https?:\/\//i.test(value) ? value : "[path]");
+}
+
+/** Authorize the run before Native opens its provider log; the client supplies no path. */
+export async function getVivaryCodeSessionDetails(
+  ownerEmail: string, runId: string, selectedWorkspace?: VivaryCodeReadScope, orgId?: string,
+): Promise<VivaryCodeSessionDetails> {
+  const workspace = selectedWorkspace ?? await resolveWorkspace();
+  const run = requireOwnedRun(runId, ownerEmail, orgId, workspace);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(run.id)) fail("Local Vivary code run not found.", { statusCode: 404 });
+  const sessionId = providerSessionId(run, engineFromRun(run));
+  const mode = metadataString(run, "providerSessionMode");
+  const continuity = mode === "new-session" || mode === "reconstructed-context" ? mode
+    : sessionId && (mode === "native-resume" || mode === "resume-requested") ? mode : "not-recorded";
+  const details: VivaryCodeSessionDetails = {
+    runId: run.id, engineLabel: engineLabelFromRun(run), sessionId, continuity,
+    nextTurn: sessionId ? "native-resume" : "reconstructed-context",
+    log: { reference: `native-transcript:${run.id}`, status: "unavailable", excerpt: "", truncated: false },
+    providerLog: { reference: sessionId ? `${engineFromRun(run) === "claude-cli" ? "claude-session" : "codex-thread"}:${sessionId}` : null,
+      status: "unsupported", excerpt: "", truncated: false },
+  };
+  await refreshHeldCredentials();
+  if (sessionId) {
+    const provider = engineFromRun(run) === "claude-cli"
+      ? await readClaudeCodeSessionLog(run) : await readCodexCodeSessionLog(run, codexSessionLogLifecycle);
+    // Redact each whole text before any output truncation, including a secret
+    // that crosses the excerpt boundary. Paths and opaque provider data stay private.
+    const messages = provider.messages.map(message => ({ role: message.role, text: sanitizeSessionDetailsText(message.text) }));
+    const excerpt = messages.slice(-40).map(message => `${message.role}: ${message.text.slice(0, 1_500)}`).join("\n\n");
+    details.providerLog = { reference: provider.reference, status: provider.status, excerpt: excerpt.slice(-20_000),
+      truncated: ("truncated" in provider && provider.truncated === true) || messages.length > 40
+        || messages.some(message => message.text.length > 1_500) || excerpt.length > 20_000 };
+  }
+  let file;
+  try {
+    const logPath = codeAgentRunTranscriptPath(run.id);
+    const before = await lstat(logPath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) return details;
+    file = await open(logPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = await file.stat({ bigint: true });
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink !== 1n || opened.size > BigInt(Number.MAX_SAFE_INTEGER)) return details;
+    // Read the final 64 KiB once. A partial first/last line is omitted, never parsed as another event.
+    const size = Number(opened.size);
+    const offset = Math.max(0, size - 64 * 1024);
+    const buffer = Buffer.alloc(Math.min(size, 64 * 1024));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, offset);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (offset) text = text.includes("\n") ? text.slice(text.indexOf("\n") + 1) : "";
+    const lines = text.split("\n").slice(0, -1);
+    const messages: string[] = [];
+    let truncated = offset > 0 || bytesRead < size;
+    for (const line of lines) {
+      let event;
+      try { event = JSON.parse(line); } catch { truncated = true; continue; }
+      if (!event || event.runId !== run.id || typeof event.message !== "string"
+          || !["user", "system", "note", "artifact", "status"].includes(event.kind)) continue;
+      if (event.message.length > 1_500) truncated = true;
+      messages.push(`${event.kind}: ${sanitizeSessionDetailsText(event.message).slice(0, 1_500)}`);
+    }
+    if (messages.length > 40) truncated = true;
+    const excerpt = messages.slice(-40).join("\n\n");
+    details.log = { ...details.log, status: "available", excerpt: excerpt.slice(-20_000),
+      truncated: truncated || excerpt.length > 20_000 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") details.log.status = "missing";
+  } finally { await file?.close(); }
+  return details;
+}
+
+export function providerSessionId(run: CodeAgentRunRecord, engine: VivaryCodeEngine): string | null {
+  if (metadataString(run, "engine") !== engine) return null;
+  const id = metadataString(run, engine === "claude-cli" ? "claudeSessionId" : "codexSessionId");
+  return id && (engine === "claude-cli"
+    ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    : /^[A-Za-z0-9_-]{1,128}$/.test(id)) ? id : null;
+}
+
+export async function approveVivaryCodeMessage(input: {
+  ownerEmail: string; orgId?: string; runId: string; requestId: string; workspace?: VivaryCodeWorkspace;
   revalidateWorkspace?: () => Promise<VivaryCodeWorkspace | undefined>;
+  answers?: Record<string, string[]>; content?: Record<string, unknown>;
 }): Promise<VivaryCodeState> {
   const workspace = input.workspace ?? await resolveWorkspace();
-  await ensureVivaryCodeHostInitialized();
-  const run = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
-  const pending = requirePendingLaunch(run, input.requestId, input.ownerEmail, input.orgId);
-  if (!sameWorkspace(pending.workspace, workspace)) {
-    fail("The selected project no longer matches this approval request.", {
-      errorCode: "vivary_code_approval_project_changed", statusCode: 409,
-    });
+  requireOwnedRun(input.runId, input.ownerEmail, input.orgId, workspace);
+  if (input.revalidateWorkspace && !sameWorkspace(await input.revalidateWorkspace() ?? { root: "", label: "" }, workspace)) {
+    fail("The selected project changed. Review the request again.", { statusCode: 409 });
   }
-
-  const runtime = await getVivaryRuntimeStatus(pending.engine, { refresh: true });
-  if (runtime.status !== "ready") {
-    fail(runtime.message, { errorCode: "vivary_code_runtime_unavailable", statusCode: 503 });
-  }
-  const current = input.revalidateWorkspace
-    ? await input.revalidateWorkspace()
-    : await resolveWorkspace();
-  if (!current || !sameWorkspace(current, pending.workspace)) {
-    fail("The selected project changed before this request was approved. Review it again.", {
-      errorCode: "vivary_code_approval_project_changed", statusCode: 409,
-    });
-  }
-
-  // No awaits after this point until the process-local slot is claimed. This
-  // prevents two approvals from launching the same request.
-  if (hostState.closing || activeRuns.size > 0) {
-    fail("The coding runtime is busy or shutting down. Wait for it or stop the active run.", {
-      errorCode: "vivary_code_run_active", statusCode: 409,
-    });
-  }
-  const currentRun = requireOwnedRun(input.runId, input.ownerEmail, input.orgId, pending.workspace);
-  const currentPending = requirePendingLaunch(currentRun, input.requestId, input.ownerEmail, input.orgId);
-  const otherPending = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).find(candidate =>
-    candidate.id !== currentRun.id && isPendingVivaryLaunch(candidate));
-  if (otherPending) {
-    fail("Another coding request is waiting for approval.", {
-      errorCode: "vivary_code_run_active", statusCode: 409,
-    });
-  }
-
-  const executionMessage = currentPending.isFollowUp
-    ? buildVivaryCodeFollowUpPrompt(
-        listCodeAgentTranscriptEvents(currentRun.id),
-        currentPending.message,
-      )
-    : currentPending.message;
-  appendCodeAgentTranscriptEvent({
-    runId: currentRun.id,
-    kind: "user",
-    message: currentPending.message,
-    metadata: {
-      source: "vivary-workbench",
-      requestId: currentPending.requestId,
-      approved: true,
-    },
-  });
-  updateCodeAgentRunRecord(currentRun.id, {
-    status: "queued",
-    phase: "queued",
-    needsApproval: false,
-    progress: { label: "Queued", completed: 0, total: 1, percent: 0 },
-    metadata: {
-      pendingLaunch: undefined,
-      approvedRequestId: currentPending.requestId,
-    },
-  });
-  startVivaryCodeRun({
-    runId: currentRun.id,
-    message: executionMessage,
-    engine: currentPending.engine,
-    model: currentPending.model,
-    ownerEmail: currentPending.ownerEmail,
-    orgId: currentPending.orgId,
-  });
-  return getVivaryCodeState(input.ownerEmail, currentRun.id, pending.workspace, input.orgId);
+  const active = activeRuns.get(input.runId);
+  if (!active || !sameWorkspace(workspace, active.workspace)) fail("The project connection changed. Stop this turn and send a new message.", { errorCode: "vivary_code_approval_project_changed", statusCode: 409 });
+  return resolveCodexRequest({ ...input, projectId: workspace.projectId }, { allow: true, answers: input.answers, content: input.content });
 }
 
 export async function denyVivaryCodeMessage(input: {
-  ownerEmail: string;
-  orgId?: string;
-  runId: string;
-  requestId: string;
-  projectId?: string;
+  ownerEmail: string; orgId?: string; runId: string; requestId: string; projectId?: string;
 }): Promise<VivaryCodeState> {
+  return resolveCodexRequest(input, { allow: false });
+}
+
+async function resolveCodexRequest(input: {
+  ownerEmail: string; orgId?: string; runId: string; requestId: string; projectId?: string;
+}, decision: CodexApprovalDecision): Promise<VivaryCodeState> {
   await ensureVivaryCodeHostInitialized();
-  const run = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).find(candidate =>
-    candidate.id === input.runId
-    && metadataString(candidate, "app") === VIVARY_CODE_APP_MARKER
-    && metadataString(candidate, "ownerEmail") === input.ownerEmail
-    && metadataString(candidate, "orgId") === (input.orgId ?? null)
-    && metadataString(candidate, "projectId") === (input.projectId ?? null));
-  if (!run) fail("Local Vivary code run not found.", {
-    errorCode: "vivary_code_run_not_found", statusCode: 404,
-  });
-  const pending = requirePendingLaunch(run, input.requestId, input.ownerEmail, input.orgId);
-  appendCodeAgentTranscriptEvent({
-    runId: run.id,
-    kind: "note",
-    message: "Coding request denied. No model or tools were started.",
-    metadata: {
-      status: "paused",
-      phase: "approval-denied",
-      requestId: pending.requestId,
-      denied: true,
-    },
-  });
-  updateCodeAgentRunRecord(run.id, {
-    status: "paused",
-    phase: "approval-denied",
-    needsApproval: false,
-    progress: { label: "Not started", completed: 0, total: 1, percent: 0 },
-    metadata: {
-      pendingLaunch: undefined,
-      deniedRequestId: pending.requestId,
-    },
-  });
-  return getVivaryCodeState(input.ownerEmail, run.id, pending.workspace, input.orgId);
+  const active = activeRuns.get(input.runId);
+  const pending = active?.requests.get(input.requestId);
+  if (!active || !pending || active.stopReason || active.ownerEmail !== input.ownerEmail
+      || active.orgId !== input.orgId || active.workspace.projectId !== input.projectId) {
+    fail("This request is no longer current.", { errorCode: "vivary_code_approval_stale", statusCode: 409 });
+  }
+  let response: Record<string, unknown>;
+  try { response = codexApprovalResponse(pending.request, decision); }
+  catch (error) { fail(error instanceof Error ? error.message : "Check your response.", { statusCode: 400 }); }
+  active.requests.delete(input.requestId);
+  appendCodeAgentTranscriptEvent({ runId: input.runId, kind: "status", message: decision.allow ? "Codex request allowed." : "Codex request declined.",
+    metadata: { requestId: input.requestId, method: pending.request.method } });
+  recordRequestSettled(input.runId, input.requestId, active.requests.size, true);
+  pending.resolve(response);
+  return getVivaryCodeState(input.ownerEmail, input.runId, active.workspace, input.orgId);
 }
 
 function startVivaryCodeRun(input: {
@@ -560,6 +1232,8 @@ function startVivaryCodeRun(input: {
   model: string;
   ownerEmail: string;
   orgId?: string;
+  workspace: VivaryCodeWorkspace;
+  permissionMode: CodePermissionMode;
 }): void {
   const controller = new AbortController();
   const activeRun: ActiveRun = {
@@ -568,22 +1242,15 @@ function startVivaryCodeRun(input: {
     ownerEmail: input.ownerEmail,
     orgId: input.orgId,
     stopReason: null,
-    timeout: setTimeout(() => {
-      if (activeRun.stopReason !== null) return;
-      activeRun.stopReason = "timeout";
-      recordStoppingRun(
-        input.runId,
-        "The local code run reached its 120 second limit and is stopping.",
-        "timeout",
-      );
-      controller.abort();
-    }, RUN_TIMEOUT_MS),
+    workspace: input.workspace,
+    permissionMode: input.permissionMode,
+    requests: new Map(),
   };
   activeRuns.set(input.runId, activeRun);
   activeRun.execution = executeVivaryCodeRun({
     activeRun,
     message: input.message,
-    model: input.engine === "claude-cli" ? input.model : undefined,
+    model: input.model === "default" ? undefined : input.model,
     runId: input.runId,
   });
   void activeRun.execution.catch(() => undefined);
@@ -595,6 +1262,8 @@ async function executeVivaryCodeRun(input: {
   model: string | undefined;
   runId: string;
 }): Promise<void> {
+  // Persist the cleanup target before final verification. The finally block clears it when nothing remains.
+  let stopRefusedAt = null as string | null;
   try {
     await executeVivaryCodeWorker({
       runId: input.runId,
@@ -603,33 +1272,56 @@ async function executeVivaryCodeRun(input: {
       ownerEmail: input.activeRun.ownerEmail,
       orgId: input.activeRun.orgId,
       signal: input.activeRun.controller.signal,
+      permissionMode: input.activeRun.permissionMode,
+      onRequest: request => {
+        if (!supportsCodexRequest(request)) throw new Error("Codex requested an unsupported interaction.");
+        if (input.activeRun.controller.signal.aborted) throw new Error("This run is stopping.");
+        return new Promise(resolve => {
+          input.activeRun.requests.set(request.requestId, { request, resolve });
+          const listed = (run: CodeAgentRunRecord) => ({ metadata: { pendingApprovals: [...recordedApprovals(run)
+            .filter(approval => approval.requestId !== request.requestId), { requestId: request.requestId,
+              method: request.method, summary: approvalSummary(request), requestedAt: new Date().toISOString() }] } });
+          // A refused move still lists the request, so a shutdown can expire it.
+          if (!transitionCodeRun(input.runId, "awaitApproval", run => ({ needsApproval: true, ...listed(run) })))
+            updateCodeAgentRunRecord(input.runId, listed);
+        });
+      },
+      onRequestResolved: requestId => {
+        if (!input.activeRun.requests.delete(requestId)) return;
+        // A stopping executor reports every pending request resolved in its teardown. The record keeps them, so final
+        // settlement can expire them on shutdown.
+        if (input.activeRun.controller.signal.aborted) return;
+        recordRequestSettled(input.runId, requestId, input.activeRun.requests.size,
+          getCodeAgentRunRecord(input.runId)?.phase === "action-approval");
+      },
+      onStopFailed: ({ step, target }) => {
+        stopRefusedAt = new Date().toISOString();
+        writeCleanupRefusal({ runId: input.runId, target, remaining: [], total: 0, fingerprint: null, hidden: false,
+          scan: "unavailable", step, refusedAt: stopRefusedAt, checkedAt: stopRefusedAt, ends: [] });
+      },
     });
     if (input.activeRun.stopReason !== null) {
-      const timedOut = input.activeRun.stopReason === "timeout";
-      recordPausedRun(input.runId, timedOut
-        ? "The local code run stopped after reaching its 120 second limit."
-        : "The local code run stopped.", {
-        phase: timedOut ? "timeout" : "paused",
-        reason: input.activeRun.stopReason,
-      });
+      recordStoppedRun(input.runId, input.activeRun.stopReason);
     }
   } catch (error) {
     if (error instanceof VivaryCodeWorkerCleanupError) {
-      hostState.closing = true;
-      appendCodeAgentTranscriptEvent({ runId: input.runId, kind: "status", message: error.message,
-        metadata: { status: "errored", phase: "cleanup-unverified" } });
-      updateCodeAgentRunRecord(input.runId, { status: "errored", phase: "cleanup-unverified",
-        metadata: { cleanupUnverified: true, executionError: error.message } });
+      const refusal = cleanupRefusalFromFailedStop(input.runId, error, stopRefusedAt);
+      stopRefusedAt = null;
+      // The credential redaction plugin redacts server output. Process names stay out of the log.
+      console.error(`[vivary-code-host] cleanup-unverified run=${input.runId} step=${refusal.step ?? "unknown"} `
+        + `scan=${refusal.scan} remaining=${refusal.remaining.length}`);
+      // The record is the refusal's source of truth, so it is written before the transcript. Both happen before
+      // `finally` frees the host slot, so no send starts beside the leftovers.
+      const message = cleanupFailureMessage(refusal);
+      writeCleanupRefusal(refusal, { executionError: message });
+      try {
+        appendCodeAgentTranscriptEvent({ runId: input.runId, kind: "status", message,
+          metadata: { status: "errored", phase: "cleanup-unverified" } });
+      } catch (failure) { logCleanupRecordFailure(input.runId, failure); }
       return;
     }
     if (input.activeRun.stopReason !== null) {
-      const timedOut = input.activeRun.stopReason === "timeout";
-      recordPausedRun(input.runId, timedOut
-        ? "The local code run stopped after reaching its 120 second limit."
-        : "The local code run stopped.", {
-        phase: timedOut ? "timeout" : "paused",
-        reason: input.activeRun.stopReason,
-      });
+      recordStoppedRun(input.runId, input.activeRun.stopReason);
       return;
     }
     const message = safeErrorMessage(error);
@@ -639,18 +1331,79 @@ async function executeVivaryCodeRun(input: {
       message: `The local code run failed: ${message}`,
       metadata: { status: "errored", phase: "error" },
     });
-    updateCodeAgentRunRecord(input.runId, {
-      status: "errored",
-      phase: "error",
+    transitionCodeRun(input.runId, "fail", {
       metadata: {
         executionError: message,
         executionErroredAt: new Date().toISOString(),
       },
     });
   } finally {
-    clearTimeout(input.activeRun.timeout);
+    if (stopRefusedAt !== null) clearStopRefusal(input.runId);
+    try { settleRecordedApprovals(input.runId, input.activeRun.stopReason === "shutdown"); }
+    catch (failure) { console.error(`[vivary-code-host] approval-record-failed run=${input.runId} `
+      + (failure instanceof Error ? failure.name : "unknown")); }
+    input.activeRun.requests.clear();
     activeRuns.delete(input.runId);
   }
+}
+
+/** Beta ticket 05. The record store merges metadata one key deep, so every write replaces the whole list. */
+function recordedApprovals(run: CodeAgentRunRecord | null | undefined): RecordedCodexApproval[] {
+  const listed = run?.metadata?.pendingApprovals;
+  return Array.isArray(listed) ? listed.filter((value): value is RecordedCodexApproval => !!value && typeof value === "object"
+    && typeof value.requestId === "string" && typeof value.method === "string" && typeof value.requestedAt === "string") : [];
+}
+
+/** The list without one request. An empty list is undefined, which removes the key from the record. */
+function withoutRecordedApproval(run: CodeAgentRunRecord, requestId: string): RecordedCodexApproval[] | undefined {
+  const rest = recordedApprovals(run).filter(approval => approval.requestId !== requestId);
+  return rest.length ? rest : undefined;
+}
+
+/** What the request asks to run or why, redacted and cut to one short line, for the record and the host strip. */
+function approvalSummary(request: CodexActionRequest): string | null {
+  const { command, reason } = request.params;
+  const text = typeof command === "string" ? command
+    : Array.isArray(command) ? command.filter(part => typeof part === "string").join(" ")
+      : typeof reason === "string" ? reason : "";
+  const line = String(redactCredentialsInValue(text)).replace(/\s+/g, " ").trim();
+  return line ? line.slice(0, 200) : null;
+}
+
+/**
+ * Takes an answered or withdrawn request off its run. When the run sits in Vivary's approval phase, it also moves the
+ * run on, to the next waiting request or back to running. A move the table refuses still takes the request off and
+ * sets the approval flag.
+ */
+function recordRequestSettled(runId: string, requestId: string, remaining: number, moveOn: boolean): void {
+  const unlisted = (run: CodeAgentRunRecord) => ({ ...(moveOn ? { needsApproval: remaining > 0 } : {}),
+    metadata: { pendingApprovals: withoutRecordedApproval(run, requestId) } });
+  if (moveOn && transitionCodeRun(runId, remaining ? "awaitApproval" : "resumeAfterApproval", unlisted)) return;
+  updateCodeAgentRunRecord(runId, unlisted);
+}
+
+/**
+ * A run that ends forgets what it still waits on, because Stop and failure cancel those requests. A shutdown is a
+ * restart from the owner's view, so its requests expire visibly instead.
+ */
+function settleRecordedApprovals(runId: string, shutdown: boolean): void {
+  const run = getCodeAgentRunRecord(runId);
+  if (!recordedApprovals(run).length) return;
+  if (shutdown) expireRecordedApprovals(run!);
+  else updateCodeAgentRunRecord(runId, { metadata: { pendingApprovals: undefined } });
+}
+
+/** Marks each request the run still waits on Expired and says so once in its conversation. */
+function expireRecordedApprovals(run: CodeAgentRunRecord): void {
+  const waiting = recordedApprovals(run).filter(approval => !approval.expiredAt);
+  if (!waiting.length) return;
+  const expiredAt = new Date().toISOString();
+  for (const approval of waiting) {
+    appendCodeAgentTranscriptEvent({ runId: run.id, kind: "status", message: `Codex request expired. ${APPROVAL_EXPIRED_REASON}`,
+      metadata: { requestId: approval.requestId, method: approval.method, reason: "host-restart" } });
+  }
+  updateCodeAgentRunRecord(run.id, current => ({ needsApproval: false, metadata: { pendingApprovals: recordedApprovals(current)
+    .map(approval => approval.expiredAt ? approval : { ...approval, expiredAt, reason: "host-restart" as const }) } }));
 }
 
 export async function stopVivaryCodeRun(input: {
@@ -683,7 +1436,9 @@ export async function stopVivaryCodeRun(input: {
     });
   }
 
-  if (activeRun.stopReason === null) {
+  // Issue #121. A run whose failed stop is still checking is already ending, and a Stop then would record the worker's
+  // failure as the owner's stop.
+  if (activeRun.stopReason === null && hostState.cleanup?.runId !== input.runId) {
     activeRun.stopReason = "user";
     recordStoppingRun(
       input.runId,
@@ -720,9 +1475,17 @@ export async function getVivaryCodeFiles(
   };
 }
 
+/**
+ * A linked target still being created, or left unfinished by a crash, is not an owner's conversation yet. Every
+ * owner listing (history, the host's recent run, draft runs and submit lookups) uses this one predicate.
+ */
+function isListedRun(run: CodeAgentRunRecord): boolean {
+  return !run.metadata?.linkedCreationPending;
+}
+
 function ownedRuns(ownerEmail: string, orgId: string | undefined, scope: VivaryCodeReadScope) {
   return listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).filter(
-    (run) => isOwnedRun(run, ownerEmail, orgId, scope),
+    (run) => isListedRun(run) && isOwnedRun(run, ownerEmail, orgId, scope),
   );
 }
 
@@ -771,7 +1534,7 @@ function isVivaryProjectHistoryRun(
     && metadataString(run, "bindingId") === project.bindingId;
 }
 
-function isOwnedRun(
+export function isOwnedRun(
   run: CodeAgentRunRecord,
   ownerEmail: string,
   orgId: string | undefined,
@@ -779,7 +1542,9 @@ function isOwnedRun(
 ): boolean {
   // Reconnection changes the local root epoch, not the saved conversation.
   // Approval still checks the newly staged workspace tuple with sameWorkspace.
-  const belongsToScope = "root" in scope
+  const belongsToScope = "kind" in scope
+    ? false // Unassigned history is Native-only; project-less Code runs belong to Personal workspace.
+    : "root" in scope
     ? scope.projectId && scope.bindingId
       ? run.cwd === scope.root
         && metadataString(run, "workspaceRoot") === scope.root
@@ -803,14 +1568,18 @@ function isOwnedIdentity(
 }
 
 function assertCodeHostAvailable(): void {
-  if (hostState.closing) {
-    fail("The coding host is stopping or requires process cleanup. Check the latest run before continuing.", {
-      errorCode: "vivary_code_host_closing",
-      statusCode: 503,
+  if (projectReconnectionPending()) {
+    fail("Project reconnection is in progress. Retry this coding request after it finishes.", {
+      errorCode: "vivary_code_project_reconnecting", statusCode: 409,
     });
   }
-  const pending = listCodeAgentRunRecords(VIVARY_CODE_GOAL_ID).some(isPendingVivaryLaunch);
-  if (activeRuns.size > 0 || pending) {
+  if (hostState.closing) {
+    fail("The coding host is shutting down.", { errorCode: "vivary_code_host_closing", statusCode: 503 });
+  }
+  if (hostState.cleanup) {
+    fail(cleanupRefusalMessage(hostState.cleanup), { errorCode: "vivary_code_cleanup_required", statusCode: 409 });
+  }
+  if (activeRuns.size > 0) {
     fail("A Vivary coding request is active or waiting for approval. Open it, deny it, or stop it.", {
       errorCode: "vivary_code_run_active",
       statusCode: 409,
@@ -818,96 +1587,8 @@ function assertCodeHostAvailable(): void {
   }
 }
 
-function isPendingVivaryLaunch(run: CodeAgentRunRecord): boolean {
-  return metadataString(run, "app") === VIVARY_CODE_APP_MARKER
-    && run.status === "needs-approval"
-    && run.phase === "launch-approval"
-    && pendingLaunchFromRun(run) !== null;
-}
-
-function requirePendingLaunch(
-  run: CodeAgentRunRecord,
-  requestId: string,
-  ownerEmail: string,
-  orgId?: string,
-): PendingLaunch {
-  const pending = pendingLaunchFromRun(run);
-  if (!pending || run.status !== "needs-approval" || run.phase !== "launch-approval"
-      || pending.requestId !== requestId || pending.ownerEmail !== ownerEmail
-      || (pending.orgId ?? null) !== (orgId ?? null)) {
-    fail("This approval request is no longer current.", {
-      errorCode: "vivary_code_approval_stale",
-      statusCode: 409,
-    });
-  }
-  return pending;
-}
-
-function pendingLaunchFromRun(run: Pick<CodeAgentRunRecord, "metadata">): PendingLaunch | null {
-  const value = run.metadata?.pendingLaunch;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const pending = value as Record<string, unknown>;
-  const workspaceValue = pending.workspace;
-  if (!workspaceValue || typeof workspaceValue !== "object" || Array.isArray(workspaceValue)) return null;
-  const workspace = workspaceValue as Record<string, unknown>;
-  if (typeof pending.requestId !== "string" || !pending.requestId
-      || typeof pending.message !== "string" || !pending.message
-      || (pending.engine !== "claude-cli" && pending.engine !== "codex-cli")
-      || typeof pending.model !== "string" || !pending.model
-      || typeof pending.ownerEmail !== "string" || !pending.ownerEmail
-      || typeof pending.isFollowUp !== "boolean"
-      || pending.timeoutMs !== RUN_TIMEOUT_MS
-      || pending.continuesAfterBrowserClose !== true
-      || typeof workspace.root !== "string" || !workspace.root
-      || typeof workspace.label !== "string" || !workspace.label) {
-    return null;
-  }
-  const optionalStrings = ["projectId", "bindingId", "rootId"] as const;
-  if (optionalStrings.some(key => workspace[key] !== undefined && typeof workspace[key] !== "string")) return null;
-  if (workspace.bindingRevision !== undefined
-      && (!Number.isInteger(workspace.bindingRevision) || (workspace.bindingRevision as number) < 0)) return null;
-  if (pending.orgId !== undefined && typeof pending.orgId !== "string") return null;
-  return {
-    requestId: pending.requestId,
-    message: pending.message,
-    engine: pending.engine,
-    model: pending.model,
-    ownerEmail: pending.ownerEmail,
-    orgId: pending.orgId as string | undefined,
-    isFollowUp: pending.isFollowUp,
-    workspace: {
-      root: workspace.root,
-      label: workspace.label,
-      projectId: workspace.projectId as string | undefined,
-      bindingId: workspace.bindingId as string | undefined,
-      rootId: workspace.rootId as string | undefined,
-      bindingRevision: workspace.bindingRevision as number | undefined,
-    },
-    timeoutMs: RUN_TIMEOUT_MS,
-    continuesAfterBrowserClose: true,
-  };
-}
-
-function toPendingApproval(run: CodeAgentRunRecord): VivaryCodePendingApproval {
-  const pending = pendingLaunchFromRun(run);
-  if (!pending) throw new Error("Pending Vivary approval metadata is invalid.");
-  return {
-    runId: run.id,
-    requestId: pending.requestId,
-    title: run.title,
-    message: pending.message,
-    projectId: pending.workspace.projectId ?? null,
-    workspaceLabel: pending.workspace.label,
-    engine: pending.engine,
-    engineLabel: pending.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
-    model: pending.model,
-    timeoutMs: RUN_TIMEOUT_MS,
-    continuesAfterBrowserClose: true,
-  };
-}
-
-function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
-  const fields = ["root", "projectId", "bindingId", "rootId", "bindingRevision"] as const;
+export function sameWorkspace(left: VivaryCodeWorkspace, right: VivaryCodeWorkspace): boolean {
+  const fields = ["root", "projectId", "bindingId", "rootId", "bindingRevision", "policyRevision"] as const;
   return fields.every(field => left[field] === right[field]);
 }
 
@@ -921,15 +1602,38 @@ function metadataNumber(run: Pick<CodeAgentRunRecord, "metadata">, key: string):
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
+const legacyRunDraftIds = new Map<string, { updatedAt: string; draftThreadId: string | null }>();
+
+function runDraftThreadId(run: CodeAgentRunRecord): string | null {
+  const projectId = metadataString(run, "projectId");
+  const prefix = "vivary-code:" + (projectId ? "project:" + projectId + ":" : "");
+  let candidate = metadataString(run, "draftThreadId");
+  if (!candidate) {
+    let cached = legacyRunDraftIds.get(run.id);
+    if (!cached || cached.updatedAt !== run.updatedAt) {
+      const first = listCodeAgentTranscriptEvents(run.id).find(event =>
+        event.kind === "user" && typeof event.metadata?.draftThreadId === "string");
+      cached = { updatedAt: run.updatedAt, draftThreadId: typeof first?.metadata?.draftThreadId === "string"
+        ? first.metadata.draftThreadId : null };
+      legacyRunDraftIds.set(run.id, cached);
+    }
+    candidate = cached.draftThreadId;
+  }
+  return candidate?.startsWith(prefix) && /^[A-Za-z0-9_-]{1,128}$/.test(candidate.slice(prefix.length))
+    ? candidate : null;
+}
+
 function toRunSummary(run: CodeAgentRunRecord): VivaryCodeRunSummary {
   return {
     id: run.id,
     status: activeRuns.has(run.id) && !isActiveCodeAgentRun(run) ? "running" : run.status,
+    phase: run.phase,
     title: run.title,
     updatedAt: run.updatedAt,
     engine: engineFromRun(run),
     engineLabel: engineLabelFromRun(run),
     model: modelFromRun(run),
+    draftThreadId: runDraftThreadId(run),
   };
 }
 
@@ -941,10 +1645,9 @@ function engineLabelFromRun(run: CodeAgentRunRecord): string {
 }
 
 function modelFromRun(run: CodeAgentRunRecord): string {
-  if (metadataString(run, "engine") === "codex-cli") return "default";
   return metadataString(run, "model")
     ?? (metadataString(run, "engine") === "claude-cli"
-      ? VIVARY_CODE_DEFAULT_MODEL
+      ? "sonnet"
       : "default");
 }
 
@@ -956,12 +1659,14 @@ function engineFromRun(run: CodeAgentRunRecord): VivaryCodeEngine {
   });
 }
 
-export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string): string {
+export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: string, codexModels: readonly string[] = [], retainedModel?: string): string {
   if (engine === "codex-cli") {
     if (!requested || requested === "default") return "default";
+    if (codexModels.includes(requested)) return requested;
   } else {
     if (!requested) return VIVARY_CODE_DEFAULT_MODEL;
-    if (VIVARY_CODE_MODELS.some(model => model === requested)) return requested;
+    if (VIVARY_CODE_MODELS.some(model => model === requested)
+      || CLAUDE_CODE_LEGACY_ALIASES.includes(requested) || requested === retainedModel) return requested;
   }
   fail("Choose a model supported by the selected coding runtime.", {
     errorCode: "vivary_code_model_unsupported", statusCode: 400,
@@ -971,6 +1676,44 @@ export function resolveVivaryCodeModel(engine: VivaryCodeEngine, requested?: str
 function titleFromMessage(message: string): string {
   const firstLine = message.split(/\r?\n/, 1)[0]?.trim() || "Vivary code run";
   return firstLine.length <= 72 ? firstLine : `${firstLine.slice(0, 69)}...`;
+}
+
+/**
+ * Beta ticket 27. A quit while the run waits on a Codex request is a restart from the owner's view, so the run ends
+ * Interrupted beside the request that the quit expires, as after a crash (J05). Any other stop leaves it paused.
+ */
+function recordStoppedRun(runId: string, reason: "shutdown" | "user"): void {
+  if (reason === "shutdown" && recordedApprovals(getCodeAgentRunRecord(runId)).some(approval => !approval.expiredAt)) {
+    recordInterruptedRun(runId, "The Vivary code host shut down while this run waited on a Codex request.", "interruptOnQuit");
+  } else {
+    recordPausedRun(runId, "The local code run stopped.", { phase: "paused", reason });
+  }
+}
+
+function recordInterruptedRun(runId: string, message: string, edge: "interrupt" | "interruptOnQuit" = "interrupt"): void {
+  const interrupted = transitionCodeRun(runId, edge, {
+    needsApproval: false,
+    metadata: { pendingLaunch: undefined },
+    progress: {
+      label: "Interrupted",
+      completed: 0,
+      total: 1,
+      failed: 0,
+      percent: 0,
+    },
+  });
+  // The conversation says Interrupted only when the record does.
+  if (!interrupted) return;
+  appendCodeAgentTranscriptEvent({
+    runId,
+    kind: "status",
+    message,
+    metadata: {
+      status: "paused",
+      phase: "interrupted",
+      reason: "host-restart",
+    },
+  });
 }
 
 function recordPausedRun(
@@ -984,9 +1727,7 @@ function recordPausedRun(
     message,
     metadata: { status: "paused", ...metadata },
   });
-  updateCodeAgentRunRecord(runId, {
-    status: "paused",
-    phase: typeof metadata.phase === "string" ? metadata.phase : "paused",
+  transitionCodeRun(runId, "pause", {
     progress: {
       label: "Paused",
       completed: 0,
@@ -1000,7 +1741,7 @@ function recordPausedRun(
 function recordStoppingRun(
   runId: string,
   message: string,
-  reason: "shutdown" | "timeout" | "user",
+  reason: "shutdown" | "user",
 ): void {
   appendCodeAgentTranscriptEvent({
     runId,
@@ -1008,9 +1749,7 @@ function recordStoppingRun(
     message,
     metadata: { status: "running", phase: "stopping", reason },
   });
-  updateCodeAgentRunRecord(runId, {
-    status: "running",
-    phase: "stopping",
+  transitionCodeRun(runId, "stop", {
     progress: {
       label: "Stopping",
       completed: 0,
@@ -1018,6 +1757,34 @@ function recordStoppingRun(
       percent: 0,
     },
   });
+}
+
+/**
+ * The engine prompt for one message. A new run and a saved provider session
+ * get the raw message. Legacy follow-ups without a provider ID quote the
+ * transcript. Every turn gets the full project block, so a resumed session
+ * never relies on a block its provider may have compacted away.
+ */
+export function buildVivaryCodeExecutionPrompt(
+  existing: CodeAgentRunRecord | null,
+  engine: VivaryCodeEngine,
+  message: string,
+  projectContext?: ProjectContextBlock,
+): string {
+  const resumesProviderSession = existing !== null && providerSessionId(existing, engine) !== null;
+  const prompt = existing && !resumesProviderSession
+    ? buildVivaryCodeFollowUpPrompt(listCodeAgentTranscriptEvents(existing.id), message) : message;
+  return projectContext ? `${projectContext}\n\n${prompt}` : prompt;
+}
+
+// One note per turn, which Native's transcript shows, says what loaded and
+// whether it changed since the run's previous turn.
+function recordProjectContextLoad(run: CodeAgentRunRecord, load: ProjectContextLoad): void {
+  const previous = metadataString(run, "projectContextRevision");
+  const changed = previous !== null && previous !== load.revision;
+  appendCodeAgentTranscriptEvent({ runId: run.id, kind: "note",
+    message: changed ? `${load.summary} The project context changed since the last turn.` : load.summary,
+    metadata: { source: "vivary-project-context", projectContextRevision: load.revision, changed } });
 }
 
 export function buildVivaryCodeFollowUpPrompt(
@@ -1063,17 +1830,13 @@ export function buildVivaryCodeFollowUpPrompt(
 
 function dedupeAdjacentAssistantEvents(
   events: CodeAgentTranscriptEvent[],
+  anchorId?: string,
 ): CodeAgentTranscriptEvent[] {
   const result: CodeAgentTranscriptEvent[] = [];
   for (const event of events) {
     const previous = result.at(-1);
-    if (
-      previous &&
-      isAssistantEvent(previous) &&
-      isAssistantEvent(event) &&
-      previous.message.trim() === event.message.trim()
-    ) {
-      result[result.length - 1] = event;
+    if (previous && repeatsAssistantReply(previous, event)) {
+      if (previous.id !== anchorId) result[result.length - 1] = event;
       continue;
     }
     result.push(event);
@@ -1085,7 +1848,7 @@ function isAssistantEvent(event: CodeAgentTranscriptEvent): boolean {
   return event.kind === "system" && event.metadata?.role === "assistant";
 }
 
-async function resolveWorkspace(): Promise<VivaryCodeWorkspace> {
+export async function resolveWorkspace(): Promise<VivaryCodeWorkspace> {
   // guard:allow-env-credential - Deployment-level filesystem path for the private preview.
   const configured = process.env.VIVARY_LOCAL_AGENT_WORKSPACE?.trim();
   if (!configured || !path.isAbsolute(configured)) {

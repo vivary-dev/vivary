@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +23,14 @@ const advisoryFloors = [
   { name: "undici", branch: "6.", fixed: "6.29.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685"] },
   { name: "undici", branch: "7.", fixed: "7.30.1", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
   { name: "undici", branch: "8.", fixed: "8.12.2", advisories: ["GHSA-xjj6-f33q-929c", "GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472"] },
+  // Advisories published 2026-10-23 (beta ticket 29). Express 5 and ajv reach these through their own ranges.
+  { name: "body-parser", fixed: "2.4.0", advisories: ["GHSA-27r3-jxmh-p828"] },
+  { name: "fast-uri", fixed: "3.1.9", advisories: ["GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp"] },
+  // GHSA-xcx6-jx8p-x3h5 covers msal-node 5.0.0-beta.0 up to 7.1.0, so every 5.x, 6.x and 7.x copy must be 7.1.0 or
+  // later. Bot Framework's 2.x copy is outside the range (beta ticket 29).
+  { name: "@azure/msal-node", branch: "5.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "6.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
+  { name: "@azure/msal-node", branch: "7.", fixed: "7.1.0", advisories: ["GHSA-xcx6-jx8p-x3h5"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.32.0", advisories: ["GHSA-22jm-h49p-29qw", "GHSA-6prh-2h8m-c8cw", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
   { name: "@modelcontextprotocol/client", fixed: "2.3.0", advisories: ["GHSA-6prh-2h8m-c8cw"] },
   { name: "@modelcontextprotocol/server", fixed: "2.3.0", advisories: ["GHSA-jm63-cq47-j5jp", "GHSA-46jr-4wx8-v453", "GHSA-rvq5-wwqv-78pq"] },
@@ -31,6 +40,7 @@ const advisoryFloors = [
   { name: "hono", fixed: "4.13.11", advisories: ["GHSA-5r4p-p66f-jhc7"] },
   { name: "markdown-it", fixed: "14.3.3", advisories: ["GHSA-r7fv-28h4-cvq7", "GHSA-vfgh-jcmw-g37q", "GHSA-gfr2-rv44-r23c"] },
   { name: "follow-redirects", fixed: "1.16.1", advisories: ["GHSA-q3jh-wrc6-jgq8", "GHSA-8r9p-f939-6h3c"] },
+  { name: "follow-redirects", fixed: "1.16.2", advisories: ["GHSA-mrwp-f3q8-3g9p"] },
   { name: "vite", fixed: "8.1.6", advisories: ["GHSA-698v-4r3x-3vcv", "GHSA-r825-w8mm-5pxw", "GHSA-587h-7wmj-h5pm", "GHSA-9jrq-w75r-8gcw", "GHSA-rq7h-c2jc-7f22"] },
   { name: "@vitest/mocker", fixed: "4.1.12", advisories: ["GHSA-qxg6-89mg-rqv8", "GHSA-xp26-3454-mjgp"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.31.0", advisories: ["GHSA-6qxp-vccf-f47h"] },
@@ -197,6 +207,32 @@ test("MSAL and Bot Framework retain UUID generation with the patched CJS and ESM
   }
 });
 
+// Beta ticket 29. GHSA-xcx6-jx8p-x3h5 affects msal-node 5.x and 6.x, so @azure/identity 4.13.2's copy is forced to
+// 7.1.0. Bot Framework's own 2.16.3 copy is outside the range and stays. No test can finish a real Azure sign-in, so
+// this proves identity loads 7.1.0, builds its clients and sends a client-credential request without an API error.
+test("identity runs on the patched MSAL 7.1.0 while Bot Framework keeps its own 2.16.3", async () => {
+  const coreRequire = createRequire(require.resolve("@agent-native/core"));
+  const connectorRequire = createRequire(coreRequire.resolve("botframework-connector"));
+  const identityRequire = createRequire(connectorRequire.resolve("@azure/identity"));
+  assert.match(identityRequire.resolve("@azure/msal-node"), /@azure\+msal-node@7\.1\.0/);
+  assert.match(connectorRequire.resolve("@azure/msal-node"), /@azure\+msal-node@2\.16\.3/);
+  const { ClientSecretCredential, DefaultAzureCredential, ManagedIdentityCredential } = connectorRequire("@azure/identity");
+  assert.doesNotThrow(() => new DefaultAzureCredential());
+  assert.doesNotThrow(() => new ManagedIdentityCredential());
+  // A closed loopback port. MSAL 7 builds the confidential client and fails only when it tries the network.
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise(resolve => server.close(resolve));
+  const credential = new ClientSecretCredential("00000000-0000-0000-0000-000000000000", "client", "secret",
+    { authorityHost: `https://127.0.0.1:${port}`, disableInstanceDiscovery: true, retryOptions: { maxRetries: 0 } });
+  const error = await credential.getToken("https://management.azure.com/.default").then(() => null, failure => failure);
+  assert.ok(error, "a closed port cannot issue a token");
+  assert.doesNotMatch(String(error?.stack ?? error), /is not a (function|constructor)|Cannot read properties of undefined/);
+  // MSAL itself names the failure: it tried to resolve the authority endpoints over the closed port.
+  assert.match(String(error?.message ?? error), /endpoints_resolution_error/);
+});
+
 test("Typography retains selector AST behavior with the patched parser", () => {
   const coreRequire = createRequire(require.resolve("@agent-native/core"));
   const { commonTrailingPseudos } = coreRequire("@tailwindcss/typography/src/utils.js");
@@ -246,5 +282,38 @@ test("Core's SQLite binding includes maintenance fixes and preserves transaction
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// better-auth 1.6.28, which Core 0.176.5 pins exactly, is inside GHSA-965c-763c-88jm,
+// GHSA-r4xp-prcw-77qf and GHSA-q84f-53jg-9ppm. Only the breaking 1.7 line fixes them
+// (1.7.7 and 1.7.0-rc.3), and 1.7 changes the account schema and forwarded-host
+// handling, so the upgrade needs its own Core change. Until then Vivary stays outside
+// every advisory's preconditions, and this test fails if that stops being true:
+// - GHSA-965c needs Magic Link storing plain tokens, or hashed tokens with hashed
+//   verification identifiers. Core stores hashed tokens and sets no storeIdentifier,
+//   whose default is plain.
+// - GHSA-r4xp needs the OAuth Proxy plugin. GHSA-q84f needs deviceAuthorization().
+//   Neither Core nor Workbench registers them.
+test("better-auth stays outside the preconditions of its unfixed 1.6 advisories", () => {
+  const versions = [...new Set(lockedVersions("better-auth").map(({ version }) => version))];
+  assert.ok(versions.length > 0, "better-auth is missing from the committed lockfiles");
+  if (versions.every((version) => isAtLeast(version, "1.7.7"))) return;
+  const core = readFileSync(new URL("../node_modules/@agent-native/core/dist/server/better-auth-instance.js", import.meta.url), "utf8");
+  const magicLink = /magicLink\(\{([\s\S]*?)sendMagicLink/.exec(core);
+  assert.ok(magicLink, "Core's Magic Link configuration was not found");
+  assert.match(magicLink[1], /storeToken: "hashed"/, "Magic Link must keep hashed tokens");
+  assert.doesNotMatch(core, /storeIdentifier/, "a verification storeIdentifier can make hashed Magic Link tokens collide with OAuth state");
+  for (const plugin of ["oAuthProxy", "deviceAuthorization"]) {
+    assert.doesNotMatch(core, new RegExp(plugin), `Core must not register ${plugin}`);
+  }
+  for (const folder of ["../server/", "../app/", "../shared/"]) {
+    for (const file of readdirSync(new URL(folder, import.meta.url), { recursive: true })) {
+      if (!/\.(ts|tsx|mjs|js)$/.test(file)) continue;
+      const source = readFileSync(new URL(folder + file, import.meta.url), "utf8");
+      for (const plugin of ["oAuthProxy", "deviceAuthorization"]) {
+        assert.doesNotMatch(source, new RegExp(plugin), `${folder}${file} must not register ${plugin}`);
+      }
+    }
   }
 });

@@ -36,18 +36,26 @@ where each capability belongs.
 
 Runtime work resolves stable project identity through the
 [project registry](../project-registry/index.md) and follows the
-[packet execution policy](../../sources/program-execution.md). That policy governs
-how work is claimed and verified; it is not the native runtime behavior contract.
+[program execution reference](../../sources/program-execution.md). Root engineering
+policy and the live issue govern how work is claimed and verified. These references
+do not replace the runtime behavior contract.
 
 ## Current integration and remaining gaps
 
 The canonical Workbench has a working Native Code path in
 `packages/workbench/server/local-code-agent.ts` and the Code execution host/worker.
-It reuses Native Code run/transcript records. The tested Windows candidate completed
-a real approved Claude Code file turn, follow-up, Stop, restart, and cleanup. The Code
-composer exposes read-only runtime identity and deliberately omits Native's provider
-picker. Codex readiness discovery is implemented, but user selection and packaged
-Codex execution are not accepted.
+It reuses Native Code run/transcript records. New conversations select Claude Code
+or Codex without entering Native provider setup. Codex discovers subscription models
+and configured connections, executes through app-server, and resumes its own native
+session. Native action requests use exact request binding and per-turn permissions.
+Normal, Read only, and YOLO apply when a turn starts. There is no fixed turn deadline
+or per-message launch gate. Progress and actual native subagent activity retain
+separate presentation from final answers.
+
+The recorded Windows candidates verified subscription file work, a configured tool,
+real child output, modes, approvals, long work, Stop, and restart. Follow
+[implemented Codex behavior](../../../specification/harness-adapters.md#implemented-codex-behavior)
+and the [acceptance register](../../../desktop-acceptance-status.md) for boundaries.
 
 Project-bound Native storage and deterministic-provider journeys are implemented.
 They do not establish access to a real Native provider, real-provider Native turns,

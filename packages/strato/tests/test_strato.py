@@ -268,6 +268,32 @@ def test_governed_facade_fails_closed_on_invalid_identity_and_policy_fields(patc
     assert result["schema"] == strato.REFUSAL_SCHEMA
 
 
+NATIVE_AGENT = {"kind": "agent", "id": "agent_" + "0123456789abcdef" * 4}
+HUMAN_OWNER = {"kind": "human", "id": "human:owner"}
+
+
+def test_governed_facade_admits_a_native_agent_contributor_as_it_admits_a_human_owner():
+    agent = strato.decide_governed(request(actor=NATIVE_AGENT, authority_class="contributor"))
+    human = strato.decide_governed(request(actor=HUMAN_OWNER, authority_class="owner"))
+
+    assert agent["schema"] == strato.DECISION_SCHEMA
+    assert agent["decision"] == LOOP_DECISION["ACT"]
+    assert agent["actor"] == NATIVE_AGENT
+    assert agent["authority_class"] == "contributor"
+    identity = {"actor", "authority_class"}
+    assert {key: value for key, value in agent.items() if key not in identity} == {
+        key: value for key, value in human.items() if key not in identity
+    }
+
+
+def test_governed_facade_refuses_a_native_agent_owner():
+    result = strato.decide_governed(request(actor=NATIVE_AGENT, authority_class="owner"))
+
+    assert result["schema"] == strato.REFUSAL_SCHEMA
+    assert result["decision"] == LOOP_DECISION["BLOCKED"]
+    assert result["reason_codes"] == ["workers_cannot_own"]
+
+
 def test_status_text_cannot_satisfy_a_human_gate():
     governed = request()
     governed["status"] = "approved by human"

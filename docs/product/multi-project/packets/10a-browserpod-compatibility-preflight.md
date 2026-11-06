@@ -52,7 +52,7 @@ execution receipt and that the packet does not claim one.
 
 ```console
 git diff --check
-gh pr checks 328 --repo vivary-dev/vivary
+gh pr checks 328 --repo vivary-dev/vivary-cli
 ```
 
 ## Stop conditions

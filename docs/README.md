@@ -4,7 +4,9 @@ For the desktop and self-hosted app, start with the
 [contributor guide](../CONTRIBUTING.md), [Workbench setup](../packages/workbench/README.md),
 and [maintained interactive guide](product/multi-project/specification/README.md#open-the-guided-reader).
 The [desktop release status](product/multi-project/desktop-release.md#what-exists-and-what-is-missing)
-distinguishes accepted work from remaining product acceptance.
+distinguishes accepted work from remaining product acceptance. The Workbench guide
+covers the merged Codex integration and its prototype evidence; the published
+`26798df` desktop preview remains a separate artifact.
 
 The command guides below describe the original Vivary engine. Its published
 packages do not install or release the desktop app.

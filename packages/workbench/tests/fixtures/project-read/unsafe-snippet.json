@@ -1,0 +1,7 @@
+{
+  "find": {
+    "exitCode": 0,
+    "stdout": "{\n  \"schema\": \"vivary.find-result/v0\",\n  \"query\": \"users endpoint\",\n  \"k\": 5,\n  \"budget\": 1200,\n  \"estimated_tokens\": 65,\n  \"filters\": {\n    \"type\": [],\n    \"path\": [],\n    \"edge\": []\n  },\n  \"results\": [\n    {\n      \"id\": \"users\",\n      \"type\": null,\n      \"path\": \"docs/users.md\",\n      \"reason\": \"title/id match\",\n      \"snippet\": \"# Users The users endpoint lists every account in pages of fifty.\",\n      \"edges\": []\n    },\n    {\n      \"id\": \"api\",\n      \"type\": null,\n      \"path\": \"docs/api.md\",\n      \"reason\": \"body match\",\n      \"snippet\": null,\n      \"edges\": []\n    }\n  ],\n  \"complete\": true,\n  \"workspace_fingerprint\": \"sha256:531c650b7512f081df5c62d731c88ef9be291c8353d1973cd90be0453d04bcb1\",\n  \"omissions\": []\n}\n",
+    "stderr": ""
+  }
+}

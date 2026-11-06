@@ -4,17 +4,13 @@
 bounded public context producers. It is not part of the baseline install, does not
 change the graph, and does not add MCP dependencies to `vivary-core`.
 
-The dependency and schema pin below describes this unpublished security source
-candidate. Published `vivary-mcp` 0.1.3 still contains the older SDK dependency;
-retaining the source component identity does not update that existing artifact or
-claim that an ordinary public-index install receives this fix.
-
 Read-only is the adapter's authority ceiling, not a claim that Vivary cannot maintain
 its workspace. Vivary Core and its CLI workflow can create governed records when an
 operation has evidence binding and explicit human approval; MCP never grants that
 approval or silently escalates into a write tool.
 
-`vivary-mcp` 0.1.3 is published on PyPI. It stays optional and off by default. No
+`vivary-mcp` 0.1.3 is published on PyPI and pins `mcp==2.0.0`. Source 0.1.4,
+staged and unpublished, pins `mcp==2.2.0`. It stays optional and off by default. No
 Vivary install starts it for you.
 
 ## Contract
@@ -186,9 +182,13 @@ Doctor reads installed distribution metadata and entry-point declarations only. 
 does not import the adapter, start a process, connect to a server, or use the network.
 
 The capability is `not-installed` by default. Compatibility requires the active
-interpreter to see the `vivary-mcp` entry point and exact declared `mcp==2.2.0`
-dependency. Doctor reports a different SDK version as incompatible rather than
-accepting it speculatively.
+interpreter to see the `vivary-mcp` entry point and an SDK matching the installed
+adapter's single exact `mcp==` dependency declaration. Published adapter 0.1.3
+declares `mcp==2.0.0`; staged adapter 0.1.4 declares `mcp==2.2.0`. Both report
+`installed` and `sdk_compatible: true` with their matching SDK. A different SDK or
+a missing, malformed, or unpinned declaration is incompatible. Missing SDK artifacts
+and failed probes retain their existing status and reason codes. This reports the
+installed contract, not a recommendation to keep an older SDK.
 
 ## Verification
 

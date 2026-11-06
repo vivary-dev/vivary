@@ -1,8 +1,8 @@
 # SPEC: Bellamente AgentLTM beside tropo
 
 **Status:** normative predecessor contract for future implementation. It is
-intentionally ahead of [#190](https://github.com/vivary-dev/vivary/pull/190):
-[#217](https://github.com/vivary-dev/vivary/issues/217) makes this specification
+intentionally ahead of [#190](https://github.com/vivary-dev/vivary-cli/pull/190):
+[#217](https://github.com/vivary-dev/vivary-cli/issues/217) makes this specification
 authoritative if implementation and contract differ.
 
 ## 1. Scope and decision
@@ -182,7 +182,7 @@ must never invent a node ID.
 ### 6.2 Required distinct results
 
 The provider result and firewall decision must preserve these conditions as distinct,
-observable outcomes required by [#205](https://github.com/vivary-dev/vivary/issues/205):
+observable outcomes required by [#205](https://github.com/vivary-dev/vivary-cli/issues/205):
 
 | Condition | Required core decision and result | Truth and mutation rule |
 |---|---|---|
@@ -234,9 +234,9 @@ Future implementation work is governed by this specification and by:
 
 - [ADR-0001 — three-seam boundary](ADR-0001-bellamente-agent-ltm-beside-tropo.md)
 - [Bellamente context — canonical vocabulary](CONTEXT.md)
-- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
-- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
-- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)
+- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary-cli/issues/205)
+- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary-cli/issues/207)
+- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary-cli/issues/217)
 - [Vivary architecture / `vivary-core`](../ARCHITECTURE.md)
 - [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
 - [Public command contract](../COMMANDS.md)

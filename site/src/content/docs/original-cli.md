@@ -1,7 +1,7 @@
 ---
 title: "Original Vivary CLI"
 description: "Package release history, verified versions, setup commands, and workspace contracts for the original Vivary command-line tools."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/ORIGINAL-CLI.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/ORIGINAL-CLI.md"
 ---
 
 This reference preserves the original command tools, package release history,
@@ -25,7 +25,7 @@ The coordinated release train named **Vivary Governed Context** is **published a
 verified**. A train is a release label, not a suite version: packages retain
 independent semvers. The only numeric lockstep is the same scaffolder distributed as
 `create-vivary` on PyPI and `@vivary/create` on npm. This policy resolves
-[#149](https://github.com/vivary-dev/vivary/issues/149); its lifecycle lives in the
+[#149](https://github.com/vivary-dev/vivary-cli/issues/149); its lifecycle lives in the
 [release workflow](/release-workflow/#train-and-version-lifecycle).
 
 The table below preserves the package installation checks from **2026-08-15**.
@@ -75,6 +75,18 @@ The creator requires Tropo 0.5.5, and the meta-package requires the matching
 creator and Tropo versions. Build the local wheel set to exercise this composition.
 Registry installation does not provide these source-only repairs.
 
+Development source also stages optional **vivary-mcp 0.1.4**, unpublished, with
+the exact SDK pin `mcp==2.2.0`. The staged **create-vivary 0.4.4** includes Doctor's
+matching check against the installed adapter's declared exact SDK pin. It recognizes
+both published vivary-mcp 0.1.3 with `mcp==2.0.0` and staged 0.1.4 with
+`mcp==2.2.0`, and reports mismatched or invalid declarations as incompatible.
+This changes no registry artifact or desktop release status.
+
+Registry metadata rechecked on **2026-10-18** still reports vivary-mcp 0.1.3,
+create-vivary 0.4.3 on PyPI, and @vivary/create 0.4.2 on npm. vivary-mcp 0.1.4 and
+both creator 0.4.4 artifacts are absent. These are availability checks, not new
+installation verification; the dated registry tables remain unchanged.
+
 [CHANGELOG.md](/changelog/) records the train and the exact smokes that verified it,
 without rewriting earlier independent-version history.
 [Migration status](/migration-status/) owns maturity classifications.
@@ -121,6 +133,47 @@ Current command surface:
   `vivary-memory-cognee` package
 - `vivary-mcp --workspace ALIAS PATH` from the optional `vivary-mcp` package,
   which stays off by default
+
+`vivary doctor --root PATH --public` prints `vivary.doctor-result/v0` with `ok`,
+`errors`, and `warnings`, and names no path the user authored. Plain Doctor reads every
+note its config does not exclude and names notes and module folders that Git may ignore.
+The public path skips the note walk, leaving notes to `vivary check --public`, and counts
+module folder problems without naming them. It exits 1 when Doctor reports errors and
+never refuses a folder.
+
+`vivary find QUERY --root PATH --public` and `vivary check --root PATH --public` read
+through Tropo's privacy-filtered facade instead of the plain Tropo commands. They leave
+out files that Git ignores, sensitive file names, and the private paths of a thin
+Vivary workspace, and they need no `tropo.toml`. Neither command writes under the root,
+and both always print JSON. The flag is part of the unpublished vivary 0.2.1 source.
+
+`find` prints `vivary.find-result/v0` and `check` prints `vivary.check-result/v0`, and
+each counts what it left out under `omissions`. `find` accepts `--k` from 1 to 20
+(default 5) and `--budget` from 64 to 4000 (default 1200), refuses a query that starts
+with `-`, and exits 0. `check` exits 1 when it reports errors. When the facade refuses the
+request, both print `{"schema": "vivary.read-refusal/v0", "reason": "<reason>"}` and
+exit 2. A usage error also exits 2, so read stdout to tell them apart.
+
+A root that is neither a Git worktree nor a thin Vivary workspace gets
+`privacy_policy_unavailable`. So does a Git worktree on a host where `git` is not on
+`PATH`. `find` also returns `path_refused` for a question that contains a file or URL
+path, credential-like text, a control character, or the root path, and a snippet the
+facade cannot show safely is `null`. `vivary find --help` still prints Tropo's help,
+and `vivary find --public --help` prints this path's options. No public path writes a
+run receipt or accepts `--receipt`.
+
+`vivary review --root PATH --public` and `vivary impact ID --root PATH --public`
+build their graph only from the notes in Tropo's privacy-filtered snapshot, so
+a private note never reaches a rule. Review runs the Structure or Editorial pack
+(`--pack`, default `structure`). Context budget reads routing files from disk
+and has no public form. Review prints `vivary.review-result/v0`, whose findings
+carry a rule code, the note's id, type, and path, and no message. A
+broken-edge finding adds its link field and leaves out the target, so a link
+to a private note reads like a link to a missing id. Impact prints
+`vivary.impact-result/v0` with each dependent's distance and linking field. A
+private, missing, or unknown target gets `target_unavailable`. Both exit 0 on
+success and print the read refusal with exit 2 otherwise. Ozone's declared
+Tropo floor does not require the Tropo that adds `public_graph`.
 
 For local debugging and bug reports, the core CLIs accept `--receipt PATH` or
 `VIVARY_RECEIPT_LOG=PATH` to append a dependency-free JSONL run receipt. Receipts stay
@@ -192,6 +245,11 @@ For workspaces that explicitly choose Cognee semantic memory, the optional
 hits that map back to known Vivary node ids. It is not part of the default install and
 provider writes require explicit approval. `tropo query --mode semantic --json` uses
 that same optional provider bridge after the workspace has been configured and indexed.
+Authored project facts are separate from that provider state. In a thin workspace,
+Tropo types each Markdown file in `.vivary/knowledge/`, or in a folder the `memory`
+role names, as a built-in `vivary_fact` note that requires `source` and `confirmed`.
+`vivary-cognee forget` deletes only the provider state under `.vivary/memory/`. The
+[Tropo specification](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/SPEC.md) owns the type rule.
 The `vivary_core.recall` API is a separate provider-neutral firewall. It
 classifies normalized candidates and projects caller-persisted recall transitions.
 Create and supersede require a proposal-bound human approval. Core adds no provider,

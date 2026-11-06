@@ -153,6 +153,39 @@ def test_python_updates_preserve_minimum_floor_policy():
     assert "increase-if-necessary" in message
 
 
+
+def _ci_contract():
+    checker = GUARD.with_name("check_ci_workflow.py")
+    spec = importlib.util.spec_from_file_location("automation_runtime_contract", checker)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_owned_automation_admits_runner_before_first_checkout():
+    bootstrap = _ci_contract().runner_bootstrap_step()
+    for name in ("track", "steward"):
+        text = REAL_FILES[name].read_text(encoding="utf-8")
+        assert text.split("    steps:\n", 1)[1].startswith(bootstrap), name
+
+
+def test_owned_automation_rejects_missing_skipped_changed_or_late_bootstrap():
+    bootstrap = _ci_contract().runner_bootstrap_step()
+    for name in ("track", "steward"):
+        text = REAL_FILES[name].read_text(encoding="utf-8")
+        for unsafe in (
+            text.replace(bootstrap, "", 1),
+            text.replace("        shell: python -I -B {0}\n",
+                         "        if: false\n        shell: python -I -B {0}\n", 1),
+            text.replace("        shell: python -I -B {0}\n",
+                         "        continue-on-error: true\n        shell: python -I -B {0}\n", 1),
+            text.replace("    steps:\n", "    steps:\n      - run: echo before admission\n", 1),
+            text.replace("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                         "actions/checkout@v7.0.1", 1),
+        ):
+            message = _run({name: unsafe})
+            assert message, name + " must retain unconditional first-step runtime admission"
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     passed = 0

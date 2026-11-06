@@ -1,7 +1,7 @@
 ---
 title: "Active context"
 description: "Optional CocoIndex-code sidecar guidance for semantic code retrieval."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/ACTIVE-CONTEXT.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/ACTIVE-CONTEXT.md"
 ---
 
 Active context is an optional sidecar pattern for Vivary-backed codebases. The simple

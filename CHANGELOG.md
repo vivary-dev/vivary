@@ -11,7 +11,126 @@ the `v0.1.0` line.
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
 
-## [Unreleased: Private Windows desktop integration] - 2026-09-16
+## [Desktop 0.1.0-beta.1] - 2026-10-31
+
+The first Windows beta of the Vivary desktop app, published as the GitHub prerelease
+`v0.1.0-beta.1`. It publishes no PyPI or npm package.
+
+- A per-user installer, `Vivary-Setup-0.1.0-beta.1.exe`, and a portable ZIP, both
+  unsigned Windows x64 builds from one GitHub Actions run, with `SHA256SUMS`,
+  `BUILD-INFO.json`, a runtime inventory, and a licenses ZIP.
+- Bundles Electron 45.2.1 with Node 24.22.1, and Python 3.12.15.
+- Includes PRs #312 to #316: the approval-wait label and word statuses for
+  automations, the CI runner guard, the follow-redirects 1.16.2 update with the
+  better-auth precondition test, the Electron 45.2.1 qualification, and the Windows
+  build fixes.
+
+### Verification
+
+The build of `32c2a26` passed an installed-Windows pass on 2026-10-31. See the
+[acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md#installed-windows-beta-october-31). Not yet accepted
+on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing.
+
+## [Unreleased: Optional MCP SDK update] - 2026-10-18
+
+Staged source versions are optional **vivary-mcp 0.1.4** and the already-staged
+**create-vivary / @vivary/create 0.4.4**. Publishing remains a manual human gate.
+These changes publish no registry artifact.
+
+- `vivary-mcp` 0.1.4 pins the official SDK to `mcp==2.2.0` and records
+  `mcp-types==2.2.0` as its schema revision. Local stdio transport, four read-only
+  tools, and unproven external conformance retain their existing contract.
+- `create-vivary` 0.4.4 checks the installed adapter's single exact SDK pin in its
+  passive Doctor report. Published adapter 0.1.3 with SDK 2.0.0 and staged adapter
+  0.1.4 with SDK 2.2.0 report consistent compatibility. A mismatched SDK or invalid
+  pin is incompatible; missing dependencies and failed probes keep their status
+  and reason codes. Doctor imports and starts no adapter.
+
+### Verification
+
+On Python 3.12.14, the focused source checks passed:
+
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k mcp -v`: 7 tests passed.
+- `timeout 60s python -m unittest discover -s packages/create-vivary/tests -p test_create_vivary.py -k GovernedContextCapabilityTests -v`: 56 tests passed.
+
+These exercise the real metadata probe with installed-distribution fixtures.
+Official-SDK wire tests and Linux/Windows offline wheel smokes remain required
+on the final integrated candidate. No registry installation or desktop acceptance
+is established by these source checks. The [CLI release status](https://github.com/vivary-dev/vivary/blob/dev/docs/ORIGINAL-CLI.md#release-status)
+preserves the dated published-version tables and the latest availability check.
+
+## [Windows prerelease 9884670] - 2026-09-22
+
+[Download and installation](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-22).
+The Windows portable prerelease includes [PR #78](https://github.com/vivary-dev/Vivary-New/pull/78).
+**Open preview in a new tab** now opens HTTP and HTTPS destinations in the default
+browser after native confirmation. The dialog shows the complete URL and defaults
+to Cancel. The tag pins source `98846706227432e26f519d1b546889261eb08ff1`.
+
+The packaged Windows checks verified Cancel without a new tab, confirmed browser
+opening at the exact path/query/fragment, and interaction with the opened page.
+Project switching cleared the old preview. Graceful shutdown stopped observed
+processes and released the listener. Restart retained the selected project and
+an empty Preview. Earlier setup and model-runtime checks retain their own dates.
+
+This unsigned prerelease keeps its development metadata and incomplete desktop
+acceptance. See the [installation guide](docs/desktop-preview.md) for preservation
+steps and known limits. No CLI registry artifacts or PyPI/npm versions change.
+
+## [Windows prerelease 250aaa0] - 2026-09-21
+
+[Download and installation](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-21). This public Windows x64 portable preview
+contains the latest merged application tree through PR #76. It adds Codex
+conversations, project-file search with line navigation, project health findings,
+folder-picker recovery, exact read-only setup previews, project-owned page previews,
+adoption process exclusion, bounded journals, and approved adoption-request replay.
+
+The tag pins `250aaa0567104541127767501de3bcf0d1c3549b`. The application tree matches merged `dev` at `b4f5229`.
+The same ZIP passed the September 21 bounded Windows/browser visual review.
+The owner approved its screenshots and authorized this prerelease.
+
+Seven candidate GitHub CI jobs passed. The separate Entire recorded-approval gate
+failed. The binary is unsigned, retains development metadata, and does not establish
+full native, clean-profile, upgrade/removal, or desktop/web acceptance.
+See [installation and limitations](docs/desktop-preview.md).
+
+No PyPI/npm package versions or registry artifacts change. The older entries below
+retain their original checkpoint context. Their then-unreleased features are included
+in this desktop archive where stated above.
+
+## [Unreleased: Codex integration] - 2026-09-16
+
+[PR #59](https://github.com/vivary-dev/Vivary-New/pull/59) merged into `dev` as
+`b81dcd7`. New Code conversations can select Codex using its existing subscription,
+account-effective model catalog, native tools, skills, and configured connections.
+Saved conversations retain their runtime, model, and native session identity.
+
+Send starts the turn immediately. Native action requests offer Allow once or
+Decline while Stop remains available. Runtime settings provide Normal, Read only,
+and YOLO; there is no Plan mode or fixed two-minute turn deadline. Public progress
+and actual child-agent activity appear separately from the main answer. The final
+corrections retain tool-call identity and pending approvals across refresh.
+
+### Verification and distribution
+
+The bounded Windows prototype passed file work, native session continuity, an MCP
+call, a real subagent result, a command longer than two minutes, native decisions,
+permission modes, and active-command cancellation across the recorded candidates.
+The final `98515c9` EXE retested the affected approval, output, restart, and shutdown
+journeys. It did not repeat every earlier journey. The hosted preview serves the
+same application source with its authentication boundary preserved.
+
+All 62 applicable Linux workflow steps passed on Zo at `f21328b`; the merge tree
+matches that tested head. GitHub Actions could not start because of billing.
+Windows governed-platform and orientation workflow jobs remain unrun. Detailed
+artifact and platform boundaries are in the [desktop acceptance register](https://github.com/vivary-dev/Vivary-New/blob/dev/docs/product/multi-project/desktop-acceptance-status.md).
+
+No package version, registry artifact, or published download changed. The private
+`26798df` archive below remains the downloadable preview. OpenCode, broader
+cross-runtime linking and concurrency, real Native-provider turns, automations,
+and the remaining desktop release journey are still open.
+
+## [Unreleased: Private Windows preview 26798df] - 2026-09-16
 
 No package version or registry artifact changes. The private Windows candidate now
 includes reliable portable extraction, clear filename and project-name validation,
@@ -568,7 +687,7 @@ contract.
 - The CI workflow contract now also pins the site dependency audit to
   `npm audit --audit-level=high` in `site/` after `npm ci`. Its regression suite
   rejects a missing, misplaced, or reordered gate, and the release workflow owns the
-  live-advisory response for [#232](https://github.com/vivary-dev/vivary/issues/232).
+  live-advisory response for [#232](https://github.com/vivary-dev/vivary-cli/issues/232).
 - Doctor repair now recognizes a thin workspace even when its repairable `.gitignore`
   policy is incomplete, and atomic repair preserves the existing file mode.
 - The strict orientation proof builds local Core and Tropo wheels before exercising
@@ -750,7 +869,7 @@ unchanged.
   Green candidate: after reviewed transitive lock updates to `js-yaml` 4.3.1 and
   `nanoid` 3.3.18, the same audit reported zero vulnerabilities. The site behavior
   suite, production build, and link check then passed. [CI gate](https://github.com/vivary-dev/vivary/blob/dev/.github/workflows/ci.yml);
-  [decision record](https://github.com/vivary-dev/vivary/issues/232);
+  [decision record](https://github.com/vivary-dev/vivary-cli/issues/232);
   verified: 2026-08-09.
 
 ### Changed
@@ -762,8 +881,8 @@ unchanged.
 
 ## [Unreleased: optional read-only MCP adapter (#206)] — 2026-08-02
 
-Implements [#206](https://github.com/vivary-dev/vivary/issues/206) under the tool
-contract resolved by [#225](https://github.com/vivary-dev/vivary/issues/225). The
+Implements [#206](https://github.com/vivary-dev/vivary-cli/issues/206) under the tool
+contract resolved by [#225](https://github.com/vivary-dev/vivary-cli/issues/225). The
 [release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
 owns current published and development version truth.
 
@@ -806,7 +925,7 @@ versions stay unchanged.
   results if policy changed.
 - On Python 3.11 for Windows, public candidate snapshots now read NTFS change time
   through an attribute-only handle instead of treating creation time as change time.
-  The [same-size rewrite regression](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py#L2569-L2592)
+  The [same-size rewrite regression](https://github.com/vivary-dev/vivary-cli/blob/dev/packages/tropo/tests/test_tropo.py#L2569-L2592)
   restores the documented race refusal on the package's lowest supported Python.
 - Public enumeration applies cancellation and hard entry ceilings while consuming
   directory iterators, before sorting. Cancellation propagates through ranking,
@@ -868,7 +987,7 @@ gates.
 
 ## [Unreleased: governed installation and capability truth (#207)] (2026-08-02)
 
-Implements [#207](https://github.com/vivary-dev/vivary/issues/207). The
+Implements [#207](https://github.com/vivary-dev/vivary-cli/issues/207). The
 [release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
 owns current published and development version truth.
 
@@ -960,7 +1079,7 @@ Publishing remains a manual human gate.
 
 ## [Unreleased: governed recall firewall (#205)] — 2026-08-02
 
-Implements [#205](https://github.com/vivary-dev/vivary/issues/205). The
+Implements [#205](https://github.com/vivary-dev/vivary-cli/issues/205). The
 [release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status)
 owns current published and development version truth.
 
@@ -1014,7 +1133,7 @@ Publishing remains a manual human gate.
 
 ## [Unreleased: governed Exo control (#204)] — 2026-08-01
 
-Implements [#204](https://github.com/vivary-dev/vivary/issues/204). The
+Implements [#204](https://github.com/vivary-dev/vivary-cli/issues/204). The
 [release-status section](https://github.com/vivary-dev/vivary/blob/dev/README.md#release-status) owns current published and
 development version truth.
 
@@ -1249,7 +1368,7 @@ remains part of the final coordinated release train and requires a separate huma
   `vivary-tropo` advances from 0.4.1 to 0.5.0 because the governed flags are a
   user-visible minor feature and keeps `vivary-core>=0.2.1`, the first source version
   exposing the adapter API. This is the first real package-to-core dependency promised
-  by [#207](https://github.com/vivary-dev/vivary/issues/207).
+  by [#207](https://github.com/vivary-dev/vivary-cli/issues/207).
 - The `vivary` meta-package advances from 0.1.0 to 0.1.3: 0.1.1 raised its floor to
   `vivary-tropo>=0.5.0`, 0.1.2 raised its floor to `vivary-ozone>=0.3.0`, and 0.1.3
   raises that floor to `vivary-ozone>=0.3.1`. A fresh suite install cannot resolve the
@@ -1510,7 +1629,7 @@ install, version, publication, or deployment action occurs.
 
 ### Changed
 
-- Reconciled [#160](https://github.com/vivary-dev/vivary/pull/160) as the normative
+- Reconciled [#160](https://github.com/vivary-dev/vivary-cli/pull/160) as the normative
   predecessor to #190: Bellamente remains an independent, workspace-local AgentLTM;
   Tropo-backed semantic adapters and the provider-neutral `vivary-core` candidate
   firewall are separate seams; learned memory never silently becomes authored truth.
@@ -1541,7 +1660,7 @@ install, version, publication, or deployment action occurs.
   matches privacy paths case-insensitively on Windows, with snapshot-level regression
   coverage. Public docs distinguish that behavior from published 0.1.0. The remaining
   escaped/complex Git-ignore limitation stays explicit and tracked by
-  [#236](https://github.com/vivary-dev/vivary/issues/236).
+  [#236](https://github.com/vivary-dev/vivary-cli/issues/236).
 - **create-vivary Doctor compatibility (#199)** — Doctor now distinguishes the strict
   15-path v0.1 common contract from legacy flat and v0.2+ indexed module layouts.
   Valid published workspaces receive preset-preserving, read-only upgrade
@@ -1618,7 +1737,7 @@ coordinated release train is complete and separately approved.
 ### Changed
 
 - **Recorded the selected dependency direction for `vivary-core`** — the first
-  acceptance criterion of [#207](https://github.com/vivary-dev/vivary/issues/207). Role
+  acceptance criterion of [#207](https://github.com/vivary-dev/vivary-cli/issues/207). Role
   packages depend on core; the `vivary` meta package receives it transitively and does
   not declare it, so there is one owner per edge and no version-pinning fight. The edge
   is added to a role's `pyproject.toml` in the *same commit* that makes that role first
@@ -2640,8 +2759,8 @@ lockstep. The other three packages are unchanged at 0.1.0.
   `npm create @vivary@latest <name>` and `uvx create-vivary@0.2.3 <name>` scaffold a workspace
   without an explicit `init` (previously failed with argparse `invalid choice: …`).
   Explicit `init` / `doctor` and leading flags (`-h` / `--help`) pass through unchanged.
-  npm launcher: [#33](https://github.com/vivary-dev/vivary/pull/33). Python CLI parity:
-  [#35](https://github.com/vivary-dev/vivary/pull/35).
+  npm launcher: [#33](https://github.com/vivary-dev/vivary-cli/pull/33). Python CLI parity:
+  [#35](https://github.com/vivary-dev/vivary-cli/pull/35).
 
 ## [0.1.0] — 2026-06-14
 

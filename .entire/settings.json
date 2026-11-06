@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "strategy_options": {
+    "checkpoint_remote": {
+      "provider": "github",
+      "repo": "vivary-dev/vivary-workbench-handoff"
+    },
+    "push_sessions": false
+  },
+  "checkpoints": {
+    "primary": {
+      "type": "git-refs"
+    }
+  }
+}

@@ -24,4 +24,4 @@ Do not open public issues for vulnerabilities. See [SECURITY.md](SECURITY.md).
 
 - npm: <https://www.npmjs.com/package/@vivary/create>
 - PyPI: <https://pypi.org/project/create-vivary/>
-- Releases: <https://github.com/vivary-dev/vivary/releases>
+- Releases: <https://github.com/vivary-dev/vivary-cli/releases>

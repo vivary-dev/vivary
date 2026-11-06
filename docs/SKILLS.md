@@ -15,6 +15,17 @@ or, in Claude Code, with `/skill-name`.
 
 ---
 
+## maintain-hldd: contributor design maintenance
+
+This repository skill keeps the [high-level design](ARCHITECTURE.md) aligned
+with Vivary's source, boundaries, and acceptance evidence. Codex discovers
+`.agents/skills/maintain-hldd/SKILL.md`. Claude's discovery entry routes to that
+same procedure. It is a contributor skill, not a workspace template.
+
+Read it when changing implementation, configuration, architecture, or durable
+product documentation. The [contributor guide](https://github.com/vivary-dev/Vivary-New/blob/dev/CONTRIBUTING.md#high-level-design-gate)
+explains hook installation and CI enforcement.
+
 ## strato — the agent-OS skill
 
 **What it's for:** bootstrap, maintain, and continuously improve a workspace so each

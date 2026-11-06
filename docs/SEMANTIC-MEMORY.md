@@ -1,10 +1,10 @@
 # Vivary optional semantic memory
 
 Status: architecture note plus first optional Cognee adapter slice
-[#84](https://github.com/vivary-dev/vivary/issues/84), now split into
-[#85](https://github.com/vivary-dev/vivary/issues/85) for presets/capabilities and
-[#86](https://github.com/vivary-dev/vivary/issues/86) for semantic memory/Cognee,
-aligned with [#20](https://github.com/vivary-dev/vivary/issues/20). The setup slice
+[#84](https://github.com/vivary-dev/vivary-cli/issues/84), now split into
+[#85](https://github.com/vivary-dev/vivary-cli/issues/85) for presets/capabilities and
+[#86](https://github.com/vivary-dev/vivary-cli/issues/86) for semantic memory/Cognee,
+aligned with [#20](https://github.com/vivary-dev/vivary-cli/issues/20). The setup slice
 landed `knowledge-work`, `create-vivary capabilities`, `--memory local|cognee`,
 `.vivary/memory.toml`, and Doctor memory reporting. Thin init writes provider config
 only after an explicit selection; it does not seed policy records. The first
@@ -106,7 +106,7 @@ approved source files. If provider state and source files disagree, source files
   [AgentLTM documentation](https://github.com/vivary-dev/vivary/tree/dev/docs/bellamente-memory).
 - **CandidateRecallProvider** — a provider-neutral, optional source of normalized
   prior assertions for the `vivary-core` candidate-recall firewall in
-  [#205](https://github.com/vivary-dev/vivary/issues/205). It is not a provider wire
+  [#205](https://github.com/vivary-dev/vivary-cli/issues/205). It is not a provider wire
   protocol or a synonym for SemanticMemoryAdapter. Before Core evaluates a
   Bellamente candidate, normalization must supply typed evidence and either a known
   stable Tropo node ID or the explicit unresolved-identity marker defined by the

@@ -1,7 +1,7 @@
 ---
 title: "Get bounded Vivary context"
 description: "Retrieve privacy-filtered project evidence with Vivary or save a complete governed Task Capsule for approved work."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/guides/get-context.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/get-context.md"
 ---
 
 Use this guide before an agent changes the workspace.

@@ -1,6 +1,26 @@
-# better-sqlite3 13 ships N-API prebuilds without lifecycle installers.
+# better-sqlite3 13 ships N-API prebuilds and has no install script.
+# No lifecycle build permission is needed for supported desktop/server targets.
 patchedDependencies:
   '@agent-native/core@0.176.5': patches/@agent-native__core@0.176.5.patch
+  '@agent-native/toolkit@0.19.3': patches/@agent-native__toolkit@0.19.3.patch
+# Only Native imports the official session reader. No second CLI executor ships.
+packageExtensions:
+  '@agent-native/core@0.176.5':
+    peerDependencies:
+      '@anthropic-ai/claude-agent-sdk': 0.3.288
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-linux-x64'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl'
+  - '@anthropic-ai/claude-agent-sdk-darwin-x64'
+  - '@anthropic-ai/claude-agent-sdk-darwin-arm64'
+  - '@anthropic-ai/claude-agent-sdk-win32-x64'
+  - '@anthropic-ai/claude-agent-sdk-win32-arm64'
+# officeparser 7.8.0 pins pdfjs-dist 6.1.200 exactly. 6.2.108 fixes GHSA-hq66-cqwq-w95j.
+# Drop this override when an officeparser release accepts a fixed PDF.js.
+# Core's optional xlsx ^0.18.5 cannot reach the fixed 0.20.3, which SheetJS publishes only on
+# its CDN. Route it to the same archive Workbench depends on, so both share one module.
 overrides:
   # Includes SQLite 3.53.4 maintenance fixes. Windows staging must use its N-API prebuild.
   better-sqlite3: 13.0.3
@@ -11,9 +31,13 @@ overrides:
   '@modelcontextprotocol/client': 2.3.0
   '@modelcontextprotocol/core': 2.3.0
   '@modelcontextprotocol/server': 2.3.0
+  # GHSA-xcx6-jx8p-x3h5 affects msal-node >= 5.0.0-beta.0, < 7.1.0. Only identity's 5.6.0 copy is in that
+  # range. Bot Framework's direct 2.16.3 copy is not, so it stays. No @azure/identity release accepts 7.x yet
+  # (4.14.0 needs ^6.0.0). Remove this line once one does.
+  '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
   # Fixed parser and HTTP dependencies retain their existing major release lines.
   markdown-it: 14.3.3
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   hono: 4.13.11
   '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
   # These consumers use v4 UUID generation; 11.1.1 retains both CJS and ESM exports.

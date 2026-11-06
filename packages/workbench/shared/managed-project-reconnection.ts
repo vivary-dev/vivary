@@ -16,7 +16,9 @@ const previewFields = {
   code: z.literal("reconnect-preview"),
   projectId: identifier,
   displayName: z.string().min(1).max(200),
-  folderName: z.string().min(1).max(128),
+  folderName: z.string().min(1).max(255),
+  folderPath: z.string().min(1),
+  folderKind: z.enum(["managed", "external"]),
   operationId: identifier,
   planSha256: digest,
 };

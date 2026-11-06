@@ -1,14 +1,17 @@
 """Tests for the ozone review layer. Run: python tests/test_ozone.py (or pytest)."""
 import contextlib
+import importlib.util
 import io
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 OZONE_ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOT = OZONE_ROOT.parent / "core"
@@ -429,6 +432,200 @@ def test_review_json_shape():
         assert set(data) >= {"reviewed", "warnings", "notes", "findings"}
         for f in data["findings"]:
             assert set(f) >= {"severity", "rule", "id", "type", "path", "message"}
+
+
+def _public_vault(td, ref):
+    """`_vault` in a Git repo with an ignored `private` note and a change `c3`
+    whose verification ref is `ref`. Returns the canonical root."""
+    _vault(td, complete=True)
+    Path(td, ".gitignore").write_text("private.md\n")
+    Path(td, "private.md").write_text("# Private\n")
+    Path(td, "changes", "c3.md").write_text(
+        f"---\nverification: [{ref}]\n---\n# Change Three\n")
+    subprocess.run(["git", "init", "-q", str(td)], check=True)
+    return normalize_path(os.path.realpath(td))
+
+
+def _random_id():
+    return f"nowhere-{uuid.uuid4().hex[:12]}"
+
+
+def test_public_review_leaves_out_a_git_ignored_note_that_plain_review_names():
+    with temp_workspace() as td:
+        root = _public_vault(td, "v1")
+        _, plain = _run_json(["review", "--root", str(td), "--json"])
+        public = ozone.public_review(root, pack="structure", allowlist=[root])
+
+    assert ("orphan", "private") in {(f["rule"], f["id"]) for f in plain["findings"]}
+    assert "private" not in {f["id"] for f in public["findings"]}
+    assert "private.md" not in json.dumps(public)
+    assert set(public) == {"schema", "pack", "reviewed", "warnings", "notes",
+                           "complete", "findings", "omissions"}
+    assert public["schema"] == "vivary.review-result/v0"
+    assert public["pack"] == "structure"
+    assert public["reviewed"] == plain["reviewed"] - 1
+    assert public["complete"] is True
+    assert public["omissions"] == [
+        {"kind": "privacy_excluded", "reason": "git_ignored", "count": 1}]
+    assert public["findings"]
+    assert all(set(f) == {"severity", "rule", "id", "type", "path"}
+               for f in public["findings"])
+    assert (public["warnings"], public["notes"]) == (
+        sum(f["severity"] == "warn" for f in public["findings"]),
+        sum(f["severity"] != "warn" for f in public["findings"]))
+
+
+def test_public_review_gives_a_ref_to_a_private_note_and_to_a_missing_id_equal_findings():
+    with temp_workspace() as private_td, temp_workspace() as missing_td:
+        private_root = _public_vault(private_td, "private")
+        missing_root = _public_vault(missing_td, _random_id())
+        _, plain = _run_json(["review", "--root", str(private_td), "--json"])
+        results = {
+            pack: [ozone.public_review(root, pack=pack, allowlist=[root])
+                   for root in (private_root, missing_root)]
+            for pack in ("structure", "editorial")
+        }
+
+    assert not any(f["rule"] == "broken-edge" for f in plain["findings"])
+    for pack, (to_private, to_missing) in results.items():
+        assert to_private == to_missing, pack
+    broken = [f for f in results["structure"][0]["findings"] if f["rule"] == "broken-edge"]
+    assert broken == [{"severity": "warn", "rule": "broken-edge", "id": "c3",
+                       "type": "change", "path": "changes/c3.md", "field": "verification"}]
+
+
+def test_public_impact_lists_dependents_through_public_edges():
+    with temp_workspace() as td:
+        root = _public_vault(td, "v1")
+        result = ozone.public_impact(root, "v1", allowlist=[root])
+
+    assert result == {
+        "schema": "vivary.impact-result/v0",
+        "target": "v1",
+        "impacted": 2,
+        "complete": True,
+        "nodes": [
+            {"id": "c1", "distance": 1, "via": "verification", "type": "change",
+             "path": "changes/c1.md"},
+            {"id": "c3", "distance": 1, "via": "verification", "type": "change",
+             "path": "changes/c3.md"},
+        ],
+        "omissions": [{"kind": "privacy_excluded", "reason": "git_ignored", "count": 1}],
+    }
+
+
+def test_public_impact_refuses_a_private_id_and_a_random_id_identically():
+    with temp_workspace() as td:
+        root = _public_vault(td, "private")
+        _, plain = _run_json(["impact", "private", "--root", str(td), "--json"])
+        refusals = []
+        for node_id in ("private", _random_id()):
+            try:
+                ozone.public_impact(root, node_id, allowlist=[root])
+            except ozone.TargetUnavailableError as error:
+                refusals.append((type(error), error.reason, error.args))
+            else:
+                assert False, f"expected {node_id} to be refused"
+
+    assert [n["id"] for n in plain["nodes"]] == ["c3"]
+    assert refusals == [
+        (ozone.TargetUnavailableError, "target_unavailable", ("target_unavailable",))] * 2
+    assert issubclass(ozone.TargetUnavailableError, ozone.TropoFacadeError)
+
+
+def _ozone_copy(td, tropo_source=None):
+    """Load a copy of ozone.py whose sibling tropo.py holds `tropo_source`, or is absent."""
+    Path(td, "ozone").mkdir()
+    shutil.copy(OZONE_ROOT / "ozone.py", Path(td, "ozone", "ozone.py"))
+    if tropo_source is not None:
+        Path(td, "tropo").mkdir()
+        Path(td, "tropo", "tropo.py").write_text(tropo_source, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("ozone_copy", Path(td, "ozone", "ozone.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_importing_ozone_does_not_run_tropo():
+    with tempfile.TemporaryDirectory() as td:
+        copy = _ozone_copy(td, 'raise RuntimeError("tropo ran")\n')
+        try:
+            copy.TropoFacadeError
+        except RuntimeError as error:
+            assert str(error) == "tropo ran"
+        else:
+            assert False, "expected reading a facade error to load Tropo"
+
+
+def test_plain_review_and_public_reads_share_one_tropo_engine():
+    with temp_workspace() as td:
+        _vault(td)
+        engine = ozone.build_workspace_graph(str(td))[0]
+
+    assert engine is ozone._load_tropo()[0]
+    assert ozone.TropoFacadeError is engine.TropoFacadeError
+    assert ozone.TargetUnavailableError is engine.TargetUnavailableError
+
+
+def test_review_without_tropo_exits_with_the_install_hint():
+    with tempfile.TemporaryDirectory() as td, mock.patch.dict(sys.modules, {"tropo": None}):
+        copy = _ozone_copy(td)
+        _vault(td)
+        messages = []
+        for argv in (["review", "--root", td], ["impact", "v1", "--root", td]):
+            try:
+                copy.main(argv)
+            except SystemExit as error:
+                messages.append(error.code)
+            else:
+                assert False, f"expected {argv[0]} to stop without Tropo"
+
+    for message in messages:
+        assert message.startswith("ozone: tropo engine not found (install vivary-tropo): ")
+
+
+def test_public_review_refuses_a_pack_that_reads_disk_and_a_folder_without_privacy_policy():
+    # The repo's sandboxes folder sits inside a Git worktree, so the plain
+    # folder lives in the system temp directory instead.
+    with tempfile.TemporaryDirectory() as td:
+        _vault(td)
+        root = normalize_path(os.path.realpath(td))
+        try:
+            ozone.public_review(root, pack="context-budget", allowlist=[root])
+        except ValueError:
+            pass
+        else:
+            assert False, "expected context-budget to be refused"
+        for read in (
+            lambda: ozone.public_review(root, pack="structure", allowlist=[root]),
+            lambda: ozone.public_impact(root, "v1", allowlist=[root]),
+        ):
+            try:
+                read()
+            except ozone.TropoFacadeError as error:
+                assert error.reason == "privacy_policy_unavailable"
+            else:
+                assert False, "expected a plain folder to be refused"
+
+
+def test_public_review_rules_list_every_rule_the_public_packs_emit():
+    paths = {
+        "c1": "changes/c1.md", "c2": "changes/c2.md", "m1": "modules/m1.md",
+        "loose": "loose.md", "d1": "drafts/d1.md", "r1": "reviews/r1.md",
+        "e1": "edits/e1.md",
+    }
+    nodes = {nid: {"id": nid, "type": None, "path": path} for nid, path in paths.items()}
+    edges = [{"from": "c1", "field": "verification", "to": "gone", "broken": True}]
+
+    emitted = {
+        finding["rule"]
+        for pack in ozone.PUBLIC_REVIEW_PACKS.values()
+        for finding in pack(nodes, edges)
+    }
+
+    assert set(ozone.PUBLIC_REVIEW_PACKS) == {"structure", "editorial"}
+    assert len(set(ozone.PUBLIC_REVIEW_RULES)) == len(ozone.PUBLIC_REVIEW_RULES)
+    assert emitted == set(ozone.PUBLIC_REVIEW_RULES)
 
 
 NOW = "2026-07-28T12:00:00+00:00"

@@ -16,10 +16,11 @@ Program context: [design](../design.md), [migration](../migration.md), [release]
 
 Own new-project service and UI. Reuse `scaffold_thin_workspace`, dry-run output, Doctor, and Tropo checks from `packages/create-vivary`. Read `design.md`, `evidence.md`, and the creation guide. Do not duplicate init rules. Follow the [workspace setup direction](../design.md#workspace-setup-direction-2026-09-13) when extending the built-in guidance. The four existing preset names remain a compatibility input, not mandatory GUI categories.
 
-The retained Workbench creation adapter is incomplete: its plan function and
-Core stdio import are missing from the integrated source. Expose a reviewable
-file-content plan from the original thin renderer, then share it between CLI
-and GUI apply paths. See the [source gap](../research/original-vivary-product-map.md#recommended-next-integration).
+The shared creator adapter now supplies exact file-content plans and reviewed
+apply. The [creation receipt](../receipts/07d-gui-workspace-creation.md) covers
+GUI creation and registration. The [pattern receipt](../receipts/07c-builtin-patterns-reconfiguration.md)
+covers installed guidance composition and changes that preserve authored work.
+Parent dependencies still gate this outcome's completion.
 
 ## Done condition
 
@@ -50,3 +51,6 @@ they do not prove the behavior above.
 - 2026-09-13: Packet 07a accepted as compatible role metadata. Packet 07b is
   ready for the shared GUI/CLI plan and apply implementation. The outcome remains
   open until real workspace creation passes its user-facing exit checks.
+
+- 2026-09-23: Packets 07b, 07d, and 07c have accepted user journeys. Parent
+  dependencies remain open, so this outcome is not marked complete.

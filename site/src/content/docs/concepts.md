@@ -1,7 +1,7 @@
 ---
 title: "What is Vivary?"
 description: "Plain-language intro: what Vivary is, the core ideas, and a glossary. Start here."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/CONCEPTS.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/CONCEPTS.md"
 ---
 
 New to AI agents? Start here. This page explains, in plain language, what Vivary is,

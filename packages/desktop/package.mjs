@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream, rmSync } from "node:fs";
+import { access, chmod, copyFile, cp, glob, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { assertCurrentNode, assertElectronPublication, validateStagedNode } from "../workbench/bin/runtime-security.mjs";
+import { releaseIdentity } from "./release-version.mjs";
 
 
 const decodeGitPaths = value => value.toString("utf8").split("\0").filter(Boolean);
@@ -61,15 +64,107 @@ export async function snapshotTrackedRepository(repository, destination) {
   });
 }
 
+/**
+ * Runs the Workbench build in a clean checkout and returns the commit it built.
+ * The checkout must have no tracked or untracked changes before or after the
+ * build, and HEAD must not move, so the output came from that commit's files.
+ * Ignored files, such as installed dependencies, are outside this check.
+ */
+export function buildWorkbenchFromSource(repository, build) {
+  const git = args => execFileSync("git", args, { cwd: repository, encoding: "utf8" });
+  const state = () => ({
+    commit: git(["rev-parse", "HEAD"]).trim(),
+    changes: git(["status", "--porcelain=v1", "--untracked-files=all"]).trimEnd(),
+  });
+  const before = state();
+  if (before.changes) throw new Error(`Building Workbench from source needs a clean checkout:\n${before.changes}`);
+  build();
+  const after = state();
+  if (after.commit !== before.commit) throw new Error("HEAD moved while Workbench was building.");
+  if (after.changes) throw new Error(`The checkout changed while Workbench was building:\n${after.changes}`);
+  return before.commit;
+}
+
+/**
+ * Returns the build.json record for a packaged tree. The Workbench output
+ * counts as verified only when this package run built it from the packaged
+ * commit and the snapshot matches that commit. A prebuilt output never does.
+ */
+export function buildMetadata({ manifest, source, target, standalone, originalRuntime, workbenchCommit = null }) {
+  const { version, channel } = releaseIdentity(manifest.version);
+  return {
+    product: "Vivary", version, sourceCommit: source.sourceCommit, sourceDirty: source.sourceDirty,
+    sourceSnapshot: { kind: source.kind, trackedOverlayCount: source.trackedOverlayCount,
+      commitMatchesPackagedSource: !source.sourceDirty, untrackedFilesIncluded: false },
+    workbenchOutput: workbenchCommit === null
+      ? { kind: "prebuilt", capturedOnce: true, sourceCommitVerified: false }
+      : { kind: "built-from-source", capturedOnce: true,
+        sourceCommitVerified: workbenchCommit === source.sourceCommit && !source.sourceDirty },
+    platform: target.platform, architecture: target.arch, node: target.nodeVersion,
+    nodeAbi: target.nodeAbi, electron: manifest.devDependencies.electron,
+    runtimeSecurity: { standalone: { sha256: standalone.sha256, versions: standalone.versions,
+      platform: standalone.platform, arch: standalone.arch } },
+    buildHost: { platform: process.platform, architecture: process.arch },
+    channel,
+    originalRuntime: {
+      manifest: "../original-runtime/manifest.json",
+      python: originalRuntime.pythonVersion,
+      components: originalRuntime.components.map(({ distribution, version }) => ({ distribution, version })),
+    },
+  };
+}
+
+/**
+ * Writes package-file-manifest.json for a packaged tree: each file's path
+ * relative to the tree, with forward slashes, mapped to its lowercase SHA-256.
+ * build-installer.mjs --manifest checks a payload against this file. The tree
+ * may hold only files and folders, as the installer build requires.
+ */
+export async function writePackageFileManifest(tree, file) {
+  const manifest = {};
+  const pending = [tree];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(absolute);
+      else if (entry.isFile()) {
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(absolute)) hash.update(chunk);
+        manifest[path.relative(tree, absolute).replaceAll(path.sep, "/")] = hash.digest("hex");
+      } else {
+        throw new Error(`A package file manifest covers only files and folders: ${absolute}`);
+      }
+    }
+  }
+  const sorted = Object.fromEntries(Object.keys(manifest).sort().map(name => [name, manifest[name]]));
+  await writeFile(file, `${JSON.stringify(sorted, null, 1)}\n`, { flag: "wx" });
+  return Object.keys(sorted).length;
+}
+
 export async function packageDesktop() {
   await assertCurrentNode();
   assertElectronPublication();
-  const { values } = parseArgs({ options: { "windows-x64": { type: "boolean" } } });
+  const { values } = parseArgs({ options: {
+    "windows-x64": { type: "boolean" }, "build-workbench": { type: "boolean" },
+  } });
 
   const root = path.dirname(fileURLToPath(import.meta.url));
   const workbench = path.resolve(root, "../workbench");
   const repository = path.resolve(root, "../..");
   const stagingParent = path.join(root, ".tmp");
+  let workbenchCommit = null;
+  if (values["build-workbench"]) {
+    workbenchCommit = buildWorkbenchFromSource(repository, () => {
+      // Remove the old output only once the checkout is known clean, so nothing from an earlier build is
+      // packaged and a refused build keeps the output it had.
+      rmSync(path.join(workbench, ".output"), { recursive: true, force: true });
+      // On Windows pnpm is a .cmd launcher, which Node starts only through a shell, so the folder is quoted.
+      const windows = process.platform === "win32";
+      execFileSync(windows ? "pnpm.cmd" : "pnpm", ["--dir", windows ? `"${workbench}"` : workbench, "run", "build"],
+        { stdio: "inherit", shell: windows });
+    });
+  }
   await access(path.join(workbench, ".output/server/index.mjs"));
   await mkdir(stagingParent, { recursive: true });
   const stage = await mkdtemp(path.join(stagingParent, "package-"));
@@ -86,15 +181,22 @@ export async function packageDesktop() {
       import(pathToFileURL(path.join(sourceDesktop, "original-runtime.mjs")).href),
     ]);
     const manifest = JSON.parse(await readFile(path.join(sourceDesktop, "package.json"), "utf8"));
+    const release = releaseIdentity(manifest.version);
     const appDir = path.join(stage, "app");
     const runtimeDir = path.join(stage, "workbench");
     const nodeDir = path.join(stage, "node");
     await Promise.all([mkdir(appDir), mkdir(path.join(runtimeDir, "bin"), { recursive: true }), mkdir(nodeDir)]);
-    await copyFile(path.join(sourceDesktop, "main.mjs"), path.join(appDir, "main.mjs"));
+    for (const file of ["main.mjs", "browser-access.mjs", "discord-presence.mjs", "desktop-settings.mjs"]) {
+      await copyFile(path.join(sourceDesktop, file), path.join(appDir, file));
+    }
+    await copyFile(path.join(sourceDesktop, "package-lock.json"), path.join(appDir, "package-lock.json"));
     await writeFile(path.join(appDir, "package.json"), JSON.stringify({
       name: "vivary", productName: "Vivary", version: manifest.version,
       private: true, type: "module", main: "main.mjs",
+      dependencies: manifest.dependencies ?? {},
     }, null, 2));
+    execFileSync(process.platform === "win32" ? "npm.cmd" : "npm",
+      ["ci", "--omit=dev", "--ignore-scripts"], { cwd: appDir, stdio: "inherit", shell: process.platform === "win32" });
     await cp(path.join(workbench, ".output"), path.join(runtimeDir, ".output"), { recursive: true, dereference: true });
     for (const file of ["start.mjs", "desktop-server.mjs", "runtime-security.mjs"]) {
       await copyFile(path.join(sourceWorkbench, "bin", file), path.join(runtimeDir, "bin", file));
@@ -115,7 +217,6 @@ export async function packageDesktop() {
       await copyFile(process.execPath, path.join(nodeDir, target.nodeExecutable));
       if (target.platform !== "win32") await chmod(path.join(nodeDir, target.nodeExecutable), 0o755);
     }
-
     const standalone = await validateStagedNode(path.join(nodeDir, target.nodeExecutable), target);
 
     const nodeLicense = await fetch(
@@ -143,28 +244,21 @@ export async function packageDesktop() {
       repository: sourceRepository, sourceCommit: source.sourceCommit, sourceDirty: source.sourceDirty,
       cacheDirectory: path.join(root, ".tmp", "original-runtime"),
     });
-    await writeFile(path.join(runtimeDir, "build.json"), JSON.stringify({
-      product: "Vivary", version: manifest.version, sourceCommit: source.sourceCommit, sourceDirty: source.sourceDirty,
-      sourceSnapshot: { kind: source.kind, trackedOverlayCount: source.trackedOverlayCount,
-        commitMatchesPackagedSource: !source.sourceDirty, untrackedFilesIncluded: false },
-      workbenchOutput: { kind: "prebuilt", capturedOnce: true, sourceCommitVerified: false },
-      platform: target.platform, architecture: target.arch, node: target.nodeVersion,
-      nodeAbi: target.nodeAbi, electron: manifest.devDependencies.electron,
-      runtimeSecurity: { standalone: { sha256: standalone.sha256, versions: standalone.versions,
-        platform: standalone.platform, arch: standalone.arch } },
-      buildHost: { platform: process.platform, architecture: process.arch },
-      channel: "private-preview",
-      originalRuntime: {
-        manifest: "../original-runtime/manifest.json",
-        python: originalRuntime.pythonVersion,
-        components: originalRuntime.components.map(({ distribution, version }) => ({ distribution, version })),
-      },
-    }, null, 2));
+    await writeFile(path.join(runtimeDir, "build.json"), JSON.stringify(buildMetadata({
+      manifest, source, target, standalone, originalRuntime, workbenchCommit,
+    }), null, 2));
 
     const built = await packager({
       dir: appDir, out: output, name: "Vivary", executableName: "vivary",
       appBundleId: "com.vivary.desktop", appVersion: manifest.version,
+      // Windows file properties take four numbers. Without this, the packager
+      // would parse the beta suffix out of appVersion on its own.
+      buildVersion: release.windowsVersion,
       win32metadata: { CompanyName: "Vivary", ProductName: "Vivary", FileDescription: "Vivary local desktop" },
+      // The owner's copyright replaces Electron's default in the executable's file properties.
+      appCopyright: "Copyright (C) 2026 Jeff Kazzee",
+      // Embedded in vivary.exe, so Explorer, the taskbar and the window use the Vivary mark.
+      icon: path.join(sourceDesktop, "assets", "vivary.ico"),
       electronVersion: manifest.devDependencies.electron,
       platform: target.platform, arch: target.arch, asar: true,
       extraResource: [runtimeDir, nodeDir], overwrite: false,
@@ -174,6 +268,12 @@ export async function packageDesktop() {
         path.join(buildPath, "resources", "original-runtime"), { recursive: true, verbatimSymlinks: true })],
     });
     for (const directory of built) console.log(directory);
+    if (values["windows-x64"]) {
+      // The Windows installer build verifies its payload against this file.
+      const manifestFile = path.join(output, "package-file-manifest.json");
+      const files = await writePackageFileManifest(built[0], manifestFile);
+      console.log(`${manifestFile} (${files} files)`);
+    }
   } finally {
     if (path.dirname(stage) !== stagingParent || !path.basename(stage).startsWith("package-")) {
       throw new Error("Refusing to clean an unexpected packaging directory.");

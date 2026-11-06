@@ -1,5 +1,9 @@
 # Project creation and approved background work
 
+This is historical acceptance. The per-turn launch gate and two-minute cutoff
+were superseded by the [September 16 native permissions decision](../design.md#native-coding-permissions-and-activity-2026-09-16).
+The current implementation does not replay old pending launch requests.
+
 Issue [#35](https://github.com/vivary-dev/Vivary-New/issues/35) owns explicit background approval. The associated repair under [#15](https://github.com/vivary-dev/Vivary-New/issues/15) enables managed project creation in the hosted source runtime.
 
 ## Delivered behavior

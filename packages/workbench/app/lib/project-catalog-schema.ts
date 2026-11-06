@@ -15,7 +15,7 @@ export const catalogSchema = z.union([
       status: availability })).max(16),
     projects: z.array(z.strictObject({ projectId: identifier, displayName: label,
       bindingRevision: revision(1), status: availability,
-      managedReconnectEligible: z.boolean().default(false) })).max(128),
+      reconnectEligible: z.boolean().default(false) })).max(128),
   }),
 ]);
 

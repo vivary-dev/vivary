@@ -1,0 +1,27 @@
+{
+  "reviewStructure": {
+    "exitCode": 0,
+    "stdout": "{\n  \"schema\": \"vivary.review-result/v0\",\n  \"pack\": \"structure\",\n  \"reviewed\": 8,\n  \"warnings\": 2,\n  \"notes\": 5,\n  \"complete\": true,\n  \"findings\": [\n    {\n      \"severity\": \"warn\",\n      \"rule\": \"change-unverified\",\n      \"id\": \"cleanup\",\n      \"type\": \"change\",\n      \"path\": \"changes/cleanup.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"change-ungated\",\n      \"id\": \"cleanup\",\n      \"type\": \"change\",\n      \"path\": \"changes/cleanup.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"orphan\",\n      \"id\": \"cleanup\",\n      \"type\": \"change\",\n      \"path\": \"changes/cleanup.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"orphan\",\n      \"id\": \"launch-post\",\n      \"type\": \"draft\",\n      \"path\": \"drafts/launch-post.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"orphan\",\n      \"id\": \"loose-review\",\n      \"type\": \"review\",\n      \"path\": \"reviews/loose-review.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"change-ungated\",\n      \"id\": \"retry\",\n      \"type\": \"change\",\n      \"path\": \"changes/retry.md\"\n    },\n    {\n      \"severity\": \"warn\",\n      \"rule\": \"broken-edge\",\n      \"id\": \"retry\",\n      \"type\": \"change\",\n      \"path\": \"changes/retry.md\",\n      \"field\": \"verification\"\n    }\n  ],\n  \"omissions\": [\n    {\n      \"kind\": \"privacy_excluded\",\n      \"reason\": \"git_ignored\",\n      \"count\": 1\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "reviewEditorial": {
+    "exitCode": 0,
+    "stdout": "{\n  \"schema\": \"vivary.review-result/v0\",\n  \"pack\": \"editorial\",\n  \"reviewed\": 8,\n  \"warnings\": 2,\n  \"notes\": 2,\n  \"complete\": true,\n  \"findings\": [\n    {\n      \"severity\": \"warn\",\n      \"rule\": \"draft-unreviewed\",\n      \"id\": \"launch-post\",\n      \"type\": \"draft\",\n      \"path\": \"drafts/launch-post.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"draft-unedited\",\n      \"id\": \"launch-post\",\n      \"type\": \"draft\",\n      \"path\": \"drafts/launch-post.md\"\n    },\n    {\n      \"severity\": \"info\",\n      \"rule\": \"draft-structure-missing\",\n      \"id\": \"launch-post\",\n      \"type\": \"draft\",\n      \"path\": \"drafts/launch-post.md\"\n    },\n    {\n      \"severity\": \"warn\",\n      \"rule\": \"review-unlinked\",\n      \"id\": \"loose-review\",\n      \"type\": \"review\",\n      \"path\": \"reviews/loose-review.md\"\n    }\n  ],\n  \"omissions\": [\n    {\n      \"kind\": \"privacy_excluded\",\n      \"reason\": \"git_ignored\",\n      \"count\": 1\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "impact": {
+    "exitCode": 0,
+    "stdout": "{\n  \"schema\": \"vivary.impact-result/v0\",\n  \"target\": \"sync-tests\",\n  \"impacted\": 2,\n  \"complete\": true,\n  \"nodes\": [\n    {\n      \"id\": \"add-sync\",\n      \"distance\": 1,\n      \"via\": \"verification\",\n      \"type\": \"change\",\n      \"path\": \"changes/add-sync.md\"\n    },\n    {\n      \"id\": \"sync\",\n      \"distance\": 1,\n      \"via\": \"verification\",\n      \"type\": \"module\",\n      \"path\": \"modules/sync.md\"\n    }\n  ],\n  \"omissions\": [\n    {\n      \"kind\": \"privacy_excluded\",\n      \"reason\": \"git_ignored\",\n      \"count\": 1\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "impactPrivate": {
+    "exitCode": 2,
+    "stdout": "{\n  \"schema\": \"vivary.read-refusal/v0\",\n  \"reason\": \"target_unavailable\"\n}\n",
+    "stderr": ""
+  },
+  "impactMissing": {
+    "exitCode": 2,
+    "stdout": "{\n  \"schema\": \"vivary.read-refusal/v0\",\n  \"reason\": \"target_unavailable\"\n}\n",
+    "stderr": ""
+  }
+}

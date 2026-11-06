@@ -1,90 +1,107 @@
 # Entire for contributors
 
-Entire records supported agent sessions alongside Git checkpoints. GitHub owns
-issues and PR review. The private Entire remote holds source and session
-checkpoints. A source push alone does not capture an agent conversation.
+Keep both the source commit and its supported agent-session checkpoint. GitHub
+owns source, issues and PR review. The active Entire mirror keeps source trails.
+Future approved project checkpoints use the private
+`vivary-dev/vivary-workbench-handoff` repository. Its old source snapshot stays
+intact. The [private recording index](https://github.com/vivary-dev/vivary-workbench-handoff/tree/docs/project-recordings)
+groups Vivary and website work by source repository and PR.
 
-This setup was checked with Entire beta 0.10.6. Read the installed
-`entire agent-help` and each command's `--help` before using different versions.
-The [official setup guide](https://github.com/entireio/cli/blob/v0.10.6/README.md)
-and [privacy guide](https://github.com/entireio/cli/blob/v0.10.6/docs/security-and-privacy.md)
-explain the capture model.
+This setup was checked with Entire 0.10.6. Read the installed `entire agent-help`
+and command help before using another version. The [separate checkpoint store
+guide](https://docs.entire.io/guides/checkpoints/store-checkpoints-in-another-repo)
+explains routing. The [privacy guide](https://github.com/entireio/cli/blob/v0.10.6/docs/security-and-privacy.md)
+explains what a checkpoint can contain.
 
-## Enable a checkout
+## Destination and upload hold
 
-Install Entire using its official instructions and authenticate your contributor
-account. Confirm `origin` is private `vivary-dev/Vivary-New` and `entire` points
-to its private Entire mirror. Never put authentication tokens in tracked files.
+The committed `.entire/settings.json` gives Entire's web service the dedicated
+checkpoint destination. Keep it committed so source trails can locate external
+checkpoints. Local settings alone do not provide that web link. Source remotes
+still point to the active source repository and its existing mirror.
 
-For a fresh checkout with no checkpoint store, run:
+The dedicated `strategy_options.checkpoint_remote` overrides a named
+`checkpoint_push_remote`. Do not replace the private route with the public source
+mirror. Native checkpoints use `refs/entire/checkpoints/<shard>/<id>`, separate
+from source branch refs. Keep the supported format. The index organizes records
+by project without renaming checkpoint refs.
+
+`push_sessions:false` holds automatic uploads. Keep this hold until the existing
+shared queue has completed its separate privacy review and upload authorization.
+Approval for future project recording does not release older queued records.
+Linked worktrees share one Git directory and checkpoint push queue. Disabling
+uploads in one worktree does not isolate its records from another worktree's push.
+Do not remove queue markers or manually push checkpoint refs around the hold.
+
+## Start a fresh project session
+
+Use the assigned checkout. Preserve existing workers, branches and dirty work.
+Before starting a supported agent, run:
+
+```sh
+entire status --detailed
+entire status --json
+entire agent list
+```
+
+Confirm enabled capture, the dedicated private destination, the refs backend and
+approved hooks for the agent being used. For a fresh checkout, or at the owner's
+next fresh session in a disabled checkout, use:
 
 ```sh
 entire enable --local --agent codex --checkpoint-backend refs \
+  --checkpoint-remote github:vivary-dev/vivary-workbench-handoff \
   --skip-push-sessions --telemetry=false --absolute-git-hook-path \
   --agent-help-skill --search-skill --no-init-repo
-entire agent add claude-code --agent-help-skill --search-skill
 ```
 
-Select only agents you use. Preserve an existing checkpoint backend when enabling
-an established checkout. Do not import old session history as part of setup.
+Use `claude-code` instead of `codex` for Claude Code, or add its integration with
+`entire agent add claude-code`. Select only agents actually used. Do not import
+old history or turn capture on in the middle of an existing conversation. An
+established checkout with a different backend needs a reviewed migration first.
+Keep `.entire/settings.local.json`, logs and transcripts untracked. The shared
+routing file is the only file allowed from `.entire/` in source history.
 
-Before enabling uploads, inspect `git remote get-url --push --all entire`.
-Merge these keys into `.entire/settings.local.json`, preserving other settings:
+Codex can discover hooks in the root worktree instead of the assigned worktree.
+Read the discovered path in `entire status --json`. If hooks are missing, use
+`entire agent add codex` and check that the discovered file contains the reviewed
+Entire hooks. Preserve unrelated hooks. If status reports `trust_review_needed`,
+review the seven hooks through `/hooks` in the actual Codex client. Entire does
+not approve Codex trust. Do not bypass that review or edit approval hashes.
+Installed hooks alone do not prove they executed.
 
-```json
-{
-  "strategy_options": {
-    "checkpoint_push_remote": "entire",
-    "push_sessions": true
-  }
-}
+The installed 0.10.6 integrations include Codex and Claude Code. Cline is not in
+the installed integration list. Do not claim Cline capture without verifying a
+supported installed integration and a real session.
+
+## Verify and deliver both records
+
+After the real session starts, use `entire session current` or
+`entire session list` to confirm tracking. Keep ordinary reviewed source commits
+and push source to its configured remotes. Before claiming capture, inspect:
+
+```sh
+entire checkpoint list --json
+entire checkpoint explain <checkpoint-id> --json
 ```
 
-Keep local settings untracked. The effective `strategy_options.checkpoint_remote`
-key must be absent from both settings files. That dedicated destination overrides
-the named-remote choice. The `checkpoint_push_remote` setting selects `entire`
-for automatic checkpoint uploads. A missing named remote disables checkpoint sync.
-Do not replace this setting with a guessed CLI flag.
+Record the source repository, PR, tested source commit, execution location,
+native agent/session, checkpoint ID and trail URL in the private project index.
+Report capture and upload separately. Local capture can be verified while remote
+delivery remains held. A source-only trail or an empty checkpoint result does not
+prove conversation capture. Record unknown evidence as unknown.
 
-Linked Git worktrees share one Git directory and therefore one Entire git-refs
-checkpoint push queue. Setting `push_sessions` to `false` in one worktree is not
-an isolation boundary. A later push from another worktree can still upload the
-queued checkpoints. Keep every worktree that shares a Git directory within the
-same authorized data boundary.
+After the shared settings are accepted and an authorized real future checkpoint
+is delivered, verify that its active source trail resolves the private checkpoint.
+Do not mark that web link complete from configuration alone. Existing trails and
+checkpoints stay in their original locations. Do not relocate or fabricate them.
 
-## Check hooks before work
-
-Run `entire status --detailed` and `entire agent list` from the assigned worktree.
-Status must show enabled capture and the `entire` checkpoint destination.
-
-Codex can discover hooks in the main checkout instead of the working checkout.
-Read the discovered path in `entire status --json`. Keep the reviewed Entire hooks
-available at that path without overwriting unrelated hooks. If status reports
-`trust_review_needed`, open `/hooks` in that Codex client and review the pending
-hooks. Installed hooks are not proof that Codex has approved or executed them.
-
-The root worktree may already hold identical Codex hooks. Compare the discovered
-hooks with the reviewed ones before copying or overwriting anything. Identical
-hooks need no change and still require the trust review above.
-
-The repository includes Entire-generated agent hooks and help/search files.
-Regenerate those through Entire when needed. Keep its local settings, logs,
-metadata, and transcripts out of source commits.
-
-## Use checkpoints during delivery
-
-Start supported Codex or Claude Code sessions in the configured checkout.
-Use `entire session current` or `entire session list` to confirm tracking.
-Keep ordinary reviewed Git commits and push source to both remotes. Then inspect
-`entire checkpoint list --json` and `entire checkpoint explain <id>` to check the
-recorded work. An empty list means no checkpoint evidence exists yet.
-
-For earlier decisions, use `entire search --json --compact` with a focused query.
-Read `entire agent-help search` for the installed search syntax. Inspect a relevant
-checkpoint before loading a full transcript. Session history can contain private
-prompts and tool output. Review that content before sharing it outside the repo.
+For earlier decisions, read `entire agent-help search` and search narrowly before
+loading a transcript. Checkpoint content can include private prompts and tool
+results. Preserve the approved project scope and destination access boundary.
 
 A controller on another computer that edits Zo through MCP is not a local agent
-session. Zo hooks cannot automatically capture that controller's conversation.
-Use a supported agent running in the Zo checkout when session capture is needed.
-Record enabled configuration and observed capture separately.
+session. Zo hooks cannot capture that controller's conversation. Use a supported
+agent running in the project checkout for future capture, or a separately verified
+supported export from the actual controller. Never copy hidden session files as
+a substitute. No dummy coding session is needed to prove setup.

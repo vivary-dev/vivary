@@ -1,3 +1,5 @@
+import { BrowserAccessSettings } from "@/components/settings/BrowserAccessSettings";
+import { DiscordPresenceSettings } from "@/components/settings/DiscordPresenceSettings";
 import { useAppearancePreferences } from "@/components/layout/AppearancePreferences";
 import { AppearancePicker } from "@agent-native/core/client/ui";
 import {
@@ -8,9 +10,12 @@ import {
   type SettingsSearchEntry,
 } from "@agent-native/core/client/settings";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { Button } from "@agent-native/toolkit/ui";
-import { IconTerminal2 } from "@tabler/icons-react";
+import { IconFileCheck, IconTerminal2 } from "@tabler/icons-react";
+import { AutomationFileReview } from "@/components/settings/AutomationFileReview";
 import { LocalRuntimeSettings } from "@/components/settings/LocalRuntimeSettings";
+import { McpSettings } from "@/components/settings/McpSettings";
 import { useTheme } from "next-themes";
 import { Link } from "react-router";
 import {
@@ -49,6 +54,14 @@ const generalSearchEntries: SettingsSearchEntry[] = [
   },
 ];
 
+// Only the desktop app renders the Discord section, which carries the "discord" anchor this entry scrolls to.
+const discordSearchEntry: SettingsSearchEntry = {
+  id: "vivary-discord",
+  label: "Discord presence",
+  keywords: "discord rich presence status activity desktop",
+  hash: "discord",
+};
+
 export function meta() {
   return [{ title: "Settings | Vivary" }];
 }
@@ -58,6 +71,10 @@ export default function SettingsRoute() {
   const {
     ready, error, retryAppearance, retrySession, setTheme, setAppearance,
   } = useAppearancePreferences();
+  const desktopStatus = useActionQuery<{ folderPicker: boolean }>("vivary-desktop-status", {}, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const nativeTabs = useAgentSettingsTabs({
     appName: "Vivary",
     usageAppId: "vivary",
@@ -70,9 +87,19 @@ export default function SettingsRoute() {
     keywords: "local cli claude code codex terminal coding sign in",
     content: <LocalRuntimeSettings />,
   };
+  // Issue #109: files automation runs wrote wait here for the owner's review.
+  const automationFilesTab = {
+    id: "automation-files",
+    label: "Automation files",
+    icon: IconFileCheck,
+    group: "agent",
+    content: <AutomationFileReview />,
+  };
+  const browserTab = { id: "browser-access", label: "Remote access", icon: IconTerminal2, group: "agent", keywords: "remote access another device phone pair browser https tailscale", content: <BrowserAccessSettings /> };
   const tabs = nativeTabs
     .filter((tab) => tab.id !== "organization" && tab.id !== "workspace")
-    .flatMap((tab) => (tab.id === "agent" ? [runtimeTab, tab] : [tab]));
+    .map((tab) => (tab.id === "mcp" ? { ...tab, keywords: "mcp", searchEntries: [], content: <McpSettings /> } : tab))
+    .flatMap((tab) => (tab.id === "agent" ? [runtimeTab, browserTab, automationFilesTab, tab] : [tab]));
   useSetPageTitle("Settings");
 
   return (
@@ -81,7 +108,8 @@ export default function SettingsRoute() {
       ariaLabel="Vivary settings"
       searchPlaceholder="Search settings"
       extraTabs={tabs}
-      generalSearchEntries={generalSearchEntries}
+      generalSearchEntries={desktopStatus.data?.folderPicker
+        ? [...generalSearchEntries, discordSearchEntry] : generalSearchEntries}
       general={
         <div className="mx-auto w-full max-w-2xl space-y-6">
           <div>
@@ -145,6 +173,7 @@ export default function SettingsRoute() {
               }
             />
           </SettingsGroup>
+          {desktopStatus.data?.folderPicker ? <DiscordPresenceSettings /> : null}
           <SettingsGroup title="Models and tools">
             <SettingsRow
               label="Coding runtimes"

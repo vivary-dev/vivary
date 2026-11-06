@@ -1,0 +1,871 @@
+diff --git a/dist/chat-history/ChatHistoryList.d.ts b/dist/chat-history/ChatHistoryList.d.ts
+index 21dc80dde23f25392f4d7ed1d40539a0f1eeb537..1657be582d9ada31b7a63c24b7a2059b636e8f52 100644
+--- a/dist/chat-history/ChatHistoryList.d.ts
++++ b/dist/chat-history/ChatHistoryList.d.ts
+@@ -55,8 +55,9 @@ export interface ChatHistoryListProps {
+      * built-in rename/pin/delete items. Still gated by the trigger button,
+      * which shows whenever this or any of the on* callbacks above is set. */
+     renderRowActions?: (item: ChatHistoryItem) => React.ReactNode;
+-    /** App-specific actions inserted after pin and before delete. Call
+-     * `closeMenu` before starting the action. */
++    /** App-specific actions inserted after pin and before delete. Render each as a
++     * `ChatHistoryMenuItem` so the keyboard reaches it, and call `closeMenu` before
++     * starting the action. */
+     renderAdditionalRowActions?: (item: ChatHistoryItem, closeMenu: () => void) => React.ReactNode;
+     /** Controlled search input. Omit `onSearchChange` to hide the search box
+      * entirely and let the host render its own (results are always supplied
+@@ -86,6 +87,18 @@ export interface ChatHistoryListProps {
+     className?: string;
+     listClassName?: string;
+ }
++/** Props of a row menu entry. `onSelect` runs when the entry is chosen by click, Enter, or Space. */
++export interface ChatHistoryMenuItemProps {
++    onSelect?: (event: Event) => void;
++    danger?: boolean;
++    className?: string;
++    children?: React.ReactNode;
++}
++/**
++ * A row menu entry that Radix's keyboard navigation reaches: the arrow keys, typeahead, Enter, and Space. Use it for
++ * entries returned from `renderAdditionalRowActions`. Vivary patch, issue #131.
++ */
++export declare function ChatHistoryMenuItem({ onSelect, danger, className, children, }: ChatHistoryMenuItemProps): React.JSX.Element;
+ /**
+  * Presentational chat history list shared by the Core `HistoryPopover`
+  * and Agent-Native Code's run rail
+diff --git a/dist/chat-history/ChatHistoryList.js b/dist/chat-history/ChatHistoryList.js
+index ebf3bdb2cbc9069ada34d9944b454bb49feeeb5f..29c821abc25e3051e841395a62db253464428234 100644
+--- a/dist/chat-history/ChatHistoryList.js
++++ b/dist/chat-history/ChatHistoryList.js
+@@ -45,6 +45,13 @@ export function ChatHistoryList({ items, sections, activeId = null, onSelect, on
+     const hasSearchValue = Boolean(searchValue?.trim());
+     return (_jsxs("div", { className: cn("an-chat-history", variant === "rail" && "an-chat-history--rail", className), "data-agent-native": "chat-history-list", children: [onSearchChange && (_jsxs("div", { className: "an-chat-history__search", children: [_jsx(IconSearch, { size: 13, className: "an-chat-history__search-icon" }), _jsx("input", { ref: searchInputRef, type: "text", value: searchValue ?? "", onChange: (event) => onSearchChange(event.target.value), placeholder: searchPlaceholder, "aria-label": searchPlaceholder, className: "an-chat-history__search-input" })] })), _jsxs("div", { className: cn("an-chat-history__list", listClassName), children: [error ? (_jsx("div", { className: "an-chat-history__state an-chat-history__state--error", children: error })) : loading ? (_jsx("div", { className: "an-chat-history__state", children: loadingLabel })) : totalCount === 0 ? (_jsx("div", { className: "an-chat-history__state", children: hasSearchValue ? emptySearchLabel : emptyLabel })) : (resolvedSections.map((section) => section.items.length > 0 && (_jsxs("div", { className: "an-chat-history__section", children: [section.label && (_jsx("div", { className: "an-chat-history__section-label", children: section.label })), section.items.map((item) => (_jsx(ChatHistoryRow, { item: item, active: item.id === activeId, onSelect: onSelect, onOpen: onOpen, onTogglePin: onTogglePin, onRename: onRename, renameMaxLength: renameMaxLength, onDelete: onDelete, renderRowActions: renderRowActions, renderAdditionalRowActions: renderAdditionalRowActions, labels: resolvedLabels }, item.id)))] }, section.id)))), footer] })] }));
+ }
++/**
++ * A row menu entry that Radix's keyboard navigation reaches: the arrow keys, typeahead, Enter, and Space. A plain
++ * button with role="menuitem" inside the menu content is skipped by those keys. Vivary patch, issue #131.
++ */
++export function ChatHistoryMenuItem({ onSelect, danger = false, className, children, }) {
++    return (_jsx(DropdownMenuPrimitive.Item, { asChild: true, onSelect: onSelect, children: _jsx("button", { type: "button", className: cn("an-chat-history-row__menu-item", danger && "an-chat-history-row__menu-item--danger", className), children: children }) }));
++}
+ const ChatHistoryRow = React.memo(function ChatHistoryRow({ item, active, onSelect, onOpen, onTogglePin, onRename, renameMaxLength, onDelete, renderRowActions, renderAdditionalRowActions, labels, }) {
+     const [isRenaming, setIsRenaming] = useState(false);
+     const [draftTitle, setDraftTitle] = useState("");
+@@ -91,10 +98,10 @@ const ChatHistoryRow = React.memo(function ChatHistoryRow({ item, active, onSele
+                 return;
+             event.preventDefault();
+             setMenuOpen(true);
+-        }, children: [isRenaming ? (_jsx("div", { className: "an-chat-history-row__rename", children: _jsx("input", { ref: renameInputRef, className: "an-chat-history-row__rename-input", value: draftTitle, maxLength: renameMaxLength, onChange: (event) => setDraftTitle(event.target.value), onKeyDown: handleRenameKeyDown, onBlur: commitRename, autoFocus: true, "aria-label": renameInputLabel }) })) : (_jsxs("button", { type: "button", className: "an-chat-history-row__button", onClick: () => !item.disabled && onSelect(item.id), onDoubleClick: () => !item.disabled && onOpen?.(item.id), disabled: item.disabled, children: [_jsxs("div", { className: "an-chat-history-row__topline", children: [_jsx("span", { className: "an-chat-history-row__title", children: item.title }), item.timestamp != null && (_jsx("span", { className: "an-chat-history-row__timestamp", children: item.timestamp }))] }), item.subtitle != null && (_jsx("div", { className: "an-chat-history-row__subtitle", children: item.subtitle })), item.detail != null && (_jsx("div", { className: "an-chat-history-row__detail", children: item.detail }))] })), !isRenaming && hasMenu && (_jsx(DropdownMenuPrimitive.Root, { open: menuOpen, onOpenChange: setMenuOpen, children: _jsxs("div", { className: "an-chat-history-row__menu", children: [_jsx(DropdownMenuPrimitive.Trigger, { asChild: true, children: _jsx("button", { type: "button", className: cn("an-chat-history-row__menu-trigger", item.pinned && "an-chat-history-row__menu-trigger--pinned"), "aria-label": optionsLabel, "aria-haspopup": "menu", "aria-expanded": menuOpen, children: item.pinned ? (_jsx(IconPinned, { size: 13, strokeWidth: 1.8 })) : (_jsx(IconDots, { size: 14, strokeWidth: 1.8 })) }) }), _jsx(DropdownMenuPrimitive.Portal, { children: _jsx(DropdownMenuPrimitive.Content, { className: "an-chat-history-row__menu-content", align: "end", collisionPadding: 8, side: "bottom", sideOffset: 4, children: renderRowActions ? (renderRowActions(item)) : (_jsxs(_Fragment, { children: [onRename && (_jsxs("button", { type: "button", role: "menuitem", className: "an-chat-history-row__menu-item", onClick: startRename, children: [_jsx(IconPencil, { size: 13, strokeWidth: 1.8 }), _jsx("span", { children: labels.rename })] })), onTogglePin && (_jsxs("button", { type: "button", role: "menuitem", className: "an-chat-history-row__menu-item", onClick: () => {
++        }, children: [isRenaming ? (_jsx("div", { className: "an-chat-history-row__rename", children: _jsx("input", { ref: renameInputRef, className: "an-chat-history-row__rename-input", value: draftTitle, maxLength: renameMaxLength, onChange: (event) => setDraftTitle(event.target.value), onKeyDown: handleRenameKeyDown, onBlur: commitRename, autoFocus: true, "aria-label": renameInputLabel }) })) : (_jsxs("button", { type: "button", className: "an-chat-history-row__button", onClick: () => !item.disabled && onSelect(item.id), onDoubleClick: () => !item.disabled && onOpen?.(item.id), disabled: item.disabled, children: [_jsxs("div", { className: "an-chat-history-row__topline", children: [_jsx("span", { className: "an-chat-history-row__title", children: item.title }), item.timestamp != null && (_jsx("span", { className: "an-chat-history-row__timestamp", children: item.timestamp }))] }), item.subtitle != null && (_jsx("div", { className: "an-chat-history-row__subtitle", children: item.subtitle })), item.detail != null && (_jsx("div", { className: "an-chat-history-row__detail", children: item.detail }))] })), !isRenaming && hasMenu && (_jsx(DropdownMenuPrimitive.Root, { open: menuOpen, onOpenChange: setMenuOpen, children: _jsxs("div", { className: "an-chat-history-row__menu", children: [_jsx(DropdownMenuPrimitive.Trigger, { asChild: true, children: _jsx("button", { type: "button", className: cn("an-chat-history-row__menu-trigger", item.pinned && "an-chat-history-row__menu-trigger--pinned"), "aria-label": optionsLabel, "aria-haspopup": "menu", "aria-expanded": menuOpen, children: item.pinned ? (_jsx(IconPinned, { size: 13, strokeWidth: 1.8 })) : (_jsx(IconDots, { size: 14, strokeWidth: 1.8 })) }) }), _jsx(DropdownMenuPrimitive.Portal, { children: _jsx(DropdownMenuPrimitive.Content, { className: "an-chat-history-row__menu-content", align: "end", collisionPadding: 8, side: "bottom", sideOffset: 4, children: renderRowActions ? (renderRowActions(item)) : (_jsxs(_Fragment, { children: [onRename && (_jsxs(ChatHistoryMenuItem, { onSelect: startRename, children: [_jsx(IconPencil, { size: 13, strokeWidth: 1.8 }), _jsx("span", { children: labels.rename })] })), onTogglePin && (_jsxs(ChatHistoryMenuItem, { onSelect: () => {
+                                                 setMenuOpen(false);
+                                                 onTogglePin(item.id);
+-                                            }, children: [item.pinned ? (_jsx(IconPinnedOff, { size: 13, strokeWidth: 1.8 })) : (_jsx(IconPinned, { size: 13, strokeWidth: 1.8 })), _jsx("span", { children: item.pinned ? labels.unpin : labels.pin })] })), renderAdditionalRowActions?.(item, () => setMenuOpen(false)), onDelete && (_jsxs("button", { type: "button", role: "menuitem", className: "an-chat-history-row__menu-item an-chat-history-row__menu-item--danger", onClick: () => {
++                                            }, children: [item.pinned ? (_jsx(IconPinnedOff, { size: 13, strokeWidth: 1.8 })) : (_jsx(IconPinned, { size: 13, strokeWidth: 1.8 })), _jsx("span", { children: item.pinned ? labels.unpin : labels.pin })] })), renderAdditionalRowActions?.(item, () => setMenuOpen(false)), onDelete && (_jsxs(ChatHistoryMenuItem, { danger: true, onSelect: () => {
+                                                 setMenuOpen(false);
+                                                 onDelete(item.id);
+                                             }, children: [_jsx(IconTrash, { size: 13, strokeWidth: 1.8 }), _jsx("span", { children: labels.delete })] }))] })) }) })] }) }))] }));
+diff --git a/dist/chat-history/index.d.ts b/dist/chat-history/index.d.ts
+index 0eb004ef5ba30ebdc55ce5fae7653feeafea769c..84dec6660ed7ec86273c9baf799fe1ed9a127013 100644
+--- a/dist/chat-history/index.d.ts
++++ b/dist/chat-history/index.d.ts
+@@ -1,4 +1,4 @@
+-export { ChatHistoryList, type ChatHistoryItem, type ChatHistoryListLabels, type ChatHistoryListProps, type ChatHistorySection, } from "./ChatHistoryList.js";
++export { ChatHistoryList, ChatHistoryMenuItem, type ChatHistoryItem, type ChatHistoryListLabels, type ChatHistoryListProps, type ChatHistoryMenuItemProps, type ChatHistorySection, } from "./ChatHistoryList.js";
+ export { ChatHistoryRail, DefaultChatHistoryRailView, type DefaultChatHistoryRailViewProps, type ChatHistoryRailLabels, type ChatHistoryRailProps, type ChatHistoryRailRenderContext, } from "./ChatHistoryRail.js";
+ export { type ChatHistoryRailController, type ChatHistoryRailControllerLabels, type UseChatHistoryRailControllerOptions, useChatHistoryRailController, } from "./useChatHistoryRailController.js";
+ //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
+diff --git a/dist/chat-history/index.js b/dist/chat-history/index.js
+index 0675b2cfb5587938eccf28f58b7fcd0b61f378d4..e0e5ec87257a3d1221094e159bec1ea96858eeff 100644
+--- a/dist/chat-history/index.js
++++ b/dist/chat-history/index.js
+@@ -1,4 +1,4 @@
+-export { ChatHistoryList, } from "./ChatHistoryList.js";
++export { ChatHistoryList, ChatHistoryMenuItem, } from "./ChatHistoryList.js";
+ export { ChatHistoryRail, DefaultChatHistoryRailView, } from "./ChatHistoryRail.js";
+ export { useChatHistoryRailController, } from "./useChatHistoryRailController.js";
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/composer/RealtimeVoiceMode.js b/dist/composer/RealtimeVoiceMode.js
+index 79f08a69220401ee275387865d58a1f7c5da8fd0..82c5863501ae66faa335f1c6baba47e6a1d49296 100644
+--- a/dist/composer/RealtimeVoiceMode.js
++++ b/dist/composer/RealtimeVoiceMode.js
+@@ -13,7 +13,7 @@ import { createRealtimeVoiceAudioLevelStore, } from "./realtime-voice-audio-leve
+  * The first click offers voice mode without silently changing the existing
+  * editable-dictation behavior.
+  */
+-export function RealtimeVoiceModeEntry({ copy, disabled, providerStatusPending = false, open: controlledOpen, onOpenChange, onStartVoiceMode, onKeepDictating, preferredMode = null, onRememberPreference, setupRequired = false, openAiConfigured = false, connectingBuilder = false, onConnectBuilder, builderConnectFlow, builderConnectPopover: BuilderConnectPopover, onUseOpenAiKey, className, }) {
++export function RealtimeVoiceModeEntry({ copy, disabled, providerStatusPending = false, open: controlledOpen, onOpenChange, onStartVoiceMode, onKeepDictating, preferredMode = null, onRememberPreference, setupRequired = false, openAiConfigured = false, connectingBuilder = false, onConnectBuilder, builderConnectFlow, builderConnectPopover: BuilderConnectPopover, showConnectBuilder = true, onUseOpenAiKey, className, }) {
+     const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+     const open = controlledOpen ?? uncontrolledOpen;
+     const titleId = useId();
+@@ -50,7 +50,7 @@ export function RealtimeVoiceModeEntry({ copy, disabled, providerStatusPending =
+                                         : onKeepDictating);
+                                 }, className: cn("size-7 shrink-0 text-muted-foreground hover:text-foreground", className), children: _jsx(IconMicrophone, {}) }) }) }), _jsx(TooltipContent, { children: copy.entryButtonLabel })] }), _jsx(PopoverContent, { side: "top", align: "end", sideOffset: 10, collisionBoundary: collisionBoundary ?? undefined, collisionPadding: 16, "data-collision-boundary": collisionBoundary ? "agent-panel" : "viewport", className: cn(setupRequired ? "p-3.5" : "p-3", setupRequired
+                     ? "w-[min(calc(100vw-2rem),var(--radix-popover-content-available-width,24rem),24rem)]"
+-                    : "w-[min(calc(100vw-2rem),var(--radix-popover-content-available-width,18rem),18rem)]"), "aria-labelledby": titleId, "aria-describedby": setupRequired ? descriptionId : undefined, children: _jsxs("div", { className: cn("grid", setupRequired ? "gap-3.5" : "gap-2.5"), children: [_jsxs("div", { className: cn(setupRequired ? "flex items-start gap-3" : "grid gap-1"), children: [setupRequired ? (_jsx("div", { className: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary", children: _jsx(IconMicrophone, { "aria-hidden": "true" }) })) : null, _jsxs("div", { className: "grid gap-1", children: [_jsx("h2", { id: titleId, className: "text-sm font-semibold leading-5 text-foreground", children: setupRequired ? copy.setupTitle : copy.promptTitle }), setupRequired ? (_jsx("p", { id: descriptionId, className: "text-xs leading-5 text-muted-foreground", children: copy.setupDescription })) : null] })] }), _jsx("div", { className: cn("grid gap-2", setupRequired ? "rounded-lg bg-muted/30 p-1" : null), children: setupRequired ? (_jsxs(_Fragment, { children: [BuilderConnectPopover && builderConnectFlow ? (_jsx(BuilderConnectPopover, { flow: builderConnectFlow, onConnect: (provisionAccount) => choose("realtime", () => onConnectBuilder
++                    : "w-[min(calc(100vw-2rem),var(--radix-popover-content-available-width,18rem),18rem)]"), "aria-labelledby": titleId, "aria-describedby": setupRequired ? descriptionId : undefined, children: _jsxs("div", { className: cn("grid", setupRequired ? "gap-3.5" : "gap-2.5"), children: [_jsxs("div", { className: cn(setupRequired ? "flex items-start gap-3" : "grid gap-1"), children: [setupRequired ? (_jsx("div", { className: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary", children: _jsx(IconMicrophone, { "aria-hidden": "true" }) })) : null, _jsxs("div", { className: "grid gap-1", children: [_jsx("h2", { id: titleId, className: "text-sm font-semibold leading-5 text-foreground", children: setupRequired ? copy.setupTitle : copy.promptTitle }), setupRequired ? (_jsx("p", { id: descriptionId, className: "text-xs leading-5 text-muted-foreground", children: copy.setupDescription })) : null] })] }), _jsx("div", { className: cn("grid gap-2", setupRequired ? "rounded-lg bg-muted/30 p-1" : null), children: setupRequired ? (_jsxs(_Fragment, { children: [!showConnectBuilder ? null : BuilderConnectPopover && builderConnectFlow ? (_jsx(BuilderConnectPopover, { flow: builderConnectFlow, onConnect: (provisionAccount) => choose("realtime", () => onConnectBuilder
+                                             ? onConnectBuilder({ provisionAccount })
+                                             : onStartVoiceMode()), children: _jsxs(Button, { type: "button", size: "sm", className: "w-full justify-start px-3", disabled: connectingBuilder, children: [connectingBuilder ? (_jsx(IconLoader2, { className: "animate-spin" })) : (_jsx(IconPlugConnected, { "aria-hidden": "true" })), copy.connectBuilder] }) })) : (_jsxs(Button, { type: "button", size: "sm", className: "w-full justify-start px-3", disabled: connectingBuilder, onClick: () => choose("realtime", onConnectBuilder ?? onStartVoiceMode), children: [connectingBuilder ? (_jsx(IconLoader2, { className: "animate-spin" })) : (_jsx(IconPlugConnected, { "aria-hidden": "true" })), copy.connectBuilder] })), _jsxs(Button, { type: "button", variant: "outline", size: "sm", className: "w-full justify-start bg-background px-3", onClick: () => choose("realtime", onUseOpenAiKey ?? onStartVoiceMode), children: [_jsx(IconKey, { "aria-hidden": "true" }), openAiConfigured
+                                                 ? copy.startWithOpenAiKey
+diff --git a/dist/composer/TiptapComposer.d.ts b/dist/composer/TiptapComposer.d.ts
+index c4236b795a64fa82e1a983339d202cc4b8aa8099..2b74244bd785f2c33feb48acc5f8fc14a233d879 100644
+--- a/dist/composer/TiptapComposer.d.ts
++++ b/dist/composer/TiptapComposer.d.ts
+@@ -108,6 +108,8 @@ export interface TiptapComposerProps {
+     clearOnSubmit?: boolean;
+     /** Called whenever the plain editor text changes. */
+     onTextChange?: (text: string) => void;
++    /** Report exact draft line breaks and whitespace through onTextChange. */
++    preserveDraftText?: boolean;
+     /** Custom action button (e.g. stop button) to render instead of the default send button. */
+     actionButton?: React.ReactNode;
+     /** Whether the default send action will wait behind existing work. */
+@@ -299,6 +301,6 @@ export interface ComposerImageModelMenu {
+     label?: string;
+ }
+ export declare function getComposerReasoningEffortOptions(model: string): ReasoningEffort[];
+-export declare function TiptapComposer({ placeholder, disabled, maxDocumentAttachmentBytes, documentAttachmentLimitLabel, focusRef, initialText, initialTextKey, onSubmit, onBeforeSubmit, clearOnSubmit, onTextChange, actionButton, willQueue, extraActionButton, stopButton, attachButton, modeControl, toolbarSlot, layoutVariant, slashCommands, slashSkills, includeDefaultSlashCommands, includeDefaultSlashSkills, onSlashCommand, execMode, onExecModeChange, planModeDisabled, planModeDisabledReason, voiceEnabled, selectedModel, selectedEngine, selectedEffort, showAutoModelOption, modelSelectorOpen, availableModels, modelListLoading, onModelChange, onEffortChange, availableAgents, selectedAgent, agentOnly, hostedHarness, onAgentChange, onModelSelectorOpenChange, providerConnectStatusEnabled, onConnectProvider, onConnectLocalRuntime, imageModelMenu, draftScope, contextItems, onRemoveContextItem, plusMenuMode, terminalModeControl, extensionTools, interceptBuildRequestsForBuilder, onAttachmentError, }: TiptapComposerProps): React.JSX.Element;
++export declare function TiptapComposer({ placeholder, disabled, maxDocumentAttachmentBytes, documentAttachmentLimitLabel, focusRef, initialText, initialTextKey, onSubmit, onBeforeSubmit, clearOnSubmit, onTextChange, preserveDraftText, actionButton, willQueue, extraActionButton, stopButton, attachButton, modeControl, toolbarSlot, layoutVariant, slashCommands, slashSkills, includeDefaultSlashCommands, includeDefaultSlashSkills, onSlashCommand, execMode, onExecModeChange, planModeDisabled, planModeDisabledReason, voiceEnabled, selectedModel, selectedEngine, selectedEffort, showAutoModelOption, modelSelectorOpen, availableModels, modelListLoading, onModelChange, onEffortChange, availableAgents, selectedAgent, agentOnly, hostedHarness, onAgentChange, onModelSelectorOpenChange, providerConnectStatusEnabled, onConnectProvider, onConnectLocalRuntime, imageModelMenu, draftScope, contextItems, onRemoveContextItem, plusMenuMode, terminalModeControl, extensionTools, interceptBuildRequestsForBuilder, onAttachmentError, }: TiptapComposerProps): React.JSX.Element;
+ export {};
+ //# sourceMappingURL=TiptapComposer.d.ts.map
+\ No newline at end of file
+diff --git a/dist/composer/TiptapComposer.js b/dist/composer/TiptapComposer.js
+index 8b7b4ac1ffa851146584b0f97325f45a84d7d308..e8da20b8747d09d52f10d366cc7dcf311757aebc 100644
+--- a/dist/composer/TiptapComposer.js
++++ b/dist/composer/TiptapComposer.js
+@@ -485,8 +485,23 @@ function ComposerModeChip({ mode, onRemove, }) {
+     const Icon = config.icon;
+     return (_jsxs("span", { className: "inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-xs font-medium text-foreground", children: [_jsx(Icon, { className: "h-3 w-3 text-muted-foreground" }), config.label, _jsx("button", { type: "button", onClick: onRemove, className: "ms-0.5 rounded-sm text-muted-foreground hover:text-foreground cursor-pointer", children: _jsx(IconX, { className: "h-3 w-3" }) })] }));
+ }
+-function plainTextToDoc(text) {
++function composerTextForChange(doc, preserveDraftText) {
++    if (!preserveDraftText)
++        return doc.textContent.trim();
++    return doc.textBetween(0, doc.content.size, "\n", node => node.type.name === "hardBreak" ? "\n" : node.textContent);
++}
++function plainTextToDoc(text, preserveDraftText = false) {
+     const lines = text.length > 0 ? text.split(/\r?\n/) : [""];
++    if (preserveDraftText) {
++        const content = [];
++        lines.forEach((line, index) => {
++            if (index > 0)
++                content.push({ type: "hardBreak" });
++            if (line)
++                content.push({ type: "text", text: line });
++        });
++        return { type: "doc", content: [{ type: "paragraph", content }] };
++    }
+     return {
+         type: "doc",
+         content: lines.map((line) => ({
+@@ -499,6 +514,31 @@ function plainTextToDoc(text) {
+ export function isComposerEditorUsable(editor) {
+     return Boolean(editor && editor.isDestroyed !== true);
+ }
++/**
++ * Whether the composer may take focus when the host restores or hands it text or asks it to focus. It may not while the
++ * owner is typing in another field, such as a chat rename field, because that field's blur saves it half typed and the
++ * rest of the typing lands in the composer. Vivary patch, issue #147.
++ */
++function composerMayTakeFocus(editor) {
++    const active = document.activeElement;
++    if (!active || active === document.body || editor.view.dom.contains(active))
++        return true;
++    return !(active.isContentEditable || active.matches?.("input, textarea, select"));
++}
++/**
++ * Moves the caret to the end and focuses the composer on the next frame, as Tiptap's focus("end") does. The check runs
++ * right before the DOM focus, so a field the owner focused in between keeps focus. Tiptap's own command checks nothing
++ * when its frame runs. Vivary patch, issue #147.
++ */
++function focusComposerAtEnd(editor) {
++    requestAnimationFrame(() => {
++        if (!isComposerEditorUsable(editor) || !composerMayTakeFocus(editor))
++            return;
++        editor.commands.setTextSelection(editor.state.doc.content.size);
++        editor.view.focus();
++        editor.commands.scrollIntoView();
++    });
++}
+ export function createTiptapComposerExtensions(getPlaceholder) {
+     return [
+         StarterKit.configure({
+@@ -895,7 +935,7 @@ function ModelSelector({ model, effort, engines, agents, selectedAgent, selected
+         !LOCAL_RUNTIME_ENGINES.has(group.engine));
+     const hasUnconfiguredVisibleModels = modelProviderGroups.some((group) => !group.configured);
+     const hasConfiguredProvider = providerGroups.some((group) => group.configured);
+-    const showBuilderAction = !isClaudeCodeAgent &&
++    const providerSetupWanted = !isClaudeCodeAgent &&
+         !hasConfiguredCloudProviderReady &&
+         (Boolean(onConnectProvider) ||
+             (providerConnectStatusEnabled &&
+@@ -903,9 +943,10 @@ function ModelSelector({ model, effort, engines, agents, selectedAgent, selected
+                 !builderFlow.envManaged &&
+                 !hasConfiguredBuilderModels &&
+                 !hasConnectedSubscription));
++    const showBuilderAction = adapters.builder.offersEnabled !== false && providerSetupWanted;
+     const showAddKeysAction = !isClaudeCodeAgent &&
+         !hasConfiguredCloudProviderReady &&
+-        (hasUnconfiguredVisibleModels || showBuilderAction);
++        (hasUnconfiguredVisibleModels || providerSetupWanted);
+     const showProviderActions = showBuilderAction || showAddKeysAction;
+     const onlyConnectPathAvailable = shouldShowOnlyConnectPath(showProviderActions, providerGroups);
+     const openLlmSettings = useCallback(() => {
+@@ -1107,7 +1148,7 @@ function ModelSelectorSkeleton() {
+                     defaultValue: "Loading models…",
+                 }) }), ["w-24", "w-32", "w-20", "w-28"].map((width, index) => (_jsxs("div", { className: "flex items-center gap-1.5 px-1 py-1.5", children: [_jsx(Skeleton, { className: "size-3 rounded-sm" }), _jsx(Skeleton, { className: `h-3 ${width}` })] }, index)))] }));
+ }
+-export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttachmentBytes = MAX_DOCUMENT_ATTACHMENT_BYTES, documentAttachmentLimitLabel = "PDFs", focusRef, initialText, initialTextKey, onSubmit, onBeforeSubmit, clearOnSubmit = true, onTextChange, actionButton, willQueue = false, extraActionButton, stopButton, attachButton, modeControl, toolbarSlot, layoutVariant = "default", slashCommands = [], slashSkills = [], includeDefaultSlashCommands = true, includeDefaultSlashSkills = true, onSlashCommand, execMode, onExecModeChange, planModeDisabled = false, planModeDisabledReason, voiceEnabled = DEFAULT_VOICE_DICTATION_ENABLED, selectedModel, selectedEngine, selectedEffort, showAutoModelOption = true, modelSelectorOpen, availableModels, modelListLoading, onModelChange, onEffortChange, availableAgents, selectedAgent, agentOnly = false, hostedHarness, onAgentChange, onModelSelectorOpenChange, providerConnectStatusEnabled, onConnectProvider, onConnectLocalRuntime, imageModelMenu, draftScope, contextItems = [], onRemoveContextItem, plusMenuMode = "full", terminalModeControl, extensionTools = false, interceptBuildRequestsForBuilder = false, onAttachmentError, }) {
++export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttachmentBytes = MAX_DOCUMENT_ATTACHMENT_BYTES, documentAttachmentLimitLabel = "PDFs", focusRef, initialText, initialTextKey, onSubmit, onBeforeSubmit, clearOnSubmit = true, onTextChange, preserveDraftText = false, actionButton, willQueue = false, extraActionButton, stopButton, attachButton, modeControl, toolbarSlot, layoutVariant = "default", slashCommands = [], slashSkills = [], includeDefaultSlashCommands = true, includeDefaultSlashSkills = true, onSlashCommand, execMode, onExecModeChange, planModeDisabled = false, planModeDisabledReason, voiceEnabled = DEFAULT_VOICE_DICTATION_ENABLED, selectedModel, selectedEngine, selectedEffort, showAutoModelOption = true, modelSelectorOpen, availableModels, modelListLoading, onModelChange, onEffortChange, availableAgents, selectedAgent, agentOnly = false, hostedHarness, onAgentChange, onModelSelectorOpenChange, providerConnectStatusEnabled, onConnectProvider, onConnectLocalRuntime, imageModelMenu, draftScope, contextItems = [], onRemoveContextItem, plusMenuMode = "full", terminalModeControl, extensionTools = false, interceptBuildRequestsForBuilder = false, onAttachmentError, }) {
+     const adapters = useComposerRuntimeAdapters();
+     const t = adapters.translate;
+     const sendButtonTooltip = t(getComposerSendTooltipKey(willQueue), {
+@@ -1202,6 +1243,8 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+     }, []);
+     const onTextChangeRef = useRef(onTextChange);
+     onTextChangeRef.current = onTextChange;
++    const preserveDraftTextRef = useRef(preserveDraftText);
++    preserveDraftTextRef.current = preserveDraftText;
+     const contextItemsRef = useRef(contextItems);
+     contextItemsRef.current = contextItems;
+     const onRemoveContextItemRef = useRef(onRemoveContextItem);
+@@ -1292,7 +1335,7 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+             // Drive the send button's enabled state from the actual editor contents;
+             // the composer runtime is only synced on submit, so its isEmpty lags.
+             setEditorHasText(composerDocumentHasContent(ed.state.doc));
+-            onTextChangeRef.current?.(ed.state.doc.textContent.trim());
++            onTextChangeRef.current?.(composerTextForChange(ed.state.doc, preserveDraftTextRef.current));
+             scheduleComposerDraftPersist(ed);
+         },
+         onSelectionUpdate: ({ editor: ed }) => {
+@@ -1569,8 +1612,8 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+     useEffect(() => {
+         if (!isComposerEditorUsable(editor) || !onTextChange)
+             return;
+-        onTextChange(editor.state.doc.textContent.trim());
+-    }, [editor, onTextChange]);
++        onTextChange(composerTextForChange(editor.state.doc, preserveDraftText));
++    }, [editor, onTextChange, preserveDraftText]);
+     const insertReference = useCallback((ref) => {
+         const normalized = adapters.agentChat.normalizeReference(ref);
+         const ed = editor;
+@@ -1661,7 +1704,7 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+     useImperativeHandle(focusRef, () => ({
+         focus() {
+             if (isComposerEditorUsable(editor))
+-                editor.commands.focus("end");
++                focusComposerAtEnd(editor);
+         },
+         insertText(text) {
+             if (!isComposerEditorUsable(editor))
+@@ -1675,13 +1718,13 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+         setText(text) {
+             if (!isComposerEditorUsable(editor))
+                 return;
+-            editor.commands.setContent(plainTextToDoc(text));
+-            editor.commands.focus("end");
++            editor.commands.setContent(plainTextToDoc(text, preserveDraftTextRef.current));
++            focusComposerAtEnd(editor);
+             const trimmed = editor.state.doc.textContent.trim();
+             setEditorHasText(trimmed.length > 0);
+             setSlotReferences([]);
+             composerRuntime.setText(trimmed);
+-            onTextChangeRef.current?.(trimmed);
++            onTextChangeRef.current?.(composerTextForChange(editor.state.doc, preserveDraftTextRef.current));
+             flushComposerDraft();
+         },
+         insertReference,
+@@ -2356,18 +2399,18 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+         try {
+             if (saved && editor.isEmpty) {
+                 editor.commands.setContent(saved);
+-                editor.commands.focus("end");
++                focusComposerAtEnd(editor);
+                 if (initialText !== undefined)
+                     initialTextKeyRef.current = key;
+             }
+             else if (initialText === undefined) {
+-                onTextChangeRef.current?.(editor.state.doc.textContent.trim());
++                onTextChangeRef.current?.(composerTextForChange(editor.state.doc, preserveDraftTextRef.current));
+                 return;
+             }
+             else if (initialTextKeyRef.current !== key) {
+                 initialTextKeyRef.current = key;
+-                editor.commands.setContent(plainTextToDoc(initialText));
+-                editor.commands.focus("end");
++                editor.commands.setContent(plainTextToDoc(initialText, preserveDraftTextRef.current));
++                focusComposerAtEnd(editor);
+             }
+             else {
+                 return;
+@@ -2375,7 +2418,7 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+             const trimmed = editor.state.doc.textContent.trim();
+             setEditorHasText(composerDocumentHasContent(editor.state.doc));
+             composerRuntime.setText(trimmed);
+-            onTextChangeRef.current?.(trimmed);
++            onTextChangeRef.current?.(composerTextForChange(editor.state.doc, preserveDraftTextRef.current));
+             scheduleComposerDraftPersist(editor);
+         }
+         catch {
+@@ -2430,6 +2473,6 @@ export function TiptapComposer({ placeholder, disabled = false, maxDocumentAttac
+                                     defaultValue: "Remove {{name}} context",
+                                     name: item.title,
+                                 }), className: "ms-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(IconX, { className: "h-3 w-3" }) })] }, item.key)))] })), _jsx("div", { "data-agent-composer-variant": layoutVariant, "data-agent-composer-slot": "editor-wrap", className: `agent-composer-editor-wrap ${composerMode || hasContextRows ? "px-2 pt-1 pb-1" : "px-2 pt-2 pb-1"}`, children: _jsx(EditorContent, { editor: editor, "data-agent-composer-variant": layoutVariant, "data-agent-composer-slot": "editor", className: "agent-composer-editor aui-composer flex-1 min-w-0 [&_.ProseMirror]:outline-none [&_.ProseMirror_p]:m-0 px-0.5" }) }), voiceEnabled && _jsx(VoiceRecordingOverlay, { voice: voice }), _jsxs("div", { "data-agent-composer-variant": layoutVariant, "data-agent-composer-slot": "toolbar", className: "agent-composer-toolbar flex items-center gap-1 px-2 py-1.5", children: [attachButton ??
+-                        (plusMenuMode === "hidden" ? null : (_jsx(ComposerPlusMenu, { addAttachment: addAttachmentForCurrentScope, onSelectMode: handleSelectMode, mode: plusMenuMode, terminalModeControl: terminalModeControl, extensionTools: extensionTools, onAttachmentError: onAttachmentError }))), toolbarSlot ?? modeControl, _jsx("div", { "data-agent-composer-slot": "toolbar-spacer", className: "flex-1" }), shouldRenderModelSelector(availableModels, onModelChange) && (_jsx(ModelSelector, { model: selectedModel ?? "", selectedEngine: selectedEngine, open: modelSelectorOpen, effort: selectedEffort, engines: availableModels, agents: availableAgents, selectedAgent: selectedAgent, agentOnly: agentOnly, hostedHarness: hostedHarness, showAutoModelOption: showAutoModelOption, modelListLoading: modelListLoading, onChange: onModelChange, onEffortChange: onEffortChange, onAgentChange: onAgentChange, onModelSelectorOpenChange: onModelSelectorOpenChange, providerConnectStatusEnabled: providerConnectStatusEnabled, onConnectProvider: onConnectProvider, onConnectLocalRuntime: onConnectLocalRuntime, terminalModeControl: terminalModeControl, imageModel: imageModelMenu })), execMode && onExecModeChange && (_jsx(ModeSelector, { mode: execMode, onChange: onExecModeChange, planModeDisabled: planModeDisabled, planModeDisabledReason: planModeDisabledReason })), actionButton ?? (_jsxs(_Fragment, { children: [extraActionButton, voiceEnabled && (_jsx(VoiceButton, { voice: voice, isMac: isMac, disabled: disabled })), primaryAction === "stop" ? (stopButton) : (_jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx("button", { type: "button", onClick: () => void submitComposer("immediate"), disabled: !canSend, "data-agent-composer-slot": "send-button", className: "agent-composer-send-button shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-[opacity,transform] duration-150 active:scale-[0.97] disabled:opacity-30 disabled:cursor-not-allowed", children: _jsx(IconArrowUp, { className: "h-3.5 w-3.5" }) }) }), _jsx(TooltipContent, { children: sendButtonTooltip })] }))] }))] }), _jsx(MentionPopover, { ref: popoverRef, type: popover?.type ?? "@", position: popover?.position ?? null, mentionItems: filteredMentionItems, skills: filteredSkills, commands: filteredCommands, hint: hint, isLoading: popover?.type === "@" ? mentionsLoading : skillsLoading, query: popover?.query ?? "", onSelectMention: handleSelectMention, onSelectSkill: handleSelectSkill, onSelectCommand: handleSelectCommand, onClose: closePopover })] }));
++                        (plusMenuMode === "hidden" ? null : (_jsx(ComposerPlusMenu, { addAttachment: addAttachmentForCurrentScope, onSelectMode: handleSelectMode, mode: plusMenuMode, terminalModeControl: terminalModeControl, extensionTools: extensionTools, onAttachmentError: onAttachmentError }))), toolbarSlot ?? modeControl, _jsx("div", { "data-agent-composer-slot": "toolbar-spacer", className: "flex-1" }), shouldRenderModelSelector(availableModels, onModelChange) && (_jsx(ModelSelector, { model: selectedModel ?? "", selectedEngine: selectedEngine, open: modelSelectorOpen, effort: selectedEffort, engines: availableModels, agents: availableAgents, selectedAgent: selectedAgent, agentOnly: agentOnly, hostedHarness: hostedHarness, showAutoModelOption: showAutoModelOption, modelListLoading: modelListLoading, onChange: onModelChange, onEffortChange: onEffortChange, onAgentChange: onAgentChange, onModelSelectorOpenChange: onModelSelectorOpenChange, providerConnectStatusEnabled: providerConnectStatusEnabled, onConnectProvider: onConnectProvider, onConnectLocalRuntime: onConnectLocalRuntime, terminalModeControl: terminalModeControl, imageModel: imageModelMenu })), execMode && onExecModeChange && (_jsx(ModeSelector, { mode: execMode, onChange: onExecModeChange, planModeDisabled: planModeDisabled, planModeDisabledReason: planModeDisabledReason })), actionButton ?? (_jsxs(_Fragment, { children: [extraActionButton, voiceEnabled && (_jsx(VoiceButton, { voice: voice, isMac: isMac, disabled: disabled })), primaryAction === "stop" ? (stopButton) : (_jsxs(Tooltip, { children: [_jsx(TooltipTrigger, { asChild: true, children: _jsx("button", { type: "button", onClick: () => void submitComposer("immediate"), disabled: !canSend, "data-agent-composer-slot": "send-button", "aria-label": sendButtonTooltip, className: "agent-composer-send-button shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-[opacity,transform] duration-150 active:scale-[0.97] disabled:opacity-30 disabled:cursor-not-allowed", children: _jsx(IconArrowUp, { className: "h-3.5 w-3.5" }) }) }), _jsx(TooltipContent, { children: sendButtonTooltip })] }))] }))] }), _jsx(MentionPopover, { ref: popoverRef, type: popover?.type ?? "@", position: popover?.position ?? null, mentionItems: filteredMentionItems, skills: filteredSkills, commands: filteredCommands, hint: hint, isLoading: popover?.type === "@" ? mentionsLoading : skillsLoading, query: popover?.query ?? "", onSelectMention: handleSelectMention, onSelectSkill: handleSelectSkill, onSelectCommand: handleSelectCommand, onClose: closePopover })] }));
+ }
+ //# sourceMappingURL=TiptapComposer.js.map
+\ No newline at end of file
+diff --git a/dist/composer/VoiceButton.js b/dist/composer/VoiceButton.js
+index 8a64666b3eb53005aea238b0936f593c88866e35..89e89ffb469ad0e653826b748de6bd0a6e666c12 100644
+--- a/dist/composer/VoiceButton.js
++++ b/dist/composer/VoiceButton.js
+@@ -40,6 +40,15 @@ export function VoiceButton({ voice, isMac, disabled }) {
+     const { state, start, stop, supported } = voice;
+     const realtimeVoice = useRealtimeVoiceModeOptional();
+     const realtimeCopy = useRealtimeVoiceModeCopy();
++    const builderOffers = adapters.builder.offersEnabled !== false;
++    const setupCopy = builderOffers
++        ? realtimeCopy
++        : {
++            ...realtimeCopy,
++            setupDescription: adapters.translate("agentChat.voiceMode.setupDescriptionOwnKeys", {
++                defaultValue: "Add your own keys to use voice mode.",
++            }),
++        };
+     const voiceProviders = adapters.voice.useProviderStatus();
+     const builderConnect = adapters.builder.useConnectFlow({
+         provisionAccount: true,
+@@ -78,7 +87,7 @@ export function VoiceButton({ voice, isMac, disabled }) {
+     if (realtimeVoice?.active && !recording && !transcribing)
+         return null;
+     if (realtimeVoice && !recording && !transcribing) {
+-        return (_jsx(RealtimeVoiceModeEntry, { copy: realtimeCopy, disabled: disabled, providerStatusPending: voiceProviders.status === null, setupRequired: isRealtimeVoiceSetupRequired(voiceProviders.status, builderConnect.statusResolved ? builderConnect.configured : null), openAiConfigured: voiceProviders.status?.openai === true, connectingBuilder: builderConnect.connecting, onConnectBuilder: builderConnect.start, builderConnectFlow: builderConnect, builderConnectPopover: adapters.builder?.BuilderConnectPopover, onUseOpenAiKey: () => {
++        return (_jsx(RealtimeVoiceModeEntry, { copy: setupCopy, showConnectBuilder: builderOffers, disabled: disabled, providerStatusPending: voiceProviders.status === null, setupRequired: isRealtimeVoiceSetupRequired(voiceProviders.status, builderConnect.statusResolved ? builderConnect.configured : null), openAiConfigured: voiceProviders.status?.openai === true, connectingBuilder: builderConnect.connecting, onConnectBuilder: builderConnect.start, builderConnectFlow: builderConnect, builderConnectPopover: adapters.builder?.BuilderConnectPopover, onUseOpenAiKey: () => {
+                 if (voiceProviders.status?.openai)
+                     void realtimeVoice.start();
+                 else
+diff --git a/dist/composer/runtime-adapters.js b/dist/composer/runtime-adapters.js
+index 2552d3be034fe8cecde3d2347fa8bb6da3487e6b..232df8bf279cf7b58730c4efae3058053b0bee55 100644
+--- a/dist/composer/runtime-adapters.js
++++ b/dist/composer/runtime-adapters.js
+@@ -60,6 +60,7 @@ const fallbackAdapters = {
+         StaleIndexBoundary: FragmentBoundary,
+     },
+     builder: {
++        offersEnabled: true,
+         useConnectFlow: () => fallbackBuilderFlow,
+         tryDelegateBuildRequest: () => false,
+         isTrustedFrameMessage: () => false,
+diff --git a/dist/editor/SharedRichEditor.js b/dist/editor/SharedRichEditor.js
+index 8b22c2c5110521fc52062b37aa1fa948fe803fb0..dd31ea138219d91682a86746c00cc9ad6261f087 100644
+--- a/dist/editor/SharedRichEditor.js
++++ b/dist/editor/SharedRichEditor.js
+@@ -94,6 +94,9 @@ export function SharedRichEditor({ value, onChange, onBlur, contentUpdatedAt, ed
+             },
+         },
+         onUpdate: ({ editor, transaction }) => {
++            // Editability and selection updates do not change saved content.
++            if (!transaction.docChanged)
++                return;
+             const guards = guardsRef.current;
+             if (!guards || guards.shouldIgnoreUpdate(transaction))
+                 return;
+@@ -135,7 +138,7 @@ export function SharedRichEditor({ value, onChange, onBlur, contentUpdatedAt, ed
+     useEffect(() => {
+         if (!editor || editor.isDestroyed)
+             return;
+-        editor.setEditable(editable);
++        editor.setEditable(editable, false);
+     }, [editable, editor]);
+     useEffect(() => {
+         if (editor)
+diff --git a/src/editor/SharedRichEditor.tsx b/src/editor/SharedRichEditor.tsx
+index 60b87f649b6bd2f3e9007fd07ca4e708c1bb28ee..81a91e98232e720a025c332893e4c7987c3280a2 100644
+--- a/src/editor/SharedRichEditor.tsx
++++ b/src/editor/SharedRichEditor.tsx
+@@ -260,6 +260,9 @@ export function SharedRichEditor({
+         },
+       },
+       onUpdate: ({ editor, transaction }) => {
++        // Editability and selection updates do not change saved content.
++        if (!transaction.docChanged)
++          return;
+         const guards = guardsRef.current;
+         if (!guards || guards.shouldIgnoreUpdate(transaction)) return;
+         try {
+@@ -301,7 +304,7 @@ export function SharedRichEditor({
+ 
+   useEffect(() => {
+     if (!editor || editor.isDestroyed) return;
+-    editor.setEditable(editable);
++    editor.setEditable(editable, false);
+   }, [editable, editor]);
+ 
+   useEffect(() => {
+diff --git a/dist/editor/extensions.js b/dist/editor/extensions.js
+index eb5cac1c6acc5e365c7127957bca7c8f73a398b1..c49df56fe4575f7595d62c9240d3bc9a6144ea8e 100644
+--- a/dist/editor/extensions.js
++++ b/dist/editor/extensions.js
+@@ -43,6 +43,7 @@ const codeLowlight = createLowlight({
+ });
+ import { createCodeBlockNode } from "./CodeBlockNode.js";
+ import { createImageExtension } from "./ImageExtension.js";
++import { createFootnoteExtensions } from "./footnotes.js";
+ const CollaborationWithSafeInitialSelection = Collaboration.extend({
+     addProseMirrorPlugins() {
+         const plugins = this.parent?.() ?? [];
+@@ -131,6 +132,9 @@ const DEFAULT_FEATURES = {
+     // Off by default: only Plans opt in today. Content injects its own richer
+     // image node via `extraExtensions` and must not get a second `image` node.
+     image: false,
++    // Vivary: off by default so editable documents keep their schema and saved
++    // Markdown. Read-only views opt in.
++    footnotes: false,
+ };
+ /**
+  * The ONE editor extension factory shared by every embedder (Plans today,
+@@ -239,6 +243,9 @@ preset: _preset = "plan", placeholder = "Type '/' for commands...", features, st
+     if (feat.image) {
+         exts.push(createImageExtension({ onImageUpload }));
+     }
++    if (feat.footnotes) {
++        exts.push(...createFootnoteExtensions());
++    }
+     // App-specific extensions (Notion/media/drag handles/comments). Appended
+     // before Collaboration so they can extend the schema and Collaboration binds
+     // over the full set.
+diff --git a/dist/editor/extensions.d.ts b/dist/editor/extensions.d.ts
+index 8d62d92c628d2e8d5d6eec02f0b1aea01964a5bc..ebf482e0b1b9c73618305000b0ad7493709f9f6a 100644
+--- a/dist/editor/extensions.d.ts
++++ b/dist/editor/extensions.d.ts
+@@ -66,6 +66,13 @@ export interface SharedEditorFeatures {
+      * option instead.
+      */
+     markdown?: boolean;
++    /**
++     * Vivary: GFM footnotes. `[^id]` references render as superscript links and
++     * `[^id]: note` definitions as one notes list at the end. Default `false`, and
++     * meant for read-only views, so editable documents keep their schema and
++     * saved Markdown.
++     */
++    footnotes?: boolean;
+     /**
+      * The shared block-level image node (`@tiptap/extension-image`). Default
+      * `false` so existing embedders are unchanged. When `true`, images
+diff --git a/dist/editor/footnotes.js b/dist/editor/footnotes.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..3d14e71c328a4dd8c3494c29384a27339137d77b
+--- /dev/null
++++ b/dist/editor/footnotes.js
+@@ -0,0 +1,392 @@
++import { mergeAttributes, Node } from "@tiptap/core";
++/**
++ * Vivary: GFM footnotes for read-only Markdown views. tiptap-markdown parses
++ * with plain markdown-it, which has no footnote syntax, so `[^id]` references
++ * stayed literal text and consecutive `[^id]: note` definitions ran together as
++ * one paragraph. These extensions add a markdown-it block rule for definitions,
++ * an inline rule for references, and a core rule that moves the definitions
++ * into one notes list at the end of the document, in order of first reference.
++ * This follows GFM: a reference without a definition stays text, and a
++ * definition that nothing references is not shown. Labels match the way link
++ * reference labels do, ignoring case, and each reference and note keeps the
++ * label it was written with for serialization. As in GFM's HTML, each reference
++ * has its own id, `fnref-<number>` for the first reference to a note and
++ * `fnref-<number>-<k>` for its k-th, and each note ends with one return link per
++ * reference. Return links are display only and serialize to nothing.
++ *
++ * Opt in with `features.footnotes`. It is off by default so editable documents
++ * keep their existing schema and saved Markdown. The serializers write the
++ * footnote syntax back so a read-only reconcile that reads Markdown still gets
++ * footnote syntax rather than a fallback.
++ */
++const LABEL_LIMIT = 999;
++const parsers = new WeakSet();
++function readLabel(src, start, max) {
++    // `[^` then a label with no whitespace, closed by `]`. As in a link label, a backslash
++    // escapes a bracket or a backslash, so `\[`, `\]`, and `\\` stay in the label.
++    if (src.charCodeAt(start) !== 0x5b || src.charCodeAt(start + 1) !== 0x5e)
++        return null;
++    for (let pos = start + 2; pos < max && pos - start <= LABEL_LIMIT; pos++) {
++        const code = src.charCodeAt(pos);
++        if (code === 0x5c) {
++            if (pos + 1 >= max)
++                return null;
++            const next = src.charCodeAt(pos + 1);
++            if (next !== 0x5b && next !== 0x5d && next !== 0x5c)
++                return null;
++            pos++;
++            continue;
++        }
++        if (code === 0x5d)
++            return pos === start + 2 ? null : { label: src.slice(start + 2, pos), end: pos + 1 };
++        if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x5b)
++            return null;
++    }
++    return null;
++}
++function footnoteDefinition(state, startLine, endLine, silent) {
++    const start = state.bMarks[startLine] + state.tShift[startLine];
++    const max = state.eMarks[startLine];
++    // Four columns of indentation make the line an indented code block instead.
++    if (state.sCount[startLine] - state.blkIndent >= 4)
++        return false;
++    const found = readLabel(state.src, start, max);
++    if (!found || state.src.charCodeAt(found.end) !== 0x3a)
++        return false;
++    if (silent)
++        return true;
++    const env = state.env;
++    const key = state.md.utils.normalizeReference(found.label);
++    env.footnotes ??= { refs: new Set() };
++    env.footnotes.refs.add(key);
++    const open = new state.Token("footnote_definition_open", "", 1);
++    open.meta = { label: found.label, key };
++    open.level = state.level++;
++    state.tokens.push(open);
++    // Parse the rest of the line and the indented lines after it as the
++    // definition's own blocks, the way markdown-it parses a list item.
++    const oldBMark = state.bMarks[startLine];
++    const oldTShift = state.tShift[startLine];
++    const oldSCount = state.sCount[startLine];
++    const oldParentType = state.parentType;
++    const afterColon = found.end + 1;
++    const initial = state.sCount[startLine] + afterColon - start;
++    let offset = initial;
++    let pos = afterColon;
++    while (pos < max) {
++        const code = state.src.charCodeAt(pos);
++        if (code === 0x09)
++            offset += 4 - (offset % 4);
++        else if (code === 0x20)
++            offset++;
++        else
++            break;
++        pos++;
++    }
++    state.tShift[startLine] = pos - afterColon;
++    state.sCount[startLine] = offset - initial;
++    state.bMarks[startLine] = afterColon;
++    state.blkIndent += 4;
++    state.parentType = "footnote";
++    if (state.sCount[startLine] < state.blkIndent)
++        state.sCount[startLine] += state.blkIndent;
++    state.md.block.tokenize(state, startLine, endLine, true);
++    state.parentType = oldParentType;
++    state.blkIndent -= 4;
++    state.tShift[startLine] = oldTShift;
++    state.sCount[startLine] = oldSCount;
++    state.bMarks[startLine] = oldBMark;
++    const close = new state.Token("footnote_definition_close", "", -1);
++    close.level = --state.level;
++    state.tokens.push(close);
++    return true;
++}
++function footnoteReference(state, silent) {
++    // Silent scans locate link-label boundaries. Treat the citation as ordinary
++    // bracketed text there, and keep it literal inside a confirmed link label.
++    if (silent || state.linkLevel > 0)
++        return false;
++    const footnotes = state.env.footnotes;
++    if (!footnotes)
++        return false;
++    const found = readLabel(state.src, state.pos, state.posMax);
++    if (!found)
++        return false;
++    const key = state.md.utils.normalizeReference(found.label);
++    if (!footnotes.refs.has(key))
++        return false;
++    // Number only after discarded and unreferenced definition bodies are removed.
++    const token = state.push("footnote_reference", "", 0);
++    token.meta = { label: found.label, key };
++    state.pos = found.end;
++    return true;
++}
++function footnoteTail(state) {
++    const footnotes = state.env.footnotes;
++    if (!footnotes)
++        return;
++    // Lift each definition's tokens out of the flow, then append the referenced
++    // ones in order of first reference. Definitions can nest, so the open ones
++    // form a stack: a nested definition becomes its own note, and the blocks
++    // after it stay with the definition that contains it. The first definition
++    // of a label wins.
++    const definitions = new Map();
++    const open = [];
++    state.tokens = state.tokens.filter((token) => {
++        if (token.type === "footnote_definition_open") {
++            const tokens = [];
++            open.push(tokens);
++            if (!definitions.has(token.meta.key))
++                definitions.set(token.meta.key, { label: token.meta.label, tokens });
++            return false;
++        }
++        if (token.type === "footnote_definition_close") {
++            open.pop();
++            return false;
++        }
++        if (open.length > 0) {
++            open[open.length - 1].push(token);
++            return false;
++        }
++        return true;
++    });
++    const numbers = new Map();
++    const list = [];
++    const occurrences = [];
++    function numberReferences(tokens) {
++        for (const block of tokens) {
++            if (block.type !== "inline")
++                continue;
++            for (const token of block.children ?? []) {
++                if (token.type !== "footnote_reference")
++                    continue;
++                const key = token.meta.key;
++                let index = numbers.get(key);
++                if (index === undefined) {
++                    index = list.length;
++                    numbers.set(key, index);
++                    list.push(key);
++                }
++                const occurrence = (occurrences[index] ?? 0) + 1;
++                occurrences[index] = occurrence;
++                token.meta = { ...token.meta, number: index + 1, occurrence };
++            }
++        }
++    }
++    // The body renders before the appended notes. Visit its references first,
++    // then each reached definition once, including notes reached from notes.
++    // The growing list is a queue, so even a note referring to itself terminates.
++    numberReferences(state.tokens);
++    for (let index = 0; index < list.length; index++) {
++        numberReferences(definitions.get(list[index]).tokens);
++    }
++    if (list.length === 0)
++        return;
++    state.tokens.push(new state.Token("footnote_block_open", "", 1));
++    list.forEach((key, index) => {
++        const definition = definitions.get(key);
++        const item = new state.Token("footnote_open", "", 1);
++        item.meta = { label: definition?.label ?? key, number: index + 1 };
++        const tokens = definition?.tokens ?? [];
++        // One return link per reference, at the end of the note's last paragraph, or in a
++        // paragraph of their own when the note ends with another block.
++        const backrefs = [];
++        for (let occurrence = 1; occurrence <= occurrences[index]; occurrence++) {
++            const backref = new state.Token("footnote_backref", "", 0);
++            backref.meta = { number: index + 1, occurrence };
++            backrefs.push(backref);
++        }
++        const last = tokens.length;
++        if (last >= 3 && tokens[last - 1].type === "paragraph_close" && tokens[last - 2].type === "inline") {
++            tokens[last - 2].children = [...(tokens[last - 2].children ?? []), ...backrefs];
++        }
++        else {
++            const inline = new state.Token("inline", "", 0);
++            inline.content = "";
++            inline.children = backrefs;
++            tokens.push(new state.Token("paragraph_open", "p", 1), inline, new state.Token("paragraph_close", "p", -1));
++        }
++        state.tokens.push(item, ...tokens, new state.Token("footnote_close", "", -1));
++    });
++    state.tokens.push(new state.Token("footnote_block_close", "", -1));
++}
++function installFootnoteSyntax(md) {
++    if (parsers.has(md))
++        return;
++    parsers.add(md);
++    const escape = md.utils.escapeHtml;
++    md.block.ruler.before("reference", "footnote_definition", footnoteDefinition, {
++        alt: ["paragraph", "reference"],
++    });
++    md.inline.ruler.after("image", "footnote_reference", footnoteReference);
++    md.core.ruler.after("inline", "footnote_tail", footnoteTail);
++    md.renderer.rules.footnote_reference = (tokens, index) => {
++        const { label, number, occurrence } = tokens[index].meta;
++        return `<sup data-footnote-ref="${escape(label)}" data-footnote-number="${number}" data-footnote-occurrence="${occurrence}">${number}</sup>`;
++    };
++    md.renderer.rules.footnote_backref = (tokens, index) => {
++        const { number, occurrence } = tokens[index].meta;
++        return `<span data-footnote-backref="" data-footnote-number="${number}" data-footnote-occurrence="${occurrence}"></span>`;
++    };
++    md.renderer.rules.footnote_block_open = () => '<section data-footnotes=""><ol>';
++    md.renderer.rules.footnote_block_close = () => "</ol></section>";
++    md.renderer.rules.footnote_open = (tokens, index) => {
++        const { label, number } = tokens[index].meta;
++        return `<li data-footnote="${escape(label)}" data-footnote-number="${number}">`;
++    };
++    md.renderer.rules.footnote_close = () => "</li>";
++}
++const numberAttribute = {
++    default: 1,
++    parseHTML: (element) => Number(element.getAttribute("data-footnote-number")) || 1,
++    renderHTML: () => ({}),
++};
++const occurrenceAttribute = {
++    default: 1,
++    parseHTML: (element) => Number(element.getAttribute("data-footnote-occurrence")) || 1,
++    renderHTML: () => ({}),
++};
++/** The id of a note's k-th reference, as in GFM: `fnref-1`, then `fnref-1-2`. */
++function referenceId(number, occurrence) {
++    return occurrence > 1 ? `fnref-${number}-${occurrence}` : `fnref-${number}`;
++}
++/** A footnote reference, shown as a superscript link to its note. */
++export const FootnoteReference = Node.create({
++    name: "footnoteReference",
++    group: "inline",
++    inline: true,
++    atom: true,
++    selectable: false,
++    addAttributes() {
++        return {
++            label: {
++                default: "",
++                parseHTML: (element) => element.getAttribute("data-footnote-ref") ?? "",
++                renderHTML: () => ({}),
++            },
++            number: numberAttribute,
++            occurrence: occurrenceAttribute,
++        };
++    },
++    parseHTML() {
++        return [{ tag: "sup[data-footnote-ref]" }];
++    },
++    renderHTML({ node, HTMLAttributes }) {
++        const number = String(node.attrs.number);
++        return ["sup", mergeAttributes(HTMLAttributes, { class: "an-rich-md-footnote-ref" }),
++            ["a", { href: `#fn-${number}`, id: referenceId(number, node.attrs.occurrence), "aria-label": `Note ${number}` }, number]];
++    },
++    renderText({ node }) {
++        return String(node.attrs.number);
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.write(`[^${node.attrs.label}]`);
++                },
++                parse: {},
++            },
++        };
++    },
++});
++/**
++ * A return link at the end of a note to one of its references. It is display only:
++ * it adds no text and writes no Markdown.
++ */
++export const FootnoteBackref = Node.create({
++    name: "footnoteBackref",
++    group: "inline",
++    inline: true,
++    atom: true,
++    selectable: false,
++    addAttributes() {
++        return { number: numberAttribute, occurrence: occurrenceAttribute };
++    },
++    parseHTML() {
++        return [{ tag: "span[data-footnote-backref]" }];
++    },
++    renderHTML({ node }) {
++        const { number, occurrence } = node.attrs;
++        const id = referenceId(number, occurrence);
++        const label = occurrence > 1 ? `${number}-${occurrence}` : String(number);
++        const link = ["a", { href: `#${id}`, class: "an-rich-md-footnote-backref", "data-footnote-backref": "",
++                "aria-label": `Back to reference ${label}` }, "↩"];
++        if (occurrence > 1)
++            link.push(["sup", {}, String(occurrence)]);
++        return ["span", { class: "an-rich-md-footnote-return" }, " ", link];
++    },
++    renderText() {
++        return "";
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize() { },
++                parse: {},
++            },
++        };
++    },
++});
++/** One note in the list, holding the definition's blocks. */
++export const FootnoteItem = Node.create({
++    name: "footnoteItem",
++    content: "block+",
++    defining: true,
++    addAttributes() {
++        return {
++            label: {
++                default: "",
++                parseHTML: (element) => element.getAttribute("data-footnote") ?? "",
++                renderHTML: () => ({}),
++            },
++            number: numberAttribute,
++        };
++    },
++    parseHTML() {
++        return [{ tag: "li[data-footnote]", priority: 60 }];
++    },
++    renderHTML({ node, HTMLAttributes }) {
++        return ["li", mergeAttributes(HTMLAttributes, { id: `fn-${node.attrs.number}` }), 0];
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.wrapBlock("    ", `[^${node.attrs.label}]: `, node, () => state.renderContent(node));
++                },
++                parse: {},
++            },
++        };
++    },
++});
++/** The notes list at the end of the document. It registers the markdown-it rules. */
++export const Footnotes = Node.create({
++    name: "footnotes",
++    group: "block",
++    content: "footnoteItem+",
++    parseHTML() {
++        return [{ tag: "section[data-footnotes]", contentElement: "ol" }];
++    },
++    renderHTML({ HTMLAttributes }) {
++        return ["section", mergeAttributes(HTMLAttributes, { class: "an-rich-md-footnotes", "aria-label": "Notes" }), ["ol", 0]];
++    },
++    addStorage() {
++        return {
++            markdown: {
++                serialize(state, node) {
++                    state.renderContent(node);
++                    state.closeBlock(node);
++                },
++                parse: {
++                    setup(markdownit) {
++                        installFootnoteSyntax(markdownit);
++                    },
++                },
++            },
++        };
++    },
++});
++export function createFootnoteExtensions() {
++    return [FootnoteReference, FootnoteBackref, FootnoteItem, Footnotes];
++}
+diff --git a/dist/editor/footnotes.d.ts b/dist/editor/footnotes.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d711d78c19fda17a2cc21a3551fa070cbcd37977
+--- /dev/null
++++ b/dist/editor/footnotes.d.ts
+@@ -0,0 +1,11 @@
++import { Node } from "@tiptap/core";
++/** A footnote reference, shown as a superscript link to its note. */
++export declare const FootnoteReference: Node<any, any>;
++/** A return link at the end of a note to one of its references. Display only. */
++export declare const FootnoteBackref: Node<any, any>;
++/** One note in the list, holding the definition's blocks. */
++export declare const FootnoteItem: Node<any, any>;
++/** The notes list at the end of the document. It registers the markdown-it rules. */
++export declare const Footnotes: Node<any, any>;
++/** Read-only GFM footnote support for `features.footnotes`. */
++export declare function createFootnoteExtensions(): Node<any, any>[];

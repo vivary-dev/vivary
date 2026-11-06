@@ -7,8 +7,10 @@ import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { assertNativeSqliteMatchesNode, ensureCorePackageJson, ensureProofRoot } from "./maintained-test-options.mjs";
 
 const TEST_FILE = fileURLToPath(import.meta.url);
+const CHILD_HEAP_ARG = "--max-old-space-size=192";
 const ACTION_PATH = "/_agent-native/actions/vivary-register-project";
 const scenarios = {
   registration: "real native HTTP registration and replay preserve store, caller context and audit",
@@ -202,9 +204,9 @@ async function worker(scenario) {
       await noDispatch();
     } else if (scenario === "authorization") {
       const missing = await call({ authenticated: false, headers: { "x-actor-id": "actor-a" } });
-      // Core currently classifies the thrown owner error as an aborted Node
-      // request after body consumption, producing 404. It still refuses entry.
-      assert.equal(missing.status, 404, missing.text);
+      // Issue #142. Core once dropped the thrown owner error as a client
+      // abort after reading the body and answered 404. It keeps the 401 now.
+      assert.equal(missing.status, 401, missing.text);
       const denied = await call({ headers: { authorization: `Bearer ${deniedToken}` } });
       assert.equal(denied.status, 403, denied.text);
       assert.equal(authenticated, 2);
@@ -251,6 +253,8 @@ if (process.env.VIVARY_HTTP_WORKER === "1") { // guard:allow-env-credential — 
     process.exitCode = 1;
   }
 } else {
+  assertNativeSqliteMatchesNode(ensureCorePackageJson());
+  ensureProofRoot("VIVARY_REGISTRY_PROOF_ROOT");
   for (const [scenario, title] of Object.entries(scenarios)) {
     test(title, async () => {
       const configured = process.env.VIVARY_REGISTRY_PROOF_ROOT; // guard:allow-env-credential — Disposable test directory path; no credential value.
@@ -269,7 +273,7 @@ if (process.env.VIVARY_HTTP_WORKER === "1") { // guard:allow-env-credential — 
         ...(scenario === "appBase" ? { APP_BASE_PATH: "/workbench" } : {}),
       });
       try {
-        const result = spawnSync(process.execPath, [TEST_FILE, scenario], {
+        const result = spawnSync(process.execPath, [CHILD_HEAP_ARG, TEST_FILE, scenario], {
           cwd: caseRoot, env, windowsHide: true, encoding: "utf8", timeout: 45000,
           maxBuffer: 1024 * 1024,
         });

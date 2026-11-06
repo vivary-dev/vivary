@@ -8,10 +8,9 @@ import {
 import { agentNativePath } from "@agent-native/core/client/api-path";
 
 import { isRejectedSessionToken, rejectSessionToken } from "./native-session-rejections";
+import { isValidSessionToken } from "../../shared/owner-session";
 
 const APP_STATE_KEY_PATTERN = /^[a-zA-Z0-9_:-]+$/;
-const SESSION_TOKEN_PATTERN = /^[^\s\u0000-\u001f\u007f]+$/;
-const MAX_SESSION_TOKEN_LENGTH = 4096;
 
 type SessionSnapshot = ReturnType<typeof useSession>;
 export type AppStateWriter = <T = unknown>(
@@ -37,13 +36,6 @@ export type AppStateWriterHandle = {
   sessionStatus: SessionSnapshot["status"];
   writeAppState: AppStateWriter;
 };
-
-export function isValidSessionToken(token: unknown): token is string {
-  return typeof token === "string"
-    && token.length > 0
-    && token.length <= MAX_SESSION_TOKEN_LENGTH
-    && SESSION_TOKEN_PATTERN.test(token);
-}
 
 export function sessionToken(snapshot: Pick<SessionSnapshot, "session" | "status">) {
   if (snapshot.status !== "authenticated") {

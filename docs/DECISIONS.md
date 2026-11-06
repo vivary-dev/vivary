@@ -7,7 +7,7 @@ reviewed on **2026-08-09**. Later decisions carry their approval date.
 - [**D-001 — Named trains coordinate independent package semvers.**](RELEASE-WORKFLOW.md#train-and-version-lifecycle)
   **Vivary Governed Context** is a release label, not a suite version. Packages bump only when their
   own surface changes; only `create-vivary` and `@vivary/create` use the same version.
-  This is the selected resolution of [#149](https://github.com/vivary-dev/vivary/issues/149).
+  This is the selected resolution of [#149](https://github.com/vivary-dev/vivary-cli/issues/149).
 - [**D-002 — `vivary-core` is a shared seam, not a fifth role or CLI.**](ARCHITECTURE.md#the-shared-seam-vivary-core)
   Tropo observes and retrieves, Strato decides, Ozone verifies and proposes, and Exo
   projects caller-owned control state. Their manifests provide the executable

@@ -257,9 +257,19 @@ test('generated docs edit their canonical repo sources rather than generated cop
 test('desktop onboarding links use the app repository in generated docs', () => {
   for (const file of ['../src/content/docs/getting-started.md', '../public/llms-full.txt']) {
     const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-    assert.ok(text.includes('https://github.com/vivary-dev/Vivary-New/blob/main/docs/product/multi-project/desktop-acceptance-status.md'));
-    assert.ok(text.includes('https://github.com/vivary-dev/Vivary-New/blob/dev/packages/workbench/README.md#run-from-source'));
-    assert.ok(text.includes('https://github.com/vivary-dev/Vivary-New/blob/dev/packages/desktop/README.md#development'));
-    assert.doesNotMatch(text, /https:\/\/github\.com\/vivary-dev\/vivary\/blob\/dev\/packages\/(?:desktop|workbench)\//);
+    assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md'));
+    assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/README.md#run-from-source'));
+    assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#development'));
+    assert.doesNotMatch(text, /https:\/\/github\.com\/vivary-dev\/vivary-cli\/blob\/dev\/packages\/(?:desktop|workbench)\//);
   }
+});
+
+
+test('HLDD references resolve to their source owners', () => {
+  const text = readFileSync(new URL('../src/content/docs/architecture.md', import.meta.url), 'utf8');
+  assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md'));
+  assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/.agents/skills/maintain-hldd/SKILL.md'));
+  assert.match(text, /\]\(https:\/\/github\.com\/vivary-dev\/vivary\/tree\/dev\/packages\)/);
+  assert.ok(text.includes('https://github.com/vivary-dev/vivary/blob/dev/packages/core/README.md'));
+  assert.doesNotMatch(text, /\]\((?:product\/multi-project\/|\.\.\/\.agents\/|\.\.\/packages\))/);
 });

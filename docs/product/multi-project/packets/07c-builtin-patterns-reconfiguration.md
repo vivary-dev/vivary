@@ -2,12 +2,13 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/16
 Parent: 07
-Status: needs-info
+Status: done
 Depends-on: [07d]
 Owner: Root-assigned creator and setup UI writer
 Scope: Use the shared plan for useful built-in starter content and explicit pattern/role reconfiguration without replacing the workspace.
 Verification-kind: runtime
-Needs: 07d supplies the working create UI over the shared plan. This packet adds reconfiguration. Preserve authored content in built-in pattern changes.
+Evidence: [Built-in guidance and reconfiguration acceptance](../receipts/07c-builtin-patterns-reconfiguration.md)
+Verification-result: passed
 Timebox: One coherent user-visible increment with focused checks and review.
 
 ## Goal
@@ -78,6 +79,26 @@ pattern catalogs remain later additions, not blockers for the first useful flow.
   unresolved. No implementation or runtime acceptance is claimed.
 
 - 2026-09-13: Included in the desktop release after 07d. Existing preset aliases remain compatible.
+- 2026-09-23: The 07d GUI and packaged Windows creation journey passed.
+  This packet is ready to claim after issue #15 merges. Keep existing user
+  content and preset aliases through reconfiguration.
+- 2026-09-23: Issues #15 and #17 passed their accepted GUI journeys. This
+  packet is the next ready project increment. Parent packet 07 remains open.
+
+- 2026-09-23: Activated after #17 merged through PR #86. The creator owns
+  installed patterns and exact reconfiguration plans. Extend existing Native
+  review and custody, preserve authored guidance and state, and verify the
+  create/edit/reconfigure/reopen journey before accepting this packet.
+
+- 2026-09-23: Clean `7784b8d9` passed installed creator, hosted desktop and
+  narrow-layout creation, edited-choice preview, authored-file preservation,
+  interrupted response retry, and same-project restart. Independent review
+  accepted the product and retained evidence. See the linked receipt for
+  source checks and the final-artifact boundary under #23.
+
+- 2026-09-23: Compatibility source `1ae19565` passed installed-runtime and
+  hosted legacy/BOM migration, 41-emoji guidance names, exact writes, authored
+  role preservation, and same-project restart.
 
 ## Shared desktop and web behavior
 

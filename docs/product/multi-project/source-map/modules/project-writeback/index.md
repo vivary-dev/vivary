@@ -47,7 +47,9 @@ prerequisites only; neither is a project-file behavior contract or effect receip
 The canonical project-file adapter is implemented in
 `packages/workbench/server/project-files.ts`, with scoped save/rename actions and
 recoverable drafts. [The issue 12 receipt](../../../receipts/11a-project-file-surface.md)
-records the accepted file slice. The [module catalog](../../../specification/modules.md)
+records the accepted file slice. Issue #21 adds exclusive Create and
+version-checked Remove to the same service. Only project memory calls them, to
+save and forget one fact file. The [module catalog](../../../specification/modules.md)
 routes to those source owners.
 
 That evidence does not establish general isolated-worker write-back, atomic

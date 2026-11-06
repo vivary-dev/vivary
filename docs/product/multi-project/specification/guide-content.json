@@ -15,7 +15,7 @@
       "acceptedOn": "2026-09-14",
       "authority": "Jeff's explicit correction in the product conversation",
       "explanation": "A project can contain multiple independent chats. The workspace shows one selected conversation in the center at a time. Each conversation has its own bounded context and can reach model context limits.",
-      "implementationImpact": "Navigation must let users start, select and return to several project conversations. Potentially concurrent thread activity needs visible status and approvals for each thread, plus controls for conflicting edits to shared files. The current runtime permits one active run at a time. This remains an explicit implementation limitation until concurrency support lands."
+      "implementationImpact": "Navigation must let users start, select and return to several project conversations. Potentially concurrent thread activity needs visible status and approvals for each thread, plus controls for conflicting edits to shared files. The current runtime permits one active root conversation run at a time. This remains an explicit implementation limitation until concurrency support lands."
     },
     {
       "id": "harness-capability-ownership",
@@ -45,15 +45,15 @@
     },
     {
       "title": "Return to the conversation",
-      "plain": "Return to an existing conversation or start another inside the same project. Each chat has separate history and model context. Reliable Native reopening and restart-draft recovery still need verification.",
+      "plain": "Return to an existing conversation or start another inside the same project. Each chat has separate history and model context.",
       "why": "A long project needs more than one context window, and separate work should not blur into one transcript.",
       "module": "M03",
       "scene": "conversation",
-      "detail": "The center shows one selected conversation at a time, not the project's only conversation. Existing Native thread, Code and harness records retain their own identities. A conversation can reach its model context limit. Another chat starts with a separate context. Potentially concurrent work needs status and approvals for each thread plus controls for conflicting edits to shared files. The current runtime still permits one active run at a time. Unsent drafts belong to the current client and profile; this does not promise draft transfer to another device. Native persistence is held under issue #6. Per-conversation draft restoration across restarts remains issue #9 acceptance."
+      "detail": "The center shows one selected conversation at a time, not the project's only conversation. Existing Native thread, Code and harness records retain their own identities. A conversation can reach its model context limit. Another chat starts with a separate context. Potentially concurrent work needs status and approvals for each thread plus controls for conflicting edits to shared files. The current runtime still permits one active root conversation run at a time. Unsent drafts belong to the current client and profile; this does not promise draft transfer to another device. Project-bound Native persistence is integrated. Codex follow-ups resume its recorded native session. Per-conversation draft restoration across restarts remains issue #9 acceptance."
     },
     {
       "title": "Choose a harness and model",
-      "plain": "The planned picker groups supported installed harnesses and their available models. Each harness owns its tools and permissions. This unified catalog is not implemented yet.",
+      "plain": "New conversations select Claude Code or Codex. Codex reports its available subscription models. The broader unified harness catalog and linked switching flow remain planned.",
       "why": "You can see the harness's actual available capabilities without configuring a second general tool picker or a predefined persona.",
       "module": "M04",
       "scene": "harness",
@@ -61,11 +61,11 @@
     },
     {
       "title": "Approve or decline work",
-      "plain": "See the request and its project before it runs. Approval, denial and Stop stay reachable when side panels are closed.",
+      "plain": "Codex Send starts immediately. Review native action requests when its selected permission mode requires a decision. Approval, denial and Stop remain reachable.",
       "why": "Background work must be visible and understandable.",
       "module": "M05",
       "scene": "approval",
-      "detail": "Approval remains bound to the originating request and Native owner. A changed request or scope needs revalidation. Runtime completion is separate from verified acceptance."
+      "detail": "Approval remains bound to the originating request and Native owner. A changed request or scope needs revalidation. Runtime completion is separate from verified acceptance. Normal, Read only, and YOLO apply to the next turn. Denying one action does not imply the model never started. Active work retains its captured mode."
     },
     {
       "title": "Open a file when you need it",

@@ -246,6 +246,58 @@ This single invariant is what makes composition safe: you can always reason
 about a document by reading rules top-down, knowing nothing below ever takes a
 constraint away.
 
+### 5.7 Authored project facts in thin workspaces
+
+A thin workspace (`.vivary/workspace.toml`) gets one built-in type after every
+pack, local table, and root overlay has merged:
+
+```toml
+[types.vivary_fact]
+folder   = [".vivary/knowledge", "<each memory role path>"]
+required = { source = "string", confirmed = "date" }
+```
+
+- `.vivary/knowledge` is the default folder for authored facts. The `memory`
+  role in `[workspace.vivary.roles]` can name other folders. The default stays
+  typed after the role moves, so facts left there still pass `check`.
+- A `folder` value that contains `/` names that exact workspace-relative
+  directory. Resolution checks the exact directory before basenames, so a fact
+  under `.vivary/knowledge/` does not inherit the `project` type of `.vivary/`.
+- A memory role path without `/`, such as `facts`, is registered as `./facts`.
+  A `./` value matches only that folder at the workspace root, so
+  `tests/facts/` stays untyped. Owner types keep plain basename matching.
+- The owner wins. An owner `[types.vivary_fact]` table is used unchanged, and a
+  fact folder that another type already names, by its path or by its
+  basename, keeps that type.
+- The private check and the privacy-filtered public check apply the same rule.
+- A folder without thin settings gets no built-in type.
+
+One file holds one fact. `confirmed` is the date the owner last saved or
+corrected it. The first `# ` heading is the title:
+
+```markdown
+---
+source: "Jeff, planning call"
+confirmed: 2026-09-25
+---
+# Relay budget
+
+The relay budget is 40 dollars per month.
+```
+
+`workspace_context(config)` returns the roles, the state file, the effective
+memory folders, and the declared protected paths (`workspace.private`,
+`workspace.runtime`, and capability storage) from configuration alone. It reads
+no notes. The creator's `workspace_context` adds which memory folders, law
+files, state file, fact files, and candidate new files the workspace's
+`.gitignore` files ignore, which `.gitignore` files it consulted, and the
+fact files it checked in each memory folder. It lists a folder as the Workbench
+does (the first 200 `.md` names of regular files and links, secret-looking
+names left out, in UTF-16 order, from at most 4,000 scanned entries) and checks
+the regular files among them whose paths the Workbench answer schema accepts,
+at most 3,000 paths and 96 KiB of JSON in all. A name that is not valid UTF-8 decodes differently on the two sides and can sort differently, so it can shift the two listings apart. The files that shift show as not checked, which fails closed. For memory
+it matches fail-closed: memory treats a path as private when any positive rule could match it and ignores negations, so it may refuse a file Git would re-include. The owner can choose a memory folder that no rule matches. A rule matches in exact case or without regard to case, a run of two or more stars reads the same whatever its length, as in Git, and a run not bounded by slashes crosses `/`, a rule and a path match as code points or as UTF-8 bytes, and a trailing `/` also matches a file. Each `.gitignore` is read as bytes: a UTF-8 byte order mark is skipped, lines split only on a newline, with one carriage return before it dropped, and an entry ends at its first NUL. Memory reads a bracket body itself only when it holds plain members and ranges, such as `[._]` or `[a-v]`, with an optional leading `!` or `^`. A body that holds a backslash, starts with `]`, `!]`, or `^]`, or holds a POSIX class, an equivalence class, or a collating symbol, a negated body holding an ASCII capital letter outside a range, such as `[!B]`, an unescaped `[` that never closes, a set Python cannot compile, and a rule longer than 256 characters make the rule match everything under its folder. Matching tracks reachable positions without backtracking, and each context read spends from a fixed matching budget. When the budget runs out, every path not yet decided counts as private, the answer sets `privacy_limited`, and the context block and the panel say the ignore rules were too costly to check in full. The budget is 20 million units: each positive rule and path pair costs its rule length plus 64 (a negated rule is skipped without a charge), and each match step costs the path positions it visits. A read that loads more than 2,000 rules from the `.gitignore` files it consults stops the same way. The budget bounds the work a read does, not its time on every machine. On Zo the slowest case measured, 1,999 rules against 200 files, stopped at the budget in about 1.7 seconds. A memory folder is private when a rule would ignore the probe name `vivary-memory-folder-probe.md` in it, so a rule that names one fact, such as `fact.md`, does not make the whole folder private, while `*.md` still does. More consulted `.gitignore` files than the Workbench answer accepts (4,000) cut the list and make the answer limited, with every path private. A `.vivary/workspace.toml` that is a link, a folder, or not a regular file returns `invalid` with a fixed message. Host paths in messages are scrubbed, including Windows UNC (`\\server\share`) and extended-length (`\\?\`) forms. Outside brackets a backslash escapes the next character. A differential test checks this against `git check-ignore`. It does not read `.git/info/exclude` or global Git excludes.
+
 ---
 
 ## 6. CLI surface

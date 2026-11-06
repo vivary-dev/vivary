@@ -25,7 +25,7 @@ No model, storage vendor, hosting plan, default runtime, or payment service is s
 Jeff requested one complete new repository named `Vivary-New` in the Vivary
 organization, connected to GitHub and Entire. His later branching correction
 selects typed topic branches from `dev`, PRs into `dev`, and reviewed promotion
-to `main`. `main` is the default branch. The repository remains private.
+to `main`. `main` is the default branch. The repository was public when checked on 2026-09-24.
 Keep the existing checkout and history. This supersedes the earlier Entire-only
 feature-branch delivery restriction. The original public repository remains separate.
 [CONTRIBUTING.md](../../../CONTRIBUTING.md) owns the workflow and its enforcement limit.
@@ -127,7 +127,7 @@ A paid authentication service is not required.
 Use up to three subagents as needed and make broad real visual/UI testing part
 of normal delivery. Repair failures, repeat the affected journey, and continue
 implementation without expanding verification machinery. The private Zo preview
-is the active development surface. For private Vivary-New, reviewed topic PRs
+is the active development surface. For Vivary-New, reviewed topic PRs
 merge into dev under [the contributor rules](../../../CONTRIBUTING.md). Promotion
 to main and public release retain their separate product-acceptance requirements.
 
@@ -166,7 +166,7 @@ The owner answered the three questions in
    without a gate is not selected.
 
 The owner subsequently added **decision four**, recorded separately in
-[PR #334](https://github.com/vivary-dev/vivary/pull/334) on 2026-09-06:
+[PR #334](https://github.com/vivary-dev/vivary-cli/pull/334) on 2026-09-06:
 Vivary drives whichever coding agent the user already pays for, Claude Code,
 Codex, or another through an adapter, with one role contract and one receipt
 shape. The loop never requires its own model API key and never resells tokens.
@@ -477,8 +477,10 @@ disciplined work process usable without programming expertise.
 The owner clarified that Vivary is a tool for accomplishing real work, not an
 educational product. The GUI directs work and presents results and decisions.
 Do not add lessons, tutorials, or teaching flows from this accessibility goal.
-Existing Claude Code and Codex subscriptions are an intended connection journey.
-The desired action is one button to connect an existing coding agent.
+Existing Claude Code and Codex subscriptions are supported by the current Code
+runtime path. PR #59 verifies the bounded Codex prototype; see the
+[acceptance register](desktop-acceptance-status.md) for exact platform and artifact
+coverage. A simpler one-button connection journey remains a product goal.
 
 Preserve GUI-first and headless-capable use, runtime choice, and the complete agreed
 scope. Show the task, changed result, passing and failing checks, and required
@@ -546,10 +548,40 @@ after leaving the browser. Background work must be obvious and provide approval
 and denial. Issue [#35](https://github.com/vivary-dev/Vivary-New/issues/35) owns
 this requirement.
 
-Each local coding turn requires a visible, server-enforced decision before
-execution. Show its exact task, project, runtime, capabilities, and existing
-two-minute limit. Approval applies to that turn only. Denial starts no model or
-tools. Pending, running, and terminal outcomes remain visible with a conversation
-link and denial or Stop as appropriate. Host restart never grants approval or
-automatically resumes interrupted work. Native retains the conversation and
-approval records. This decision adds no scheduler or second run store.
+The original per-turn launch decision and two-minute limit are superseded by
+Jeff's September 16 correction below. The [issue #35 receipt](receipts/35-background-approval.md)
+retains the original implementation and its historical acceptance.
+
+## Native coding permissions and activity, 2026-09-16
+
+Sending a message starts work. The agent may continue until it completes, fails,
+the user selects Stop, or the host closes. Leaving a browser page does not stop
+it. Startup and process cleanup retain time limits; model turns have no fixed
+wall-clock cutoff. Restart interrupts unfinished work and never replays actions
+or instructions awaiting an old launch approval.
+
+Codex owns tool execution. Vivary relays its native action approvals and questions
+into the existing workspace. Decisions bind to the live owner, project connection,
+run, and native request. The browser cannot replace the command or permissions.
+Stop and pending decisions remain available when another project is selected.
+
+Runtime settings offers Normal, Read only, and YOLO for Codex, with no Plan mode.
+Normal allows project work and asks when an action needs broader access. Read only
+prevents local command writes and permission expansion. YOLO allows full host
+command access without action prompts. Connected services retain their own access
+rules. Changes apply to the next turn and never expand an active turn silently.
+The mode does not reach Claude Code. Every Claude Code run starts in Claude Code's
+`acceptEdits` mode with its file tools, so it edits project files without asking in
+every mode. Settings says so under the mode, and the line under a Claude Code
+conversation says that Claude Code accepts file edits and that the mode applies to
+Codex only.
+
+Public progress updates use compact, darker cards within the conversation. Actual
+native subagent activity has distinct cards with recorded identities and status.
+Final answers use the main text style. Never infer subagents from consecutive
+assistant messages or label public progress as hidden reasoning.
+
+The [Workbench runtime contract](../../../packages/workbench/README.md) owns
+adapter capabilities and limitations. The [acceptance register](desktop-acceptance-status.md)
+separates source, hosted, simulated-protocol, and real Windows evidence. Issue #38
+retains broader linked-conversation, handoff, and concurrent-conversation work.

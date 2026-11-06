@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { withMigrationRuntime, runMigrations, closeDbExec } from "@agent-native/core/db";
-import { ORG_MIGRATIONS, organizations, orgMembers, setAppMemberRole } from "@agent-native/core/org";
-import { addSession, removeSession } from "@agent-native/core/server";
-import { and, eq } from "@agent-native/core/db/schema";
 import { H3Event } from "h3";
-import { getDb } from "../server/db/index.mjs";
-import { createNativeRegistry, createNativeRegistryAuth } from "../server/native-registry.mjs";
-import { evaluateRegistryOperation } from "../../../scripts/registry_contract_model.mjs";
+
+// Each run owns a disposable database, so the fixed ids below never collide.
+const directory = await mkdtemp(path.join(tmpdir(), "vivary-registry-scope-"));
+const database = "file:" + path.join(directory, "native.sqlite");
+Object.assign(process.env, { DATABASE_URL: database, DATABASE_URL_UNPOOLED: database,
+  VIVARY_DATABASE_URL: database, VIVARY_DATABASE_URL_UNPOOLED: database });
+test.after(() => rm(directory, { recursive: true, force: true }));
+const { withMigrationRuntime, runMigrations, closeDbExec } = await import("@agent-native/core/db");
+const { ORG_MIGRATIONS, organizations, orgMembers, setAppMemberRole } = await import("@agent-native/core/org");
+const { addSession, removeSession } = await import("@agent-native/core/server");
+const { and, eq } = await import("@agent-native/core/db/schema");
+const { getDb } = await import("../server/db/index.mjs");
+const { createNativeRegistry, createNativeRegistryAuth } = await import("../server/native-registry.mjs");
+const { evaluateRegistryOperation } = await import("../../../scripts/registry_contract_model.mjs");
 
 test("catalog scope shares native authority without observing or broadening it", async (suite) => {
   const email = "catalog-actor@example.test";
@@ -52,6 +62,10 @@ test("catalog scope shares native authority without observing or broadening it",
       assert.ok(Object.isFrozen(scope.locationRefs));
       assert.equal(await runtime.readScope(mutable), null);
       assert.equal(observations, 0);
+    });
+    await suite.test("only the owner's own requests read the scope", async () => {
+      assert.notEqual(await runtime.readScope(original), null);
+      for (const caller of ["tool", "agent"]) assert.equal(await runtime.readScope({ ...original, caller }), null);
     });
     await suite.test("each scope lookup observes native role and membership removal", async () => {
       assert.notEqual(await runtime.readScope(original), null);

@@ -72,6 +72,9 @@ rather than being ignored. Core artifacts carried through the envelopes use the
 
 | Surface | Request | Success | Refusal / incomplete result | Contract evidence |
 |---|---|---|---|---|
+| `vivary doctor --public --json` | CLI arguments plus an operator-selected root | `vivary.doctor-result/v0`, naming no user-authored path | None. A usage error exits 2 | [Front door regressions](https://github.com/vivary-dev/Vivary-New/blob/dev/packages/vivary/tests/test_vivary_cli.py) |
+| `vivary find --public --json`, `vivary check --public --json` | CLI arguments plus an operator-selected root | `vivary.find-result/v0`, `vivary.check-result/v0` | `vivary.read-refusal/v0` with the facade's reason, exit 2 | [Front door regressions](https://github.com/vivary-dev/Vivary-New/blob/dev/packages/vivary/tests/test_vivary_cli.py) |
+| `vivary review --public --json`, `vivary impact ID --public --json` | CLI arguments plus an operator-selected root. Review takes `--pack structure` or `editorial` | `vivary.review-result/v0`, `vivary.impact-result/v0`, exit 0 | `vivary.read-refusal/v0` with the facade's reason, including `target_unavailable` for a private, missing, or unknown impact target, exit 2 | [Front door regressions](https://github.com/vivary-dev/Vivary-New/blob/dev/packages/vivary/tests/test_vivary_cli.py) |
 | `tropo find --governed --json` | CLI arguments plus an operator-selected root | `vivary.task-capsule/v0` | Structured CLI error; no partial capsule is presented as complete | [Tropo regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/tropo/tests/test_tropo.py) |
 | `strato decide --governed --json` | `vivary.strato-decision-request/v0` | `vivary.strato-decision/v0` | `vivary.strato-decision-refusal/v0` | [Strato regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/strato/tests/test_strato.py) |
 | `ozone verify --governed --json` | `vivary.ozone-verification-request/v0` | `vivary.ozone-verification/v0`, carrying Core receipt/gate verdicts and an optional repair proposal | `vivary.ozone-verification-refusal/v0` | [Ozone regressions](https://github.com/vivary-dev/vivary/blob/dev/packages/ozone/tests/test_ozone.py) |
@@ -173,8 +176,8 @@ text, target ids, and local paths are not copied into the summary.
 | Command | Job |
 |---|---|
 | `logs [PATH]` | Read local JSONL receipts from `PATH`, `VIVARY_RECEIPT_LOG`, or `.vivary/receipts.jsonl` and print a summary. |
-| `logs --failed --tail 10` | Show only recent failed receipts. |
-| `logs --json` | Return `{summary, records}` for agents and bug-report tooling. |
+| `logs --failed --tail 10` | Show only recent failed receipts. A receipt counts as failed unless its `ok` is `true`. |
+| `logs --json` | Return `{summary, log, records}` for agents and bug-report tooling. `summary` covers the printed records, and `log` covers the whole file. A missing log returns `log: null` and exits 0. |
 | `logs email ... --out FILE` | Write a local `.eml` draft; directory targets, symlink targets, symlink/junction ancestors, and Windows device names are refused. |
 | `logs email ...` | Without `--out`, print a `mailto:` URL for the user's mail client. |
 
@@ -195,9 +198,7 @@ Standard output is reserved for MCP JSON-RPC. `--observability` writes bounded,
 sanitized diagnostics to standard error: none in `off`, refusal/cancellation/timeout
 events in `errors`, or all bounded lifecycle events in `json`.
 
-This unpublished source candidate pins protocol `2026-07-28` and official SDK
-`mcp==2.2.0` with `mcp-types==2.2.0`. Published `vivary-mcp` 0.1.3 still has the
-older SDK dependency; these source changes do not update that artifact. External
+Staged source 0.1.4 pins protocol `2026-07-28` and official SDK `mcp==2.2.0`. External
 conformance remains unproven. [MCP.md](MCP.md) owns the tool schemas, privacy and
 process boundaries, passive Doctor report, and verification procedure.
 
@@ -1132,12 +1133,13 @@ or competing import artifact.
 A bounded read or parse failure reports `capability_probe_failed`. Only `not-installed`
 rows include ordered install hints.
 
-The MCP row is optional and `not-installed` by default. In this unpublished source
-candidate, a compatible row requires the recorded `vivary-mcp` entry point, its
-exact `mcp==2.2.0` dependency declaration, the matching SDK version, local
-standard-input/output transport, and the exact four tool names. Published 0.1.3
-retains its older SDK binding. Doctor reports external conformance as `unproven`;
-it does not import or start the adapter.
+The MCP row is optional and `not-installed` by default. A compatible row requires the
+recorded `vivary-mcp` entry point, its single exact `mcp==` dependency declaration,
+the matching SDK version, local standard-input/output transport, and the exact four
+tool names. Published adapter 0.1.3 declares `mcp==2.0.0`; staged adapter 0.1.4 declares
+`mcp==2.2.0`. `sdk_compatible` follows that installed adapter's declaration. Missing,
+malformed, or unpinned declarations are incompatible. Doctor reports external
+conformance as `unproven`; it does not import or start the adapter.
 
 The status reader considers the interpreter's canonical `purelib` and `platlib` roots,
 at most eight system-site candidates, and at most eight user-site candidates. It then

@@ -9,7 +9,7 @@ import {
   getCodeAgentRunRecord,
 } from "@agent-native/core/code-agents";
 
-test("a pending launch remains approval-gated when a fresh host initializes", async () => {
+test("a legacy pending launch is interrupted without replay when a fresh host initializes", async () => {
   const store = await mkdtemp(path.join(os.tmpdir(), "vivary-code-restart-test-"));
   const previousStore = process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
   const previousWorkspace = process.env.VIVARY_LOCAL_AGENT_WORKSPACE; // guard:allow-env-credential - Isolated test runtime configuration, not user credentials.
@@ -58,27 +58,28 @@ test("a pending launch remains approval-gated when a fresh host initializes", as
       },
     });
 
+    const native = createCodeAgentRunRecord({ id: "native-request-restart-run", goalId: "vivary-local-code",
+      title: "Native request interrupted by restart", cwd: workspace.root,
+      status: "needs-approval", phase: "action-approval", needsApproval: true,
+      metadata: { ...run.metadata, engine: "codex-cli", pendingLaunch: undefined } });
+
     const {
       getVivaryCodeHostState,
       initializeVivaryCodeAgent,
     } = await import("../server/local-code-agent.ts");
     await initializeVivaryCodeAgent();
     const retained = getCodeAgentRunRecord(run.id);
-    assert.equal(retained?.status, "needs-approval");
-    assert.equal(retained?.phase, "launch-approval");
-    assert.equal(retained?.needsApproval, true);
-    assert.equal(
-      retained?.metadata?.pendingLaunch
-        && typeof retained.metadata.pendingLaunch === "object"
-        && "requestId" in retained.metadata.pendingLaunch
-        ? retained.metadata.pendingLaunch.requestId
-        : null,
-      requestId,
-    );
+    assert.equal(retained?.status, "paused");
+    assert.equal(retained?.phase, "interrupted");
+    assert.equal(retained?.needsApproval, false);
+    assert.equal(retained?.metadata?.pendingLaunch, undefined);
     const host = await getVivaryCodeHostState("owner@example.com");
     assert.equal(host.activeRun, null);
-    assert.equal(host.busy, true);
-    assert.equal(host.pendingApproval?.requestId, requestId);
+    assert.equal(host.busy, false);
+    assert.equal(host.pendingApproval, null);
+    assert.equal(getCodeAgentRunRecord(native.id)?.status, "paused");
+    assert.equal(getCodeAgentRunRecord(native.id)?.phase, "interrupted");
+    assert.equal(getCodeAgentRunRecord(native.id)?.needsApproval, false);
   } finally {
     if (previousStore === undefined) delete process.env.AGENT_NATIVE_CODE_AGENTS_HOME;
     else process.env.AGENT_NATIVE_CODE_AGENTS_HOME = previousStore;

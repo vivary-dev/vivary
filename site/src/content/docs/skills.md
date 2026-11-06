@@ -1,7 +1,7 @@
 ---
 title: "Agent skills"
 description: "The strato, tropo, and loops skills that operate a Vivary workspace."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/SKILLS.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/SKILLS.md"
 ---
 
 Vivary packages include **agent skills**: load-on-demand procedures that tell an
@@ -18,6 +18,17 @@ load on demand. You invoke one by asking for it in plain language (the triggers 
 or, in Claude Code, with `/skill-name`.
 
 ---
+
+## maintain-hldd: contributor design maintenance
+
+This repository skill keeps the [high-level design](/architecture/) aligned
+with Vivary's source, boundaries, and acceptance evidence. Codex discovers
+`.agents/skills/maintain-hldd/SKILL.md`. Claude's discovery entry routes to that
+same procedure. It is a contributor skill, not a workspace template.
+
+Read it when changing implementation, configuration, architecture, or durable
+product documentation. The [contributor guide](https://github.com/vivary-dev/Vivary-New/blob/dev/CONTRIBUTING.md#high-level-design-gate)
+explains hook installation and CI enforcement.
 
 ## strato — the agent-OS skill
 

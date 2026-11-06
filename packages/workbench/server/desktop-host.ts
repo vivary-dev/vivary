@@ -65,7 +65,7 @@ export function chooseDesktopProjectFolder(): Promise<string | null> {
       } catch {
         // The parent may disconnect while the chooser deadline expires.
       }
-      finish(new Error("Folder selection timed out. Close the chooser and try again."));
+      finish(new DOMException("Folder selection timed out. Close the folder chooser and try again.", "TimeoutError"));
     }, CHOOSE_FOLDER_TIMEOUT_MS);
     timer.unref();
     process.on("message", onMessage);

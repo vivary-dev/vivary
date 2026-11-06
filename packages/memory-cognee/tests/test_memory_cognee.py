@@ -616,6 +616,26 @@ class CogneeMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(report["result"]["status"], "missing")
         self.assertFalse(manifest.exists())
 
+    def test_forget_leaves_authored_knowledge(self):
+        with temp_workspace() as root:
+            write_workspace(root, allow_network=True, allow_without_api_key=True)
+            fact = root / ".vivary" / "knowledge" / "relay-budget.md"
+            fact.parent.mkdir()
+            fact.write_bytes(
+                b'---\nsource: "Jeff, planning call"\nconfirmed: 2026-09-25\n---\n'
+                b"# Relay budget\n\nThe relay budget is 40 dollars per month.\n"
+            )
+            before = fact.read_bytes()
+            adapter = vivary_cognee.CogneeMemoryAdapter(root, cognee_client=FakeCognee())
+            state_root = vivary_cognee._cognee_state_root(adapter.root, adapter.config)
+
+            report = asyncio.run(adapter.forget(approved=True))
+
+            self.assertTrue(report["forgot"])
+            self.assertEqual(fact.read_bytes(), before)
+            self.assertTrue(state_root.is_relative_to(adapter.root / ".vivary" / "memory"))
+            self.assertFalse(fact.is_relative_to(state_root))
+
     def test_forget_preserves_manifest_when_dataset_is_inaccessible(self):
         with temp_workspace() as root:
             write_workspace(root, allow_network=True, allow_without_api_key=True)

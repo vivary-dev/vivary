@@ -1,7 +1,9 @@
 import {
+  IconBook2,
   IconFolder,
   IconLayoutColumns,
   IconMessageCircle,
+  IconSearch,
   IconSettings,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -10,9 +12,16 @@ export const navigationItems = [
   { href: "/", label: "Workspace", icon: IconMessageCircle, keywords: ["conversation", "project"] },
   { href: "/?panel=files", label: "Open files", icon: IconFolder, keywords: ["read", "edit", "rename"] },
   { href: "/?panel=details", label: "Project details", icon: IconLayoutColumns, keywords: ["host", "information"] },
+  { href: "/?panel=search", label: "Search project", icon: IconSearch, keywords: ["find", "grep", "text", "filename", "regex"] },
 ] as const;
 
 export const settingsItems = [
+  {
+    href: "/settings/architecture",
+    label: "Documentation",
+    icon: IconBook2,
+    keywords: ["architecture", "high-level design", "how vivary works"],
+  },
   {
     href: "/settings",
     label: "Settings",

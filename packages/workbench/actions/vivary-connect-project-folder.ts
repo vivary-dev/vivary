@@ -18,7 +18,11 @@ export default defineAction({
     let folder: string | null;
     try {
       folder = await chooseDesktopProjectFolder();
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        // Keep chooser expiry non-retryable: a 408 response can replay the request.
+        fail(error.message, { statusCode: 409 });
+      }
       fail("The folder chooser could not finish. Close it and try again in the desktop app.", {
         statusCode: 409,
       });

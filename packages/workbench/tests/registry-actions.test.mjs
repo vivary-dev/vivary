@@ -5,6 +5,7 @@ import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { assertNativeSqliteMatchesNode, ensureCorePackageJson, ensureProofRoot } from "./maintained-test-options.mjs";
 
 const TEST_FILE = fileURLToPath(import.meta.url);
 const CHILD_HEAP_ARG = "--max-old-space-size=192";
@@ -110,7 +111,18 @@ async function worker(scenario) {
       assert.equal(action.schema.safeParse(request()).success, name === "register");
       assert.equal(action.tool.parameters.additionalProperties, false);
     }
-    await assert.rejects(readdir(new URL("../actions/", import.meta.url)), { code: "ENOENT" });
+    assert.deepEqual(Object.keys(actions).sort(),
+      ["exportProject", "mutationAdmission", "mutationQuarantine", "register"]);
+    // Registry actions are composed in server/registry-actions.mjs and mounted only
+    // by registry-http.mjs. Core discovers the app actions folder on its own, so a
+    // same-named file there would expose a registry action; assert absence by name.
+    const registryActionNames = ["vivary-register-project", "vivary-export-project",
+      "vivary-admit-project-mutation", "vivary-quarantine-project-mutation"];
+    const discovered = new Set((await readdir(new URL("../actions/", import.meta.url)))
+      .map((file) => path.parse(file).name));
+    for (const name of registryActionNames) {
+      assert.ok(!discovered.has(name), `${name} must not be discoverable from the app actions folder`);
+    }
     await empty();
   } else if (scenario === "persistence") {
     const actions = make();
@@ -327,6 +339,8 @@ async function worker(scenario) {
 if (process.env.VIVARY_ACTION_WORKER === "1") { // guard:allow-env-credential — Test child mode flag; no credential value.
   await worker(process.argv[2]);
 } else {
+  assertNativeSqliteMatchesNode(ensureCorePackageJson());
+  ensureProofRoot("VIVARY_REGISTRY_PROOF_ROOT");
   for (const [scenario, title] of Object.entries(cases)) {
     test(title, async () => {
       const configured = process.env.VIVARY_REGISTRY_PROOF_ROOT; // guard:allow-env-credential — Disposable test directory path; no credential value.

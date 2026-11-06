@@ -6,6 +6,7 @@ import { register } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertNativeSqliteMatchesNode, ensureCorePackageJson, ensureProofRoot } from "./maintained-test-options.mjs";
 
 const TEST_FILE = fileURLToPath(import.meta.url);
 const HEAP = "--max-old-space-size=192";
@@ -28,6 +29,7 @@ function errorChain(error) {
   return chain;
 }
 
+ensureCorePackageJson();
 register(new URL("./native-http-dependency-loader.mjs", import.meta.url), {
   data: { corePackageJson: process.env.VIVARY_TEST_CORE_PACKAGE_JSON }, // guard:allow-env-credential — Existing dependency manifest path.
 });
@@ -273,10 +275,18 @@ async function makeFixture(base) {
 
 async function mainTest() {
   assert.ok(process.execArgv.includes(HEAP));
+  assertNativeSqliteMatchesNode(ensureCorePackageJson());
+  ensureProofRoot("VIVARY_12H_PROOF_ROOT");
   assert.ok(process.env.VIVARY_TEST_CORE_PACKAGE_JSON); // guard:allow-env-credential — Reviewed installed Core package manifest path.
   assert.ok(process.env.VIVARY_12H_PROOF_ROOT && path.isAbsolute(process.env.VIVARY_12H_PROOF_ROOT)); // guard:allow-env-credential — Disposable proof path.
   const base = await realpath(process.env.VIVARY_12H_PROOF_ROOT); // guard:allow-env-credential — Disposable proof path.
   const f = await makeFixture(base);
+  // Parent and forked children share this database. Always use the fixture
+  // root the suite removes: never an inherited DATABASE_URL, and not Core's
+  // cwd-relative default. Core still creates an empty data/ directory under
+  // the working directory, which the package scripts keep in packages/workbench.
+  // guard:allow-env-mutation — Test-only fixture location shared with the forked children; process-scoped by design.
+  process.env.DATABASE_URL = `file:${path.join(f.root, "registry.sqlite")}`; // guard:allow-env-credential — Task-owned SQLite fixture file only.
   const m = await modules();
   const cases = [];
   const snapshotPool = new Map();

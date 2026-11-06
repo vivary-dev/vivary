@@ -17,7 +17,7 @@ This brief records public code and source-safe constraints for the proposed mult
 
 `vivary-dev/Vivary-New` is the private desktop-development repository. Topic PRs
 integrate into `dev`, with reviewed promotion to the default branch, `main`.
-`vivary-dev/vivary` remains the original public product and release repository. `Jeff-Kazzee/littleagent` is the public source identity for the workbench specifications and implementation. `The-Little-AI-Company/harnessmax` is a public legacy evidence source. Private planning, machine paths, branches, commit hashes, dirty-state inventories, and review material are maintained outside this public contract.
+`vivary-dev/vivary-cli` remains the original public product and release repository. `Jeff-Kazzee/littleagent` is the public source identity for the workbench specifications and implementation. `The-Little-AI-Company/harnessmax` is a public legacy evidence source. Private planning, machine paths, branches, commit hashes, dirty-state inventories, and review material are maintained outside this public contract.
 
 The public repository contract governs branches, reviews, tests, documentation generation, and release evidence. This brief does not convert a source observation, proposal, or local result into shipped or published behavior.
 
@@ -31,9 +31,10 @@ includes GUI acceptance with each useful workspace operation.
 
 ## Current workspace behavior
 
-Vivary is a local governed-context standard and scaffolder. It does not own the host
-project or require one agent runtime. The [architecture](../../ARCHITECTURE.md)
-lines 3-12 and 29-60 define that boundary.
+The original Vivary engine is a local governed-context standard and scaffolder.
+It does not own the host project or require one agent runtime. The architecture
+sections on [owner intent](../../ARCHITECTURE.md#purpose-and-owner-intent) and the
+[original engine](../../ARCHITECTURE.md#original-engine) define that boundary.
 
 Greenfield creation already has a safe entry point. `scaffold_thin_workspace` in
 [`create_vivary.py`](../../../packages/create-vivary/create_vivary.py) lines 656-773
@@ -71,7 +72,7 @@ storage, a storage provider, memory, size, and privacy for one workspace.
 
 Core is a contract and policy kernel shared by the role packages, with explicit
 I/O adapters for source observation, evidence storage, and Git evidence sync. The
-[architecture](../../ARCHITECTURE.md) assigns distinct authority to Tropo,
+[original engine design](../../ARCHITECTURE.md#original-engine) assigns distinct authority to Tropo,
 Strato, Ozone, and Exo while keeping common validation in Core.
 
 The following functions can support read-only project views:
@@ -81,7 +82,8 @@ The following functions can support read-only project views:
 - `observe_content` in [`workspace_content.py`](../../../packages/core/vivary_core/workspace_content.py) line 483 reads bounded public content under the effective privacy policy.
 - `compile_task_capsule` in [`capsule_compile.py`](../../../packages/core/vivary_core/capsule_compile.py) line 3040 compiles bounded task context from an observed graph.
 
-The architecture lines 163-170 says observation does not fetch or write. Core keeps
+The [Core contract](../../../packages/core/README.md) states that checkout
+observation does not fetch or write. Core keeps
 conflicts and unknown values explicit. A GUI can present these results without
 changing Core's authority.
 
@@ -94,18 +96,21 @@ Exo provides graph coordination and caller-owned control transitions.
 `workspace_state`, `cmd_conflicts`, `cmd_board`, and `cmd_claim` in
 [`exo.py`](../../../packages/exo/exo.py) lines 155-390 can inform project and task views.
 `governed_control` at lines 823-841 dispatches bounded Core operations. The
-architecture lines 218-225 says Exo provides no scheduler, state store, agent runner,
+[governed-control contract](../../../packages/exo/README.md#governed-control)
+states that the adapter adds no scheduler, state store, agent runner,
 network call, provider call, repair write, or publishing path.
 
-The front door in [`vivary_cli.py`](../../../packages/vivary/vivary_cli.py) lines 49-103
-uses a static table of ten task verbs and imports one component for each call. The
-architecture lines 151-159 says it adds no component code, subprocess, or dynamic
-discovery. It is a useful command boundary, but it does not own application state.
+The front door in [`vivary_cli.py`](../../../packages/vivary/vivary_cli.py) uses
+the static `ROUTES` table of ten task verbs and imports one component for each
+call. The [package contract](../../../packages/vivary/README.md) describes this
+in-process dispatch. The front door owns routing and compatibility checks, while
+the role packages own command behavior. It does not own application state.
 
 The passive capability report can populate an environment screen.
-`capability_report` in `create_vivary.py` lines 8752-8757 uses bounded distribution
-inspection. The architecture lines 244-251 says the probe does not import or start
-optional packages.
+`capability_report` in [`create_vivary.py`](../../../packages/create-vivary/create_vivary.py)
+uses bounded distribution inspection. The [capability-status contract](../../COMMANDS.md#capability-status)
+and [passive MCP report](../../MCP.md#passive-doctor-report) describe the probe
+and its boundary against importing or starting optional packages.
 
 ## Missing application behavior
 
@@ -129,7 +134,7 @@ the proposed local GUI. The repository has no OpenAPI description, HTTP applicat
 API, A2A agent card, or `/.well-known/agent.json` file. It does publish
 `site/public/llms.txt`, `site/public/llms-full.txt`, and `site/public/robots.txt`.
 The optional MCP package is a local read-only standard-input and standard-output
-adapter, as stated in the architecture lines 287-289.
+adapter, as stated in the [MCP contract](../../MCP.md#contract).
 
 These missing features belong to the proposed program. [Program design](design.md)
 must define a separate application and session layer while leaving filesystem

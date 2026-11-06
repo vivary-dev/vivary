@@ -21,9 +21,12 @@ test("private chooser IPC validates replies and cleans up after completion", { t
   const fixture = await mkdtemp(path.join(tmpdir(), "vivary-desktop-host-"));
   const entry = path.join(fixture, "child.mjs");
   const helper = new URL("../server/desktop-host.ts", import.meta.url).href;
-  await writeFile(entry, `import { desktopHostAvailable, chooseDesktopProjectFolder } from ${JSON.stringify(helper)};
+  await writeFile(entry, `import { mock } from "node:test";
+import { desktopHostAvailable, chooseDesktopProjectFolder } from ${JSON.stringify(helper)};
 process.on("message", async message => {
+  if (message?.type === "test:expire") { mock.timers.tick(120_000); return; }
   if (message?.type !== "test:choose") return;
+  if (message.timeout) mock.timers.enable({ apis: ["setTimeout"] });
   const baseline = process.listenerCount("message");
   const selection = chooseDesktopProjectFolder();
   if (message.busy) {
@@ -31,7 +34,8 @@ process.on("message", async message => {
     catch { process.send({ type: "test:busy", rejected: true }); }
   }
   try { process.send({ type: "test:result", folder: await selection, remaining: process.listenerCount("message") - baseline }); }
-  catch (error) { process.send({ type: "test:error", message: error.message, remaining: process.listenerCount("message") - baseline }); }
+  catch (error) { process.send({ type: "test:error", message: error.message, remaining: process.listenerCount("message") - baseline, ...(error.name === "TimeoutError" ? { timedOut: true } : {}) }); }
+  finally { if (message.timeout) mock.timers.reset(); }
 });
 process.send({ type: "test:ready", available: desktopHostAvailable() });
 `);
@@ -82,6 +86,17 @@ process.send({ type: "test:ready", available: desktopHostAvailable() });
       child.send({ type: "vivary:project-folder:result", requestId: await readRequest(), ...result });
       assert.deepEqual(await next("test:error"), { type: "test:error", message, remaining: 0 });
     }
+
+    child.send({ type: "test:choose", timeout: true });
+    const expiredRequest = await readRequest();
+    child.send({ type: "test:expire" });
+    assert.deepEqual(await next("vivary:project-folder:cancel"), { type: "vivary:project-folder:cancel", requestId: expiredRequest });
+    assert.deepEqual(await next("test:error"), { type: "test:error", message: "Folder selection timed out. Close the folder chooser and try again.", remaining: 0, timedOut: true });
+    child.send({ type: "test:choose" });
+    const retryRequest = await readRequest();
+    child.send({ type: "vivary:project-folder:result", requestId: expiredRequest, path: "/tmp/expired-folder" });
+    child.send({ type: "vivary:project-folder:result", requestId: retryRequest, path: "/tmp/retried-folder" });
+    assert.deepEqual(await next("test:result"), { type: "test:result", folder: "/tmp/retried-folder", remaining: 0 });
 
     child.send({ type: "test:choose" });
     await readRequest();

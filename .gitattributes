@@ -3,6 +3,10 @@
 * text=auto eol=lf
 * whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 
+# A maintained pnpm patch writes a blank source line as a single-space context
+# line. That space is part of the patch, not trailing whitespace.
+packages/workbench/patches/*.patch whitespace=-blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
 # Batch files are the one Windows text format that still commonly expects CRLF.
 *.bat text eol=crlf
 *.cmd text eol=crlf

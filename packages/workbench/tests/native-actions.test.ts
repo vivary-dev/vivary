@@ -1,6 +1,66 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createNativeActionCaller } from "../app/lib/native-actions";
+import evaluateOwner from "../actions/vivary-project-evaluate-owner.ts";
+import evaluateTool from "../actions/vivary-project-evaluate.ts";
+import { createNativeActionCaller, createNativeActionReader, folderConnectionErrorMessage } from "../app/lib/native-actions";
+import { VIVARY_OWNER_ACTIONS } from "../shared/owner-actions";
+
+test("search and match reads share rejected tokens with owner writes and recover with a fresh session", async () => {
+  let token = "read-rejection-owner-token", requests = 0, invalidations = 0;
+  const dependencies = {
+    getSession: () => ({ status: "authenticated" as const, session: { email: "owner@example.test", token } }),
+    cookieAction: async <T>() => null as T,
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests++;
+      const request = new Request(input, init);
+      assert.equal(request.method, "GET");
+      assert.equal(request.credentials, "same-origin");
+      assert.equal(request.redirect, "error");
+      assert.equal(request.headers.get("X-Vivary-Session"), token);
+      assert.equal(request.headers.get("X-Agent-Native-Frontend"), "1");
+      assert.equal(new URL(request.url).searchParams.get("query"), "needle & text");
+      return requests === 1 ? Response.json({ message: "Sign in." }, { status: 401 }) : Response.json({ results: [] });
+    },
+    locationHref: () => "https://private.example.test/agent", nativePath: (path: string) => path,
+    invalidate: () => { invalidations++; },
+  };
+  const read = createNativeActionReader(dependencies), secondRead = createNativeActionReader(dependencies);
+  const write = createNativeActionCaller(dependencies), params = new URLSearchParams({ query: "needle & text" });
+  assert.equal((await read("vivary-chat-search", params)).status, 401);
+  await assert.rejects(secondRead("vivary-chat-match", params), /session refreshes/);
+  await assert.rejects(write("vivary-code-send", {}), /session refreshes/);
+  assert.deepEqual([requests, invalidations], [1, 1]);
+  token = "read-refreshed-owner-token";
+  assert.equal((await secondRead("vivary-chat-match", params)).status, 200);
+  assert.equal(requests, 2);
+});
+
+test("cookie reads invalidate on 401 and preserve cancellation without leaking credentials", async () => {
+  let calls = 0, invalidations = 0;
+  const abort = new AbortController();
+  const read = createNativeActionReader({
+    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test" } }),
+    fetch: async (input, init) => {
+      calls++;
+      assert.equal(new Headers(init?.headers).has("X-Vivary-Session"), false);
+      assert.equal(init?.signal, abort.signal);
+      return Response.json(null, { status: 401 });
+    },
+    locationHref: () => "http://localhost/", nativePath: path => path,
+    invalidate: () => { invalidations++; },
+  });
+  assert.equal((await read("vivary-chat-search", new URLSearchParams(), abort.signal)).status, 401);
+  assert.deepEqual([calls, invalidations], [1, 1]);
+  for (const nativePath of [(path: string) => "https://other.example.test" + path,
+    (path: string) => path + "?redirect=foreign", (path: string) => path + "#fragment"]) {
+    const unsafe = createNativeActionReader({
+      getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "private-read-token" } }),
+      fetch: async () => { assert.fail("Unsafe endpoint sent a request"); },
+      locationHref: () => "http://localhost/", nativePath, invalidate: () => undefined,
+    });
+    await assert.rejects(unsafe("vivary-chat-match", new URLSearchParams()), /this Vivary instance/);
+  }
+});
 
 test("owner action sends one bounded same-origin request without redirects", async () => {
   const requests: Request[] = [];
@@ -121,11 +181,97 @@ test("original engine commands use the same private owner-session transport", as
     nativePath: path => path,
     invalidate: () => { throw new Error("Unexpected invalidation"); },
   });
-  const input = { projectId: "project-test", command: { verb: "doctor" } };
+  const input = { projectId: "project-test", command: { verb: "pattern-state" } };
   assert.deepEqual(await call("vivary-original-command", input), { exitCode: 0 });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "https://private.example.test/_agent-native/actions/vivary-original-command");
   assert.equal(requests[0].headers.get("x-vivary-session"), "original-owner-test-token");
   assert.equal(requests[0].redirect, "error");
   assert.deepEqual(await requests[0].json(), input);
+});
+
+test("governed evaluation is an owner action and a separate agent tool that is not a read", async () => {
+  assert.ok(VIVARY_OWNER_ACTIONS.includes("vivary-project-evaluate-owner"));
+  assert.equal((VIVARY_OWNER_ACTIONS as readonly string[]).includes("vivary-project-evaluate"), false, "the tool has no owner transport");
+  assert.deepEqual([evaluateTool.agentTool, evaluateTool.readOnly, evaluateTool.dedupe, evaluateTool.timeoutMs,
+    evaluateTool.mcpTool, evaluateTool.toolCallable], [true, false, false, 70_000, false, false]);
+  assert.deepEqual([evaluateOwner.agentTool, evaluateOwner.readOnly, evaluateOwner.mcpTool, evaluateOwner.toolCallable],
+    [false, false, false, false]);
+  const requests: Request[] = [];
+  const call = createNativeActionCaller({
+    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "evaluate-owner-test-token" } }),
+    cookieAction: async () => { throw new Error("A private owner session must use its existing transport."); },
+    fetch: async (input, init) => { requests.push(new Request(input, init)); return Response.json({ status: "evaluated" }); },
+    locationHref: () => "https://private.example.test/", nativePath: path => path,
+    invalidate: () => { throw new Error("Unexpected invalidation"); },
+  });
+  const input = { projectId: "project-test", evaluateAs: "agent", operation: "expire_leases", state: { claims: [] } };
+  assert.deepEqual(await call("vivary-project-evaluate-owner", input), { status: "evaluated" });
+  assert.equal(requests[0].url, "https://private.example.test/_agent-native/actions/vivary-project-evaluate-owner");
+  assert.deepEqual(await requests[0].json(), input);
+});
+
+test("folder picker timeouts explain how to recover on both owner transports", async () => {
+  for (const token of ["picker-timeout-owner", undefined]) {
+    const failure = token
+      ? new DOMException("The operation was aborted due to timeout", "TimeoutError")
+      : Object.assign(new Error("Action timed out after 130s"), { timedOut: true, status: 408 });
+    const call = createNativeActionCaller({
+      getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", ...(token ? { token } : {}) } }),
+      cookieAction: async () => { throw failure; },
+      fetch: async () => { throw failure; },
+      locationHref: () => "https://private.example.test/", nativePath: path => path,
+      invalidate: () => { throw new Error("Unexpected invalidation"); },
+    });
+    try {
+      await call("vivary-connect-project-folder", {});
+      assert.fail("The expired picker must reject");
+    } catch (error) {
+      assert.equal(folderConnectionErrorMessage(error), "Folder selection timed out. Close the folder chooser and try again.");
+    }
+  }
+});
+
+test("folder connection preserves the server's safe recovery message", async () => {
+  const call = createNativeActionCaller({
+    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "picker-server-error-owner" } }),
+    cookieAction: async () => { throw new Error("Unexpected cookie fallback"); },
+    fetch: async () => Response.json({ message: "Close the folder chooser and try again in the desktop app." }, { status: 409 }),
+    locationHref: () => "https://private.example.test/", nativePath: path => path, invalidate: () => undefined,
+  });
+  await assert.rejects(call("vivary-connect-project-folder", {}), error => {
+    assert.equal(folderConnectionErrorMessage(error), "Close the folder chooser and try again in the desktop app.");
+    return true;
+  });
+  assert.equal(folderConnectionErrorMessage(new Error("private unexpected failure")), "The folder could not be connected. Try again.");
+});
+
+
+test("preview refusal preserves the Native error code for safe review recovery", async () => {
+  const call = createNativeActionCaller({
+    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "preview-refusal-test-owner" } }),
+    cookieAction: async () => { throw new Error("Unexpected cookie fallback"); },
+    fetch: async () => Response.json({ message: "The project changed. Review it again.", errorCode: "vivary_project_preview_refused" }, { status: 409 }),
+    locationHref: () => "https://private.example.test/", nativePath: path => path, invalidate: () => undefined,
+  });
+  await assert.rejects(call("vivary-project-preview", {}), error => {
+    assert.equal((error as { status?: number }).status, 409);
+    assert.equal((error as { errorCode?: string }).errorCode, "vivary_project_preview_refused");
+    return true;
+  });
+});
+
+
+test("draft keepalive uses the full UTF-8 body budget", async () => {
+  const flags: boolean[] = [];
+  const call = createNativeActionCaller({
+    getSession: () => ({ status: "authenticated", session: { email: "owner@example.test", token: "native-budget-token" } }),
+    cookieAction: async () => { throw new Error("Unexpected cookie fallback"); },
+    fetch: async (_input, init) => { flags.push(Boolean(init?.keepalive)); return Response.json({ accepted: true }); },
+    locationHref: () => "https://private.example.test/agent", nativePath: path => path,
+    invalidate: () => undefined,
+  });
+  await call("vivary-chat-draft", { expected: { text: "a".repeat(32_000) }, next: { text: "a".repeat(32_000) } }, { keepalive: true });
+  await call("vivary-chat-draft", { next: { text: "short" } }, { keepalive: true });
+  assert.deepEqual(flags, [false, true]);
 });

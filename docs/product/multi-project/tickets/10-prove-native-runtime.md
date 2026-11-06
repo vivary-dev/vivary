@@ -28,6 +28,16 @@ The readiness screen reports actual state. One authorized runtime starts in the 
 
 Run deterministic host tests and one approved no-cost real-runtime proof. Record runtime version, auth state without secrets, project binding, events, cancellation result, resume result, and cost.
 
+Session details must redact credentials and local filesystem paths in both Native
+and Provider excerpts before truncation, preserve ordinary web links and Native
+Running/Finished status text, and leave stored transcripts unchanged. Keep the
+two source labels distinct. The [Codex reader receipt](../receipts/10-codex-stored-thread-reader.md)
+records the Native projection correction: controller preflight 9/9, all 40 details
+regressions, typecheck and Native Doctor pass with the documented configuration
+diagnostic limitation. Corrected built/packaged privacy acceptance and final-head
+published review, CI and Entire approval remain pending; earlier Windows privacy
+failure and separate cleanup receipts are preserved.
+
 
 Run the [canonical common planning checks](../execution-contract.md#maintaining-the-graph)
 after changing this outcome's metadata. These checks validate planning documents;

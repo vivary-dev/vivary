@@ -28,7 +28,7 @@ You do not need to understand every internal module before reviewing that experi
 - Vivary provides its original engine and narrow deterministic workspace operations. Explain the capability or permission boundary before proposing another tool.
 - Templates start offline. A later optional community collection can use the existing vivary-site to link to source GitHub repositories and downloads, with preview before apply and no implied execution.
 
-These decisions do not need another vote. The workspace, file/panel journeys, project-bound history, and focused private Windows candidate are implemented and tested within the boundaries in the [acceptance register](../desktop-acceptance-status.md). The supported harness catalog, selectable Codex execution, real Native-provider turns, automation execution, linked conversations, handoff workflow, concurrency, and complete release journey remain incomplete. See the [implementation checkpoint](README.md#implementation-checkpoint-2026-09-16) before treating a walkthrough as available behavior.
+These decisions do not need another vote. The workspace, file/panel journeys, project-bound history, and focused private Windows candidate are implemented and tested within the boundaries in the [acceptance register](../desktop-acceptance-status.md). Codex selection and bounded native execution are integrated with recorded Windows acceptance. The generic harness catalog, real Native-provider turns, automation execution, linked conversations, handoff workflow, concurrency, and complete release journey remain incomplete. See the [implementation checkpoint](README.md#implementation-checkpoint-2026-09-16) before treating a walkthrough as available behavior.
 
 ## Accepted review record
 
@@ -38,7 +38,7 @@ Jeff accepted guide snapshot `e86d06ed592a2d3c` on 2026-09-14 through his submit
 
 Later on 2026-09-14, Jeff explicitly clarified that one central conversation does not mean one total conversation for a project. Projects must allow multiple chats with independent history and context. Several threads may eventually run at the same time.
 
-This intent is settled and needs no additional design vote. The workspace must show activity and approvals for each thread and protect shared files from conflicting writes. The current runtime still permits one active run at a time, so concurrent execution remains an implementation gap. The product must show that limit accurately until runtime support changes.
+This intent is settled and needs no additional design vote. The workspace must show activity and approvals for each thread and protect shared files from conflicting writes. The current runtime still permits one active root conversation run at a time, so concurrent execution remains an implementation gap. The product must show that limit accurately until runtime support changes.
 
 ### Accepted clarification: harness capabilities and permission boundaries
 

@@ -6,6 +6,7 @@ import argparse
 import base64
 import configparser
 import csv
+import functools
 import hashlib
 import importlib
 import importlib.machinery
@@ -23,13 +24,16 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import time
-from contextlib import contextmanager
+import warnings
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import date, datetime, timezone
 from email.parser import BytesParser
 from email.message import Message
 from pathlib import Path
-from typing import Callable
+from enum import Enum, unique
+from typing import Callable, NamedTuple
 
 
 if os.name == "nt":
@@ -86,6 +90,15 @@ if os.name == "nt":
         ctypes.POINTER(_WindowsDirectoryInformation),
     ]
     _WINDOWS_GET_FILE_INFO.restype = wintypes.BOOL
+    _WINDOWS_CREATE_MUTEX = _WINDOWS_KERNEL32.CreateMutexW
+    _WINDOWS_CREATE_MUTEX.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    _WINDOWS_CREATE_MUTEX.restype = wintypes.HANDLE
+    _WINDOWS_WAIT_OBJECT = _WINDOWS_KERNEL32.WaitForSingleObject
+    _WINDOWS_WAIT_OBJECT.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _WINDOWS_WAIT_OBJECT.restype = wintypes.DWORD
+    _WINDOWS_RELEASE_MUTEX = _WINDOWS_KERNEL32.ReleaseMutex
+    _WINDOWS_RELEASE_MUTEX.argtypes = [wintypes.HANDLE]
+    _WINDOWS_RELEASE_MUTEX.restype = wintypes.BOOL
     _WINDOWS_CLOSE_HANDLE = _WINDOWS_KERNEL32.CloseHandle
     _WINDOWS_CLOSE_HANDLE.argtypes = [wintypes.HANDLE]
     _WINDOWS_CLOSE_HANDLE.restype = wintypes.BOOL
@@ -132,6 +145,71 @@ if os.name == "nt":
 __version__ = "0.4.4"
 
 PRESETS = ("coding", "second-brain", "knowledge-work", "writing")
+# Frozen v1 output bodies. Add a new renderer revision for content changes.
+BUILTIN_PATTERN_V1_BODIES = {
+    "capture": """Use this page for quick intake. Record an idea, request, or observation
+before deciding where it belongs. Later, triage each entry into a real project,
+source, action, or archive. Keep the original wording when it matters.
+
+## New item
+
+- Captured:
+- Source or origin:
+- What needs attention:
+- Next triage step:
+""",
+    "source-reference": """Keep a list of sources that this workspace actually uses.
+For each source, record its title, origin, date when known, and a link or local
+path. Attribute claims to the source. Label your interpretation separately and
+leave an uncertainty visible rather than turning it into a source statement.
+
+## Source
+
+- Title:
+- Origin and date:
+- Link or path:
+- Source says:
+- My interpretation:
+- Open question:
+""",
+    "navigation": """Link the files that exist in this workspace and explain when
+to open them. Add links as you create or adopt real files. Do not list a planned
+document as though it already exists.
+
+## Routes
+
+- File or folder:
+- Use it for:
+""",
+    "project-brief": """Describe this project's purpose and intended outcome using
+known facts. Keep unknowns as prompts until you can answer them. Link known
+inputs and name the next concrete step.
+
+- Purpose:
+- Intended outcome:
+- Known inputs:
+- Next step:
+- Open questions:
+""",
+}
+BUILTIN_PATTERNS = {
+    "capture": {
+        "label": "Capture", "path": "inbox/README.md",
+        "description": "Quick intake now, deliberate triage later.",
+    },
+    "source-reference": {
+        "label": "Sources", "path": "sources/index.md",
+        "description": "Attribute source statements and separate your interpretation.",
+    },
+    "navigation": {
+        "label": "Navigation", "path": "START-HERE.md",
+        "description": "Guide people to files that actually exist.",
+    },
+    "project-brief": {
+        "label": "Project brief", "path": "brief.md",
+        "description": "Record purpose, outcome, known inputs, and the next step.",
+    },
+}
 
 ACTIVE_CONTEXTS = ("cocoindex-code",)
 
@@ -142,7 +220,9 @@ SUBCOMMANDS = ("init", "doctor", "wizard", "capabilities", "adopt", "record")
 RECEIPT_ENV = "VIVARY_RECEIPT_LOG"
 RECEIPT_SCHEMA = "vivary.run_receipt.v1"
 RECEIPT_VALUE_FLAGS = {
+    "--request-id",
     "--adapter",
+    "--pattern-choices",
     "--receipt",
     "--preset",
     "--active-context",
@@ -156,6 +236,7 @@ RECEIPT_VALUE_FLAGS = {
     "--plan",
     "--size",
     "--privacy",
+    "--privacy-request",
 }
 RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
     "--auto",
@@ -165,6 +246,7 @@ RECEIPT_KNOWN_FLAGS = RECEIPT_VALUE_FLAGS | {
     "--json",
     "--no-wizard",
     "--obsidian",
+    "--prepare-privacy",
     "--reviewed",
     "--repair",
     "--trend",
@@ -303,6 +385,14 @@ LEGACY_WORKSPACE_CONTRACT = "legacy-v0.1"
 INDEXED_WORKSPACE_CONTRACT = "indexed-v0.2+"
 LEGACY_FULL_WORKSPACE_CONTRACT = "legacy-full"
 LEGACY_RECOMMENDED_WORKSPACE_FILES = INDEXED_WORKSPACE_FILES
+_THIN_PRIVACY_PROBES = {
+    ".vivary/private/": (".vivary/private/secret.md",),
+    ".vivary/runtime/": (".vivary/runtime/adopt-journal.json",),
+    "*.vivary-tmp": (".vivary-output.vivary-tmp",),
+}
+_THIN_ACTIVE_CONTEXT_PRIVACY_PROBES = {
+    ".cocoindex_code/": (".cocoindex_code/private-index.db",),
+}
 _WORKSPACE_PRESET_BYTE_LIMIT = 64 * 1024
 
 PRESET_STARTERS = {
@@ -371,6 +461,17 @@ PRESET_STARTERS = {
 
 class ScaffoldError(RuntimeError):
     """Raised when a workspace cannot be scaffolded safely."""
+
+
+class AdoptAttemptRefusal(ScaffoldError):
+    """This invocation refused before writes; earlier attempts may have written."""
+
+    def __init__(self, message: str, *, target: Path, plan_hash: str, request_id: str):
+        super().__init__(message)
+        self.attempt = {
+            "attempt_status": "refused_before_mutation",
+            "root": str(target), "plan_hash": plan_hash, "request_id": request_id,
+        }
 
 
 class RepairRefusal(ScaffoldError):
@@ -654,6 +755,125 @@ def _validate_thin_init_target(target: Path, *, force: bool) -> None:
             )
 
 
+def _normalize_pattern_choices(choices) -> tuple[dict[str, str], ...]:
+    if not isinstance(choices, (tuple, list)) or len(choices) > len(BUILTIN_PATTERNS):
+        raise ScaffoldError("choose up to four installed workspace patterns")
+    selected = []
+    ids, paths = set(), set()
+    for choice in choices:
+        if not isinstance(choice, dict) or set(choice) != {"id", "name", "path"}:
+            raise ScaffoldError("pattern choice requires id, name, and path")
+        identifier, name, path = (choice[key] for key in ("id", "name", "path"))
+        if not isinstance(identifier, str) or identifier not in BUILTIN_PATTERNS or identifier in ids:
+            raise ScaffoldError("pattern choice is unknown or repeated")
+        if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 80
+            or any(ord(char) < 32 or ord(char) == 127 or 0xD800 <= ord(char) <= 0xDFFF for char in name)):
+            raise ScaffoldError("pattern name must be 1-80 single-line characters")
+        if (not isinstance(path, str) or len(path) > 240 or not path.endswith(".md")
+            or "\\" in path or path.startswith("/") or re.match(r"^[A-Za-z]:", path)
+            or any(part in ("", ".", "..") for part in path.split("/"))
+            or any(ord(char) < 32 or ord(char) == 127 or 0xD800 <= ord(char) <= 0xDFFF or char in '<>:"|?*'
+                   for char in path)
+            or any(part.startswith(".") or part.endswith((" ", ".")) or ":" in part
+                   for part in path.split("/"))
+            or path.split("/")[0].casefold() in {".vivary", ".git", ".agents"}
+            or path.casefold() in {"agents.md", "state.md", ".gitignore"}
+            or any(re.match(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", part)
+                   for part in path.split("/"))):
+            raise ScaffoldError("pattern path must be a safe project-relative Markdown path")
+        if path.casefold() in paths:
+            raise ScaffoldError("pattern destinations must be distinct")
+        ids.add(identifier)
+        paths.add(path.casefold())
+        selected.append({"id": identifier, "name": name.strip(), "path": path})
+    return tuple(selected)
+
+
+def builtin_pattern_catalog() -> list[dict[str, str]]:
+    return [
+        {"id": identifier, "label": spec["label"],
+         "description": spec["description"], "defaultName": spec["label"],
+         "defaultPath": spec["path"]}
+        for identifier, spec in BUILTIN_PATTERNS.items()
+    ]
+
+
+def _read_pattern_choices_request(value: str | None):
+    if value is None:
+        return None
+    if value != "-":
+        raise ScaffoldError("pattern choices must be read from standard input")
+    raw = sys.stdin.read(4097)
+    if len(raw.encode("utf-8")) > 4096:
+        raise ScaffoldError("pattern choices exceed the input size limit")
+    def closed_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate pattern choice field")
+            result[key] = item
+        return result
+    try:
+        return _normalize_pattern_choices(json.loads(raw, object_pairs_hook=closed_object))
+    except (ValueError, TypeError, RecursionError, UnicodeError) as exc:
+        raise ScaffoldError("pattern choices request is malformed") from exc
+
+
+# Retain prior renderers so a later catalog edit cannot reinterpret an approved
+# output or make an unchanged installed choice appear authored.
+PATTERN_RENDERERS = {"v1": BUILTIN_PATTERN_V1_BODIES}
+CURRENT_PATTERN_RENDERER = "v1"
+
+
+def _pattern_file(choice: dict[str, str], revision: str | None = None) -> str:
+    body = PATTERN_RENDERERS[revision or CURRENT_PATTERN_RENDERER][choice["id"]]
+    return f"# {choice['name']}\n\n{body}"
+
+
+def _pattern_known_hash(choice: dict[str, str], digest: str) -> bool:
+    return any(
+        digest == _sha256_prefixed(_pattern_file(choice, revision).encode("utf-8"))
+        for revision in PATTERN_RENDERERS
+    )
+
+
+def _pattern_approved_file(choice: dict[str, str], digest: str) -> str:
+    for revision in PATTERN_RENDERERS:
+        text = _pattern_file(choice, revision)
+        if digest == _sha256_prefixed(text.encode("utf-8")):
+            return text
+    raise ValueError("managed output differs from supported renderers")
+
+
+def _pattern_context_block(choices: tuple[dict[str, str], ...]) -> str:
+    from urllib.parse import quote
+    lines = ["<!-- vivary:patterns:start -->", "## Selected guidance", ""]
+    for choice in choices:
+        label = choice["name"].replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        link = "../" + quote(choice["path"], safe="/-._~")
+        lines.append(f"- [{label}]({link})")
+    return "\n".join([*lines, "<!-- vivary:patterns:end -->", ""])
+
+
+def _pattern_config_block(choices: tuple[dict[str, str], ...],
+                          output_hashes: dict[str, str] | None = None) -> str:
+    patterns = ["thin-context", *(choice["id"] for choice in choices)]
+    rows = [
+        {"id": choice["id"], "name": choice["name"], "path": choice["path"],
+         "generated_hash": (output_hashes or {}).get(choice["id"])
+             or _sha256_prefixed(_pattern_file(choice).encode("utf-8"))}
+        for choice in choices
+    ]
+    entries = ", ".join(
+        "{ " + ", ".join(f"{key} = {json.dumps(value, ensure_ascii=False)}" for key, value in row.items()) + " }"
+        for row in rows
+    )
+    return ("# >>> vivary pattern selection >>>\n"
+            f"patterns = {json.dumps(patterns)}\n"
+            f"pattern_outputs = [{entries}]\n"
+            "# <<< vivary pattern selection <<<")
+
+
 def _prepare_thin_workspace(
     target: str | Path,
     *,
@@ -661,6 +881,7 @@ def _prepare_thin_workspace(
     adapters: tuple[str, ...] | list[str],
     active_context: str | None,
     force: bool,
+    pattern_choices=(),
 ) -> tuple[Path, list[tuple[Path, str]]]:
     """Validate thin-init inputs and build the one ordered file list without writes."""
     if preset not in PRESETS:
@@ -668,6 +889,7 @@ def _prepare_thin_workspace(
             f"unknown preset {preset!r}; expected one of {', '.join(PRESETS)}"
         )
     selected_adapters = tuple(adapters)
+    pattern_choices = _normalize_pattern_choices(pattern_choices)
     unknown_adapters = sorted(set(selected_adapters) - set(_THIN_ADAPTER_PATHS))
     if unknown_adapters:
         raise ScaffoldError(
@@ -693,13 +915,14 @@ def _prepare_thin_workspace(
     project = target.name or "vivary-workspace"
     writes: list[tuple[Path, str]] = [
         (target / ".gitignore", _thin_gitignore_block(active_context=active_context)),
-        (target / ".vivary" / "context.md", _thin_context_doc(project, preset)),
+        (target / ".vivary" / "context.md", _thin_context_doc(project, preset, pattern_choices)),
         (
             target / ".vivary" / "workspace.toml",
             _thin_workspace_toml(
                 preset,
                 selected_adapters,
                 active_context=active_context,
+                pattern_choices=pattern_choices,
             ),
         ),
         (target / "AGENTS.md", "# AGENTS.md\n\n" + _thin_agents_block()),
@@ -708,9 +931,34 @@ def _prepare_thin_workspace(
     for adapter in sorted(selected_adapters):
         text, _source_hash, _content_hash = _thin_adapter_doc(adapter)
         writes.append((target / _THIN_ADAPTER_PATHS[adapter], text))
+    for choice in pattern_choices:
+        writes.append((target / choice["path"], _pattern_file(choice)))
 
     paths = [path for path, _text in writes]
     _ensure_safe_destinations(target, paths, force=False)
+    if pattern_choices:
+        # Apply's Doctor uses this same Tropo policy. Validate the proposed
+        # Markdown before approving a destination that becomes a typed record.
+        import tomllib as _toml
+        tropo = _load_tropo(default_repo_root())
+        config_text = next(text for path, text in writes
+                           if path == target / ".vivary" / "workspace.toml")
+        projected = {"base": {}, "types": {}, "exclude": []}
+        tropo._merge_config(projected, _toml.loads(config_text))
+        effective = tropo.Config(projected, str(target))
+        existing_parent = next(parent for parent in target.parents if parent.exists())
+        for choice in pattern_choices:
+            path = target / choice["path"]
+            document = tropo.analyze_file(
+                str(path), choice["path"], effective, text=_pattern_file(choice),
+                use_git_dates=False, stat_result=existing_parent.stat())
+            errors = [finding for finding in document.findings
+                      if finding.level == "error"]
+            if errors:
+                first = errors[0]
+                raise ScaffoldError(
+                    f"pattern destination {choice['path']} fails validation "
+                    f"({first.code}): {first.message}")
     return target, writes
 
 def plan_thin_workspace(
@@ -719,6 +967,7 @@ def plan_thin_workspace(
     preset: str = "coding",
     adapters: tuple[str, ...] | list[str] = (),
     active_context: str | None = None,
+    pattern_choices=(),
 ) -> dict:
     """Preview exact creates; content and target digests grant no write authority.
 
@@ -727,11 +976,12 @@ def plan_thin_workspace(
     A caller must separately validate current target custody before any effect.
     """
     adapters = tuple(adapters)
+    pattern_choices = _normalize_pattern_choices(pattern_choices)
     target, writes = _prepare_thin_workspace(
         target, preset=preset, adapters=adapters,
-        active_context=active_context, force=False,
+        active_context=active_context, force=False, pattern_choices=pattern_choices,
     )
-    return _thin_init_plan(target, writes, preset, adapters, active_context)
+    return _thin_init_plan(target, writes, preset, adapters, active_context, pattern_choices)
 
 
 def _thin_init_plan(
@@ -740,6 +990,7 @@ def _thin_init_plan(
     preset: str,
     adapters: tuple[str, ...],
     active_context: str | None,
+    pattern_choices=(),
 ) -> dict:
     files = []
     for path, text in writes:
@@ -756,6 +1007,8 @@ def _thin_init_plan(
         "files": files,
         "content_sha256": _thin_approval_hash({"files": files}),
     }
+    if pattern_choices:
+        plan["pattern_choices"] = list(pattern_choices)
     return {**plan, "plan_sha256": _thin_approval_hash(plan)}
 
 
@@ -819,10 +1072,12 @@ def apply_thin_workspace(
     preset: str = "coding",
     adapters: tuple[str, ...] | list[str] = (),
     active_context: str | None = None,
+    pattern_choices=(),
     repo_root: str | Path | None = None,
 ) -> dict:
     """Apply only the reviewed greenfield init, or recognize its exact retry."""
     adapters = tuple(adapters)
+    pattern_choices = _normalize_pattern_choices(pattern_choices)
     target = _resolve_scaffold_target(target)
     try:
         occupied = target.is_dir() and next(target.iterdir(), None) is not None
@@ -833,7 +1088,7 @@ def apply_thin_workspace(
             scratch = Path(temporary) / target.name
             rendered = plan_thin_workspace(
                 scratch, preset=preset, adapters=adapters,
-                active_context=active_context,
+                active_context=active_context, pattern_choices=pattern_choices,
             )
             plan = {**rendered, "target": str(target)}
             plan["plan_sha256"] = _thin_approval_hash(
@@ -842,7 +1097,7 @@ def apply_thin_workspace(
     else:
         plan = plan_thin_workspace(
             target, preset=preset, adapters=adapters,
-            active_context=active_context,
+            active_context=active_context, pattern_choices=pattern_choices,
         )
     if accepted_plan_sha256 != plan["plan_sha256"]:
         return {"code": "plan-changed"}
@@ -857,8 +1112,8 @@ def apply_thin_workspace(
     # The original init path owns effect-boundary validation, writes, and rollback.
     scaffold_thin_workspace(
         target, preset=preset, adapters=adapters,
-        active_context=active_context, repo_root=repo_root,
-        expected_plan_sha256=accepted_plan_sha256,
+        active_context=active_context, pattern_choices=pattern_choices,
+        repo_root=repo_root, expected_plan_sha256=accepted_plan_sha256,
     )
     return {"code": "created", "target": str(target),
             "plan_sha256": plan["plan_sha256"]}
@@ -870,6 +1125,7 @@ def scaffold_thin_workspace(
     preset: str = "coding",
     adapters: tuple[str, ...] | list[str] = (),
     active_context: str | None = None,
+    pattern_choices=(),
     force: bool = False,
     repo_root: str | Path | None = None,
     dry_run: bool = False,
@@ -884,13 +1140,14 @@ def scaffold_thin_workspace(
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
     adapters = tuple(adapters)
+    pattern_choices = _normalize_pattern_choices(pattern_choices)
     target, writes = _prepare_thin_workspace(
         target, preset=preset, adapters=adapters,
-        active_context=active_context, force=force,
+        active_context=active_context, force=force, pattern_choices=pattern_choices,
     )
     paths = [path for path, _text in writes]
     if expected_plan_sha256 is not None and _thin_init_plan(
-        target, writes, preset, adapters, active_context
+        target, writes, preset, adapters, active_context, pattern_choices
     )["plan_sha256"] != expected_plan_sha256:
         raise ScaffoldError("init plan changed before writing; review a fresh plan")
     if dry_run:
@@ -1303,18 +1560,117 @@ def _workspace_compatibility(target: Path, memory_report: dict) -> tuple[dict, s
     return compatibility, backend
 
 
+class PublicRule(NamedTuple):
+    one: str
+    several: str
+    # Values public output may name. They come from Vivary's own file lists and ignore patterns.
+    values: frozenset[str] = frozenset()
+
+
+# Public Doctor prints one sentence per rule, with a count, and never a detail.
+# A detail may name a path, an exception, or a config value, and a command
+# line is not an observation. A value is printed only when it is in the rule's
+# closed set. `unique` refuses two rules with the same row, and a test checks
+# that every `report` call names a rule.
+@unique
+class DoctorRule(Enum):
+    """Each kind of problem Doctor reports. Its value is its public row."""
+    WORKSPACE_MISSING = PublicRule(
+        "the workspace does not exist", "the workspace does not exist")
+    WORKSPACE_NOT_DIRECTORY = PublicRule(
+        "the workspace is not a directory", "the workspace is not a directory")
+    ADOPTION_JOURNAL = PublicRule(
+        "an adoption was interrupted and needs recovery", "an adoption was interrupted and needs recovery")
+    GITIGNORE_UNREADABLE = PublicRule(
+        "the .gitignore cannot be read", "the .gitignore cannot be read")
+    ADOPTION_PREJOURNAL = PublicRule(
+        "an adoption's privacy change was interrupted and needs recovery", "an adoption's privacy change was interrupted and needs recovery")
+    ADOPTION_MARKER_MALFORMED = PublicRule(
+        "the .gitignore has a malformed adoption marker", "the .gitignore has malformed adoption markers")
+    REQUIRED_FILE_MISSING = PublicRule(
+        "a required workspace file is missing", "{n} required workspace files are missing",
+        frozenset(THIN_WORKSPACE_FILES) | frozenset(BASELINE_WORKSPACE_FILES))
+    CONTRACT_FILE_MISSING = PublicRule(
+        "a required contract file is missing", "{n} required contract files are missing",
+        frozenset(INDEXED_WORKSPACE_FILES))
+    RECOMMENDED_FILE_MISSING = PublicRule(
+        "a recommended workspace file is missing", "{n} recommended workspace files are missing",
+        frozenset(LEGACY_RECOMMENDED_WORKSPACE_FILES))
+    RECOMMENDED_UPGRADE = PublicRule(
+        "a reviewed adoption can move the workspace to the current contract", "a reviewed adoption can move the workspace to the current contract")
+    PRIVACY_IGNORE_MISSING = PublicRule(
+        "a required privacy ignore is missing from .gitignore", "{n} required privacy ignores are missing from .gitignore",
+        frozenset(PRIVACY_IGNORE_PROBES) | frozenset(_THIN_PRIVACY_PROBES)
+        | frozenset(_THIN_ACTIVE_CONTEXT_PRIVACY_PROBES))
+    RECOMMENDED_PRIVACY_IGNORE_MISSING = PublicRule(
+        "a recommended privacy ignore is missing from .gitignore", "{n} recommended privacy ignores are missing from .gitignore",
+        frozenset(PRIVACY_IGNORE_PROBES))
+    MODULE_INDEX_MISSING = PublicRule(
+        "a module folder lacks index.md", "{n} module folders lack index.md")
+    MODULE_LEGACY_FILE = PublicRule(
+        "a legacy module file sits beside a module index", "{n} legacy module files sit beside a module index")
+    TROPO_INVALID = PublicRule(
+        "tropo configuration is invalid", "tropo configuration is invalid")
+    TROPO_FINDING = PublicRule(
+        "a typed note has a finding", "{n} typed note findings")
+    GRAPH_BROKEN = PublicRule(
+        "the typed graph has broken links", "the typed graph has broken links")
+    GRAPH_EMPTY = PublicRule(
+        "the typed graph has no nodes", "the typed graph has no nodes")
+    CAPABILITY_INVALID = PublicRule(
+        "a declared capability is invalid", "{n} declared capabilities are invalid")
+    MEMORY_MISCONFIGURED = PublicRule(
+        "semantic memory is misconfigured", "semantic memory is misconfigured")
+    MEMORY_PRIVACY_FAILED = PublicRule(
+        "semantic memory privacy check failed", "semantic memory privacy check failed")
+    MEMORY_UNAVAILABLE = PublicRule(
+        "the semantic memory provider is unavailable", "the semantic memory provider is unavailable")
+
+
+def _doctor_lines(problems: list[tuple[str, DoctorRule, str, str | None]], level: str, public: bool) -> list[str]:
+    if not public:
+        return [detail for problem_level, _, detail, _ in problems if problem_level == level]
+    found: dict[DoctorRule, list[str | None]] = {}
+    for problem_level, rule, _, value in problems:
+        if problem_level == level:
+            found.setdefault(rule, []).append(value)
+    lines = []
+    for rule, values in found.items():
+        sentences = rule.value
+        line = sentences.one if len(values) == 1 else sentences.several.format(n=len(values))
+        named = [value for value in values if value in sentences.values]
+        lines.append(f"{line}: {', '.join(named)}" if named else line)
+    return lines
+
+
 def doctor_workspace(
     target: str | Path,
     *,
     repo_root: str | Path | None = None,
     _allow_adopt_journal: bool = False,
+    public: bool = False,
 ) -> dict:
-    """Validate that a directory looks like a usable Vivary agent workspace."""
+    """Validate that a directory looks like a usable Vivary agent workspace.
+
+    ``public=True`` reports each problem rule's fixed sentence from
+    ``DoctorRule`` with a count, and never the detail, because a detail may
+    name a file Git ignores or a folder outside the workspace. It names a value
+    only from the rule's closed set. It
+    skips the typed-note graph walk and reports no graph. A caller that must
+    leave private files out reads notes through Tropo's privacy-filtered check
+    instead.
+    """
+    problems: list[tuple[str, DoctorRule, str, str | None]] = []
+
+    def report(level: str, rule: DoctorRule, detail: str, value: str | None = None) -> None:
+        problems.append((level, rule, detail, value))
+
+    def failing() -> bool:
+        return any(level == "error" for level, _, _, _ in problems)
+
     root = Path(repo_root) if repo_root is not None else default_repo_root()
     root = root.resolve()
     target = Path(target).resolve()
-    errors: list[str] = []
-    warnings: list[str] = []
     memory_report, memory_privacy_requirements = _memory_report(target)
     compatibility = _empty_workspace_compatibility()
     backend_name = "file"
@@ -1324,62 +1680,53 @@ def doctor_workspace(
     )
 
     if not target.exists():
-        errors.append(f"workspace does not exist: {target}")
+        report("error", DoctorRule.WORKSPACE_MISSING, f"workspace does not exist: {target}")
     elif not target.is_dir():
-        errors.append(f"workspace is not a directory: {target}")
+        report("error", DoctorRule.WORKSPACE_NOT_DIRECTORY, f"workspace is not a directory: {target}")
 
     if (
-        not errors
+        not failing()
         and not _allow_adopt_journal
         and (target / ".vivary" / "runtime" / "adopt-journal.json").exists()
     ):
-        errors.append(
-            "unfinished adoption journal exists; run create-vivary adopt <workspace> "
-            "--recover <plan-hash> before continuing"
-        )
+        report("error", DoctorRule.ADOPTION_JOURNAL,
+               "unfinished adoption journal exists; run create-vivary adopt <workspace> "
+               "--recover <plan-hash> before continuing")
 
-    if not errors and not _allow_adopt_journal:
+    if not failing() and not _allow_adopt_journal:
         gitignore = target / ".gitignore"
         if gitignore.is_file() and not _is_symlink_or_junction(gitignore):
             try:
                 gitignore_bytes = gitignore.read_bytes()
             except OSError as exc:
-                errors.append(f"cannot inspect .gitignore for interrupted adoption: {exc}")
+                report("error", DoctorRule.GITIGNORE_UNREADABLE, f"cannot inspect .gitignore for interrupted adoption: {exc}")
             else:
                 prejournal = _prejournal_privacy_match(gitignore_bytes)
                 if prejournal is not None:
                     interrupted_hash = prejournal.group(1).decode("ascii")
-                    errors.append(
-                        "unfinished pre-journal adoption privacy replacement exists; "
-                        "run create-vivary adopt <workspace> "
-                        f"--recover {interrupted_hash} before continuing"
-                    )
+                    report("error", DoctorRule.ADOPTION_PREJOURNAL,
+                           "unfinished pre-journal adoption privacy replacement exists; "
+                           "run create-vivary adopt <workspace> "
+                           f"--recover {interrupted_hash} before continuing")
                 elif _ADOPT_PREJOURNAL_MARKER_PREFIX.encode("ascii") in gitignore_bytes:
-                    errors.append("malformed pre-journal adoption marker exists in .gitignore")
+                    report("error", DoctorRule.ADOPTION_MARKER_MALFORMED,
+                           "malformed pre-journal adoption marker exists in .gitignore")
 
-    if not errors:
+    if not failing():
         compatibility, backend_name = _workspace_compatibility(target, memory_report)
-        errors.extend(
-            f"missing required file: {rel}"
-            for rel in compatibility["baseline_missing"]
-        )
-        errors.extend(
-            f"missing required indexed contract file: {rel}"
-            for rel in compatibility["contract_missing"]
-        )
-        warnings.extend(
-            f"recommended workspace file missing: {rel}"
-            for rel in compatibility["recommended_missing"]
-        )
+        for rel in compatibility["baseline_missing"]:
+            report("error", DoctorRule.REQUIRED_FILE_MISSING, f"missing required file: {rel}", rel)
+        for rel in compatibility["contract_missing"]:
+            report("error", DoctorRule.CONTRACT_FILE_MISSING, f"missing required indexed contract file: {rel}", rel)
+        for rel in compatibility["recommended_missing"]:
+            report("warning", DoctorRule.RECOMMENDED_FILE_MISSING, f"recommended workspace file missing: {rel}", rel)
         if compatibility["recommended_upgrade"] is not None:
-            warnings.append(compatibility["recommended_upgrade"])
+            report("warning", DoctorRule.RECOMMENDED_UPGRADE, compatibility["recommended_upgrade"])
 
         if compatibility["workspace_contract"] == THIN_WORKSPACE_CONTRACT:
             if (target / ".gitignore").exists():
-                errors.extend(
-                    f"privacy ignore missing: {pattern}"
-                    for pattern in _missing_thin_privacy_ignores(target)
-                )
+                for pattern in _missing_thin_privacy_ignores(target):
+                    report("error", DoctorRule.PRIVACY_IGNORE_MISSING, f"privacy ignore missing: {pattern}", pattern)
         elif (target / ".gitignore").exists():
             missing = _missing_privacy_ignores(target)
             if memory_report["enabled"]:
@@ -1388,27 +1735,25 @@ def doctor_workspace(
                     for pattern in missing
                     if pattern in memory_privacy_requirements
                 ]
-                warnings.extend(
-                    f"recommended privacy ignore missing: {pattern}; add it to .gitignore"
-                    for pattern in missing
-                    if pattern not in memory_privacy_requirements
-                )
+                for pattern in missing:
+                    if pattern not in memory_privacy_requirements:
+                        report("warning", DoctorRule.RECOMMENDED_PRIVACY_IGNORE_MISSING,
+                               f"recommended privacy ignore missing: {pattern}; add it to .gitignore", pattern)
             else:
                 required_missing = [
                     pattern
                     for pattern in missing
                     if pattern in PUBLISHED_BASELINE_PRIVACY_IGNORES
                 ]
-                warnings.extend(
-                    f"recommended privacy ignore missing: {pattern}; add it to .gitignore"
-                    for pattern in missing
-                    if pattern not in PUBLISHED_BASELINE_PRIVACY_IGNORES
-                )
-            errors.extend(
-                f"privacy ignore missing: {pattern}" for pattern in required_missing
-            )
+                for pattern in missing:
+                    if pattern not in PUBLISHED_BASELINE_PRIVACY_IGNORES:
+                        report("warning", DoctorRule.RECOMMENDED_PRIVACY_IGNORE_MISSING,
+                               f"recommended privacy ignore missing: {pattern}; add it to .gitignore", pattern)
+            for pattern in required_missing:
+                report("error", DoctorRule.PRIVACY_IGNORE_MISSING, f"privacy ignore missing: {pattern}", pattern)
         if compatibility["workspace_contract"] != THIN_WORKSPACE_CONTRACT:
-            errors.extend(_module_index_errors(target))
+            for rule, detail in _module_index_problems(target):
+                report("error", rule, detail)
 
     graph = {"nodes": 0, "edges": 0, "broken": 0}
     workspace_roles = None
@@ -1421,44 +1766,52 @@ def doctor_workspace(
             tropo, resolver = _doctor_config_context(target, root)
             workspace_roles = resolver.base.workspace_roles
         except Exception as exc:  # keep doctor a report, not a traceback
-            errors.append(f"tropo validation failed: {exc}")
-    if not errors:
+            report("error", DoctorRule.TROPO_INVALID, f"tropo validation failed: {exc}")
+    if not failing():
         try:
             if resolver is None:
                 tropo, resolver = _doctor_config_context(target, root)
-            docs, nodes, edges = _doctor_graph_context(tropo, resolver, target)
-            findings = [f.render() for doc in docs for f in doc.findings]
-            graph = {
-                "nodes": len(nodes),
-                "edges": len(edges),
-                "broken": sum(1 for edge in edges if edge["broken"]),
-            }
-            if findings:
-                errors.extend(f"tropo finding: {finding}" for finding in findings)
-            if graph["broken"]:
-                errors.append(f"graph has {graph['broken']} broken edge(s)")
-            if graph["nodes"] == 0:
-                warnings.append("typed graph has no nodes")
+            if not public:
+                docs, nodes, edges = _doctor_graph_context(tropo, resolver, target)
+                graph = {
+                    "nodes": len(nodes),
+                    "edges": len(edges),
+                    "broken": sum(1 for edge in edges if edge["broken"]),
+                }
+                # Keep Tropo's own severity. Warnings such as W202 (unknown field)
+                # or W210 (redundant frontmatter) describe ordinary notes, not a
+                # broken workspace; only error-level findings fail Doctor.
+                for doc in docs:
+                    for finding in doc.findings:
+                        report("error" if finding.level == "error" else "warning", DoctorRule.TROPO_FINDING,
+                               f"tropo finding: {finding.render()}")
+                if graph["broken"]:
+                    report("error", DoctorRule.GRAPH_BROKEN, f"graph has {graph['broken']} broken edge(s)")
+                if graph["nodes"] == 0:
+                    report("warning", DoctorRule.GRAPH_EMPTY, "typed graph has no nodes")
         except Exception as exc:  # keep doctor a report, not a traceback
-            errors.append(f"tropo validation failed: {exc}")
+            report("error", DoctorRule.TROPO_INVALID, f"tropo validation failed: {exc}")
 
     if target.is_dir():
         # Declaration failures must not suppress graph/trend metrics. The graph is a
         # read-only observation of the workspace, independent of optional providers.
-        errors.extend(compatibility["declared_capability_problems"])
+        for problem in compatibility["declared_capability_problems"]:
+            report("error", DoctorRule.CAPABILITY_INVALID, problem)
         if memory_report["status"] == "misconfigured":
-            errors.append(f"semantic memory misconfigured: {memory_report['detail']}")
+            report("error", DoctorRule.MEMORY_MISCONFIGURED, f"semantic memory misconfigured: {memory_report['detail']}")
         elif memory_report["status"] == "privacy-failed":
-            errors.append("semantic memory privacy check failed")
+            report("error", DoctorRule.MEMORY_PRIVACY_FAILED, "semantic memory privacy check failed")
         elif memory_report["status"] == "unavailable":
-            warnings.append(f"semantic memory provider unavailable: {memory_report['provider']}")
+            report("warning", DoctorRule.MEMORY_UNAVAILABLE, f"semantic memory provider unavailable: {memory_report['provider']}")
 
+    errors = _doctor_lines(problems, "error", public)
+    warnings = _doctor_lines(problems, "warning", public)
     return {
         "ok": not errors,
         "root": str(target),
         "errors": errors,
         "warnings": warnings,
-        "graph": graph,
+        "graph": None if public else graph,
         "backend": backend_name,
         "memory": memory_report,
         "compatibility": compatibility,
@@ -1551,6 +1904,238 @@ def _doctor_config_context(target: Path, root: Path):
     tropo = _load_tropo(root)
     resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
     return tropo, resolver
+
+
+def workspace_context(
+    target: str | Path,
+    *,
+    repo_root: str | Path | None = None,
+    candidates: list[str] | tuple[str, ...] = (),
+) -> dict:
+    """Return the paths an agent reads when a run starts, for the Workbench.
+
+    The answer is Tropo's `workspace_context` for this folder plus the privacy
+    facts the Workbench needs (see `_context_privacy`). `candidates` are
+    workspace-relative files the Workbench is about to create, such as a new
+    fact file; `private_candidates` lists the ones the ignore rules would
+    ignore. A thin config Tropo refuses returns {"status": "invalid",
+    "message": ...} without any host path. Reads configuration, ignore files,
+    and memory folder listings only: no note bodies, no writes, no receipt.
+    """
+    candidates = _context_candidates(candidates)
+    root = (Path(repo_root) if repo_root is not None else default_repo_root()).resolve()
+    target = Path(target).resolve()
+    tropo = _load_tropo(root)
+    marker = target / ".vivary" / "workspace.toml"
+    if marker.is_symlink() or (os.path.lexists(marker) and not marker.is_file()):
+        return {"status": "invalid", "message": _MALFORMED_MARKER_MESSAGE}
+    if _workspace_contract(target)[0] != THIN_WORKSPACE_CONTRACT:
+        context = tropo.workspace_context(None)
+    else:
+        try:
+            resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
+            context = tropo.workspace_context(resolver.base)
+        except (tropo.ConfigError, OSError, TypeError, AttributeError) as exc:
+            return {"status": "invalid", "message": _without_host_paths(str(exc), target)}
+    budget = _MemoryMatchBudget()
+    privacy = _context_privacy(target, context, budget)
+    private_candidates = [path for path in candidates if _memory_probe_is_ignored(target, path, budget)]
+    return {
+        **context,
+        **privacy,
+        "private_candidates": private_candidates,
+        "privacy_limited": budget.spent,
+    }
+
+
+_CONTEXT_MAX_CANDIDATES = 16
+_MALFORMED_MARKER_MESSAGE = (
+    "The file .vivary/workspace.toml is a link, a folder, or not a regular file. "
+    "Replace it with a regular file."
+)
+# The Workbench answer schema accepts at most this many `ignore_files`.
+_CONTEXT_IGNORE_FILES = 4_000
+# A new fact file name no rule is likely to name, for deciding whether a
+# memory folder is private. A rule that names one fact, such as `fact.md`,
+# does not make the whole folder private. A rule such as `*.md` still does.
+_MEMORY_FOLDER_PROBE = "vivary-memory-folder-probe.md"
+
+
+def _context_candidates(candidates) -> list[str]:
+    """Validate the Workbench's candidate paths: a few workspace-relative paths."""
+    if not isinstance(candidates, (list, tuple)) or len(candidates) > _CONTEXT_MAX_CANDIDATES:
+        raise ValueError("context candidates must be a short list")
+    checked = []
+    for candidate in candidates:
+        if not isinstance(candidate, str) or len(candidate) > 1_000:
+            raise ValueError("context candidates must be relative paths")
+        parts = candidate.split("/")
+        if (candidate.startswith("/") or "\\" in candidate or re.match(r"^[A-Za-z]:", candidate)
+                or any(part in ("", ".", "..") for part in parts)):
+            raise ValueError("context candidates must stay inside the workspace")
+        checked.append(candidate)
+    return checked
+
+
+# An absolute POSIX or Windows path that is not part of a relative path or a URL.
+# Drive paths, POSIX paths, and Windows UNC and extended-length paths
+# (`\\server\share\...`, `\\?\C:\...`).
+_ABSOLUTE_PATH = re.compile(r"(?<![\w.:/\\])(?:[A-Za-z]:[\\/]|\\\\|/)[^\s,;'\"]*")
+
+
+def _without_host_paths(message: str, target: Path) -> str:
+    """The workspace becomes ".", and any other absolute path is named generically."""
+    return _ABSOLUTE_PATH.sub("<a folder outside the project>", message.replace(str(target), "."))
+
+
+# Fact file listings follow the Workbench's `listFolder` in project-files.ts
+# exactly: the same entries scanned, the same names kept, the same order and
+# cap. The Workbench loads only the files this answer names in
+# `checked_files`, so any mismatch fails closed. Keep these in step with
+# MAX_FOLDER_ENTRIES and CONTEXT_BOUNDS.factsPerLocation there.
+_CONTEXT_SCANNED_ENTRIES = 4_000
+_CONTEXT_LISTED_FILES = 200
+# `checked_files` stays far under the bridge's 512 KiB output limit: at most
+# this many paths and this many bytes of JSON across all memory folders. The
+# Workbench schema accepts at most _CONTEXT_CHECKED_TOTAL items.
+_CONTEXT_CHECKED_TOTAL = 3_000
+_CONTEXT_CHECKED_JSON_BYTES = 96 * 1024
+# The Workbench answer schema accepts a workspace-relative path of at most
+# this many UTF-16 code units, with no backslash.
+_WORKBENCH_PATH_UNITS = 512
+
+
+def _context_privacy(target: Path, context: dict, budget: "_MemoryMatchBudget | None" = None) -> dict:
+    """What the workspace's .gitignore rules make private, for the Workbench.
+
+    - `private`: memory folders a new fact file would be ignored in.
+    - `private_files`: law files, the state file, and existing Markdown files
+      in each memory folder that the rules ignore. The Workbench does not load
+      them.
+    - `checked_files`: every memory folder file this answer checked. The
+      Workbench loads, corrects, or forgets no other fact file, so a file it
+      lists beyond these bounds, or one created after this check, is skipped.
+      Links and names the Workbench cannot carry are never checked.
+    - `ignore_files`: every `.gitignore` consulted for those paths, one per
+      ancestor folder, whether it exists or not. The Workbench keys its cache
+      on their bytes, so a new or edited rule is picked up.
+    - `privacy_policy`: "gitignore" when any of those files exists.
+
+    Every match spends from `budget`. Once it runs out, each path not yet
+    decided counts as private, and `workspace_context` reports
+    `privacy_limited`. More consulted `.gitignore` files than the Workbench
+    accepts spend the budget too: the list is cut, so the Workbench could not
+    notice an edit to the rest, and every path counts as private.
+
+    The check walks folders as Doctor does, so it needs no Git, but reads each
+    `.gitignore` with its own reader (`_memory_rules_at_base`) and matches with
+    a fail-closed matcher (`_memory_ignored_by_rules`). It does not read
+    `.git/info/exclude` or global Git excludes.
+    """
+    folders = list(context["memory"])
+    roles = context.get("roles") or {}
+    files = [*roles.get("law", []), *([context["state"]] if context.get("state") else [])]
+    listed = _checked_fact_paths(target, folders)
+    budget = budget if budget is not None else _MemoryMatchBudget()
+    probes = [*(f"{folder}/{_MEMORY_FOLDER_PROBE}" for folder in folders), *files, *listed]
+    ignore_files = sorted({
+        "/".join([*path.split("/")[:depth], ".gitignore"])
+        for path in probes
+        for depth in range(path.count("/") + 1)
+    })
+    if len(ignore_files) > _CONTEXT_IGNORE_FILES:
+        ignore_files = ignore_files[:_CONTEXT_IGNORE_FILES]
+        budget.spent = True
+    return {
+        "privacy_policy": ("gitignore" if any(
+            (target / name).is_file() and not _is_symlink_or_junction(target / name) for name in ignore_files)
+            else "none"),
+        "private": [folder for folder in folders
+                    if _memory_probe_is_ignored(target, f"{folder}/{_MEMORY_FOLDER_PROBE}", budget)],
+        "private_files": sorted({path for path in [*files, *listed] if _memory_probe_is_ignored(target, path, budget)}),
+        "checked_files": listed,
+        "ignore_files": ignore_files,
+    }
+
+
+def _is_fact_file_name(name: str) -> bool:
+    """The Workbench's fact file name rule: `<something>.md`, not secret-looking.
+
+    Mirrors `listFolder` and `isSecretName` in project-files.ts. For names
+    ending in `.md` the secret rule reduces to these three tests.
+    """
+    lower = name.lower()
+    return (len(name) > 3 and lower.endswith(".md") and not lower.startswith(".env.")
+            and "credential" not in lower and "secret" not in lower)
+
+
+def _workbench_can_carry(path: str) -> bool:
+    """Whether the Workbench answer schema accepts `path` and can name it the same way.
+
+    A backslash is refused there, a name Python could not decode (a lone
+    surrogate here, U+FFFD in Node) cannot match, and the schema caps length
+    in UTF-16 code units.
+    """
+    if "\\" in path or chr(0xFFFD) in path:
+        return False
+    try:
+        return len(path.encode("utf-16-le")) // 2 <= _WORKBENCH_PATH_UNITS
+    except UnicodeEncodeError:
+        return False
+
+
+def _checked_fact_paths(target: Path, folders: list[str]) -> list[str]:
+    """The fact files this answer checks, within the per-folder and total bounds."""
+    checked: list[str] = []
+    used = 0
+    for folder in folders:
+        for name in _markdown_names(target, folder):
+            path = f"{folder}/{name}"
+            if not _workbench_can_carry(path):
+                continue
+            size = len(json.dumps(path)) + 2
+            if len(checked) >= _CONTEXT_CHECKED_TOTAL or used + size > _CONTEXT_CHECKED_JSON_BYTES:
+                return checked
+            checked.append(path)
+            used += size
+    return checked
+
+
+def _markdown_names(target: Path, folder: str) -> list[str]:
+    """The regular fact files among the Workbench's listing of `folder`.
+
+    The listing is the one `listFolder` makes: fact file names of regular
+    files and links among the first entries scanned, sorted by UTF-16 code
+    units as JavaScript sorts, and capped. Links take their place in that
+    order but are never checked, so the Workbench reports them as links.
+    """
+    current = target
+    for part in folder.split("/"):
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except OSError:
+            return []
+        if not stat.S_ISDIR(info.st_mode) or _is_symlink_or_junction(current):
+            return []
+    names: list[str] = []
+    regular: set[str] = set()
+    try:
+        with os.scandir(current) as entries:
+            for scanned, entry in enumerate(entries, start=1):
+                if scanned > _CONTEXT_SCANNED_ENTRIES:
+                    break
+                if not _is_fact_file_name(entry.name):
+                    continue
+                if entry.is_symlink():
+                    names.append(entry.name)
+                elif entry.is_file(follow_symlinks=False):
+                    names.append(entry.name)
+                    regular.add(entry.name)
+    except OSError:
+        return []
+    window = sorted(names, key=lambda name: name.encode("utf-16-be", "surrogatepass"))[:_CONTEXT_LISTED_FILES]
+    return [name for name in window if name in regular]
 
 
 def _doctor_graph_context(tropo, resolver, target: Path):
@@ -2136,7 +2721,7 @@ def _apply_w210_fix(
 
 def _module_routing_metrics(target: Path) -> tuple[int, int]:
     """Module index count and total file count under modules/, the same
-    directories doctor already walks in `_module_index_errors`. This doubles
+    directories doctor already walks in `_module_index_problems`. This doubles
     as a cheap routing-surface proxy without re-deriving one."""
     modules = target / "modules"
     if not modules.exists():
@@ -2433,16 +3018,6 @@ def _missing_privacy_ignores(target: Path, *, include_nested: bool = True) -> li
     ]
 
 
-_THIN_PRIVACY_PROBES = {
-    ".vivary/private/": (".vivary/private/secret.md",),
-    ".vivary/runtime/": (".vivary/runtime/adopt-journal.json",),
-    "*.vivary-tmp": (".vivary-output.vivary-tmp",),
-}
-_THIN_ACTIVE_CONTEXT_PRIVACY_PROBES = {
-    ".cocoindex_code/": (".cocoindex_code/private-index.db",),
-}
-
-
 def _thin_privacy_probes(active_context: str | None = None) -> dict[str, tuple[str, ...]]:
     probes = dict(_THIN_PRIVACY_PROBES)
     if active_context == "cocoindex-code":
@@ -2488,6 +3063,9 @@ def _probe_is_ignored(
     *,
     include_nested: bool = True,
     extra_root_rules: tuple[tuple[str, bool, str], ...] = (),
+    root_rules: tuple[tuple[str, bool, str], ...] | None = None,
+    matcher=None,
+    rules_at=None,
 ) -> bool:
     """Whether Git would ignore `rel_path` in this workspace.
 
@@ -2500,19 +3078,347 @@ def _probe_is_ignored(
     deeper negation cannot re-include the file.
 
     `extra_root_rules` simulates lines a repair would append to the root file.
+    `matcher` decides one path against the collected rules, and `rules_at`
+    reads the rules of the `.gitignore` in one folder. Doctor uses
+    `_ignored_by_rules` and `_privacy_rules_at_base`.
     """
+    matcher = matcher or _ignored_by_rules
+    rules_at = rules_at or _privacy_rules_at_base
     rel_path = rel_path.replace("\\", "/")
-    rules = _privacy_rules_at_base(target, "") + list(extra_root_rules)
+    rules = (rules_at(target, "") if root_rules is None else list(root_rules)) + list(extra_root_rules)
     if not include_nested:
-        return _ignored_by_rules(rules, rel_path)
+        return matcher(rules, rel_path)
 
     parts = rel_path.split("/")
     for depth in range(1, len(parts)):
         base = "/".join(parts[:depth])
-        if _ignored_by_rules(rules, base):
+        if matcher(rules, base):
             return True
-        rules.extend(_privacy_rules_at_base(target, base))
-    return _ignored_by_rules(rules, rel_path)
+        rules.extend(rules_at(target, base))
+    return matcher(rules, rel_path)
+
+
+def _memory_ignored_by_rules(rules: list[tuple[str, bool, str]], rel_path: str,
+                             budget: "_MemoryMatchBudget | None" = None) -> bool:
+    """Whether any positive rule could make Git ignore `rel_path`, for authored memory.
+
+    Doctor must never call a private file safe. Memory must never load or save
+    a file Git could ignore, so its matcher can only over-match:
+
+    - Negations are ignored. A path any positive rule matches stays private,
+      whatever `!` rules follow, so memory may refuse a file Git re-includes.
+    - A rule matches in exact case or without regard to case, a superset of
+      both `core.ignorecase` settings.
+    - A run of two or more stars reads the same whatever its length, as in
+      Git. A run not bounded by slashes matches across `/`, a superset of
+      Git's reading as `*`.
+    - A rule and path are compared as code points and as UTF-8 bytes, so `?`
+      and bracket members cover Git's byte semantics.
+    - A trailing `/` is ignored, so a directory rule also matches a file.
+    - A bracket expression `_bracket_rule_is_uncertain` names, or a rule
+      longer than `_MEMORY_RULE_CHARS`, matches everything under the rule's
+      folder.
+    - Matching tracks reachable positions instead of backtracking. A context
+      read spends from a fixed budget, `_MEMORY_MATCH_BUDGET`, and loads at
+      most `_MEMORY_RULE_LIMIT` rules. When either runs out, every path not
+      yet decided counts as private.
+    """
+    return any(not negated and _memory_rule_matches(base, pattern, rel_path, budget)
+               for base, negated, pattern in rules)
+
+
+# A memory rule longer than this is uncertain, so it matches. It bounds the
+# work of one match, which grows with rule length times path length.
+_MEMORY_RULE_CHARS = 256
+# The work one context read may spend matching memory paths. Each rule and
+# path pair costs the rule's length plus _MEMORY_PAIR_UNITS, which stands for
+# the fixed Python work of one pair, and each match step costs the path
+# positions it visits. Once this runs out, every path not yet decided
+# counts as private. A typical workspace spends a small fraction.
+_MEMORY_MATCH_BUDGET = 20_000_000
+_MEMORY_PAIR_UNITS = 64
+# The rules one context read may load from the .gitignore files it consults.
+# Past this the read stops, and every path not yet decided counts as private.
+_MEMORY_RULE_LIMIT = 2_000
+
+
+class _MemoryMatchBudgetSpent(Exception):
+    """The context read's matching budget ran out."""
+
+
+class _MemoryMatchBudget:
+    """One context read's matching budget, with the rules and verdicts it already has."""
+
+    def __init__(self, units: int = _MEMORY_MATCH_BUDGET) -> None:
+        self.left = units
+        self.spent = False
+        self.rules: dict[str, list[tuple[str, bool, str]]] = {}
+        self.rule_count = 0
+        self.verdicts: dict[tuple[str, tuple[tuple[str, bool, str], ...]], bool] = {}
+
+    def charge(self, units: int) -> None:
+        self.left -= units
+        if self.left < 0:
+            self.spent = True
+            raise _MemoryMatchBudgetSpent
+
+
+def _memory_rule_matches(base: str, pattern: str, rel_path: str, budget: _MemoryMatchBudget | None = None) -> bool:
+    rel_path = rel_path.replace("\\", "/")
+    if base:
+        if not rel_path.startswith(f"{base}/"):
+            return False
+        scoped = rel_path[len(base) + 1 :]
+    else:
+        scoped = rel_path
+    if budget is not None:
+        budget.charge(len(pattern) + _MEMORY_PAIR_UNITS)
+    if len(pattern) > _MEMORY_RULE_CHARS or _bracket_rule_is_uncertain(pattern):
+        return True
+    body = pattern.rstrip("/")
+    # A leading or inner separator anchors the pattern to the rule's folder.
+    # Without one it matches by basename at any depth.
+    anchored = "/" in body
+    if body.startswith("/"):
+        body = body[1:]
+    if not body:
+        return False
+    forms = [(body, scoped)]
+    if not (body.isascii() and scoped.isascii()):
+        # The byte form differs only when a character is not ASCII.
+        forms.append((_utf8_as_latin1(body), _utf8_as_latin1(scoped)))
+    for rule_text, path_text in forms:
+        # Folding changes nothing for a rule with no cased character and no
+        # bracket. A bracket range with uncased ends, such as `[@-_]`, can
+        # still span letters that Git folds.
+        needs_fold = "[" in rule_text or rule_text.lower() != rule_text.upper()
+        for fold in (False, True) if needs_fold else (False,):
+            tokens = _memory_glob_tokens(rule_text, fold)
+            if tokens is None or _memory_glob_match(tokens, path_text, anchored=anchored, fold=fold, budget=budget):
+                return True
+    return False
+
+
+def _utf8_as_latin1(text: str) -> str:
+    """`text` as its UTF-8 bytes, one character per byte, as Git's wildmatch sees it."""
+    return text.encode("utf-8", "surrogateescape").decode("latin-1")
+
+
+# Enough for every form of every rule one context read may load.
+@functools.lru_cache(maxsize=4 * _MEMORY_RULE_LIMIT + 64)
+def _memory_glob_tokens(pattern: str, fold: bool) -> tuple[tuple[str, object], ...] | None:
+    """A memory rule as match steps, or `None` when a bracket set will not compile.
+
+    Git skips a whole run of stars before it decides whether the run is
+    bounded by slashes, so a run of two or more reads the same whatever its
+    length. A bounded run followed by `/` matches zero or more folders. Any
+    other run of two or more matches across `/`, a superset of Git's reading
+    of an unbounded run as `*`.
+    """
+    tokens: list[tuple[str, object]] = []
+    flags = re.DOTALL | (re.IGNORECASE if fold else 0)
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            end = i
+            while end < len(pattern) and pattern[end] == "*":
+                end += 1
+            if end - i == 1:
+                tokens.append(("star", None))
+                i = end
+            elif (i == 0 or pattern[i - 1] == "/") and pattern[end : end + 1] == "/":
+                tokens.append(("folders", None))
+                i = end + 1
+            else:
+                tokens.append(("any-run", None))
+                i = end
+        elif char == "?":
+            tokens.append(("one", None))
+            i += 1
+        elif char == "\\" and i + 1 < len(pattern):
+            tokens.append(("literal", pattern[i + 1]))
+            i += 2
+        elif char == "[" and pattern.find("]", i + 2) != -1:
+            close = pattern.find("]", i + 2)
+            body = pattern[i + 1 : close]
+            if body[:1] in ("!", "^"):
+                body = "^" + body[1:]
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", FutureWarning)
+                    tokens.append(("set", re.compile(f"[{body}]", flags)))
+            except re.error:
+                return None
+            i = close + 1
+        else:
+            tokens.append(("literal", char))
+            i += 1
+    return tuple(tokens)
+
+
+def _memory_glob_match(tokens: tuple[tuple[str, object], ...], path: str, *, anchored: bool, fold: bool,
+                       budget: _MemoryMatchBudget | None = None) -> bool:
+    """Whether `tokens` match `path` or a folder above it, with no backtracking.
+
+    It tracks the set of path positions each step can reach, so the work is at
+    most the number of steps times the path length. Each step charges
+    `budget` for the positions it visited.
+    """
+    size = len(path)
+    slashes = [index for index, char in enumerate(path) if char == "/"]
+    positions = {0} if anchored else {0, *(index + 1 for index in slashes)}
+    if budget is not None:
+        budget.charge(len(positions))
+    for kind, value in tokens:
+        if not positions:
+            return False
+        reached: set[int] = set()
+        if kind == "literal":
+            for at in positions:
+                if at < size and (path[at] == value or (fold and path[at].lower() == str(value).lower())):
+                    reached.add(at + 1)
+        elif kind == "one":
+            reached = {at + 1 for at in positions if at < size and path[at] != "/"}
+        elif kind == "set":
+            reached = {at + 1 for at in positions if at < size and value.match(path[at])}  # type: ignore[union-attr]
+        elif kind == "star":
+            covered = -1
+            for at in sorted(positions):
+                if at <= covered:
+                    continue
+                reached.add(at)
+                while at < size and path[at] != "/":
+                    at += 1
+                    reached.add(at)
+                covered = at
+        elif kind == "any-run":
+            reached = set(range(min(positions), size + 1))
+        else:  # "folders": zero or more whole folders
+            first = min(positions)
+            reached = set(positions) | {index + 1 for index in slashes if index > first}
+        if budget is not None:
+            budget.charge(len(positions) + len(reached))
+        positions = reached
+    # A match also covers everything beneath it.
+    return any(at == size or path[at] == "/" for at in positions)
+
+
+@functools.lru_cache(maxsize=_MEMORY_RULE_LIMIT + 64)
+def _bracket_rule_is_uncertain(pattern: str) -> bool:
+    r"""Whether memory's matcher may misread a bracket expression in `pattern`.
+
+    Memory's matcher reads a bracket body of plain members and ranges, such as `[._]`,
+    `[a-v]`, or `[.]`, and Git's backslash escape outside brackets,
+    so `foo\[bar` is a literal. Git reads `\x` inside a bracket as a literal
+    `x` and a `]` right after `[`, `[!`, or `[^` as a member, where Python's
+    `re` does not. So a body holding a backslash, a body starting with `]`,
+    `!]`, or `^]`, a POSIX class (`[[:alpha:]]`), an equivalence class
+    (`[[=a=]]`), a collating symbol (`[[.a.]]`), an unescaped `[` that never
+    closes, and a set Python cannot compile are uncertain. So is a negated
+    body holding an ASCII capital letter as a literal member, such as `[!B]`:
+    with `core.ignorecase` Git lowercases the path but compares that member
+    as written. Ranges are compared the same way on both sides. The last
+    check compiles `pattern` through Doctor's `_wildmatch_regex` only to find
+    a set Python cannot compile.
+    """
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            if pattern[index + 1 : index + 2] == "]" or pattern[index + 1 : index + 3] in ("!]", "^]"):
+                return True
+            close = pattern.find("]", index + 2)
+            if close == -1:
+                return True
+            body = pattern[index + 1 : close]
+            if "\\" in body or re.search(r"\[[:=.]", body):
+                return True
+            if body[:1] in ("!", "^") and _has_capital_literal(body[1:]):
+                return True
+            index = close + 1
+            continue
+        index += 1
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            re.compile(_wildmatch_regex(pattern.strip("/")))
+    except re.error:
+        return True
+    return False
+
+
+def _has_capital_literal(members: str) -> bool:
+    """Whether a bracket body holds an ASCII capital letter outside a range."""
+    index = 0
+    while index < len(members):
+        if members[index + 1 : index + 2] == "-" and index + 2 < len(members):
+            index += 3
+            continue
+        if "A" <= members[index] <= "Z":
+            return True
+        index += 1
+    return False
+
+
+def _memory_probe_is_ignored(target: Path, rel_path: str, budget: _MemoryMatchBudget | None = None) -> bool:
+    """Whether memory treats `rel_path` as private. A spent `budget` makes it private."""
+    if budget is None:
+        return _probe_is_ignored(target, rel_path, matcher=_memory_ignored_by_rules, rules_at=_memory_rules_at_base)
+    if budget.spent:
+        return True
+
+    # One context read probes many paths in the same folders, so it reads each
+    # .gitignore once and decides each folder once.
+    def rules_at(target: Path, base: str) -> list[tuple[str, bool, str]]:
+        if base not in budget.rules:
+            rules = _memory_rules_at_base(target, base)
+            budget.rules[base] = rules
+            budget.rule_count += len(rules)
+            if budget.rule_count > _MEMORY_RULE_LIMIT:
+                budget.spent = True
+                raise _MemoryMatchBudgetSpent
+        return budget.rules[base]
+
+    def matcher(rules: list[tuple[str, bool, str]], path: str) -> bool:
+        key = (path, tuple(rules))
+        if key not in budget.verdicts:
+            budget.verdicts[key] = _memory_ignored_by_rules(rules, path, budget)
+        return budget.verdicts[key]
+
+    try:
+        return _probe_is_ignored(target, rel_path, matcher=matcher, rules_at=rules_at)
+    except _MemoryMatchBudgetSpent:
+        return True
+
+
+def _memory_rules_at_base(target: Path, base: str) -> list[tuple[str, bool, str]]:
+    """The rules of one `.gitignore` for memory, split the way Git splits them.
+
+    Git splits a `.gitignore` only on `\n`, drops one `\r` before it, ends an
+    entry at its first NUL, and skips a UTF-8 byte order mark at the start. A lone `\r`, form feed, NEL, U+2028,
+    or U+2029 stays inside its rule, where `str.splitlines` would start a new
+    one. Bytes that are not UTF-8 keep their value through `surrogateescape`.
+    """
+    gitignore = target / base / ".gitignore" if base else target / ".gitignore"
+    if _is_symlink_or_junction(gitignore) or not gitignore.is_file():
+        return []
+    data = gitignore.read_bytes()
+    if data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    rules: list[tuple[str, bool, str]] = []
+    for raw in data.split(b"\n"):
+        if raw.endswith(b"\r"):
+            raw = raw[:-1]
+        # Git ends each entry at its first NUL, then trims trailing spaces.
+        raw = raw.split(b"\x00", 1)[0]
+        parsed = _parse_gitignore_line(raw.decode("utf-8", "surrogateescape"))
+        if parsed is not None:
+            rules.append((base, parsed[0], parsed[1]))
+    return rules
 
 
 def _strip_unescaped_trailing_spaces(line: str) -> str:
@@ -2961,13 +3867,13 @@ def _windows_open_locked_directory(path: Path, *, delete: bool = False):
     return handle, (before.st_dev, inode)
 
 
-def _windows_open_locked_regular_file(path: Path):
+def _windows_open_locked_regular_file(path: Path, *, delete: bool = True):
     before = os.stat(path, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode) or _is_symlink_or_junction(path):
         raise ScaffoldError(f"delete target is not a regular file: {path}")
     handle = _WINDOWS_CREATE_FILE(
         str(path),
-        _WINDOWS_GENERIC_READ | _WINDOWS_FILE_READ_ATTRIBUTES | _WINDOWS_DELETE,
+        _WINDOWS_GENERIC_READ | _WINDOWS_FILE_READ_ATTRIBUTES | (_WINDOWS_DELETE if delete else 0),
         0x00000001 | _WINDOWS_FILE_SHARE_DELETE,
         None,
         _WINDOWS_OPEN_EXISTING,
@@ -3007,13 +3913,21 @@ def _windows_assert_directory_identity(path: Path, identity: tuple[int, int]) ->
         raise ScaffoldError(f"destination parent changed during write: {path}")
 
 
-def _windows_create_temporary_file(parent: Path, destination_name: str) -> int:
+def _windows_create_temporary_file(
+    parent: Path, destination_name: str, *,
+    temporary_name: str | None = None,
+    before_temporary: Callable[[Path], None] | None = None,
+) -> int:
     for _attempt in range(16):
-        temporary = parent / f".{destination_name}.{os.urandom(8).hex()}.vivary-tmp"
+        temporary = parent / (temporary_name or f".{destination_name}.{os.urandom(8).hex()}.vivary-tmp")
+        if before_temporary is not None:
+            before_temporary(temporary)
         handle = _WINDOWS_CREATE_FILE(
             str(temporary),
             _WINDOWS_GENERIC_WRITE | _WINDOWS_DELETE,
-            _WINDOWS_FILE_SHARE_READ_WRITE | _WINDOWS_FILE_SHARE_DELETE,
+            # Keep the temporary file in its locked parent until our own
+            # handle commits or deletes it. Other handles cannot rename it.
+            _WINDOWS_FILE_SHARE_READ_WRITE,
             None,
             _WINDOWS_CREATE_NEW,
             _WINDOWS_FILE_ATTRIBUTE_TEMPORARY,
@@ -3027,7 +3941,7 @@ def _windows_create_temporary_file(parent: Path, destination_name: str) -> int:
                 raise
             return descriptor
         error = ctypes.get_last_error()
-        if error != 80:  # ERROR_FILE_EXISTS
+        if error != 80 or temporary_name is not None:  # ERROR_FILE_EXISTS
             raise ScaffoldError(
                 f"cannot create temporary file in {parent}: {ctypes.WinError(error)}"
             )
@@ -3036,7 +3950,6 @@ def _windows_create_temporary_file(parent: Path, destination_name: str) -> int:
 
 def _windows_rename_open_file(
     file_handle: int,
-    parent_handle: object,
     name: str,
     *,
     replace_existing: bool,
@@ -3046,7 +3959,9 @@ def _windows_rename_open_file(
     buffer = ctypes.create_string_buffer(size)
     information = _WindowsRenameInformation.from_buffer(buffer)
     information.replace_if_exists = replace_existing
-    information.root_directory = parent_handle
+    # The temporary file and destination share the locked parent. Windows
+    # requires a null RootDirectory for this same-directory rename.
+    information.root_directory = None
     information.file_name_length = len(encoded_name)
     ctypes.memmove(
         ctypes.addressof(buffer) + _WindowsRenameInformation.file_name.offset,
@@ -3225,7 +4140,16 @@ def _atomic_write_bytes_no_follow(
     replace_existing: bool = True,
     on_commit: Callable[[], None] | None = None,
     on_create_directory: Callable[[Path], None] | None = None,
+    temporary_name: str | None = None,
+    before_temporary: Callable[[Path], None] | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> None:
+    if temporary_name is not None and (
+        not temporary_name or temporary_name in {".", ".."}
+        or "/" in temporary_name or "\\" in temporary_name
+        or ":" in temporary_name or "\x00" in temporary_name
+    ):
+        raise ScaffoldError("temporary destination must be one safe filename")
     with _safe_destination_parent(
         target, dst, on_create_directory=on_create_directory,
     ) as parent:
@@ -3233,7 +4157,10 @@ def _atomic_write_bytes_no_follow(
             parent_path, parent_handle, parent_identity = parent
             mode = source_mode if source_mode is not None else _existing_regular_file_mode(dst)
             _windows_assert_directory_identity(parent_path, parent_identity)
-            descriptor = _windows_create_temporary_file(parent_path, dst.name)
+            descriptor = _windows_create_temporary_file(
+                parent_path, dst.name, temporary_name=temporary_name,
+                before_temporary=before_temporary,
+            )
             committed = False
             try:
                 file_handle = msvcrt.get_osfhandle(descriptor)
@@ -3246,9 +4173,10 @@ def _atomic_write_bytes_no_follow(
                         except OSError:
                             pass
                 _windows_assert_directory_identity(parent_path, parent_identity)
+                if before_commit is not None:
+                    before_commit()
                 _windows_rename_open_file(
                     file_handle,
-                    parent_handle,
                     dst.name,
                     replace_existing=replace_existing,
                 )
@@ -3270,7 +4198,9 @@ def _atomic_write_bytes_no_follow(
             if source_mode is not None
             else _descriptor_regular_file_mode(parent_fd, dst.name)
         )
-        temp_name = f".{dst.name}.{os.urandom(8).hex()}.vivary-tmp"
+        temp_name = temporary_name or f".{dst.name}.{os.urandom(8).hex()}.vivary-tmp"
+        if before_temporary is not None:
+            before_temporary(dst.parent / temp_name)
         flags = (
             os.O_WRONLY
             | os.O_CREAT
@@ -3289,6 +4219,8 @@ def _atomic_write_bytes_no_follow(
                     except OSError:
                         pass
             try:
+                if before_commit is not None:
+                    before_commit()
                 if replace_existing:
                     os.replace(
                         temp_name,
@@ -3319,6 +4251,93 @@ def _atomic_write_bytes_no_follow(
                 os.unlink(temp_name, dir_fd=parent_fd)
             except FileNotFoundError:
                 pass
+
+
+def _append_reviewed_bytes_no_follow(
+    target: Path, dst: Path, before: bytes, suffix: bytes, after: bytes, *,
+    before_write: Callable[[], None], on_write_attempt: Callable[[], None],
+) -> None:
+    """Append to one held file; a changed path or mixed output never counts as success."""
+    if not suffix or before + suffix != after:
+        raise ScaffoldError("reviewed privacy append does not match the approved content")
+    with _safe_destination_parent(target, dst, create_missing=False) as parent:
+        if os.name == "nt":
+            # FILE_APPEND_DATA without FILE_WRITE_DATA cannot overwrite existing bytes.
+            # Share READ only: a writer or renamer cannot coexist with this handle.
+            handle = _WINDOWS_CREATE_FILE(
+                str(dst),
+                _WINDOWS_GENERIC_READ | _WINDOWS_FILE_READ_ATTRIBUTES | 0x00000004,
+                0x00000001,
+                None,
+                _WINDOWS_OPEN_EXISTING,
+                _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+                None,
+            )
+            if handle == _WINDOWS_INVALID_HANDLE:
+                raise ScaffoldError(
+                    f"cannot hold reviewed privacy file: {ctypes.WinError(ctypes.get_last_error())}"
+                )
+            try:
+                info = _WindowsDirectoryInformation()
+                if not _WINDOWS_GET_FILE_INFO(handle, ctypes.byref(info)):
+                    raise ScaffoldError("cannot inspect held privacy file")
+                if (info.file_attributes & (_WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    | _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT) or info.number_of_links != 1):
+                    raise ScaffoldError("reviewed privacy file must be a regular file with one name")
+                descriptor = msvcrt.open_osfhandle(
+                    handle, os.O_RDWR | os.O_APPEND | os.O_BINARY,
+                )
+            except Exception:
+                _WINDOWS_CLOSE_HANDLE(handle)
+                raise
+        else:
+            descriptor = os.open(
+                dst.name, os.O_RDWR | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=parent,
+            )
+        try:
+            held = os.fstat(descriptor)
+            if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
+                raise ScaffoldError("reviewed privacy file must be a regular file with one name")
+
+            def check_path() -> None:
+                if _is_symlink_or_junction(dst):
+                    raise ScaffoldError("reviewed privacy file changed during append")
+                try:
+                    current = (os.stat(dst, follow_symlinks=False) if os.name == "nt"
+                        else os.stat(dst.name, dir_fd=parent, follow_symlinks=False))
+                except OSError as exc:
+                    raise ScaffoldError("reviewed privacy file changed during append") from exc
+                if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
+                    raise ScaffoldError("reviewed privacy file changed during append")
+
+            def read_held() -> bytes:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                limit = len(after) + 1
+                chunks = bytearray()
+                while len(chunks) < limit:
+                    block = os.read(descriptor, min(65536, limit - len(chunks)))
+                    if not block:
+                        break
+                    chunks.extend(block)
+                return bytes(chunks)
+
+            check_path()
+            if read_held() != before:
+                raise ScaffoldError("the reviewed privacy input changed before writes")
+            before_write()
+            check_path()
+            if os.fstat(descriptor).st_nlink != 1 or read_held() != before:
+                raise ScaffoldError("the reviewed privacy input changed before writes")
+            on_write_attempt()
+            if os.write(descriptor, suffix) != len(suffix):
+                raise ScaffoldError("the reviewed privacy append was incomplete")
+            check_path()
+            if read_held() != after:
+                raise ScaffoldError("the reviewed privacy output changed during append")
+        finally:
+            os.close(descriptor)
 
 
 def _write_text_no_follow(target: Path, dst: Path, text: str) -> None:
@@ -3540,21 +4559,21 @@ def _module_index_path(target: Path, module_id: str) -> Path:
     return target / "modules" / module_id / "index.md"
 
 
-def _module_index_errors(target: Path) -> list[str]:
+def _module_index_problems(target: Path) -> list[tuple[DoctorRule, str]]:
     modules = target / "modules"
     if not modules.exists():
         return []
-    errors: list[str] = []
+    problems: list[tuple[DoctorRule, str]] = []
     for child in sorted(modules.iterdir()):
         if child.is_dir() and not child.name.startswith(".") and not (child / "index.md").exists():
             rel = child.relative_to(target).as_posix()
-            errors.append(f"module directory missing index.md: {rel}")
+            problems.append((DoctorRule.MODULE_INDEX_MISSING, f"module directory missing index.md: {rel}"))
         if child.is_file() and child.suffix == ".md" and child.name != "index.md":
             paired_index = modules / child.stem / "index.md"
             if paired_index.exists():
                 rel = child.relative_to(target).as_posix()
-                errors.append(f"legacy module file coexists with module index: {rel}")
-    return errors
+                problems.append((DoctorRule.MODULE_LEGACY_FILE, f"legacy module file coexists with module index: {rel}"))
+    return problems
 
 
 def _workspace_readme(
@@ -4757,11 +5776,9 @@ _ADOPT_VIVARY_OWNED_DIRS = {
 class BrownfieldInventory:
     """Read-only snapshot of an existing directory tree for `adopt`.
 
-    Never mutates disk. Walks `target` once, skipping the fixed skip-list dirs,
-    any dotdir, and any directory Vivary itself would have created, and records
-    just enough to plan an adopt: whether root contract files already exist, how
-    markdown- vs code-heavy the tree is, and which directories look like
-    undocumented "modules" worth a router.
+    Never mutates disk. Walks `target` once, skipping dependency and hidden
+    directories. It counts files in scanned folders for preview while omitting
+    Vivary-owned paths from the preset and module-router heuristic.
     """
 
     def __init__(self, target: Path):
@@ -4773,6 +5790,8 @@ class BrownfieldInventory:
         self.markdown_count = 0
         self.code_count = 0
         self.other_count = 0
+        self.preserved_markdown_count = 0
+        self.preserved_non_markdown_count = 0
         self.candidate_modules: list[str] = []
         self._scan()
 
@@ -4787,19 +5806,21 @@ class BrownfieldInventory:
                 d for d in dirnames
                 if d not in _ADOPT_SKIP_DIRS
                 and not d.startswith(".")
-                and not (rel_dir == "" and d in _ADOPT_VIVARY_OWNED_DIRS)
             )
 
             depth = 0 if not rel_dir else rel_dir.count("/") + 1
+            owned_tree = bool(rel_dir and rel_dir.split("/", 1)[0] in _ADOPT_VIVARY_OWNED_DIRS)
             for name in filenames:
-                # Root files owned by (or reserved for) the Vivary scaffold
-                # don't vote in the preset heuristic — otherwise re-running
-                # adopt on an adopted tree would count its own README/SOUL/
-                # STATE contract files as markdown and flip the detected
-                # preset, the same reason Vivary-owned dirs are pruned above.
-                if depth == 0 and name in _ADOPT_RESERVED_ROOT_FILES:
+                raw_suffix = Path(name).suffix
+                if raw_suffix in (".md", ".markdown"):
+                    self.preserved_markdown_count += 1
+                else:
+                    self.preserved_non_markdown_count += 1
+                suffix = raw_suffix.lower()
+                # Vivary-owned trees and reserved root files do not vote in
+                # the preset heuristic, including on a repeated adoption.
+                if owned_tree or (depth == 0 and name in _ADOPT_RESERVED_ROOT_FILES):
                     continue
-                suffix = Path(name).suffix.lower()
                 if suffix in (".md", ".markdown"):
                     self.markdown_count += 1
                     if depth >= 1 and depth <= 2:
@@ -5228,8 +6249,8 @@ def _thin_gitignore_block(*, active_context: str | None = None) -> str:
 """
 
 
-def _thin_context_doc(project: str, preset: str) -> str:
-    return f"""---
+def _thin_context_doc(project: str, preset: str, pattern_choices=()) -> str:
+    base = f"""---
 status: active
 preset: {preset}
 ---
@@ -5264,6 +6285,35 @@ instead of guessing. Treat a successful tool call as activity, not proof.
 Get deliberate human approval for publishing, external writes, destructive work,
 credentials, authority expansion, and any ambiguity the evidence cannot resolve.
 """
+    return base if not pattern_choices else base + "\n" + _pattern_context_block(pattern_choices)
+
+
+_THIN_STARTER_TYPES = """
+[types.module]
+folder = "modules"
+required = { project = "string", status = "enum:active|draft|blocked|archived", module_area = "string" }
+optional = { related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list", source_files = "string-list", test_files = "string-list" }
+
+[types.change]
+folder = "changes"
+required = { project = "string", status = "enum:planned|active|done|blocked|deferred", slice = "string" }
+optional = { branch = "string", related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list" }
+
+[types.decision]
+folder = "decisions"
+required = { project = "string", status = "enum:proposed|accepted|deferred|superseded", date = "date" }
+optional = { supersedes = "ref", superseded_by = "ref", related_modules = "ref-list", related_changes = "ref-list", rationale = "string" }
+
+[types.verification]
+folder = "verification"
+required = { project = "string", status = "enum:planned|passed|failed|blocked|deferred", target = "string" }
+optional = { command = "string", evidence = "any", related_modules = "ref-list", related_changes = "ref-list" }
+
+[types.gate]
+folder = "gates"
+required = { project = "string", status = "enum:open|approved|rejected|deferred", gate = "string" }
+optional = { approver = "string", approved_at = "datetime", command_intent = "string", related_modules = "ref-list", related_changes = "ref-list" }
+"""
 
 
 def _thin_workspace_toml(
@@ -5271,6 +6321,8 @@ def _thin_workspace_toml(
     adapters: tuple[str, ...] | list[str] = (),
     *,
     active_context: str | None = None,
+    adopted: bool = False,
+    pattern_choices=(),
 ) -> str:
     adapter_list = ", ".join(json.dumps(adapter) for adapter in sorted(adapters))
     capability_list = json.dumps(active_context) if active_context is not None else ""
@@ -5280,6 +6332,19 @@ def _thin_workspace_toml(
     exclude_list = ", ".join(json.dumps(path) for path in excludes)
     boundary = [".gitignore", ".vivary/private", ".vivary/runtime", *capability_storage]
     boundary_list = ", ".join(json.dumps(path) for path in boundary)
+    # Adoption cannot claim an owner's ordinary folders as typed records merely
+    # because their names match Vivary's starter folder names.
+    project_folders = '[".vivary"]' if adopted else '[".vivary", "projects"]'
+    other_types = _THIN_STARTER_TYPES.strip("\n")
+    if adopted:
+        for folder, record_type in _THIN_RECORD_FOLDERS.items():
+            # Keep the owner's explicit type of the same name authoritative.
+            other_types = other_types.replace(
+                f"[types.{record_type}]", f"[types.vivary_record_{record_type}]")
+            other_types = other_types.replace(
+                f'folder = "{folder}"', f'folder = ".vivary/records/{folder}"')
+    pattern_line = ('patterns = ["thin-context"]' if not pattern_choices
+                    else _pattern_config_block(pattern_choices))
     return f'''version = 1
 exclude = [{exclude_list}]
 
@@ -5296,7 +6361,7 @@ capabilities = [{capability_list}]
 # same thin-context defaults.
 [workspace.vivary]
 version = 1
-patterns = ["thin-context"]
+{pattern_line}
 
 # Descriptions only: these paths grant no access and need not exist.
 # The context Routes section is a map, not a generated inventory.
@@ -5314,34 +6379,11 @@ allow_untyped = true
 optional = {{ tags = "string-list" }}
 
 [types.project]
-folder = [".vivary", "projects"]
+folder = {project_folders}
 required = {{ status = "enum:idea|active|paused|shipped|archived" }}
 optional = {{ preset = "string", repo = "url", target_ship = "date" }}
 
-[types.module]
-folder = "modules"
-required = {{ project = "string", status = "enum:active|draft|blocked|archived", module_area = "string" }}
-optional = {{ related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list", source_files = "string-list", test_files = "string-list" }}
-
-[types.change]
-folder = "changes"
-required = {{ project = "string", status = "enum:planned|active|done|blocked|deferred", slice = "string" }}
-optional = {{ branch = "string", related_modules = "ref-list", related_changes = "ref-list", verification = "ref-list", gates = "ref-list" }}
-
-[types.decision]
-folder = "decisions"
-required = {{ project = "string", status = "enum:proposed|accepted|deferred|superseded", date = "date" }}
-optional = {{ supersedes = "ref", superseded_by = "ref", related_modules = "ref-list", related_changes = "ref-list", rationale = "string" }}
-
-[types.verification]
-folder = "verification"
-required = {{ project = "string", status = "enum:planned|passed|failed|blocked|deferred", target = "string" }}
-optional = {{ command = "string", evidence = "any", related_modules = "ref-list", related_changes = "ref-list" }}
-
-[types.gate]
-folder = "gates"
-required = {{ project = "string", status = "enum:open|approved|rejected|deferred", gate = "string" }}
-optional = {{ approver = "string", approved_at = "datetime", command_intent = "string", related_modules = "ref-list", related_changes = "ref-list" }}
+{other_types}
 '''
 
 
@@ -5583,6 +6625,380 @@ def _thin_approval_hash(payload: dict) -> str:
     return _sha256_prefixed(encoded)
 
 
+def _adopt_configured_validation(
+    target: Path, repo_root: Path, proposed_config: str,
+    planned_writes: list[tuple[Path, str]],
+    trusted_inputs: dict[Path, bytes] | None = None,
+) -> tuple[list[dict], str | None]:
+    """Check existing and proposed Markdown against the effective future schema."""
+    thin_config = target / ".vivary" / "workspace.toml"
+    root_config = target / "tropo.toml"
+    nested_config = target / ".vivary" / "tropo.toml"
+    tropo = _load_tropo(repo_root)
+    import tomllib as _toml
+    captured = dict(trusted_inputs or {})
+
+    def project_bytes(path: Path) -> tuple[bytes, os.stat_result]:
+        data, info = _read_adopt_regular_snapshot(target, path)
+        if path in captured and captured[path] != data:
+            raise ScaffoldError("workspace input changed during validation")
+        captured[path] = data
+        return data, info
+
+    def safe_toml(path: str) -> dict:
+        candidate = Path(os.path.abspath(path))
+        try:
+            candidate.relative_to(target)
+        except ValueError:
+            installed_packs = Path(tropo.__file__).parent / "packs"
+            if (candidate.parent != installed_packs
+                or candidate.suffix != ".toml"
+                or _is_symlink_or_junction(candidate)
+                or candidate.resolve(strict=True).parent != installed_packs.resolve(strict=True)):
+                raise tropo.ConfigError("pack path is outside the installed catalog")
+            return tropo._read_toml(path)
+        data, _info = project_bytes(candidate)
+        try:
+            return _toml.loads(data.decode("utf-8-sig"))
+        except (UnicodeError, _toml.TOMLDecodeError) as exc:
+            raise tropo.ConfigError("workspace configuration is malformed") from exc
+
+    def safe_document(full: str) -> tuple[str, os.stat_result]:
+        data, info = project_bytes(Path(full))
+        return data.decode("utf-8", errors="replace"), info
+
+    try:
+        projected = None
+        if thin_config.is_file():
+            resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent),
+                                            read_toml=safe_toml)
+        else:
+            projected = {"base": {}, "types": {}, "exclude": []}
+            tropo._merge_config(projected, _toml.loads(proposed_config))
+            if root_config.is_file():
+                root_raw = safe_toml(str(root_config))
+                if root_raw.get("packs"):
+                    raise tropo.ConfigError("root-only packs need a reviewed schema migration")
+                tropo._merge_config(projected, root_raw)
+            resolver = tropo.ConfigResolver(
+                str(target), str(Path(tropo.__file__).parent),
+                base_data=projected, read_toml=safe_toml)
+        proposed_docs = []
+        config_paths = {path for path in (thin_config, root_config, nested_config) if path.is_file()}
+        for path, text in planned_writes:
+            if path.suffix not in (".md", ".markdown"):
+                continue
+            rel = path.relative_to(target).as_posix()
+            effective = resolver.for_dir(str(path.parent))
+            if not tropo.is_excluded(rel, effective.exclude):
+                proposed_docs.append(tropo.analyze_file(str(path), rel, effective,
+                    text=text, use_git_dates=False,
+                    stat_result=target.stat()))
+        docs = tropo.analyze(str(target), [], resolver,
+                             additional_documents=proposed_docs,
+                             read_document=safe_document)
+        for doc in docs:
+            config_paths.update(Path(path) for path in tropo._overlay_paths(
+                str(Path(doc.full).parent), str(target)))
+        inputs = sorted({Path(doc.full) for doc in docs if Path(doc.full).is_file()} | config_paths)
+        input_rows = []
+        for path in inputs:
+            data, _info = project_bytes(path)
+            input_rows.append({"path": path.relative_to(target).as_posix(),
+                               "hash": _sha256_prefixed(data)})
+        input_hash = _thin_approval_hash({
+            "effective_policy": resolver._base_dict,
+            "validation_inputs": input_rows,
+        })
+        findings = [finding.as_dict() for doc in docs for finding in doc.findings]
+        return sorted(findings, key=lambda item: (item["path"], item["line"], item["code"])), input_hash
+    except Exception as exc:
+        path = getattr(exc, "config_path", None)
+        path = Path(path) if path is not None else (
+            thin_config if thin_config.is_file() else root_config if root_config.is_file() else nested_config)
+        return [{"path": path.relative_to(target).as_posix(), "line": 0,
+                 "level": "error", "code": "CONFIG",
+                 "message": f"Existing schema could not be checked: {str(exc).replace(str(target), '.')}"}], None
+
+
+def _installed_pattern_selection(workspace: dict) -> tuple[tuple[dict, ...], dict[str, str], dict | None]:
+    metadata = workspace.get("vivary")
+    if metadata is None:
+        # Older thin-v0.3 workspaces used role metadata without an output ledger.
+        # Keep the effective role mapping, but claim no generated guidance files.
+        tropo = _load_tropo(default_repo_root())
+        roles = tropo.resolve_workspace_roles(workspace)["roles"]
+        return (), {}, roles
+    rows = metadata.get("pattern_outputs", [])
+    if not isinstance(rows, list):
+        raise ValueError("pattern outputs are malformed")
+    choices = _normalize_pattern_choices(tuple(
+        {"id": row["id"], "name": row["name"], "path": row["path"]}
+        for row in rows))
+    hashes = {row["id"]: row["generated_hash"] for row in rows}
+    if any(not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+           for value in hashes.values()):
+        raise ValueError("pattern output hash is malformed")
+    if any(not _pattern_known_hash(row, hashes[row["id"]]) for row in choices):
+        raise ValueError("managed output ledger differs from supported renderers")
+    if metadata.get("patterns") != ["thin-context", *(row["id"] for row in choices)]:
+        raise ValueError("pattern list and generated-output ledger disagree")
+    return choices, hashes, None
+
+
+def workspace_pattern_state(target: str | Path) -> dict:
+    """Read installed choices without claiming any file by its name alone."""
+    import tomllib as _toml
+    root = _resolve_scaffold_target(target)
+    config = root / ".vivary" / "workspace.toml"
+    _ensure_safe_destinations(root, [config], force=True)
+    if not config.is_file() or _is_symlink_or_junction(config):
+        raise ScaffoldError("this project has no regular Vivary workspace configuration")
+    try:
+        raw = _toml.loads(_read_adopt_regular_bytes(root, config).decode("utf-8-sig"))
+        workspace = raw["workspace"]
+        if workspace["contract"] != THIN_WORKSPACE_CONTRACT:
+            raise ValueError("unsupported workspace contract")
+        choices, _hashes, _legacy_roles = _installed_pattern_selection(workspace)
+    except (KeyError, TypeError, ValueError, UnicodeError, ScaffoldError) as exc:
+        raise ScaffoldError(f"pattern configuration needs review: {exc}") from exc
+    return {"ok": True, "catalog": builtin_pattern_catalog(), "choices": list(choices)}
+
+
+def _managed_newline_style(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\r" if "\r" in text else "\n"
+
+
+def _canonical_managed_lines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _pattern_config_update(text: str, previous: tuple[dict, ...],
+                           selected: tuple[dict, ...], previous_hashes: dict[str, str],
+                           output_hashes: dict[str, str] | None = None,
+                           legacy_roles: dict | None = None) -> str:
+    current = _pattern_config_block(previous, previous_hashes)
+    desired = _pattern_config_block(selected, output_hashes)
+    if legacy_roles is not None:
+        newline = _managed_newline_style(text)
+        separator = "" if text.endswith(newline * 2) else newline if text.endswith(newline) else newline * 2
+        roles = "".join(
+            f"{role} = {json.dumps(paths, ensure_ascii=False)}{newline}"
+            for role, paths in legacy_roles.items())
+        return (text + separator + "[workspace.vivary]" + newline
+                + "version = 1" + newline
+                + desired.replace("\n", newline) + newline
+                + "[workspace.vivary.roles]" + newline + roles)
+    begin, end = "# >>> vivary pattern selection >>>", "# <<< vivary pattern selection <<<"
+    if text.count(begin) == 1 and text.count(end) == 1:
+        start = text.index(begin)
+        stop = text.index(end, start) + len(end)
+        region = text[start:stop]
+        if _canonical_managed_lines(region) != current:
+            raise ScaffoldError("the managed pattern selection was edited; review it before reconfiguration")
+        return text[:start] + desired.replace("\n", _managed_newline_style(region)) + text[stop:]
+    if begin in text or end in text:
+        raise ScaffoldError("the managed pattern selection markers are incomplete")
+    if previous:
+        raise ScaffoldError("pattern ownership metadata is missing")
+    marker = 'patterns = ["thin-context"]'
+    if text.count(marker) != 1:
+        raise ScaffoldError("legacy pattern selection needs a reviewed migration")
+    return text.replace(marker, desired.replace("\n", _managed_newline_style(text)), 1)
+
+
+def _pattern_context_update(text: str, previous: tuple[dict, ...],
+                            selected: tuple[dict, ...]) -> str:
+    begin, end = "<!-- vivary:patterns:start -->", "<!-- vivary:patterns:end -->"
+    desired = _pattern_context_block(selected)
+    if text.count(begin) == 1 and text.count(end) == 1:
+        start = text.index(begin)
+        stop = text.index(end, start) + len(end)
+        region = text[start:stop]
+        if _canonical_managed_lines(region) != _pattern_context_block(previous).rstrip("\n"):
+            raise ScaffoldError("the managed guidance links were edited; review them before reconfiguration")
+        rendered = desired.rstrip("\n").replace("\n", _managed_newline_style(region))
+        return text[:start] + rendered + text[stop:]
+    if begin in text or end in text:
+        raise ScaffoldError("the managed guidance link markers are incomplete")
+    if previous:
+        raise ScaffoldError("pattern guidance links are missing")
+    newline = _managed_newline_style(text)
+    separator = "" if text.endswith(newline * 2) else newline if text.endswith(newline) else newline * 2
+    return text + separator + desired.replace("\n", newline)
+
+
+def _pattern_case_collision(target: Path, relative: str) -> bool:
+    parent = target
+    for part in Path(relative).parts:
+        if _is_symlink_or_junction(parent):
+            return True
+        if parent.is_dir():
+            names = {entry.name for entry in os.scandir(parent)}
+            if any(name.casefold() == part.casefold() and name != part for name in names):
+                return True
+        parent /= part
+    return False
+
+
+def plan_workspace_change(
+    target: str | Path, *, pattern_choices, repo_root: str | Path | None = None,
+) -> dict:
+    """Preview a pattern change through the existing adoption action contract."""
+    import tomllib as _toml
+    target = _resolve_scaffold_target(target)
+    selected = _normalize_pattern_choices(pattern_choices)
+    config_path = target / ".vivary" / "workspace.toml"
+    context_path = target / ".vivary" / "context.md"
+    _ensure_safe_destinations(target, [config_path, context_path], force=True)
+    if not target.is_dir() or any(not path.is_file() or _is_symlink_or_junction(path)
+                                  for path in (config_path, context_path)):
+        raise ScaffoldError("reconfiguration requires an existing regular thin workspace")
+    config_bytes = _read_adopt_regular_bytes(target, config_path)
+    context_bytes = _read_adopt_regular_bytes(target, context_path)
+    try:
+        config_text = config_bytes.decode("utf-8")
+        context_text = context_bytes.decode("utf-8")
+        raw = _toml.loads(config_text.removeprefix("\ufeff"))
+        workspace = raw["workspace"]
+        if workspace["contract"] != THIN_WORKSPACE_CONTRACT:
+            raise ValueError("not a thin workspace")
+        previous, previous_hashes, legacy_roles = _installed_pattern_selection(workspace)
+        preset = workspace["preset"]
+        adapters = tuple(workspace.get("adapters", []))
+        capabilities = workspace.get("capabilities", [])
+        if preset not in PRESETS or not isinstance(capabilities, list):
+            raise ValueError("workspace options are malformed")
+        retained_hashes = {
+            row["id"]: previous_hashes[row["id"]]
+            for row in selected
+            if row["id"] in {old["id"] for old in previous}
+            and next(old for old in previous if old["id"] == row["id"]) == row
+        }
+        new_config = _pattern_config_update(
+            config_text, previous, selected, previous_hashes, retained_hashes, legacy_roles)
+        new_context = _pattern_context_update(context_text, previous, selected)
+    except (KeyError, TypeError, ValueError, UnicodeError, ScaffoldError) as exc:
+        raise ScaffoldError(f"pattern configuration needs review: {exc}") from exc
+
+    inventory = BrownfieldInventory(target)
+    writes, replacements, kept, retired, conflicts = [], [], [], [], []
+    before = {row["id"]: row for row in previous}
+    requested = {row["id"]: row for row in selected}
+    for old in previous:
+        if old["id"] not in requested or requested[old["id"]]["path"] != old["path"]:
+            old_path = target / old["path"]
+            if old_path.is_file() and not _is_symlink_or_junction(old_path):
+                retired.append(old["path"])
+                kept.append(old_path)
+            elif old_path.exists():
+                conflicts.append({"path": old_path, "reason": "retired output is not a regular file"})
+    for choice in selected:
+        path = target / choice["path"]
+        prior = before.get(choice["id"])
+        same_place = prior is not None and prior["path"] == choice["path"]
+        same_content = same_place and prior["name"] == choice["name"]
+        try:
+            _ensure_safe_destinations(target, [path], force=True)
+        except ScaffoldError:
+            conflicts.append({"path": path, "reason": "pattern destination has an unsafe parent or link"})
+            continue
+        if _pattern_case_collision(target, choice["path"]):
+            conflicts.append({"path": path, "reason": "destination differs only by case"})
+        elif not path.exists():
+            writes.append((path, _pattern_file(choice)))
+        elif _is_symlink_or_junction(path) or not path.is_file():
+            conflicts.append({"path": path, "reason": "pattern destination is not a regular file"})
+        elif same_content:
+            kept.append(path)
+        elif same_place:
+            current_hash = _sha256_prefixed(_read_adopt_regular_bytes(target, path))
+            if current_hash == previous_hashes[choice["id"]]:
+                replacements.append({"path": path, "before_hash": current_hash,
+                                     "text": _pattern_file(choice)})
+            else:
+                conflicts.append({"path": path, "reason": "pattern destination has authored content"})
+        else:
+            conflicts.append({"path": path, "reason": "pattern destination has authored content"})
+    for path, original, updated in ((config_path, config_bytes, new_config),
+                                    (context_path, context_bytes, new_context)):
+        if original != updated.encode("utf-8"):
+            replacements.append({"path": path, "before_hash": _sha256_prefixed(original),
+                                 "text": updated})
+        else:
+            kept.append(path)
+    for relative in ("AGENTS.md", "STATE.md", ".gitignore"):
+        path = target / relative
+        if path.is_file() and not _is_symlink_or_junction(path):
+            kept.append(path)
+        else:
+            conflicts.append({"path": path, "reason": "required workspace file is unavailable"})
+    kept = sorted(set(kept))
+    writes.sort(key=lambda item: item[0])
+    replacements.sort(key=lambda item: item["path"])
+    kept_identities = [{"path": path.relative_to(target).as_posix(),
+                        "content_hash": _sha256_prefixed(_read_adopt_regular_bytes(target, path))} for path in kept]
+    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root().resolve()
+    proposed_markdown = writes + [
+        (row["path"], row["text"]) for row in replacements
+        if row["path"].suffix in (".md", ".markdown")
+    ]
+    validation_findings, validation_input_hash = _adopt_configured_validation(
+        target, root, new_config, proposed_markdown,
+        trusted_inputs={config_path: config_bytes, context_path: context_bytes})
+    conflicted_paths = {row["path"] for row in conflicts}
+    for finding in validation_findings:
+        path = target / finding["path"]
+        if finding["level"] == "error" and path not in conflicted_paths:
+            conflicts.append({"path": path, "reason": f"{finding['code']}: {finding['message']}"})
+            conflicted_paths.add(path)
+    conflicts.sort(key=lambda row: row["path"])
+    approval = _thin_plan_payload(
+        target, preset=preset, adapters=adapters, capabilities=capabilities,
+        writes=writes, patches=[], adapter_replacements=replacements,
+        kept_identities=kept_identities)
+    approval.update(intent="reconfigure", pattern_choices=list(selected),
+                    validation_inputs_hash=validation_input_hash)
+    plan_hash = _thin_approval_hash(approval)
+    content_files = [
+        {"operation": operation, "path": path.relative_to(target).as_posix(),
+         "content": text, "content_hash": _sha256_prefixed(text.encode("utf-8")),
+         "bytes": len(text.encode("utf-8")), **extra}
+        for operation, path, text, extra in (
+            [("create", path, text, {}) for path, text in writes]
+            + [("replace", row["path"], row["text"],
+                {"before_hash": row["before_hash"]}) for row in replacements])
+    ]
+    return {
+        "contract": THIN_WORKSPACE_CONTRACT, "target": target, "preset": preset,
+        "preset_reason": "reviewed built-in pattern change",
+        "capabilities": capabilities, "inventory": inventory,
+        "creates": [path for path, _ in writes],
+        "would_create": [path for path, _ in writes],
+        "followups": [], "excluded_pre_existing": [], "skipped_module_collisions": [],
+        "patches": [], "optional_projections": [], "adapter_replacements": replacements,
+        "kept": kept, "kept_identities": kept_identities, "conflicts": conflicts,
+        "privacy": {"status": "satisfied", "rules": list(_thin_privacy_probes(
+            capabilities[0] if capabilities else None))},
+        "plan_hash": plan_hash, "approval_payload": approval, "writes": writes,
+        "content_plan": {"schema": "vivary.adopt-content-plan.v1", "files": content_files,
+                         "kept": kept_identities},
+        "retired_kept": sorted(retired), "pattern_choices": list(selected),
+        "validation_findings": validation_findings, "content_inventory": {
+            "existing_markdown": inventory.preserved_markdown_count,
+            "existing_non_markdown": inventory.preserved_non_markdown_count,
+        },
+        "privacy_preparation": {"required": False, "ready": False, "reason": None,
+                                "root_hash": None, "before_hash": None, "after_hash": None},
+        "request_replay": _adopt_request_readiness(
+            target, has_changes=bool(writes or replacements), has_conflicts=bool(conflicts),
+            extra_root_rules=()),
+        "would_create": [path for path, _ in writes], "followups": [],
+        "gitignore_followups": [], "excluded_pre_existing": [],
+        "skipped_module_collisions": [],
+    }
+
+
 def plan_adopt(
     target: str | Path,
     *,
@@ -5632,6 +7048,7 @@ def plan_adopt(
         target / ".vivary" / "workspace.toml": _thin_workspace_toml(
             chosen_preset,
             selected_adapters,
+            adopted=True,
         ),
         target / "STATE.md": _thin_state_doc(),
     }
@@ -5640,6 +7057,7 @@ def plan_adopt(
     adapter_replacements: list[dict] = []
     optional_projections: list[dict] = []
     patches: list[dict] = []
+    patch_contents: dict[Path, str] = {}
     kept: list[Path] = []
     conflicts: list[dict] = []
 
@@ -5735,12 +7153,14 @@ def plan_adopt(
                     {"path": agents_path, "reason": "duplicate or malformed Vivary block"}
                 )
             else:
+                inserted_text = _append_patch_text(agents_bytes, agents_block)
+                patch_contents[agents_path] = agents_text + inserted_text
                 patches.append(
                     {
                         "path": agents_path,
                         "before_hash": _sha256_prefixed(agents_bytes),
                         "anchor": "eof",
-                        "inserted_text": _append_patch_text(agents_bytes, agents_block),
+                        "inserted_text": inserted_text,
                     }
                 )
 
@@ -5751,7 +7171,7 @@ def plan_adopt(
         accepted_gitignore_blocks += (
             _thin_gitignore_block(active_context="cocoindex-code"),
         )
-    if not gitignore_path.exists():
+    if not os.path.lexists(gitignore_path):
         writes.append((gitignore_path, gitignore_block))
         privacy_status = "planned"
     elif _is_symlink_or_junction(gitignore_path) or not gitignore_path.is_file():
@@ -5801,12 +7221,14 @@ def plan_adopt(
                     )
                     privacy_status = "conflict"
                 else:
+                    inserted_text = _append_patch_text(gitignore_bytes, gitignore_block)
+                    patch_contents[gitignore_path] = gitignore_text + inserted_text
                     patches.append(
                         {
                             "path": gitignore_path,
                             "before_hash": _sha256_prefixed(gitignore_bytes),
                             "anchor": "eof",
-                            "inserted_text": _append_patch_text(gitignore_bytes, gitignore_block),
+                            "inserted_text": inserted_text,
                         }
                     )
                     privacy_status = "planned"
@@ -5865,6 +7287,16 @@ def plan_adopt(
         for path in kept
         if path.is_file() and not _is_symlink_or_junction(path)
     ]
+    validation_findings, validation_input_hash = _adopt_configured_validation(
+        target, root, desired[target / ".vivary" / "workspace.toml"],
+        writes + projection_writes)
+    conflicted_paths = {item["path"] for item in conflicts}
+    for finding in validation_findings:
+        path = target / finding["path"]
+        if finding["level"] == "error" and path not in conflicted_paths:
+            conflicts.append({"path": path,
+                "reason": f"{finding['code']}: {finding['message']}"})
+            conflicted_paths.add(path)
     conflicts.sort(key=lambda item: item["path"])
     creates = [path for path, _ in writes]
     approval_payload = _thin_plan_payload(
@@ -5877,9 +7309,98 @@ def plan_adopt(
         adapter_replacements=adapter_replacements,
         kept_identities=kept_identities,
     )
+    approval_payload["validation_inputs_hash"] = validation_input_hash
     plan_hash = _thin_approval_hash(approval_payload)
 
+    # Capture the reviewed bytes now; reporting must not reread changed files.
+    content_files = [
+        {"operation": "create", "path": path, "content": text}
+        for path, text in writes + projection_writes
+    ] + [
+        {
+            "operation": "patch",
+            "path": patch["path"],
+            "content": patch_contents[patch["path"]],
+            "before_hash": patch["before_hash"],
+        }
+        for patch in patches
+    ] + [
+        {
+            "operation": "replace",
+            "path": item["path"],
+            "content": item["text"],
+            "before_hash": item["before_hash"],
+        }
+        for item in adapter_replacements
+    ]
+    content_plan = {
+        "schema": "vivary.adopt-content-plan.v1",
+        "files": [
+            {
+                **item,
+                "path": item["path"].relative_to(target).as_posix(),
+                "content_hash": _sha256_prefixed(item["content"].encode("utf-8")),
+                "bytes": len(item["content"].encode("utf-8")),
+            }
+            for item in sorted(content_files, key=lambda item: item["path"])
+        ],
+        "kept": kept_identities,
+    }
+
+    privacy_file = next((item for item in content_plan["files"] if item["path"] == ".gitignore"), None)
+    try:
+        _assert_adopt_record_privacy(target, _adopt_record_paths(target))
+        current_record_privacy = True
+    except (ScaffoldError, OSError):
+        current_record_privacy = False
+    privacy_required = not current_record_privacy
+    privacy_ready = privacy_required and privacy_file is not None and not conflicts
+    runtime_path = target / ".vivary" / "runtime"
+    if privacy_ready and os.path.lexists(runtime_path):
+        privacy_ready = False
+        privacy_blocker = "Existing .vivary/runtime content needs review before privacy preparation."
+    else:
+        privacy_blocker = None
+    if privacy_ready:
+        try:
+            if (privacy_file["operation"] == "patch"
+                and gitignore_path.stat().st_nlink != 1):
+                raise ScaffoldError("Existing .gitignore has another hard-link name. Review it before setup.")
+            _assert_adopt_records_untracked(target)
+            _assert_adopt_record_privacy(target, _adopt_record_paths(target),
+                extra_root_rules=simulated_rules)
+        except (ScaffoldError, OSError) as exc:
+            privacy_ready = False
+            privacy_blocker = str(exc)
+    if privacy_ready:
+        privacy_reason = None
+    elif privacy_blocker:
+        privacy_reason = privacy_blocker
+    elif not privacy_required:
+        privacy_reason = "Existing ignore rules already protect private setup records."
+    elif conflicts:
+        privacy_reason = "Resolve the privacy conflicts and preview again."
+    else:
+        privacy_reason = "The proposed .gitignore change cannot protect private setup records."
+    privacy_preparation = {
+        "required": privacy_required, "ready": privacy_ready, "reason": privacy_reason,
+        "root_hash": _thin_approval_hash(_thin_target_identity(target)),
+        "before_hash": privacy_file.get("before_hash") if privacy_file else None,
+        "after_hash": privacy_file["content_hash"] if privacy_file else None,
+    }
+
     return {
+        "content_plan": content_plan,
+        "validation_findings": validation_findings,
+        "content_inventory": {
+            "existing_markdown": inventory.preserved_markdown_count,
+            "existing_non_markdown": inventory.preserved_non_markdown_count,
+        },
+        "privacy_preparation": privacy_preparation,
+        "request_replay": _adopt_request_readiness(
+            target, has_changes=bool(content_files), has_conflicts=bool(conflicts),
+            extra_root_rules=simulated_rules if privacy_status != "conflict" else (),
+        ),
         "contract": THIN_WORKSPACE_CONTRACT,
         "target": target,
         "preset": chosen_preset,
@@ -5913,6 +7434,11 @@ def plan_adopt(
 
 _ADOPT_JOURNAL_REL = Path(".vivary/runtime/adopt-journal.json")
 _ADOPT_JOURNAL_SCHEMA = "vivary.adopt-journal.v3"
+_ADOPT_JOURNAL_MAX_BYTES = 1024 * 1024
+_ADOPT_REQUEST_JOURNAL_SCHEMA = "vivary.adopt-journal.v4"
+_ADOPT_RECEIPT_SCHEMA = "vivary.adopt-receipt.v1"
+_ADOPT_RECOVERY_RECEIPT_SCHEMA = "vivary.adopt-recovery-receipt.v1"
+_ADOPT_RECEIPTS_REL = Path(".vivary/runtime/adopt-receipts")
 _ADOPT_RECOVERY_PLAN_SCHEMA = "vivary.adopt-recovery-plan.v1"
 _ADOPT_PREJOURNAL_RE = re.compile(
     rb"# vivary-adopt-prejournal "
@@ -5963,9 +7489,10 @@ def _adopt_actions(plan: dict) -> list[dict]:
     )
 
 
-def _adopt_backups(actions: list[dict]) -> dict[Path, bytes | None]:
+def _adopt_backups(target: Path, actions: list[dict]) -> dict[Path, bytes | None]:
     return {
-        action["path"]: action["path"].read_bytes() if action["path"].exists() else None
+        action["path"]: _read_adopt_regular_bytes(target, action["path"])
+        if action["path"].exists() else None
         for action in actions
     }
 
@@ -5976,7 +7503,7 @@ def _assert_adopt_kept_inputs(target: Path, plan: dict) -> None:
         _ensure_within_target(target, [path])
         if _is_symlink_or_junction(path) or not path.is_file():
             raise ScaffoldError(f"approved plan input changed: {identity['path']}")
-        if _sha256_prefixed(path.read_bytes()) != identity["content_hash"]:
+        if _sha256_prefixed(_read_adopt_regular_bytes(target, path)) != identity["content_hash"]:
             raise ScaffoldError(f"approved plan input changed: {identity['path']}")
 
 
@@ -6022,12 +7549,311 @@ def _adopt_journal_payload(
     }
 
 
-def _write_adopt_journal(target: Path, payload: dict) -> None:
-    _write_text_no_follow(
-        target,
-        target / _ADOPT_JOURNAL_REL,
-        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+def _adopt_request_options(preset: str | None, adapters: tuple[str, ...] | list[str]) -> dict:
+    if preset is not None and (not isinstance(preset, str) or preset not in PRESETS):
+        raise ScaffoldError("request preset is not supported")
+    if not isinstance(adapters, (tuple, list)) or any(
+        not isinstance(adapter, str) or adapter not in _THIN_ADAPTER_PATHS
+        for adapter in adapters
+    ):
+        raise ScaffoldError("request adapters are not supported")
+    if len(set(adapters)) != len(adapters):
+        raise ScaffoldError("each --adapter value may be selected only once")
+    return {"preset": preset, "adapters": sorted(adapters)}
+
+
+def _pattern_request_options(choices) -> dict:
+    return {"intent": "reconfigure", "pattern_choices": list(_normalize_pattern_choices(choices))}
+
+
+def _validate_adopt_request_id(request_id: str) -> None:
+    if not isinstance(request_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id
+    ):
+        raise ScaffoldError("request ID must be 1-128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit")
+    if re.match(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", request_id):
+        raise ScaffoldError("request ID must not be a reserved Windows filename")
+
+
+def _validated_adopt_request(payload: dict) -> dict | None:
+    if payload.get("schema") == _ADOPT_JOURNAL_SCHEMA:
+        if "request" in payload:
+            raise ScaffoldError("legacy adoption journal contains unexpected request identity")
+        return None
+    if payload.get("schema") != _ADOPT_REQUEST_JOURNAL_SCHEMA:
+        raise ScaffoldError("adoption journal schema is not supported")
+    request = payload.get("request")
+    if not isinstance(request, dict) or set(request) != {"id", "options"}:
+        raise ScaffoldError("adoption journal request identity is malformed")
+    _validate_adopt_request_id(request["id"])
+    options = request["options"]
+    if not isinstance(options, dict):
+        raise ScaffoldError("adoption journal request options are malformed")
+    if set(options) == {"preset", "adapters"}:
+        normalized = _adopt_request_options(options["preset"], options["adapters"])
+    elif set(options) == {"intent", "pattern_choices"} and options.get("intent") == "reconfigure":
+        normalized = _pattern_request_options(options["pattern_choices"])
+    else:
+        raise ScaffoldError("adoption journal request options are malformed")
+    if options != normalized:
+        raise ScaffoldError("adoption journal request options are not canonical")
+    return request
+
+
+@contextmanager
+def _open_adopt_readonly(target: Path, path: Path):
+    with _safe_destination_parent(target, path, create_missing=False) as parent:
+        if os.name == "nt":
+            handle, _identity = _windows_open_locked_regular_file(path, delete=False)
+            try:
+                descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+            except Exception:
+                _WINDOWS_CLOSE_HANDLE(handle)
+                raise
+        else:
+            descriptor = os.open(
+                path.name, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=parent,
+            )
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ScaffoldError("adoption record or input is not a regular file")
+            yield stream
+
+
+def _read_adopt_regular_snapshot(target: Path, path: Path) -> tuple[bytes, os.stat_result]:
+    try:
+        with _open_adopt_readonly(target, path) as stream:
+            return stream.read(), os.fstat(stream.fileno())
+    except OSError as exc:
+        raise ScaffoldError("workspace input changed during review") from exc
+
+
+def _read_adopt_regular_bytes(target: Path, path: Path) -> bytes:
+    return _read_adopt_regular_snapshot(target, path)[0]
+
+
+def _read_adopt_record(target: Path, path: Path) -> tuple[dict, bytes] | None:
+    try:
+        with _open_adopt_readonly(target, path) as stream:
+            data = stream.read(_ADOPT_JOURNAL_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ScaffoldError("adoption record cannot be read safely") from exc
+    if len(data) > _ADOPT_JOURNAL_MAX_BYTES:
+        raise ScaffoldError("adoption record exceeds the recovery size limit")
+
+    def closed_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate record key")
+            result[key] = value
+        return result
+
+    try:
+        payload = json.loads(data.decode("utf-8"), object_pairs_hook=closed_object)
+        if not isinstance(payload, dict):
+            raise ValueError("record must be an object")
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise ScaffoldError("adoption record is malformed") from exc
+    return payload, data
+
+
+def _assert_adopt_records_untracked(target: Path) -> None:
+    """Ignore rules do not make files already present in any enclosing Git index private."""
+    for ancestor in (target, *target.parents):
+        if not os.path.lexists(ancestor / ".git"):
+            continue
+        runtime_path = (target.relative_to(ancestor) / ".vivary" / "runtime").as_posix()
+        try:
+            result = subprocess.run(
+                ["git", "-c", "core.fsmonitor=false", "-C", str(ancestor),
+                    "ls-files", "--cached", "--error-unmatch",
+                    "--", f":(icase,literal){runtime_path}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=5, check=False,
+                env={**{key: value for key, value in os.environ.items()
+                    if not key.upper().startswith("GIT_")}, "LC_ALL": "C"},
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ScaffoldError("Git index could not be inspected for private runtime records") from exc
+        if result.returncode == 0:
+            raise ScaffoldError("Git already tracks .vivary/runtime. Review tracked private records before setup")
+        if result.returncode != 1 or b"did not match any file(s) known to git" not in result.stderr:
+            raise ScaffoldError("Git index could not be inspected for private runtime records")
+
+
+def _assert_adopt_record_privacy(
+    target: Path, paths: list[Path], *,
+    extra_root_rules: tuple[tuple[str, bool, str], ...] = (),
+    root_rules: tuple[tuple[str, bool, str], ...] | None = None,
+) -> None:
+    for path in paths:
+        if not _probe_is_ignored(
+            target, path.relative_to(target).as_posix(),
+            extra_root_rules=extra_root_rules, root_rules=root_rules,
+        ):
+            raise ScaffoldError("adoption request privacy does not cover the record and its temporary file")
+
+
+def _adopt_record_paths(target: Path) -> list[Path]:
+    journal = target / _ADOPT_JOURNAL_REL
+    receipts = target / _ADOPT_RECEIPTS_REL
+    return [
+        journal.parent, receipts, journal,
+        journal.parent / ".adopt-journal.json.preview.vivary-tmp",
+        receipts / "preview.json",
+        receipts / ".preview.json.preview.vivary-tmp",
+    ]
+
+
+def _adopt_request_readiness(
+    target: Path, *, has_changes: bool, has_conflicts: bool,
+    extra_root_rules: tuple[tuple[str, bool, str], ...],
+) -> dict:
+    """Capture conservative request prerequisites without granting apply authority."""
+    journal = target / _ADOPT_JOURNAL_REL
+    if journal.exists() or _is_symlink_or_junction(journal):
+        return {"ready": False, "reason": "An unfinished adoption needs recovery or its original request retry."}
+    if has_conflicts:
+        return {"ready": False, "reason": "Resolve the setup conflicts and preview again."}
+    if not has_changes:
+        return {"ready": False, "reason": "No setup changes need to be applied."}
+    # Directory coverage protects every request ID and random publication name.
+    # Checking only an example JSON filename could miss a temporary-file exception.
+    paths = _adopt_record_paths(target)
+    try:
+        _assert_adopt_records_untracked(target)
+        _assert_adopt_record_privacy(target, paths)
+        _assert_adopt_record_privacy(target, paths, extra_root_rules=extra_root_rules)
+    except ScaffoldError as exc:
+        return {"ready": False, "reason": str(exc)}
+    except OSError:
+        return {"ready": False, "reason": "Existing ignore rules must protect .vivary/runtime/ and its recovery records before retryable setup. Review those rules and preview again."}
+    return {"ready": True, "reason": None}
+
+
+def _validated_adopt_receipt(
+    target: Path, payload: dict, request: dict, plan_hash: str,
+    *, repo_root: str | Path | None,
+) -> tuple[dict, list[dict], dict]:
+    if set(payload) != {"schema", "journal"} or payload["schema"] != _ADOPT_RECEIPT_SCHEMA:
+        raise ScaffoldError("adoption receipt schema is not supported")
+    journal = payload["journal"]
+    if not isinstance(journal, dict) or journal.get("schema") != _ADOPT_REQUEST_JOURNAL_SCHEMA:
+        raise ScaffoldError("adoption receipt journal is malformed")
+    try:
+        recorded_request = _validated_adopt_request(journal)
+        actions, _backups = _validated_journal_state(target, journal, plan_hash)
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
+        raise ScaffoldError("adoption receipt journal is malformed") from exc
+    if recorded_request != request:
+        raise ScaffoldError("adoption receipt request ID or options do not match")
+    if journal["phase"] != "publishing" or journal["completed"] != len(actions):
+        raise ScaffoldError("adoption receipt is not a completed transaction")
+    expected = [
+        (action["path"], action["after_hash"]) for action in actions
+    ] + [
+        (target / row["path"], row["content_hash"])
+        for row in journal["approval"]["kept"]
+    ]
+    for path, expected_hash in expected:
+        try:
+            with _open_adopt_readonly(target, path) as stream:
+                digest = hashlib.sha256()
+                while chunk := stream.read(65536):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise ScaffoldError("adoption receipt output or kept input is missing or unsafe") from exc
+        if "sha256:" + digest.hexdigest() != expected_hash:
+            raise ScaffoldError("adoption receipt output or kept input changed")
+    doctor = doctor_workspace(target, repo_root=repo_root, _allow_adopt_journal=True)
+    if not doctor["ok"]:
+        raise ScaffoldError("Doctor failed while checking the recorded adoption")
+    return journal, actions, doctor
+
+
+def _replay_adopt_request(
+    target: Path, request: dict, plan_hash: str, *, repo_root: str | Path | None,
+    before_mutation: Callable[[], None] | None = None,
+) -> dict | None:
+    receipt_path = target / _ADOPT_RECEIPTS_REL / (request["id"] + ".json")
+    record = _read_adopt_record(target, receipt_path)
+    journal_path = target / _ADOPT_JOURNAL_REL
+    pending = _read_adopt_record(target, journal_path)
+    if record is None:
+        if pending is not None:
+            pending_request = _validated_adopt_request(pending[0])
+            if pending_request is not None and pending[0].get("phase") == "publishing":
+                raise ScaffoldError("adoption completion is uncertain: the expected receipt is missing; refusing rollback or new apply")
+            raise ScaffoldError("unfinished adoption journal exists; recover it before applying a new plan")
+        return None
+    if record[0].get("schema") == _ADOPT_RECOVERY_RECEIPT_SCHEMA:
+        raise ScaffoldError("this adoption request was recovered; review a new plan with a new request ID")
+    journal, actions, doctor = _validated_adopt_receipt(
+        target, record[0], request, plan_hash, repo_root=repo_root,
     )
+    _assert_adopt_record_privacy(target, [receipt_path])
+    if pending is not None:
+        if pending[0] != journal:
+            raise ScaffoldError("adoption receipt and remaining journal disagree; refusing cleanup")
+        if before_mutation is not None:
+            before_mutation()
+        _unlink_no_follow(target, journal_path, expected_hashes={_sha256_prefixed(pending[1])})
+    approval = journal["approval"]
+    result = _recovery_result(target, plan_hash, "", [], recovered=False)
+    created_paths = {row["path"] for row in approval["creates"]}
+    replacements = {row["path"]: row for row in approval["adapter_replacements"]}
+    adapter_paths = {_THIN_ADAPTER_PATHS[adapter] for adapter in approval["adapters"]}
+    creates = [target / row["path"] for row in approval["creates"] if row["path"] not in adapter_paths]
+    projections = []
+    adapter_replacements = []
+    for adapter in approval["adapters"]:
+        relative = _THIN_ADAPTER_PATHS[adapter]
+        text, source_hash, content_hash = _thin_adapter_doc(adapter)
+        projections.append({
+            "adapter": adapter, "path": target / relative,
+            "bytes": len(text.encode("utf-8")),
+            "source_hash": source_hash, "content_hash": content_hash,
+            "status": "create" if relative in created_paths else "replace" if relative in replacements else "clean",
+        })
+        if relative in replacements:
+            adapter_replacements.append({
+                "path": target / relative, "before_hash": replacements[relative]["before_hash"], "text": text,
+            })
+    return {
+        **result, "applied": True, "doctor": doctor,
+        "preset": approval["preset"], "preset_reason": "recorded approved adoption",
+        "capabilities": approval["capabilities"], "creates": creates,
+        "would_create": creates, "optional_projections": projections,
+        "adapter_replacements": adapter_replacements,
+        "patches": [{**row, "path": target / row["path"]} for row in approval["patches"]],
+        "kept": [target / row["path"] for row in approval["kept"]],
+        "plan_hash": plan_hash, "request_id": request["id"], "replayed": True,
+    }
+
+
+def _encode_adopt_journal(payload: dict) -> bytes:
+    content = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    if len(content) > _ADOPT_JOURNAL_MAX_BYTES:
+        raise ScaffoldError("adoption journal exceeds the recovery size limit")
+    return content
+
+
+def _write_adopt_journal(
+    target: Path, payload: dict, *, temporary_name: str | None = None,
+) -> None:
+    path = target / _ADOPT_JOURNAL_REL
+    if payload.get("schema") == _ADOPT_REQUEST_JOURNAL_SCHEMA:
+        _atomic_write_bytes_no_follow(
+            target, path, _encode_adopt_journal(payload),
+            temporary_name=temporary_name,
+            before_temporary=lambda temporary: _assert_adopt_record_privacy(target, [path, temporary]),
+        )
+    else:
+        _write_bytes_no_follow(target, path, _encode_adopt_journal(payload))
 
 
 def _remove_empty_adopt_dirs(target: Path) -> None:
@@ -6191,6 +8017,8 @@ def _adopt_expected_generated_bytes(
     preset: str,
     adapters: tuple[str, ...],
     active_context: str | None,
+    *,
+    adopted: bool,
 ) -> dict[str, bytes]:
     project = target.name or "vivary-workspace"
     expected = {
@@ -6202,6 +8030,7 @@ def _adopt_expected_generated_bytes(
             preset,
             adapters,
             active_context=active_context,
+            adopted=adopted,
         ).encode("utf-8"),
         "AGENTS.md": ("# AGENTS.md\n\n" + _thin_agents_block()).encode("utf-8"),
         "STATE.md": _thin_state_doc().encode("utf-8"),
@@ -6212,13 +8041,90 @@ def _adopt_expected_generated_bytes(
     return expected
 
 
+def _reconfiguration_journal_policy(target: Path, approval: dict, payload: dict
+                                    ) -> tuple[dict[str, bytes], set[str], set[str]]:
+    """Rebuild approved output bytes from the original managed config and choices."""
+    import tomllib as _toml
+    try:
+        selected = _normalize_pattern_choices(approval["pattern_choices"])
+        if list(selected) != approval["pattern_choices"]:
+            raise ValueError("pattern choices are not canonical")
+        action_rows = payload["actions"]
+        if not isinstance(action_rows, list):
+            raise ValueError("actions are malformed")
+        by_path = {row["path"]: row for row in action_rows if isinstance(row, dict)
+                   and isinstance(row.get("path"), str)}
+        kept = {row["path"]: row["content_hash"] for row in approval["kept"]
+                if isinstance(row, dict) and isinstance(row.get("path"), str)}
+        def original(relative: str) -> bytes:
+            row = by_path.get(relative)
+            if row is not None:
+                if row.get("kind") != "replace":
+                    raise ValueError("managed document replacement is malformed")
+                data = base64.b64decode(row["before"], validate=True)
+                return data
+            if relative not in kept:
+                raise ValueError("managed document is absent from the approval")
+            path = target / relative
+            if _is_symlink_or_junction(path) or not path.is_file():
+                raise ValueError("managed document is unavailable")
+            data = _read_adopt_regular_bytes(target, path)
+            if _sha256_prefixed(data) != kept[relative]:
+                raise ValueError("managed document changed")
+            return data
+        config = original(".vivary/workspace.toml").decode("utf-8")
+        context = original(".vivary/context.md").decode("utf-8")
+        raw = _toml.loads(config.removeprefix("\ufeff"))
+        workspace = raw["workspace"]
+        if workspace["contract"] != THIN_WORKSPACE_CONTRACT:
+            raise ValueError("workspace contract changed")
+        previous, hashes, legacy_roles = _installed_pattern_selection(workspace)
+        if workspace["preset"] != approval["preset"] or sorted(workspace.get("adapters", [])) != approval["adapters"]:
+            raise ValueError("workspace policy differs from approval")
+        if sorted(workspace.get("capabilities", [])) != approval["capabilities"]:
+            raise ValueError("workspace capabilities differ from approval")
+        previous_by_id = {row["id"]: row for row in previous}
+        approved_outputs = {
+            row["path"]: row["content_hash"]
+            for key in ("creates", "adapter_replacements")
+            for row in approval[key]
+        }
+        selected_hashes = {}
+        selected_files = {}
+        for row in selected:
+            prior = previous_by_id.get(row["id"])
+            if prior == row:
+                digest = hashes[row["id"]]
+            else:
+                digest = approved_outputs.get(row["path"])
+                if digest is None:
+                    raise ValueError("changed pattern output is absent from approval")
+            selected_hashes[row["id"]] = digest
+            selected_files[row["path"]] = _pattern_approved_file(row, digest).encode("utf-8")
+        expected = {
+            ".vivary/workspace.toml": _pattern_config_update(
+                config, previous, selected, hashes, selected_hashes, legacy_roles).encode("utf-8"),
+            ".vivary/context.md": _pattern_context_update(context, previous, selected).encode("utf-8"),
+        }
+        expected.update(selected_files)
+        allowed = {".vivary/workspace.toml", ".vivary/context.md", "AGENTS.md", "STATE.md", ".gitignore"}
+        allowed.update(row["path"] for row in previous)
+        allowed.update(row["path"] for row in selected)
+        return expected, allowed, set(expected)
+    except (KeyError, TypeError, ValueError, UnicodeError, ScaffoldError) as exc:
+        raise ScaffoldError(f"reconfiguration journal policy is malformed: {exc}") from exc
+
+
 def _validated_journal_state(
     target: Path,
     payload: dict,
     recover_hash: str,
 ) -> tuple[list[dict], dict[Path, bytes | None]]:
-    if payload.get("schema") != _ADOPT_JOURNAL_SCHEMA:
-        raise ScaffoldError("adoption journal schema is not supported")
+    request = _validated_adopt_request(payload)
+    if request is not None and set(payload) != {
+        "schema", "plan_hash", "approval", "phase", "completed", "actions", "request",
+    }:
+        raise ScaffoldError("adoption request journal is malformed")
     if payload.get("plan_hash") != recover_hash:
         raise ScaffoldError(
             f"recovery hash mismatch: journal {payload.get('plan_hash')}, "
@@ -6236,8 +8142,18 @@ def _validated_journal_state(
         "adapter_replacements",
         "kept",
     }
-    if not isinstance(approval, dict) or set(approval) != approval_keys:
+    if not isinstance(approval, dict):
         raise ScaffoldError("adoption journal approval payload is malformed")
+    legacy_approval = set(approval) == approval_keys
+    reconfigure = set(approval) == approval_keys | {
+        "validation_inputs_hash", "intent", "pattern_choices",
+    } and approval.get("intent") == "reconfigure"
+    if not legacy_approval and not reconfigure and set(approval) != approval_keys | {"validation_inputs_hash"}:
+        raise ScaffoldError("adoption journal approval payload is malformed")
+    if not legacy_approval:
+        value = approval["validation_inputs_hash"]
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value)):
+            raise ScaffoldError("adoption journal validation input hash is malformed")
     if approval["contract"] != THIN_WORKSPACE_CONTRACT:
         raise ScaffoldError("adoption journal approval contract is not supported")
     if approval["target"] != _thin_target_identity(target):
@@ -6264,13 +8180,14 @@ def _validated_journal_state(
         raise ScaffoldError("adoption journal approval capabilities are malformed")
     adapters = tuple(raw_adapters)
     active_context = raw_capabilities[0] if raw_capabilities else None
-    expected_bytes = _adopt_expected_generated_bytes(
-        target,
-        preset,
-        adapters,
-        active_context,
-    )
-    allowed_paths = set(expected_bytes)
+    if reconfigure:
+        expected_bytes, allowed_paths, replacement_paths = _reconfiguration_journal_policy(
+            target, approval, payload)
+    else:
+        expected_bytes = _adopt_expected_generated_bytes(
+            target, preset, adapters, active_context, adopted=not legacy_approval)
+        allowed_paths = set(expected_bytes)
+        replacement_paths = {_THIN_ADAPTER_PATHS[adapter] for adapter in adapters}
     expected_actions: dict[str, dict] = {}
 
     creates = approval["creates"]
@@ -6281,6 +8198,10 @@ def _validated_journal_state(
         raise ScaffoldError("adoption journal approval actions are malformed")
     if sum(len(rows) for rows in (creates, patches, replacements, kept)) > 32:
         raise ScaffoldError("adoption journal approval exceeds the action limit")
+    if reconfigure and patches:
+        raise ScaffoldError("reconfiguration journal cannot patch unrelated guidance")
+    selected_paths = ({choice["path"] for choice in approval["pattern_choices"]}
+                      if reconfigure else set())
 
     for row in creates:
         if not isinstance(row, dict) or set(row) != {"path", "content_hash"}:
@@ -6288,6 +8209,8 @@ def _validated_journal_state(
         rel = row["path"]
         if (
             rel not in allowed_paths
+            or rel not in expected_bytes
+            or (reconfigure and rel not in selected_paths)
             or row["content_hash"] != _sha256_prefixed(expected_bytes[rel])
             or rel in expected_actions
         ):
@@ -6315,7 +8238,7 @@ def _validated_journal_state(
             raise ScaffoldError("adoption journal approved patch is not canonical")
         expected_actions[rel] = {"kind": "patch", **row}
 
-    adapter_paths = {_THIN_ADAPTER_PATHS[adapter] for adapter in adapters}
+    adapter_paths = replacement_paths
     for row in replacements:
         if not isinstance(row, dict) or set(row) != {
             "path",
@@ -6326,6 +8249,7 @@ def _validated_journal_state(
         rel = row["path"]
         if (
             rel not in adapter_paths
+            or rel not in expected_bytes
             or row["content_hash"] != _sha256_prefixed(expected_bytes[rel])
             or rel in expected_actions
         ):
@@ -6354,11 +8278,23 @@ def _validated_journal_state(
         raise ScaffoldError("adoption journal has no recoverable actions")
     if len(raw_actions) != len(expected_actions):
         raise ScaffoldError("adoption journal actions do not match the approved plan")
-    if payload.get("phase") not in {"planned", "applying"}:
+    phases = {"planned", "applying", "publishing"} if request is not None else {"planned", "applying"}
+    if payload.get("phase") not in phases:
         raise ScaffoldError("adoption journal progress is malformed")
     completed = payload.get("completed")
-    if not isinstance(completed, int) or not 0 <= completed <= len(raw_actions):
+    if type(completed) is not int or not 0 <= completed <= len(raw_actions):
         raise ScaffoldError("adoption journal progress exceeds the action count")
+    if payload["phase"] == "publishing" and completed != len(raw_actions):
+        raise ScaffoldError("adoption publication intent does not cover every action")
+    if request is not None:
+        options = request["options"]
+        if reconfigure:
+            if options != _pattern_request_options(approval["pattern_choices"]):
+                raise ScaffoldError("reconfiguration request options do not match approval")
+        elif (set(options) != {"preset", "adapters"}
+              or options["adapters"] != approval["adapters"]
+              or (options["preset"] is not None and options["preset"] != approval["preset"])):
+            raise ScaffoldError("adoption request options do not match approval")
 
     action_keys = {
         "path",
@@ -6521,6 +8457,66 @@ def _recovery_result(
     }
 
 
+def _assert_recovery_restored(target: Path, journal: dict, actions: list[dict], backups: dict) -> None:
+    _hash, current = _adopt_recovery_plan(target, journal["plan_hash"], actions, backups)
+    if any(row["operation"] != "no-op" for row in current):
+        raise ScaffoldError("recovered adoption output changed")
+    _ensure_safe_destinations(target, [target / row["path"] for row in journal["approval"]["kept"]], force=True)
+    _assert_adopt_kept_inputs(target, {"kept_identities": journal["approval"]["kept"]})
+
+
+def _replay_adopt_recovery(
+    target: Path, receipt: dict, request_id: str, recover_hash: str,
+    approved_recovery_hash: str | None, *, yes: bool, pending: tuple[dict, bytes] | None,
+) -> dict:
+    if set(receipt) != {"schema", "journal", "recovery_plan_hash", "recovery_actions"}:
+        raise ScaffoldError("adoption recovery receipt is malformed")
+    if receipt["schema"] != _ADOPT_RECOVERY_RECEIPT_SCHEMA:
+        raise ScaffoldError("adoption completion record exists; refusing rollback")
+    journal = receipt["journal"]
+    try:
+        actions, backups = _validated_journal_state(target, journal, recover_hash)
+        request = _validated_adopt_request(journal)
+        if request is None or request["id"] != request_id or journal["phase"] == "publishing":
+            raise ScaffoldError("adoption recovery receipt request does not match pending adoption")
+        rows = receipt["recovery_actions"]
+        if not isinstance(rows, list) or len(rows) != len(actions):
+            raise ScaffoldError("adoption recovery receipt actions are malformed")
+        for row, action in zip(rows, actions):
+            before = backups[action["path"]]
+            restore_hash = _sha256_prefixed(before) if before is not None else None
+            if not isinstance(row, dict) or set(row) != {"path", "operation", "current_hash", "restore_hash"}:
+                raise ScaffoldError("adoption recovery receipt action is malformed")
+            if row["path"] != action["path"].relative_to(target).as_posix() or row["restore_hash"] != restore_hash:
+                raise ScaffoldError("adoption recovery receipt action does not match its journal")
+            if row["current_hash"] == restore_hash:
+                operation = "no-op"
+            elif row["current_hash"] in _adopt_action_after_hashes(action):
+                operation = "restore" if before is not None else "delete-created"
+            else:
+                raise ScaffoldError("adoption recovery receipt action hash is invalid")
+            if row["operation"] != operation:
+                raise ScaffoldError("adoption recovery receipt operation is invalid")
+        recovery_hash = _thin_approval_hash({
+            "schema": _ADOPT_RECOVERY_PLAN_SCHEMA, "target": _thin_target_identity(target),
+            "transaction_plan_hash": recover_hash, "actions": rows,
+        })
+        if recovery_hash != receipt["recovery_plan_hash"]:
+            raise ScaffoldError("adoption recovery receipt approval hash does not match")
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
+        raise ScaffoldError("adoption recovery receipt is malformed") from exc
+    if yes and approved_recovery_hash != recovery_hash:
+        raise ScaffoldError("recovery plan hash mismatch: retry the originally approved recovery hash")
+    if pending is not None and pending[0] != journal:
+        raise ScaffoldError("adoption recovery receipt and remaining journal disagree; refusing cleanup")
+    _assert_recovery_restored(target, journal, actions, backups)
+    receipt_path = target / _ADOPT_RECEIPTS_REL / (request_id + ".json")
+    _assert_adopt_record_privacy(target, [receipt_path])
+    if yes and pending is not None:
+        _unlink_no_follow(target, target / _ADOPT_JOURNAL_REL, expected_hashes={_sha256_prefixed(pending[1])})
+    return _recovery_result(target, recover_hash, recovery_hash, rows, recovered=yes)
+
+
 def _recover_adopt(
     target: Path,
     recover_hash: str,
@@ -6528,23 +8524,42 @@ def _recover_adopt(
     yes: bool,
     approved_recovery_hash: str | None,
     repo_root: str | Path | None,
+    request_id: str | None = None,
 ) -> dict:
     journal_path = target / _ADOPT_JOURNAL_REL
-    if not journal_path.exists():
+    record = _read_adopt_record(target, journal_path)
+    if request_id is not None:
+        receipt_path = target / _ADOPT_RECEIPTS_REL / (request_id + ".json")
+        receipt = _read_adopt_record(target, receipt_path)
+        if receipt is not None:
+            return _replay_adopt_recovery(target, receipt[0], request_id, recover_hash,
+                approved_recovery_hash, yes=yes, pending=record)
+    if record is None:
+        if request_id is not None:
+            raise ScaffoldError("no request-aware adoption journal or recovery receipt exists")
         prejournal = _prejournal_recovery_state(target, recover_hash)
         if prejournal is None:
             raise ScaffoldError("no safe adoption journal exists to recover")
         actions, backups = prejournal
     else:
-        if _is_symlink_or_junction(journal_path) or not journal_path.is_file():
-            raise ScaffoldError("no safe adoption journal exists to recover")
-        if journal_path.stat().st_size > 1024 * 1024:
-            raise ScaffoldError("adoption journal exceeds the recovery size limit")
+        payload, _data = record
         try:
-            payload = json.loads(journal_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ScaffoldError(f"adoption journal is unreadable: {exc}") from exc
-        actions, backups = _validated_journal_state(target, payload, recover_hash)
+            actions, backups = _validated_journal_state(target, payload, recover_hash)
+            request = _validated_adopt_request(payload)
+        except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
+            raise ScaffoldError("adoption journal is malformed") from exc
+        if request is not None:
+            if request_id is not None and request["id"] != request_id:
+                raise ScaffoldError("recovery request ID does not match the adoption journal")
+            if payload["phase"] == "publishing":
+                raise ScaffoldError("adoption completion is committed or uncertain; retry the original --request-id instead of rollback")
+            receipt = _read_adopt_record(
+                target, target / _ADOPT_RECEIPTS_REL / (request["id"] + ".json"),
+            )
+            if receipt is not None:
+                raise ScaffoldError("adoption completion record exists; refusing rollback")
+        elif request_id is not None:
+            raise ScaffoldError("this adoption journal has no original request ID")
 
     recovery_plan_hash, recovery_actions = _adopt_recovery_plan(
         target,
@@ -6569,7 +8584,42 @@ def _recover_adopt(
             "recovery plan hash mismatch: "
             f"approved {approved_recovery_hash}, current {recovery_plan_hash}"
         )
-    _rollback_adopt(target, actions, backups)
+    if request_id is None:
+        _rollback_adopt(target, actions, backups)
+    else:
+        recovery_receipt = {"schema": _ADOPT_RECOVERY_RECEIPT_SCHEMA, "journal": payload,
+            "recovery_plan_hash": recovery_plan_hash, "recovery_actions": recovery_actions}
+        receipt_bytes = _encode_adopt_journal(recovery_receipt)
+        temporary_name = f".{receipt_path.name}.{os.urandom(8).hex()}.vivary-tmp"
+        private_paths = [receipt_path, receipt_path.parent / temporary_name]
+        _ensure_safe_destinations(target, private_paths, force=False)
+        _assert_adopt_record_privacy(target, private_paths)
+        # Evaluate the restored root rules with the retained nested ignore files.
+        # Recovery records must stay private after rollback, including leftovers.
+        ignore_path = target / ".gitignore"
+        if ignore_path in backups:
+            original_ignore = backups[ignore_path]
+        else:
+            try:
+                with _open_adopt_readonly(target, ignore_path) as stream:
+                    original_ignore = stream.read()
+            except FileNotFoundError:
+                original_ignore = None
+        try:
+            original_rules = tuple(("", parsed[0], parsed[1]) for line in (original_ignore or b"").decode("utf-8-sig").splitlines()
+                if (parsed := _parse_gitignore_line(line)) is not None)
+        except UnicodeError as exc:
+            raise ScaffoldError("original recovery ignore rules are not UTF-8") from exc
+        _assert_adopt_record_privacy(target,
+            [journal_path.parent, receipt_path.parent, journal_path, *private_paths],
+            root_rules=original_rules)
+        _assert_adopt_kept_inputs(target, {"kept_identities": payload["approval"]["kept"]})
+        _rollback_adopt(target, actions, backups, cleanup_journal=False)
+        _assert_recovery_restored(target, payload, actions, backups)
+        _atomic_write_bytes_no_follow(target, receipt_path, receipt_bytes, replace_existing=False,
+            temporary_name=temporary_name,
+            before_temporary=lambda temporary: _assert_adopt_record_privacy(target, [receipt_path, temporary]))
+        _unlink_no_follow(target, journal_path, expected_hashes={_sha256_prefixed(record[1])})
     return _recovery_result(
         target,
         recover_hash,
@@ -6579,28 +8629,318 @@ def _recover_adopt(
     )
 
 
+_ADOPTION_ACTIVE: set[tuple[int, int]] = set()
+_ADOPTION_ACTIVE_LOCK = threading.Lock()
+
+
+@contextmanager
+def _exclusive_adoption(target: Path):
+    """Exclude cooperating adoption writers without creating lock metadata."""
+    if os.name not in ("posix", "nt"):
+        raise ScaffoldError("this platform cannot exclude concurrent adoption")
+    # Only walk the parent: the synthetic leaf is never inspected or created.
+    hold_parent = _windows_destination_parent if os.name == "nt" else _posix_destination_parent
+    with ExitStack() as root:
+        try:
+            before = os.stat(target, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise ScaffoldError(f"adopt target is not a directory: {target}")
+            held = root.enter_context(hold_parent(target, target / ".adopt-placeholder", create_missing=False))
+            if os.name == "nt":
+                info = _WindowsDirectoryInformation()
+                if not _WINDOWS_GET_FILE_INFO(held[1], ctypes.byref(info)):
+                    raise ScaffoldError("cannot inspect adoption root handle")
+                identity = (info.volume_serial_number, (info.file_index_high << 32) | info.file_index_low)
+                path_identity = held[2]
+            else:
+                info = os.fstat(held)
+                identity = path_identity = (info.st_dev, info.st_ino)
+        except FileNotFoundError as exc:
+            raise ScaffoldError(f"adopt target does not exist: {target}") from exc
+        except OSError as exc:
+            raise ScaffoldError(f"cannot open adoption root: {target}") from exc
+        # Windows mutex ownership is recursive on one thread; public reentry must refuse.
+        with _ADOPTION_ACTIVE_LOCK:
+            if identity in _ADOPTION_ACTIVE:
+                raise ScaffoldError("adoption or recovery is already running for this workspace")
+            _ADOPTION_ACTIVE.add(identity)
+        mutex = None
+        acquired = False
+        try:
+            if os.name == "nt":
+                key = hashlib.sha256(f"{identity[0]}:{identity[1]}".encode("ascii")).hexdigest()
+                mutex = _WINDOWS_CREATE_MUTEX(None, False, "Global\\VivaryAdoptV1_" + key)
+                if not mutex:
+                    raise ScaffoldError("cannot acquire global adoption exclusion")
+                status = _WINDOWS_WAIT_OBJECT(mutex, 0)
+                if status == 0x102:  # WAIT_TIMEOUT
+                    raise ScaffoldError("adoption or recovery is already running for this workspace")
+                if status not in (0, 0x80):  # WAIT_OBJECT_0 or WAIT_ABANDONED owns the mutex.
+                    raise ScaffoldError("cannot acquire global adoption exclusion")
+                acquired = True
+            else:
+                try:
+                    import fcntl
+                    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise ScaffoldError("adoption or recovery is already running for this workspace") from exc
+                except (ImportError, OSError) as exc:
+                    raise ScaffoldError("this filesystem cannot exclude concurrent adoption") from exc
+            try:
+                current = os.stat(target, follow_symlinks=False)
+            except OSError as exc:
+                raise ScaffoldError("adoption root changed before mutation") from exc
+            if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != path_identity:
+                raise ScaffoldError("adoption root changed before mutation")
+            yield
+        finally:
+            release_failed = False
+            if mutex:
+                if acquired:
+                    release_failed = not _WINDOWS_RELEASE_MUTEX(mutex)
+                _WINDOWS_CLOSE_HANDLE(mutex)
+            with _ADOPTION_ACTIVE_LOCK:
+                _ADOPTION_ACTIVE.remove(identity)
+            # POSIX flock is released when the parent guard closes its descriptor.
+            if release_failed:
+                raise ScaffoldError("cannot release global adoption exclusion")
+
+
+_ADOPT_PRIVACY_REQUEST_SCHEMA = "vivary.adopt-privacy-request.v1"
+_ADOPT_PRIVACY_REQUEST_MAX_BYTES = 2048
+_ADOPT_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+def _validated_adopt_privacy_request(value: dict) -> dict:
+    if not isinstance(value, dict) or set(value) != {
+        "schema", "root_hash", "before_hash", "after_hash",
+    } or value["schema"] != _ADOPT_PRIVACY_REQUEST_SCHEMA:
+        raise ScaffoldError("privacy preparation request is malformed")
+    if (not isinstance(value["root_hash"], str)
+        or not isinstance(value["after_hash"], str)
+        or not _ADOPT_DIGEST_RE.fullmatch(value["root_hash"])
+        or not _ADOPT_DIGEST_RE.fullmatch(value["after_hash"])):
+        raise ScaffoldError("privacy preparation digest is malformed")
+    before_hash = value["before_hash"]
+    if before_hash is not None and (
+        not isinstance(before_hash, str) or not _ADOPT_DIGEST_RE.fullmatch(before_hash)
+    ):
+        raise ScaffoldError("privacy preparation digest is malformed")
+    return value
+
+
+def _reviewed_privacy_after(before_hash: str | None, current: bytes) -> bool:
+    """Accept a completed retry only if the suffix is the canonical privacy append."""
+    for active_context in (None, "cocoindex-code"):
+        block = _thin_gitignore_block(active_context=active_context).encode("utf-8")
+        if current == block and before_hash in (None, _sha256_prefixed(b"")):
+            return True
+        if before_hash is None:
+            continue
+        for separator in (b"\n", b"\n\n"):
+            suffix = separator + block
+            if not current.endswith(suffix):
+                continue
+            before = current[:-len(suffix)]
+            if _sha256_prefixed(before) != before_hash:
+                continue
+            if before + _append_patch_text(before, block.decode("utf-8")).encode("utf-8") == current:
+                return True
+    return False
+
+
+def prepare_adopt_privacy(
+    target: str | Path, *,
+    plan_hash: str, request_id: str, privacy_request: dict,
+    preset: str | None = None, adapters: tuple[str, ...] | list[str] = (),
+    repo_root: str | Path | None = None,
+) -> dict:
+    """Apply only the reviewed root ignore rule before any private request record."""
+    resolved = _resolve_scaffold_target(target)
+    attempted = False
+    try:
+        _validate_adopt_request_id(request_id)
+        request = _validated_adopt_privacy_request(privacy_request)
+        if not isinstance(plan_hash, str) or not _ADOPT_DIGEST_RE.fullmatch(plan_hash):
+            raise ScaffoldError("privacy preparation needs the original plan hash")
+        with _exclusive_adoption(resolved):
+            if request["root_hash"] != _thin_approval_hash(_thin_target_identity(resolved)):
+                raise ScaffoldError("the reviewed project folder changed")
+            _assert_adopt_records_untracked(resolved)
+            if os.path.lexists(resolved / ".vivary" / "runtime"):
+                raise ScaffoldError("Existing .vivary/runtime content needs review before privacy preparation")
+            ignore_path = resolved / ".gitignore"
+            try:
+                with _open_adopt_readonly(resolved, ignore_path) as stream:
+                    current = stream.read()
+            except FileNotFoundError:
+                current = None
+            if current is not None and _sha256_prefixed(current) == request["after_hash"]:
+                if not _reviewed_privacy_after(request["before_hash"], current):
+                    raise ScaffoldError("the current privacy file is not the reviewed append")
+                _assert_adopt_record_privacy(resolved, _adopt_record_paths(resolved))
+                return {"root": str(resolved), "plan_hash": plan_hash,
+                    "request_id": request_id, "replayed": True}
+
+            if (None if current is None else _sha256_prefixed(current)) != request["before_hash"]:
+                raise ScaffoldError("the reviewed privacy input changed. Prepare a new preview")
+            plan = plan_adopt(resolved, preset=preset, adapters=adapters, repo_root=repo_root)
+            if plan["plan_hash"] != plan_hash:
+                raise ScaffoldError("the folder or setup inputs changed. Prepare a new preview")
+            privacy = plan["privacy_preparation"]
+            if not privacy["required"] or not privacy["ready"]:
+                raise ScaffoldError(privacy["reason"] or "privacy preparation is unavailable")
+            if any(privacy[field] != request[field] for field in ("root_hash", "before_hash", "after_hash")):
+                raise ScaffoldError("the reviewed privacy change does not match this request")
+            file = next((item for item in plan["content_plan"]["files"]
+                if item["path"] == ".gitignore"), None)
+            if file is None or file["operation"] not in ("create", "patch"):
+                raise ScaffoldError("the reviewed plan has no root privacy change")
+            _assert_adopt_kept_inputs(resolved, plan)
+            _ensure_safe_destinations(resolved, [ignore_path], force=file["operation"] == "patch")
+            def check_project_inputs() -> None:
+                if request["root_hash"] != _thin_approval_hash(_thin_target_identity(resolved)):
+                    raise ScaffoldError("the reviewed project folder changed")
+                _assert_adopt_records_untracked(resolved)
+                if os.path.lexists(resolved / ".vivary" / "runtime"):
+                    raise ScaffoldError("Existing .vivary/runtime content needs review before privacy preparation")
+
+            def check_create_input() -> None:
+                check_project_inputs()
+                if os.path.lexists(ignore_path):
+                    raise ScaffoldError("the reviewed privacy input changed before writes")
+
+            def before_commit() -> None:
+                nonlocal attempted
+                if file["operation"] == "create":
+                    check_create_input()
+                else:
+                    check_project_inputs()
+                # From this point the write may commit without an acknowledgement.
+                attempted = True
+
+            after = file["content"].encode("utf-8")
+            if file["operation"] == "create":
+                _atomic_write_bytes_no_follow(resolved, ignore_path, after,
+                    replace_existing=False,
+                    before_temporary=lambda _temporary: check_create_input(),
+                    before_commit=before_commit)
+            else:
+                patch = next((item for item in plan["patches"]
+                    if item["path"] == ignore_path), None)
+                if patch is None:
+                    raise ScaffoldError("the reviewed plan has no root privacy append")
+                _append_reviewed_bytes_no_follow(
+                    resolved, ignore_path, current, patch["inserted_text"].encode("utf-8"),
+                    after, before_write=check_project_inputs, on_write_attempt=before_commit,
+                )
+            _assert_adopt_record_privacy(resolved, _adopt_record_paths(resolved))
+            return {"root": str(resolved), "plan_hash": plan_hash,
+                "request_id": request_id, "replayed": False}
+    except (ScaffoldError, OSError) as exc:
+        error = exc if isinstance(exc, ScaffoldError) else ScaffoldError(
+            "privacy preparation did not receive a complete filesystem acknowledgement")
+        if not attempted:
+            raise AdoptAttemptRefusal(str(error), target=resolved,
+                plan_hash=plan_hash, request_id=request_id) from exc
+        raise error from exc
+
+
+def apply_workspace_change(
+    target: str | Path, *, pattern_choices, yes: bool = False,
+    plan_hash: str | None = None, request_id: str | None = None,
+    repo_root: str | Path | None = None,
+) -> dict:
+    """Use the existing adopted-folder journal for reviewed pattern changes."""
+    return adopt_workspace(
+        target, yes=yes, plan_hash=plan_hash, request_id=request_id,
+        repo_root=repo_root, pattern_choices=pattern_choices, intent="reconfigure")
+
+
 def adopt_workspace(
     target: str | Path,
     *,
     preset: str | None = None,
     adapters: tuple[str, ...] | list[str] = (),
     repo_root: str | Path | None = None,
+    pattern_choices=None,
+    intent: str = "adopt",
     yes: bool = False,
     plan_hash: str | None = None,
     recover_hash: str | None = None,
+    request_id: str | None = None,
     _fault_after: int | None = None,
     _crash_after: int | None = None,
     _crash_before_journal: bool = False,
     _before_apply: Callable[[], None] | None = None,
 ) -> dict:
-    """Adopt Vivary onto an existing tree.
+    """Plan read-only, or exclusively apply/recover the approved adoption."""
+    if intent not in ("adopt", "reconfigure"):
+        raise ScaffoldError("workspace change intent is not supported")
+    if recover_hash is not None and pattern_choices is not None:
+        raise ScaffoldError("recovery uses the original pattern choices; omit new choices")
+    if intent == "reconfigure":
+        if preset is not None or adapters:
+            raise ScaffoldError("guidance changes keep the installed preset and adapters")
+        if recover_hash is not None:
+            raise ScaffoldError("recovery uses the original journal intent")
+        _normalize_pattern_choices(pattern_choices)
+    elif pattern_choices is not None:
+        raise ScaffoldError("pattern choices require reviewed reconfiguration")
+    if request_id is not None:
+        _validate_adopt_request_id(request_id)
+        if intent == "reconfigure":
+            _pattern_request_options(pattern_choices)
+        else:
+            _adopt_request_options(preset, adapters)
+        if recover_hash is None and (not yes or plan_hash is None):
+            raise ScaffoldError("--request-id requires ordinary apply with --yes --plan or an explicit --recover")
+        if recover_hash is not None and (preset is not None or adapters):
+            raise ScaffoldError("request recovery uses the original journal options; omit preset and adapters")
+    resolved_target = _resolve_scaffold_target(target)
+    exclusion = _exclusive_adoption(resolved_target) if yes else nullcontext()
+    mutation_attempted = False
 
-    Analyze + plan always run read-only. When `yes` is False (the default), no
-    file is written — the plan is returned for the caller to render as a dry run.
-    When `yes` is True, only files that do not already exist are written, using
-    the same symlink/out-of-root hardened write path as `init`. Existing files are
-    never opened for writing, moved, renamed, or truncated.
-    """
+    def before_mutation() -> None:
+        nonlocal mutation_attempted
+        mutation_attempted = True
+
+    try:
+        with exclusion:
+            return _adopt_workspace(
+                resolved_target, preset=preset, adapters=adapters, repo_root=repo_root,
+                pattern_choices=pattern_choices, intent=intent,
+                yes=yes, plan_hash=plan_hash, recover_hash=recover_hash, request_id=request_id,
+                _fault_after=_fault_after, _crash_after=_crash_after,
+                _crash_before_journal=_crash_before_journal, _before_apply=_before_apply,
+                _before_mutation=before_mutation,
+            )
+    except ScaffoldError as exc:
+        if request_id is not None and recover_hash is None and not mutation_attempted:
+            raise AdoptAttemptRefusal(str(exc), target=resolved_target,
+                plan_hash=plan_hash, request_id=request_id) from exc
+        raise
+
+
+def _adopt_workspace(
+    target: str | Path,
+    *,
+    preset: str | None = None,
+    adapters: tuple[str, ...] | list[str] = (),
+    repo_root: str | Path | None = None,
+    pattern_choices=None,
+    intent: str = "adopt",
+    yes: bool = False,
+    plan_hash: str | None = None,
+    recover_hash: str | None = None,
+    request_id: str | None = None,
+    _fault_after: int | None = None,
+    _crash_after: int | None = None,
+    _crash_before_journal: bool = False,
+    _before_apply: Callable[[], None] | None = None,
+    _before_mutation: Callable[[], None] | None = None,
+) -> dict:
+    """Plan, or apply/recover reviewed changes under the caller's exclusion."""
     resolved_target = _resolve_scaffold_target(target)
     if recover_hash is not None:
         return _recover_adopt(
@@ -6609,9 +8949,23 @@ def adopt_workspace(
             yes=yes,
             approved_recovery_hash=plan_hash,
             repo_root=repo_root,
+            request_id=request_id,
         )
 
-    plan = plan_adopt(resolved_target, preset=preset, adapters=adapters, repo_root=repo_root)
+    request = None
+    if request_id is not None:
+        request = {"id": request_id, "options": (
+            _pattern_request_options(pattern_choices) if intent == "reconfigure"
+            else _adopt_request_options(preset, adapters))}
+        replay = _replay_adopt_request(resolved_target, request, plan_hash,
+            repo_root=repo_root, before_mutation=_before_mutation)
+        if replay is not None:
+            return replay
+
+    plan = (plan_workspace_change(resolved_target, pattern_choices=pattern_choices,
+                                  repo_root=repo_root)
+            if intent == "reconfigure" else
+            plan_adopt(resolved_target, preset=preset, adapters=adapters, repo_root=repo_root))
     target_path = plan["target"]
 
     if not yes:
@@ -6637,12 +8991,10 @@ def adopt_workspace(
 
     if _before_apply is not None:
         _before_apply()
-    verified_plan = plan_adopt(
-        resolved_target,
-        preset=preset,
-        adapters=adapters,
-        repo_root=repo_root,
-    )
+    verified_plan = (plan_workspace_change(
+        resolved_target, pattern_choices=pattern_choices, repo_root=repo_root)
+        if intent == "reconfigure" else plan_adopt(
+            resolved_target, preset=preset, adapters=adapters, repo_root=repo_root))
     if verified_plan["plan_hash"] != plan_hash:
         raise ScaffoldError(
             "approved plan input changed before writes: "
@@ -6694,7 +9046,26 @@ def adopt_workspace(
 
     _assert_adopt_kept_inputs(target_path, plan)
     actions = _adopt_actions(plan)
-    backups = _adopt_backups(actions)
+    if request is not None and not actions:
+        raise ScaffoldError("request replay requires a nonempty adoption plan; no-op apply is not recorded")
+    journal_temporary = None
+    receipt_path = None
+    receipt_temporary = None
+    if request is not None:
+        receipt_path = target_path / _ADOPT_RECEIPTS_REL / (request_id + ".json")
+        journal_temporary = f".{journal_path.name}.{os.urandom(8).hex()}.vivary-tmp"
+        receipt_temporary = f".{receipt_path.name}.{os.urandom(8).hex()}.vivary-tmp"
+        private_paths = [
+            journal_path, journal_path.parent / journal_temporary,
+            receipt_path, receipt_path.parent / receipt_temporary,
+        ]
+        _ensure_safe_destinations(target_path, private_paths, force=False)
+        _assert_adopt_records_untracked(target_path)
+        # Rollback may restore the original ignore rules while a crash leaves a
+        # temporary record behind, so protection must exist before adoption too.
+        _assert_adopt_record_privacy(target_path, private_paths)
+        _assert_adopt_record_privacy(target_path, private_paths, extra_root_rules=simulated_rules)
+    backups = _adopt_backups(target_path, actions)
     completed = 0
     privacy_is_action = bool(actions and actions[0]["path"] == target_path / ".gitignore")
     if privacy_is_action:
@@ -6710,10 +9081,23 @@ def adopt_workspace(
         phase="planned",
         completed=0,
     )
+    if request is not None:
+        journal.update(schema=_ADOPT_REQUEST_JOURNAL_SCHEMA, request=request)
+    # Reserve both completed records before the first guidance write.
+    final_journal = {**journal, "phase": "publishing" if request else "applying", "completed": len(actions)}
+    _encode_adopt_journal(final_journal)
+    receipt_bytes = None
+    if request is not None:
+        receipt_bytes = _encode_adopt_journal({"schema": _ADOPT_RECEIPT_SCHEMA, "journal": final_journal})
+    publishing = False
 
+    if _before_mutation is not None:
+        _before_mutation()
     try:
         action_offset = 0
-        if privacy_is_action:
+        # Request-aware apply already proved record privacy in the original
+        # folder, so its journal must precede even the first ignore-file change.
+        if privacy_is_action and request is None:
             privacy_action = actions[0]
             _apply_adopt_action(
                 target_path,
@@ -6722,7 +9106,7 @@ def adopt_workspace(
             )
             if _crash_before_journal:
                 raise KeyboardInterrupt("injected crash after privacy before journal")
-            _write_adopt_journal(target_path, journal)
+            _write_adopt_journal(target_path, journal, temporary_name=journal_temporary)
             current_privacy = privacy_action["path"].read_bytes()
             if _sha256_prefixed(current_privacy) != _sha256_prefixed(
                 privacy_action["transient_after"]
@@ -6736,20 +9120,20 @@ def adopt_workspace(
             completed = 1
             journal["phase"] = "applying"
             journal["completed"] = completed
-            _write_adopt_journal(target_path, journal)
+            _write_adopt_journal(target_path, journal, temporary_name=journal_temporary)
             if _crash_after is not None and completed == _crash_after:
                 raise KeyboardInterrupt(f"injected crash after replacement {completed}")
             if _fault_after is not None and completed == _fault_after:
                 raise ScaffoldError(f"injected failure after replacement {completed}")
             action_offset = 1
         else:
-            _write_adopt_journal(target_path, journal)
+            _write_adopt_journal(target_path, journal, temporary_name=journal_temporary)
         for action in actions[action_offset:]:
             _apply_adopt_action(target_path, action)
             completed += 1
             journal["phase"] = "applying"
             journal["completed"] = completed
-            _write_adopt_journal(target_path, journal)
+            _write_adopt_journal(target_path, journal, temporary_name=journal_temporary)
             if _crash_after is not None and completed == _crash_after:
                 raise KeyboardInterrupt(f"injected crash after replacement {completed}")
             if _fault_after is not None and completed == _fault_after:
@@ -6764,9 +9148,24 @@ def adopt_workspace(
             raise ScaffoldError(
                 "Doctor failed after apply: " + "; ".join(doctor["errors"])
             )
+        if request is not None:
+            # An atomic intent write can commit and then raise. Once attempted,
+            # this exception path must never undo a possibly committed request.
+            publishing = True
+            _write_adopt_journal(target_path, final_journal, temporary_name=journal_temporary)
+            _atomic_write_bytes_no_follow(
+                target_path, receipt_path, receipt_bytes, replace_existing=False,
+                temporary_name=receipt_temporary,
+                before_temporary=lambda temporary: _assert_adopt_record_privacy(target_path, [receipt_path, temporary]),
+            )
         _unlink_no_follow(target_path, journal_path)
-        return {**plan, "applied": True, "doctor": doctor}
+        result = {**plan, "applied": True, "doctor": doctor}
+        if request is not None:
+            result.update(request_id=request_id, replayed=False)
+        return result
     except Exception as exc:
+        if publishing:
+            raise ScaffoldError("adoption completion is committed or uncertain; retry the original --request-id; no rollback was attempted") from exc
         try:
             _rollback_adopt(target_path, actions, backups)
         except ScaffoldError as rollback_exc:
@@ -6996,19 +9395,20 @@ def _validate_record_candidate(
     try:
         resolver = tropo.ConfigResolver(str(target), str(Path(tropo.__file__).parent))
         effective = resolver.for_dir(str(destination.parent))
-        with tempfile.TemporaryDirectory(prefix="vivary-record-validate-") as raw:
-            shadow = Path(raw) / destination.parent.name / destination.name
-            shadow.parent.mkdir(parents=True)
-            shadow.write_text(text, encoding="utf-8", newline="\n")
-            doc = tropo.analyze_file(
-                str(shadow),
-                relative,
-                effective,
-                use_git_dates=False,
-            )
+        doc = tropo.analyze_file(
+            str(destination),
+            relative,
+            effective,
+            text=text,
+            use_git_dates=False,
+            stat_result=target.stat(),
+        )
     except (OSError, UnicodeError, ValueError, tropo.ConfigError) as exc:
         raise ScaffoldError("record source could not be validated against workspace policy") from exc
     expected_type = _THIN_RECORD_FOLDERS[destination.parent.name]
+    internal_path = f".vivary/records/{destination.parent.name}"
+    if effective.folder_map.get(internal_path) == f"vivary_record_{expected_type}":
+        expected_type = f"vivary_record_{expected_type}"
     findings = [finding.render() for finding in doc.findings]
     if doc.type != expected_type or findings:
         detail = "; ".join(findings[:5]) or (
@@ -7245,6 +9645,8 @@ def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
             }
             for conflict in result.get("conflicts", [])
         ],
+        "validation_findings": result.get("validation_findings", []),
+        "content_inventory": result.get("content_inventory"),
         "privacy": result.get("privacy"),
         "plan_hash": result.get("plan_hash"),
         "recovery_plan_hash": result.get("recovery_plan_hash"),
@@ -7254,8 +9656,17 @@ def _adopt_report_to_json(result: dict, *, mode: str) -> dict:
         "excluded_pre_existing": result["excluded_pre_existing"],
         "skipped_module_collisions": result["skipped_module_collisions"],
     }
+    for key in ("pattern_choices", "retired_kept"):
+        if key in result:
+            payload[key] = result[key]
     if mode in ("applied", "recovered") and result.get("doctor") is not None:
         payload["doctor"] = result["doctor"]
+    if mode == "dry-run":
+        payload["content_plan"] = result["content_plan"]
+        payload["request_replay"] = result["request_replay"]
+        payload["privacy_preparation"] = result["privacy_preparation"]
+    if "request_id" in result:
+        payload.update(request_id=result["request_id"], replayed=result["replayed"])
     return payload
 
 
@@ -7272,6 +9683,12 @@ def _print_adopt_report(result: dict, *, mode: str) -> None:
     for dst in result["kept"]:
         rel = dst.relative_to(target).as_posix()
         print(f"  exists, kept: {rel}")
+    for conflict in result.get("conflicts", []):
+        rel = conflict["path"].relative_to(target).as_posix()
+        print(f"  conflict: {rel}: {conflict['reason']}")
+    for finding in result.get("validation_findings", []):
+        print(f"  {finding['level']}: {finding['path']}:{finding['line']} "
+              f"{finding['code']}: {finding['message']}")
 
     if result["gitignore_followups"]:
         print("\nManual follow-up: your .gitignore exists and was left untouched.")
@@ -8330,6 +10747,8 @@ def _selected_extra_dependency(
 def _required_dependency_constraints(
     requirements: tuple[str, ...],
     expected_dependencies: tuple[str, ...],
+    *,
+    exact_dependencies: tuple[str, ...] = (),
 ) -> dict[str, tuple[str, tuple[int, int, int]]]:
     expected = {
         _normalize_distribution_name(dependency): dependency
@@ -8357,6 +10776,10 @@ def _required_dependency_constraints(
             for operator, release, wildcard in clauses
             if operator == ">=" and not wildcard and len(release) == 3
         ]
+        if dependency in exact_dependencies and (
+            len(clauses) != 1 or len(exact_clauses) != 1
+        ):
+            raise _CapabilityContractIncompatible
         if len(exact_clauses) == 1 and not floor_clauses:
             constraint = ("==", exact_clauses[0])
         elif len(floor_clauses) == 1 and not exact_clauses:
@@ -8822,10 +11245,14 @@ def _capability_probe_results(capabilities: list[dict]) -> dict[str, dict]:
             dependency_constraints = _required_dependency_constraints(
                 observed_result["declared_requirements"],
                 expected_dependencies,
+                exact_dependencies=("mcp",) if role == "vivary-mcp" else (),
             )
         except _CapabilityContractIncompatible:
             results[role] = {"status": "incompatible"}
             continue
+        if role == "vivary-mcp":
+            # Installed adapter releases own their SDK pin, including older releases.
+            results[role]["required_sdk_version"] = dependency_constraints["mcp"][1]
         for dependency, (operator, required_version) in dependency_constraints.items():
             dependency_result = results.get(dependency)
             if dependency_result is None:
@@ -8939,8 +11366,9 @@ def _annotate_mcp_capability(capability: dict, results: dict[str, dict]) -> None
         else None
     )
     capability["sdk_compatible"] = (
-        sdk.get("status") == "installed"
-        and sdk.get("version") == (2, 2, 0)
+        package_status == "installed"
+        and sdk.get("status") == "installed"
+        and sdk.get("version") == package.get("required_sdk_version")
     )
 
 
@@ -9063,6 +11491,8 @@ def build_parser(
         default=None,
         help="Vivary source checkout root (mainly for local development/tests)",
     )
+    init.add_argument("--pattern-choices", metavar="-", default=None,
+                      help="read reviewed built-in guidance choices as JSON from standard input")
     init.add_argument("--json", action="store_true", help="machine-readable output")
     init.add_argument("--dry-run", action="store_true", help="simulate without writing")
     init.add_argument(
@@ -9178,12 +11608,25 @@ def build_parser(
         ),
     )
     adopt.add_argument(
+        "--request-id",
+        default=None,
+        help="original request identity for retryable apply or recovery",
+    )
+    adopt.add_argument("--prepare-privacy", action="store_true",
+        help="apply only the reviewed privacy prerequisite before retryable setup")
+    adopt.add_argument("--privacy-request", default=None, metavar="-",
+        help="bounded reviewed privacy descriptor from standard input")
+    adopt.add_argument(
         "--adapter",
         action="append",
         choices=tuple(_THIN_ADAPTER_PATHS),
         default=[],
         help="add one bounded runtime projection; repeat for both supported adapters",
     )
+    adopt.add_argument("--pattern-state", action="store_true",
+                       help="read installed guidance choices without writing")
+    adopt.add_argument("--pattern-choices", metavar="-", default=None,
+                       help="review or apply built-in guidance choices from standard input")
     adopt.add_argument("--json", action="store_true", help="machine-readable output")
     adopt.add_argument(
         "--repo-root",
@@ -9564,18 +12007,66 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     if args.command == "adopt":
         yes = getattr(args, "yes", False)
         try:
+            if args.pattern_state:
+                if yes or args.plan is not None or args.recover is not None or args.pattern_choices is not None:
+                    raise ScaffoldError("pattern state is read-only and accepts no plan or choices")
+                report = workspace_pattern_state(args.target)
+                if args.json:
+                    print(json.dumps(report, indent=2))
+                else:
+                    for row in report["choices"]:
+                        print(f"{row['id']}: {row['name']} -> {row['path']}")
+                return 0
+            if args.prepare_privacy:
+                if args.pattern_choices is not None:
+                    raise ScaffoldError("privacy preparation uses its original choices; omit pattern choices")
+                if not yes or args.recover is not None or args.privacy_request != "-" or args.request_id is None:
+                    raise ScaffoldError("privacy preparation requires --yes --plan --request-id --privacy-request -")
+                raw = sys.stdin.read(_ADOPT_PRIVACY_REQUEST_MAX_BYTES + 1)
+                if len(raw.encode("utf-8")) > _ADOPT_PRIVACY_REQUEST_MAX_BYTES:
+                    raise ScaffoldError("privacy preparation request exceeds the size limit")
+                def closed_object(pairs):
+                    value = {}
+                    for key, item in pairs:
+                        if key in value:
+                            raise ValueError("duplicate privacy request field")
+                        value[key] = item
+                    return value
+                try:
+                    privacy_request = json.loads(raw, object_pairs_hook=closed_object)
+                except (ValueError, UnicodeError, RecursionError) as exc:
+                    raise ScaffoldError("privacy preparation request is malformed") from exc
+                result = prepare_adopt_privacy(
+                    args.target, preset=args.preset, adapters=tuple(args.adapter),
+                    repo_root=args.repo_root, plan_hash=args.plan,
+                    request_id=args.request_id, privacy_request=privacy_request)
+                payload = {"ok": True, "mode": "privacy-prepared", **result}
+                if args.json:
+                    print(json.dumps(payload, indent=2))
+                else:
+                    print(f"create-vivary adopt: prepared reviewed ignore-file protection in {result['root']}")
+                return 0
+            if args.privacy_request is not None:
+                raise ScaffoldError("--privacy-request requires --prepare-privacy")
+            if args.recover is not None and args.pattern_choices is not None:
+                raise ScaffoldError("recovery uses the original pattern choices; omit --pattern-choices")
+            choices = _read_pattern_choices_request(args.pattern_choices)
             result = adopt_workspace(
                 args.target,
+                pattern_choices=choices,
+                intent="reconfigure" if choices is not None and args.recover is None else "adopt",
                 preset=args.preset,
                 adapters=tuple(args.adapter),
                 repo_root=args.repo_root,
                 yes=yes,
                 plan_hash=args.plan,
                 recover_hash=args.recover,
+                request_id=args.request_id,
             )
         except ScaffoldError as exc:
             if getattr(args, "json", False):
-                print(json.dumps({"ok": False, "error": str(exc)}))
+                print(json.dumps({"ok": False, "error": str(exc),
+                    **(exc.attempt if isinstance(exc, AdoptAttemptRefusal) else {})}))
             else:
                 print(f"create-vivary adopt: {exc}", file=sys.stderr)
             return 1
@@ -9605,14 +12096,14 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             else:
                 print(f"create-vivary wizard: {exc}", file=sys.stderr)
             return 1
-        decisions = _run_wizard(args)
-        _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
-        installed = decisions.get("installed") or (
-            []
-            if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
-            else _ensure_backend_installed(decisions["provider"], _yes)
-        )
         try:
+            decisions = _run_wizard(args)
+            _yes = getattr(args, "yes", False) or getattr(args, "auto", False)
+            installed = decisions.get("installed") or (
+                []
+                if getattr(args, "dry_run", False) or decisions["storage"] != "embedded"
+                else _ensure_backend_installed(decisions["provider"], _yes)
+            )
             vivary_paths = _write_vivary_dir(
                 target,
                 decisions["storage"],
@@ -9662,6 +12153,14 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         return 2
 
     # --- init ---
+    try:
+        selected_patterns = _read_pattern_choices_request(args.pattern_choices)
+    except ScaffoldError as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}))
+        else:
+            print(f"create-vivary init: {exc}", file=sys.stderr)
+        return 1
     if args.reviewed or args.plan is not None:
         try:
             if not args.reviewed:
@@ -9678,6 +12177,7 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             options = dict(
                 preset=args.preset, adapters=tuple(args.adapter),
                 active_context=args.active_context,
+                pattern_choices=selected_patterns or (),
             )
             if args.dry_run:
                 if args.yes or args.plan is not None:
@@ -9738,6 +12238,7 @@ def _main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             preset=args.preset,
             adapters=tuple(args.adapter),
             active_context=args.active_context,
+            pattern_choices=selected_patterns or (),
             force=args.force,
             repo_root=args.repo_root,
             dry_run=dry_run,

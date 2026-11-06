@@ -108,16 +108,16 @@ behavior or repository publication.
 
 ## Initial PR #333 corrections
 
-The [review of `97df0bc`](https://github.com/vivary-dev/vivary/pull/333#pullrequestreview-5126046129)
+The [review of `97df0bc`](https://github.com/vivary-dev/vivary-cli/pull/333#pullrequestreview-5126046129)
 found five gaps after the initial local review. Jeff authorized resolving the
 findings and merging the verified PR on 2026-09-06.
 
 | Finding | Correction and evidence |
 | --- | --- |
-| [Read-only connection grant](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944682263) | `read-only-grant-refuses-write` requests write on an OS-writable root and expects `denied`. `read-only-grant-allows-read` supplies the positive read control |
-| [Jujutsu administration identity](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944682270) | Private `jjRepositoryId` joins the existing VCS binding. Recreation and repointing change it while preserving root, content, and Git contention keys. Alias and incomplete-identity cases retain their own expectations. Two executable registry cases require `stale-binding` for admission and write-back |
-| [Git administration replacement](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944682274) | `git-administration-replaced-binding` compares the old and recreated full VCS records under R10 with unchanged kind and owner; expected result is `stale-binding` |
-| [Stale frontier](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944682266) | The verification log distinguishes the initial empty frontier from the current 20a-ready direction. No 12b was created |
+| [Read-only connection grant](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944682263) | `read-only-grant-refuses-write` requests write on an OS-writable root and expects `denied`. `read-only-grant-allows-read` supplies the positive read control |
+| [Jujutsu administration identity](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944682270) | Private `jjRepositoryId` joins the existing VCS binding. Recreation and repointing change it while preserving root, content, and Git contention keys. Alias and incomplete-identity cases retain their own expectations. Two executable registry cases require `stale-binding` for admission and write-back |
+| [Git administration replacement](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944682274) | `git-administration-replaced-binding` compares the old and recreated full VCS records under R10 with unchanged kind and owner; expected result is `stale-binding` |
+| [Stale frontier](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944682266) | The verification log distinguishes the initial empty frontier from the current 20a-ready direction. No 12b was created |
 | R13 recreated-root write-back, in the review body | `write-back-recreated-root` expects `content-conflict`, independently of R8/R10's `root-replaced` result |
 
 At `d1af7d8`, the observation fixture had 68 cases, 28 relations, and 19 boundary
@@ -159,9 +159,9 @@ The review of `d1af7d8` found three further gaps:
 
 | Finding | Correction and evidence |
 | --- | --- |
-| [Jujutsu working-copy administration](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771957) | Private `jjWorkspaceId` binds verified per-workspace administration and its working-root association. Recreation/repointing changes it while Jujutsu repository identity, Git identities, root, content, and common keys stay equal. Alias, missing-administration, and mismatched-root cases have explicit expectations. R10 boundary oracles and synthetic admission/write-back cases require `stale-binding` on workspace identity change |
-| [Successful write-access observation](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771960) | `write-access-allowed-no-vcs`, `write-access-allowed-git`, and `write-access-allowed-colocated-jj` use a read-write grant, an OS-writable root, and requested write access. Each expects the normal observation with empty effects |
-| [Release-truth entry](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944771964) | The Unreleased changelog now names the observation contract and synthetic registry milestone with its non-runtime limits. The existing site sync generated the changelog and LLM-text mirrors |
+| [Jujutsu working-copy administration](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944771957) | Private `jjWorkspaceId` binds verified per-workspace administration and its working-root association. Recreation/repointing changes it while Jujutsu repository identity, Git identities, root, content, and common keys stay equal. Alias, missing-administration, and mismatched-root cases have explicit expectations. R10 boundary oracles and synthetic admission/write-back cases require `stale-binding` on workspace identity change |
+| [Successful write-access observation](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944771960) | `write-access-allowed-no-vcs`, `write-access-allowed-git`, and `write-access-allowed-colocated-jj` use a read-write grant, an OS-writable root, and requested write access. Each expects the normal observation with empty effects |
+| [Release-truth entry](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944771964) | The Unreleased changelog now names the observation contract and synthetic registry milestone with its non-runtime limits. The existing site sync generated the changelog and LLM-text mirrors |
 
 At `a789112`, the observation fixture had 77 expected cases, 37 relations, and 21
 boundary assertions. The two private Jujutsu identities are absent from other
@@ -194,10 +194,10 @@ The review of `a789112` found four further gaps:
 
 | Finding | Correction and evidence |
 | --- | --- |
-| [Unsupported shared Jujutsu evidence](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847499) | Private `diagnostics.jjRepositoryEvidence` retains verified Jujutsu repository and optional Git backing identities. Relations distinguish shared and different repositories across non-colocated workspaces and retain Git backing. Missing required repository evidence refuses observation. The registry projection stays unsupported, read-only, with null VCS IDs and no resource keys |
-| [Stale maintained routes](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847507) | The audit and outcome-02/03 continuation sections link the accepted 12a receipt, generated frontier, and current direction. Historical receipts and open product outcomes retain their evidence status |
-| [OS-readable roots without write permission](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847511) | Three supported-layout cases request read with a read-only grant, OS read permission, and no OS write permission. They retain the normal root observation and empty effects |
-| [Linked-worktree private administration](https://github.com/vivary-dev/vivary/pull/333#discussion_r3944847516) | Recreation and repointing change only checkout identity while root, repository, and content stay equal. The common reservation key remains shared. Admission and write-back boundaries require `stale-binding`; two executable registry decisions isolate checkout-only drift |
+| [Unsupported shared Jujutsu evidence](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944847499) | Private `diagnostics.jjRepositoryEvidence` retains verified Jujutsu repository and optional Git backing identities. Relations distinguish shared and different repositories across non-colocated workspaces and retain Git backing. Missing required repository evidence refuses observation. The registry projection stays unsupported, read-only, with null VCS IDs and no resource keys |
+| [Stale maintained routes](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944847507) | The audit and outcome-02/03 continuation sections link the accepted 12a receipt, generated frontier, and current direction. Historical receipts and open product outcomes retain their evidence status |
+| [OS-readable roots without write permission](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944847511) | Three supported-layout cases request read with a read-only grant, OS read permission, and no OS write permission. They retain the normal root observation and empty effects |
+| [Linked-worktree private administration](https://github.com/vivary-dev/vivary-cli/pull/333#discussion_r3944847516) | Recreation and repointing change only checkout identity while root, repository, and content stay equal. The common reservation key remains shared. Admission and write-back boundaries require `stale-binding`; two executable registry decisions isolate checkout-only drift |
 
 The current observation corpus has 86 expected cases, 57 relations, and 25
 boundary assertions. Its exact diagnostic shape remains private and adds no

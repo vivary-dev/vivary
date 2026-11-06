@@ -94,7 +94,7 @@ provider runtime calls. The next productization gates are:
 - Semantic memory in an incognito, privacy-first mode: optional, explicit, and never
   default.
 - Typed semantic search over Tropo graph truth, tracked in
-  [#20](https://github.com/vivary-dev/vivary/issues/20), returning Vivary node ids and
+  [#20](https://github.com/vivary-dev/vivary-cli/issues/20), returning Vivary node ids and
   paths rather than opaque chunks.
 
 Those belong in separate feature PRs so each can run CI and review cleanly.

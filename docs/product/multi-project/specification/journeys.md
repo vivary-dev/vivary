@@ -45,6 +45,8 @@ Acceptance: two projects with different drafts and conversations. Fail selection
 
 ## J03: Choose a model or another harness
 
+The implemented two-engine picker selects Claude Code or Codex for a new conversation. Codex resumes its own native session on follow-up. Runtime/model changes require a new conversation. The grouped picker and linked-history sequence below are target behavior, not the shipped switching flow. [Implemented Codex behavior](harness-adapters.md#implemented-codex-behavior) defines immediate Send, native approvals, modes, and activity cards.
+
 The single picker groups model rows under Claude Code, Codex and other supported registered harness names. Each group has a small trusted logo or generic fallback. Unknown brands cannot inject markup. Readiness appears beside unavailable entries. No preset persona is required. Optional user-authored profiles use the existing Native resource/settings owner or intentionally authored project instructions. A person can create/edit, select, clear and inspect their effective instruction sources. Selection applies to future explicitly requested context and records the profile revision. Clearing preserves history and does not claim prior model context was erased. Profiles cannot grant tool permissions or transfer approval.
 
 ```mermaid
@@ -109,9 +111,27 @@ stateDiagram-v2
   AwaitingToolApproval --> Running: authorized answer
   Running --> Completed: observed success
   Running --> Failed: observed error
-  Running --> Interrupted: controller lost
-  Interrupted --> Running: explicit supported resume
+  Running --> Interrupted: host restart
+  AwaitingToolApproval --> Interrupted: host restart or quit, request expired
 ```
+
+### Codex tool request
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Pending: Codex asks, listed on the run record
+  Pending --> Answered: owner allows or declines
+  Pending --> Withdrawn: Codex resolves it while the run goes on
+  Pending --> Cancelled: Stop or run failure
+  Pending --> Expired: host shutdown or restart
+  Answered --> [*]
+  Withdrawn --> [*]
+  Cancelled --> [*]
+  Expired --> [*]
+```
+
+An expired request cannot be answered. Its conversation and the host strip say "Vivary restarted before this request was answered". The host strip shows Interrupted for a run that a restart interrupted, and any request that expired with it, until the next send on that run. A normal quit while a run waits on a Codex request expires that request the same way, so the run ends Interrupted too. A quit with no request waiting leaves the run paused. A send after Interrupted starts a new turn that resumes the provider session where the runtime supports it. Nothing replays the interrupted turn. The workbench server writes every Code status and phase through one transition table, `packages/workbench/server/code-run-transitions.ts`, which refuses and logs any other change. A send moves an interrupted run to Queued, a state this chart does not draw, and Core's executor then marks it running. A permission request that arrives before Core marks the run running moves it from Queued to Awaiting tool approval.
 
 ### Cancellation
 
@@ -210,6 +230,34 @@ flowchart LR
 ```
 
 Factory and heartbeat use existing Native scheduling/task owners. Preserve one task identity, bounded retries and no-progress stops. A periodic trigger is not new authority. These later features remain unavailable until their integration and activation gates pass.
+
+### Automation approval waits
+
+An automation run that reaches a tool needing approval keeps one history, conversation and turn while it waits. The wait survives an app restart, and Settings shows it for inspection and a decision. Update this diagram in the same change as any change to these states, the decision authority, deletion or settlement (issue #108).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  state "Waiting for approval" as Waiting
+  state "Resuming" as Resuming
+  [*] --> Running: schedule, Run now, event or webhook
+  Running --> Waiting: tool needs approval
+  Running --> Completed: observed success
+  Running --> Failed: observed error
+  Running --> Interrupted: Stop, quit or lost run
+  Waiting --> Resuming: owner approves exact unexpired request
+  Waiting --> Declined: owner declines
+  Waiting --> Declined: Settings Delete declines after owner lost access
+  Waiting --> Declined: request expired
+  Resuming --> Waiting: approved step never started
+  Resuming --> Declined: request was already declined
+  Resuming --> Interrupted: approved step outcome unconfirmed
+  Resuming --> Failed: grant refused before use, step did not run
+  Resuming --> Completed: continuation succeeds
+  Resuming --> Failed: continuation fails
+```
+
+Only the run's owner can approve, and only before the request expires. Declining executes nothing. If the approval cannot be used when the step runs, for example because it expired after the decision, the step does not run and the run fails without asking again. An approved step that returns an error continues the run, and the agent sees the error. A request expires after an hour. An expired request can only be declined, so the next settlement pass declines it, which releases the job even when nobody acts. A wait saved just before a crash expires the same way once its run has ended. A personal job made while an organization was active runs under that organization and keeps its run history there. Its wait would block other members' jobs of the same name and stay hidden from its owner, so such a job cannot use connected tools and is refused at start, whether Run now or its schedule starts it. If an organization run's owner leaves or loses access, the automation's creator or an organization admin (whoever may delete it) can decline the wait, never approve it. Deleting the job in Settings declines that wait first, then deletes the job. A job that runs as the shared or organization identity cannot use connected tools, because no person can approve for it, so it is refused at start. When a run that waited ends, settlement also declines its request if nobody decided it, so no request outlives its run. An owner can decline a wait whose run can no longer save its conversation, and settlement ends it once its request expires. Approving still needs the saved conversation. If the app stops after an owner's decision and before the run continues, settlement recovers the decision once its claim lease has passed: a declined request ends declined, a used approval ends interrupted, and an undecided request returns to waiting. Approval cleanup keeps a decided request while an unfinished run still claims it, so this recovery can read the decision. After a waited run ends, settlement records its outcome on the automation, moves a scheduled job to its next run (Run now does not move the schedule), and releases the next queued webhook delivery. The webhook delivery that started a waited run stays held until settlement records that run's outcome, even when the run fails on the delivery's last retry. Deleting or moving a job is refused while a wait, a resume or an unsettled outcome is bound to it. History cleanup removes ordinary runs, including one still in flight, and never removes a wait.
 
 ## J11: Host, preview and platform acceptance
 

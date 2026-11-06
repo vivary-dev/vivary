@@ -5,8 +5,9 @@ keep the implementation narrow enough that the tests and docs can move with it.
 
 ## Active repository
 
-Work in private `vivary-dev/Vivary-New`. The original public `vivary-dev/vivary`
-repository retains its release workflow and is a separate delivery target.
+Work in `vivary-dev/vivary`, which was public when checked on 2026-09-24.
+The original `vivary-dev/vivary-cli` repository retains its release workflow and
+is a separate delivery target.
 
 - `dev` integrates reviewed work.
 - `main` is the default branch and receives reviewed promotions from `dev`.
@@ -17,22 +18,63 @@ repository retains its release workflow and is a separate delivery target.
   (`entire`). Source mirroring does not establish agent-session capture.
 
 Before merging, resolve review findings and require passing applicable CI plus
-one independent approval. When the CI service cannot start, record that failure
-separately from test failures. An owner-approved alternative host may run the
-applicable checks against the exact PR commit. Record executed checks, omissions,
-and review evidence under a distinct result. Do not relabel an unrun Actions or
-Windows job as successful. Promotion to `main` also needs Jeff's acceptance of
+one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
+gate script from the pull request's base commit, or, while the base has no script (`main`
+before its next promotion), from the commit pinned in the workflow, so a pull request's
+edits to the script apply only after merge. PR #193, which introduced the gate, ran its own
+earlier commit, whose script is identical to its reviewed final script.
+It requires a completed independent review of the exact head and base, published by the
+server-side `vivary-independent-review` tool, which runs outside the repository on the
+Vivary host and opens one review thread per finding. It stays pending while that review
+or a Codex review of the exact head runs, fails when the review failed, covers another head
+or base, or lacks a thread for a finding, and fails on any unresolved review thread,
+outdated ones included. It is not a security boundary: a pull request can edit its own
+workflow, and the allowed publisher is the owner's account. The reviewer therefore adds a
+finding whenever CI, agent or instruction files change, and the owner's Entire approval
+remains required. Never post or edit a review result by hand. Before merging: run
+`vivary-independent-review --pr N` after the final push, publish a fix or an evidence-backed
+rejection for every finding, resolve each thread only after its disposition is verified,
+then re-run the check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
+Jeff can approve his own trail. An agent can add technical review but never
+records a human approval. Zo is the standing owner-approved CI host. Run the
+applicable workflow commands and gates on Zo against the exact PR commit. GitHub
+Actions billing or runner failures do not block this verification path. Record
+executed checks, omissions, logs, and review evidence as Zo CI. Keep GitHub service
+failures separate from test failures. Do not relabel an unrun Actions or Windows
+job as successful. Passing applicable Zo CI satisfies the CI gate, subject to the
+same review and product acceptance requirements. Promotion to `main` also needs Jeff's acceptance of
 the delivered product milestone. This does not authorize a public release.
 
-On 2026-09-13, GitHub refused branch-protection configuration for this private
-repository under the organization's Free plan. These rules remain contributor
-policy. Server enforcement is unavailable until the repository plan supports it.
+On 2026-09-13, GitHub refused branch-protection configuration while this
+repository was private under the organization's Free plan. These rules remain
+contributor policy. On 2026-09-24, `dev` still had no branch protection.
 
 Dependabot reads configuration from `main`. Its version updates target `dev`
 once this configuration reaches `main`. GitHub security updates still target
 `main`, so review those changes and bring equivalent fixes into `dev` before
 promotion. Do not merge a security update that leaves the integration branch
-unfixed. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch).
+unfixed. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
+
+Dependency-only Dependabot commits pass the HLDD gate without a design update,
+so the dependency review before merge is the gate that catches a bad update.
+Review each new or changed package version in the diff, including new transitive
+packages in the lockfile:
+
+- It was published more than 72 hours earlier, or it carries a provenance
+  attestation from its stated repository.
+- It runs no `preinstall`, `install`, or `postinstall` script beyond one that
+  selects a platform binary.
+- It ships no `binding.gyp` with an `actions` block.
+
+The seven-day `cooldown` in `.github/dependabot.yml` delays version updates, but
+GitHub states that `cooldown` "is only available for version updates, not
+security updates"
+([Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#cooldown-)).
+A security update can bring a version published hours earlier, so the 72-hour
+check matters most there.
+
+Give a new or low-download package a closer look. The owner's approval of the
+Entire trail stays required before merge.
 
 ### Entire session capture
 
@@ -57,7 +99,7 @@ Never reset or clean a checkout to make it appear disposable.
 
 ## Find the implementation owner
 
-Start with the ready GitHub issue you claim in `vivary-dev/Vivary-New`; since
+Start with the ready GitHub issue you claim in `vivary-dev/vivary`; since
 2026-09-13 issues own task goals, acceptance, dependencies, ownership, and
 lifecycle. Use [the program frontier](docs/product/multi-project/index.md) and
 any linked packet for implementation guidance and retained evidence, and
@@ -114,9 +156,61 @@ Every PR should include:
 - verification: local commands run and CI expectations
 - docs impact: docs, README, package READMEs, generated site sync, or "none"
 - release/package impact: versions, package metadata, install commands, or "none"
+- size: the diff in bytes and the changed hand-written lines, against the size rule below
 
 Merges happen only after the written plan matches the delivered change, the
 applicable CI or explicitly approved alternative gate passes, and review is complete.
+
+### Size
+
+Keep each PR small enough for one fast trusted review round. Measured on
+2026-10-24, every PR whose diff fit the trusted reviewer's single-session cap
+was reviewed in one session of under 5 minutes. Two PRs above the cap needed
+chunked reviews of 25 to 50 minutes a round, and those rounds stopped repeatedly.
+
+- Keep the whole diff under 1 MiB (1,048,576 bytes), the single-session cap.
+- Aim for about 1,000 changed hand-written lines or fewer. Lockfiles, mirrored
+  site docs, CA bundles, vendored trees and patch files, and embedded copies that
+  a checker generates do not count.
+- Put large generated or vendored changes in their own PR, landed first.
+- Cover one issue or one slice. Split before you open the PR, never after its
+  review starts.
+
+## High-level design gate
+
+Read [the HLDD](docs/ARCHITECTURE.md) and use
+[maintain-hldd](.agents/skills/maintain-hldd/SKILL.md) for relevant changes.
+Update the affected sections in the same commit as source or contract changes.
+If no design changes, record the specific reasoning in Last change review.
+
+Install the hook once per Git checkout:
+
+```bash
+python scripts/check_hldd.py --install-hook
+```
+
+The installer preserves Entire and other hooks. It refuses to replace an
+existing pre-commit hook or hook manager. Add the staged command to that
+existing chain when needed. Linked worktrees share hooks, but this hook runs
+only in source trees that track the HLDD checker.
+
+Before committing, stage the source and its design review, then run:
+
+```bash
+python scripts/check_hldd.py --staged
+```
+
+CI runs the same rule for every introduced commit using explicit base and head
+refs. A prior documentation commit does not cover a later code-only commit.
+Whitespace, comments, and dates alone do not count as a review. Test-only and generated site-mirror
+changes are exempt. Commits before gate adoption remain historical. CI also
+checks introduced side-branch commits. Neither check can establish the truth of the prose.
+Review the description against its source and evidence. Local hooks can be
+bypassed by Git, so passing CI and the existing human review remain necessary.
+
+The built application exposes this same document at Settings > Documentation.
+Its text is bundled at build time and remains readable without a network.
+Linked source and detailed references require internet access.
 
 ## Documentation sync
 

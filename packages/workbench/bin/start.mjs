@@ -9,6 +9,10 @@ import { parseArgs } from "node:util";
 import { assertCurrentNode } from "./runtime-security.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Profile files in the data folder. Every release since the 2026-09-22 preview uses
+// these names, so renaming one would hide an existing profile from an upgrade.
+export const PROFILE_DATABASE = "auth.sqlite";
+export const PROFILE_AUTH_SECRET = "auth-secret";
 
 export function startupOptions(args, environment = process.env) {
   const { values } = parseArgs({ args, options: {
@@ -71,8 +75,9 @@ async function checkPort(port) {
   await new Promise(resolve => probe.close(resolve));
 }
 
-async function authSecret(dataDir) {
-  const secretFile = path.join(dataDir, "auth-secret");
+/** Creates the sign-in secret once, and keeps an existing one so saved sign-ins stay valid. */
+export async function authSecret(dataDir) {
+  const secretFile = path.join(dataDir, PROFILE_AUTH_SECRET);
   try {
     await writeFile(secretFile, randomBytes(32).toString("hex") + "\n", { flag: "wx", mode: 0o600 });
   } catch (error) {
@@ -104,7 +109,7 @@ export async function startVivary(options) {
     }
   }
 
-  const databaseUrl = `file:${path.join(options.dataDir, "auth.sqlite")}`;
+  const databaseUrl = `file:${path.join(options.dataDir, PROFILE_DATABASE)}`;
   // These are process startup settings. User model credentials remain in the CLI's own store.
   Object.assign(process.env, {
     NODE_ENV: "production",
@@ -137,7 +142,7 @@ export async function startVivary(options) {
   console.log(`Vivary: ${options.appUrl}/`);
   console.log(options.mode === "hosted"
     ? "Hosted access: Native authentication is enabled."
-    : "Self-hosted access: no Vivary login or signup. Model access uses your existing CLI login.");
+    : "Self-hosted access: no Vivary account or signup. Model access uses your existing CLI login.");
   await import(pathToFileURL(serverEntry).href);
 }
 
@@ -145,11 +150,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const options = startupOptions(process.argv.slice(2));
     if (options.help) {
-      console.log("Usage: vivary-gui [--port 5173] [--data-dir DIR] [--workspace DIR]\n       vivary-gui --private-proxy --url https://your-host --data-dir DIR [--port PORT]\n\nLocal mode opens without login or signup and listens only on this computer.\nPrivate proxy mode requires the configured private Zo access boundary.\nUse --hosted only for a deployment that requires Native authentication.");
+      console.log("Usage: vivary-gui [--port 5173] [--data-dir DIR] [--workspace DIR]\n       vivary-gui --private-proxy --url https://your-host --data-dir DIR [--port PORT]\n\nLocal mode listens only on this computer.\nPrivate proxy mode requires the configured private Zo access boundary.\nBoth modes sign in through a one-time address saved in owner-sign-in.txt in the data folder. Each address works once.\nUse --hosted only for a deployment that requires Native authentication.");
     } else {
       // guard:allow-env-credential - Nonsecret CLI process marker, set before loading the server.
       process.env.VIVARY_STANDALONE_HOST = "1"; // guard:allow-env-mutation - Direct process startup only; never a request handler.
       await startVivary(options);
+      // The desktop server reuses startVivary and signs in through its own capability, so only this entry prints.
+      if (options.mode !== "hosted") {
+        console.log(`Owner sign-in file: ${path.join(options.dataDir, "owner-sign-in.txt")}`);
+        console.log("Open the address in that file to sign in. Each address works once.");
+      }
     }
   } catch (error) {
     console.error(`Vivary could not start: ${error.message}`);

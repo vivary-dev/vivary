@@ -125,6 +125,27 @@ class GovernedRecordWorkflowTests(unittest.TestCase):
         values.update(overrides)
         return create_vivary.record_workspace(**values)
 
+    def test_adopted_workspace_still_accepts_internal_change_record(self):
+        shutil.rmtree(self.workspace)
+        self.workspace.mkdir()
+        (self.workspace / "ordinary.md").write_text("# Ordinary\n", encoding="utf-8")
+        adoption = create_vivary.plan_adopt(self.workspace, preset="coding", repo_root=ROOT)
+        create_vivary.adopt_workspace(self.workspace, preset="coding", repo_root=ROOT,
+                                     yes=True, plan_hash=adoption["plan_hash"])
+        self.refresh_capsule()
+        plan = self.plan()
+        self.assertEqual(plan["path"], ".vivary/records/changes/first-governed-change.md")
+        self.assertTrue(self.apply(plan)["applied"])
+        tropo = create_vivary._load_tropo(ROOT)
+        resolver = tropo.ConfigResolver(str(self.workspace), str(ROOT / "packages/tropo"))
+        record_path = ".vivary/records/changes/first-governed-change.md"
+        docs = tropo.analyze(str(self.workspace), [], resolver)
+        record = next(doc for doc in docs if doc.rel.replace("\\", "/") == record_path)
+        self.assertEqual(record.type, "vivary_record_change")
+        self.assertFalse(record.findings)
+        self.assertTrue(any(hit["path"] == record_path
+                            for hit in tropo.search_graph(resolver, "First governed change")))
+
     def test_plan_is_read_only_capsule_bound_and_preserves_the_five_file_seed(self):
         before = snapshot(self.workspace)
 

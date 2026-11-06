@@ -1,7 +1,7 @@
 ---
 title: "Create a Vivary workspace"
 description: "Create and verify the five-file Vivary governed-context workspace for a new project without adding starter content."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/guides/create-workspace.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/create-workspace.md"
 ---
 
 Use this guide for a new project or an empty directory.

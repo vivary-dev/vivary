@@ -242,6 +242,21 @@ def test_repository_fsmonitor_hook_is_not_invoked_by_default_observation(tmp_pat
 
     _git(base, repo, ["config", "core.fsmonitor", hook.replace("\\", "/")])
     _git(base, repo, ["config", "core.fsmonitorHookVersion", "1"])
+    if os.name != "nt":
+        # Establish independently that the temp directory permits execution.
+        # A noexec TMPDIR is an unsupported host, not a product failure; any
+        # other reason for a silent hook stays a failure below.
+        probe = os.path.join(base, "exec-probe")
+        with open(probe, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("#!/bin/sh\nexit 0\n")
+        os.chmod(probe, stat.S_IRWXU)
+        try:
+            subprocess.run([probe], check=True)
+        except PermissionError:
+            pytest.skip(
+                "the test temp directory does not permit execution (noexec "
+                "TMPDIR); the fsmonitor hook proof needs an executable provider"
+            )
     # Positive control: the repository-local provider is executable on both
     # platforms before either governed runner applies its command-scoped override.
     _git(base, repo, ["status", "--porcelain"])
@@ -334,6 +349,21 @@ def test_tracked_ignored_dirty_path_is_never_disclosed(fx, allowlist):
     serialized = json.dumps(result)
     assert "tracked.md" not in serialized
     assert "privacy_command" in serialized
+
+
+def test_npm_script_fact_is_absent_when_no_manifest_exists(tmp_path):
+    # A writing or notes checkout has no package.json. The npm fact does not
+    # apply, so it must not appear as an unknown either.
+    base = str(tmp_path)
+    repo = str(tmp_path / "repo")
+    _git(base, base, ["init", "-q", "-b", "main", repo])
+    _commit_file(base, repo, "notes.md", "# Notes\n", "notes")
+
+    result = observe_checkouts([repo], allowlist=[repo], now=NOW)
+
+    facts = result["checkouts"][0]["facts"]
+    assert "package.json" not in facts["workspace_markers"]["value"]
+    assert "npm_test_script" not in facts
 
 
 def test_ignored_manifest_never_enters_markers_or_npm_script_facts(tmp_path):

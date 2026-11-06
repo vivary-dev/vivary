@@ -4,6 +4,8 @@ import { SettingsGroup, SettingsRow } from "@agent-native/core/client/settings";
 import { Badge, Button, Skeleton } from "@agent-native/toolkit/ui";
 import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 
+import { EXECUTION_MODE_SCOPE_LABEL } from "../../lib/code-permission-labels";
+import type { CodePermissionMode } from "../../../server/code-permissions";
 import type { VivaryCodeEngine, VivaryRuntimeStatus, VivaryRuntimeStatusResult } from "../../../server/local-runtime-setup";
 
 const runtimes = [
@@ -21,7 +23,7 @@ const runtimes = [
     signInCommand: "codex login",
     installUrl: "https://developers.openai.com/codex/cli",
     helpUrl: "https://developers.openai.com/codex/auth",
-    description: "Use OpenAI coding models with your Codex account.",
+    description: "Inspect your ChatGPT sign-in, Codex models, and configured tools.",
   },
 ] satisfies Array<{
   engine: VivaryCodeEngine;
@@ -32,9 +34,13 @@ const runtimes = [
   description: string;
 }>;
 
+// The select below offers exactly the modes the permissions action accepts.
+const permissionModes: readonly CodePermissionMode[] = ["normal", "read-only", "yolo"];
+
 const statusLabels: Record<VivaryRuntimeStatus["status"], string> = {
-  ready: "Ready",
+  ready: "Signed in",
   "sign-in-required": "Sign-in required",
+  "update-required": "Update required",
   "not-installed": "Not installed",
   unavailable: "Check needed",
 };
@@ -45,6 +51,17 @@ export function LocalRuntimeSettings() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+  const permissions = useActionQuery<{ mode: "normal" | "read-only" | "yolo" }>("vivary-code-permissions", {}, { retry: false });
+  const [saving, setSaving] = useState(false);
+  async function saveMode(mode: CodePermissionMode) {
+    setSaving(true);
+    setRefreshError(undefined);
+    try {
+      await callAction("vivary-code-permissions-set", { mode });
+      await permissions.refetch();
+    } catch (failure) { setRefreshError(actionErrorMessage(failure) ?? "Permissions could not be saved."); }
+    finally { setSaving(false); }
+  }
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string>();
   const error = refreshError ?? actionErrorMessage(status.error);
@@ -68,7 +85,7 @@ export function LocalRuntimeSettings() {
       <div className="min-w-0 flex-1">
         <h2 className="text-lg font-semibold tracking-tight">Coding runtimes</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Vivary uses the coding agents installed on this computer. Connect either one to start working in Agent.
+          Vivary uses the coding agents installed on this computer. Choose a runtime when starting a conversation.
         </p>
       </div>
       <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={checking}>
@@ -79,6 +96,25 @@ export function LocalRuntimeSettings() {
 
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
+    <SettingsGroup title="Codex permissions">
+      <SettingsRow id="codex-permissions" label="Execution mode" description="Applies when you send your next message. Running work keeps its current permissions.">
+        <select aria-label="Codex execution mode" className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          value={permissions.data?.mode ?? "normal"} disabled={saving || !permissions.data}
+          onChange={event => {
+            const next = permissionModes.find(mode => mode === event.target.value);
+            if (next) void saveMode(next);
+          }}>
+          <option value="normal">Normal</option><option value="read-only">Read only</option><option value="yolo">YOLO</option>
+        </select>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          {permissions.data?.mode === "yolo" ? "Codex can run commands with full host access without asking for approval. Use this only with projects and instructions you trust."
+            : permissions.data?.mode === "read-only" ? "Codex can inspect local files but cannot edit them or request broader command permissions. Connected services retain their own access settings."
+              : "Codex can work inside the project. It asks before actions that need broader access."}
+        </p>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">{EXECUTION_MODE_SCOPE_LABEL}</p>
+        {permissions.error && <p role="alert" className="text-sm text-destructive">Permissions could not be loaded. <button onClick={() => void permissions.refetch()}>Retry</button></p>}
+      </SettingsRow>
+    </SettingsGroup>
     <SettingsGroup title="Local agents">
       {runtimes.map(runtime => {
         const current = status.data?.runtimes.find(item => item.engine === runtime.engine);
@@ -95,6 +131,22 @@ export function LocalRuntimeSettings() {
             : <p className="text-sm leading-6 text-muted-foreground" role="status">
                 {current?.message ?? "Refresh to check this runtime."}
               </p>}
+          {runtime.engine === "claude-cli" && status.data?.claudeModels && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+            <p>Installed version: {current?.version ?? "Unverified"}. Model IDs and API list prices verified 2026-10-13.</p>
+            {status.data.claudeModels.map(model => <p key={model.id}>
+              {model.label} ({model.id}). {model.message} API list price per million tokens: {model.apiPrice}.
+            </p>)}
+            <p>API list prices are reference information. They do not describe your subscription bill or included model access.</p>
+          </div>}
+          {runtime.engine === "codex-cli" && status.data?.codexModels && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+            <p>{status.data.codexModels.message}</p>
+            {status.data.codexModels.status === "ready" && <>
+              <p>{status.data.codexModels.models.length} models reported by Codex.</p>
+              <p>Configured connections: {status.data.codexModels.connections.length
+                ? status.data.codexModels.connections.join(", ") : "None"}.</p>
+              <p>Connection names come from Codex settings. Availability is checked when Codex uses them.</p>
+            </>}
+          </div>}
           <details className="mt-3 text-sm" open={current?.status !== "ready"}>
             <summary className="w-fit cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {current?.status === "ready" ? "Setup and sign-in help" : "Set up " + runtime.label}
@@ -103,7 +155,7 @@ export function LocalRuntimeSettings() {
               <li>
                 <a className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4"
                   href={runtime.installUrl} target="_blank" rel="noopener noreferrer">
-                  Install {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
+                  {current?.status === "update-required" ? "Update" : "Install"} {runtime.label}<IconExternalLink size={14} aria-hidden="true" />
                 </a>{" "}using the official instructions.
               </li>
               <li>

@@ -22,7 +22,7 @@ import sysconfig
 import urllib.parse
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 __version__ = "0.2.1"
 DEFAULT_RECEIPT_LOG = ".vivary/receipts.jsonl"
@@ -70,11 +70,119 @@ def routed_prog(verb: str) -> str:
     return f"vivary {verb}"
 
 
+def _bounded(low: int, high: int) -> Callable[[str], int]:
+    def parse(text: str) -> int:
+        if not text.isdecimal() or not low <= int(text) <= high:
+            raise argparse.ArgumentTypeError(f"expected an integer from {low} to {high}")
+        return int(text)
+
+    return parse
+
+
+def _question(text: str) -> str:
+    # Tropo reads its query right after the verb and refuses a `--` terminator.
+    if text.startswith("-"):
+        raise argparse.ArgumentTypeError("the query must not start with '-'")
+    return text
+
+
+def _public_root(path: str) -> str:
+    from vivary_core import normalize_path
+
+    # The facade accepts only Core's spelling of the root, which on Windows
+    # means forward slashes and a lowercase drive letter.
+    return normalize_path(os.path.realpath(path))
+
+
+def _refusal(error: Any) -> tuple[dict, int]:
+    return {"schema": "vivary.read-refusal/v0", "reason": error.reason}, 2
+
+
+def _find_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("query", type=_question, help="the question to rank context for")
+    parser.add_argument("--k", type=_bounded(1, 20), default=5,
+                        help="results to return, 1 to 20 (default 5)")
+    parser.add_argument("--budget", type=_bounded(64, 4000), default=1200,
+                        help="estimated token budget, 64 to 4000 (default 1200)")
+
+
+def _public_find(module: Any, args: argparse.Namespace) -> tuple[dict, int]:
+    root = _public_root(args.root)
+    try:
+        return module.find_context(
+            root, args.query, k=args.k, budget=args.budget, allowlist=[root]), 0
+    except module.TropoFacadeError as error:
+        return _refusal(error)
+
+
+def _public_check(module: Any, args: argparse.Namespace) -> tuple[dict, int]:
+    root = _public_root(args.root)
+    try:
+        result = module.check_workspace(root, allowlist=[root])
+    except module.TropoFacadeError as error:
+        return _refusal(error)
+    return result, 1 if result["errors"] > 0 else 0
+
+
+def _review_arguments(parser: argparse.ArgumentParser) -> None:
+    # Context-budget reads routing files from disk, so it has no public form.
+    parser.add_argument("--pack", choices=("structure", "editorial"), default="structure",
+                        help="the review pack (default structure)")
+
+
+def _public_review(module: Any, args: argparse.Namespace) -> tuple[dict, int]:
+    root = _public_root(args.root)
+    try:
+        return module.public_review(root, pack=args.pack, allowlist=[root]), 0
+    except module.OzoneError as error:
+        # A missing Tropo stops the read the way it stops a plain review.
+        sys.exit(f"ozone: {error}")
+    except module.TropoFacadeError as error:
+        return _refusal(error)
+
+
+def _impact_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("id", help="the node whose dependents to list")
+
+
+def _public_impact(module: Any, args: argparse.Namespace) -> tuple[dict, int]:
+    root = _public_root(args.root)
+    try:
+        return module.public_impact(root, args.id, allowlist=[root]), 0
+    except module.OzoneError as error:
+        # A missing Tropo stops the read the way it stops a plain review.
+        sys.exit(f"ozone: {error}")
+    except module.TropoFacadeError as error:
+        return _refusal(error)
+
+
+def _public_doctor(module: Any, args: argparse.Namespace) -> tuple[dict, int]:
+    # Plain Doctor names notes and folders that Git may ignore. Notes stay
+    # with `check --public`, and this report names no user-authored path.
+    report = module.doctor_workspace(os.path.realpath(args.root), public=True)
+    result = {"schema": "vivary.doctor-result/v0", "ok": report["ok"],
+              "errors": report["errors"], "warnings": report["warnings"]}
+    return result, 0 if report["ok"] else 1
+
+
+def _no_arguments(parser: argparse.ArgumentParser) -> None:
+    pass
+
+
+class PublicRead(NamedTuple):
+    """A verb's `--public` report, which leaves private files out."""
+
+    run: Callable[[Any, argparse.Namespace], tuple[dict, int]]
+    # Adds the verb's own arguments to the shared `--root --public --json` parser.
+    arguments: Callable[[argparse.ArgumentParser], None] = _no_arguments
+
+
 class Route(NamedTuple):
     verb: str
     module: str
     operation: tuple[str, ...]
     summary: str
+    public: PublicRead | None = None
 
 
 ROUTES = (
@@ -83,19 +191,23 @@ ROUTES = (
     Route("adopt", "create_vivary", ("adopt",),
           "Plan governed context for an existing workspace"),
     Route("doctor", "create_vivary", ("doctor",),
-          "Validate a Vivary workspace scaffold"),
+          "Validate a Vivary workspace scaffold", PublicRead(_public_doctor)),
     Route("capabilities", "create_vivary", ("capabilities",),
           "List the optional preset capabilities"),
     Route("check", "tropo", ("check",),
-          "Validate the context graph and report errors and warnings"),
+          "Validate the context graph and report errors and warnings",
+          PublicRead(_public_check)),
     Route("find", "tropo", ("find",),
-          "Retrieve a token-budgeted context set for a query"),
+          "Retrieve a token-budgeted context set for a query",
+          PublicRead(_public_find, _find_arguments)),
     Route("decide", "strato", ("decide",),
           "Evaluate one governed decision request"),
     Route("review", "ozone", ("review",),
-          "Run a review rule pack over the context graph"),
+          "Run a review rule pack over the context graph",
+          PublicRead(_public_review, _review_arguments)),
     Route("impact", "ozone", ("impact",),
-          "Show what one node affects"),
+          "Show what one node affects",
+          PublicRead(_public_impact, _impact_arguments)),
     Route("control", "exo", ("control",),
           "Dispatch one governed Core control request"),
 )
@@ -158,14 +270,21 @@ def _read_receipts(path: Path) -> tuple[list[dict[str, Any]], int]:
 
 def _load_receipts(path_text: str) -> tuple[Path, list[dict[str, Any]], int]:
     path = Path(path_text).expanduser()
-    if not path.is_file():
+    if not os.path.lexists(path):
         raise FileNotFoundError("receipt log not found")
+    if not path.is_file():
+        raise OSError("receipt log is not a regular file")
     records, invalid = _read_receipts(path)
     return path, records, invalid
 
 
+# A receipt counts as successful only when it says so, so a missing or odd `ok` counts as failed.
+def _failed(record: dict[str, Any]) -> bool:
+    return record.get("ok") is not True
+
+
 def _filtered_records(records: list[dict[str, Any]], *, failed: bool, tail: int | None):
-    out = [record for record in records if not failed or record.get("ok") is False]
+    out = [record for record in records if not failed or _failed(record)]
     if tail is not None:
         limit = max(0, tail)
         out = [] if limit == 0 else out[-limit:]
@@ -178,7 +297,7 @@ def _summarize(records: list[dict[str, Any]], invalid_lines: int) -> dict[str, A
     for record in records:
         tool = str(record.get("tool", "unknown"))
         by_tool[tool] = by_tool.get(tool, 0) + 1
-        if record.get("ok") is False:
+        if _failed(record):
             failed += 1
     return {
         "total": len(records),
@@ -189,7 +308,7 @@ def _summarize(records: list[dict[str, Any]], invalid_lines: int) -> dict[str, A
 
 
 def _format_record(record: dict[str, Any]) -> str:
-    status = "ok" if record.get("ok") is not False else "fail"
+    status = "fail" if _failed(record) else "ok"
     timestamp = str(record.get("timestamp", "unknown-time"))
     tool = str(record.get("tool", "unknown-tool"))
     command = str(record.get("command", "unknown-command"))
@@ -290,13 +409,23 @@ def _draft_path_error(path: Path) -> str | None:
 def cmd_logs(args: argparse.Namespace) -> int:
     try:
         _, records, invalid = _load_receipts(args.path)
-    except (FileNotFoundError, OSError) as exc:
+    except FileNotFoundError as exc:
+        if args.json:
+            # No receipts yet is an answer, so JSON callers get it as a value.
+            print(json.dumps({"summary": _summarize([], 0), "log": None, "records": []}, indent=2))
+            return 0
+        print(f"vivary logs: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
         print(f"vivary logs: {exc}", file=sys.stderr)
         return 1
     selected = _filtered_records(records, failed=args.failed, tail=args.tail)
     summary = _summarize(selected, invalid)
     if args.json:
-        print(json.dumps({"summary": summary, "records": selected}, indent=2))
+        # `summary` covers the selected records. `log` covers the whole file,
+        # so a caller that reads the latest few still sees true totals.
+        print(json.dumps({"summary": summary, "log": _summarize(records, invalid),
+                          "records": selected}, indent=2))
     else:
         print(_format_text(selected, summary, invalid), end="")
     return 0
@@ -476,6 +605,39 @@ def _prog_keyword(main: Any, route: Route) -> dict[str, str]:
     return {"prog": routed_prog(route.verb)} if accepts else {}
 
 
+def _public_read(module: Any, route: Route, rest: list[str]) -> int:
+    """Print one report that leaves private files out.
+
+    Plain find, check, review, impact, and doctor read every Markdown file
+    their config does not exclude, so a git-ignored note reaches the output.
+    Find, check, review, and impact read through Tropo's privacy-filtered
+    facade, which applies Core's privacy policy and needs no Tropo config. A
+    folder that is neither a Git worktree nor a thin Vivary workspace is
+    refused, because its private files cannot be told apart. Doctor checks the
+    workspace and names no user-authored path.
+    """
+    parser = argparse.ArgumentParser(
+        prog=routed_prog(route.verb),
+        description=(
+            "Print a report that leaves private files out. Find, check, review,"
+            " and impact leave out files that Git ignores, sensitive names, and a"
+            " thin Vivary workspace's private paths, and need no tropo.toml."
+            " Doctor checks the workspace and names no user-authored path."
+            " Output is always JSON."
+        ),
+        allow_abbrev=False,
+    )
+    parser.add_argument("--root", required=True, help="the project folder")
+    parser.add_argument("--public", action="store_true", required=True,
+                        help="leave private files out")
+    parser.add_argument("--json", action="store_true",
+                        help="accepted, output is always JSON")
+    route.public.arguments(parser)
+    result, code = route.public.run(module, parser.parse_args(rest))
+    print(json.dumps(result, indent=2))
+    return code
+
+
 def _dispatch(route: Route, rest: list[str]) -> int:
     component = COMPONENTS[route.module]
     try:
@@ -530,6 +692,8 @@ def _dispatch(route: Route, rest: list[str]) -> int:
     argv = [*route.operation, *rest]
     keyword = _prog_keyword(main, route)
     try:
+        if route.public is not None and "--public" in rest:
+            return _public_read(module, route, rest)
         try:
             return main(argv, **keyword)
         except TypeError as exc:

@@ -1,7 +1,7 @@
 ---
 title: "Obsidian (optional)"
 description: "Optional Obsidian setup for fans, never required."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/OBSIDIAN.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/OBSIDIAN.md"
 ---
 
 **Obsidian is optional and never required.** A Vivary workspace is plain Markdown +

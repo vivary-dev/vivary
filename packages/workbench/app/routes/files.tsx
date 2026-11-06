@@ -7,6 +7,8 @@ import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useProjects } from "@/components/projects/ProjectContext";
 import { fileDraftKey, useFileDraft } from "@/components/projects/FileDrafts";
 import { restoreFileLineEndings } from "@/lib/file-draft-state";
+import { requestedLine } from "@/lib/project-file-location";
+import { focusFootnote } from "@/lib/footnote-links";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { ProjectFile, ProjectFilesResult, ProjectFileSaveResult, ProjectFileRenameResult } from "@/lib/project-file-schema";
 import "@agent-native/toolkit/editor.css";
@@ -14,32 +16,33 @@ import "../project-files.css";
 
 export function meta() { return [{ title: "Files | Vivary" }]; }
 const errorText = (error: unknown) => error instanceof Error ? error.message : "The file action could not finish. Retry.";
-const readonlyFeatures = { image: false, tables: true, tasks: true, link: true };
+const readonlyFeatures = { image: false, tables: true, tasks: true, link: true, footnotes: true };
 
 export default function FilesRoute() {
   const { activeProject, catalog, workspaceAvailable, checking, refresh } = useProjects();
   const [params] = useSearchParams();
   const path = params.get("project") === activeProject?.projectId ? params.get("path") : null;
+  const line = path ? requestedLine(params.get("line")) : null;
   if (checking) return <FileSkeleton />;
   if (!workspaceAvailable) return <div className="file-page-empty" role="alert"><h2>Project folder unavailable</h2><p>Your files and drafts stay with this project.</p><Button onClick={() => void refresh()}>Refresh projects</Button></div>;
   if (!activeProject || !catalog) return <div className="file-page-empty"><h2>Open a project to see its files</h2><p>Choose or create a project from the sidebar.</p></div>;
   if (!path) return <div className="file-page-empty"><h2>{activeProject.displayName}</h2><p>Choose a file from the file list to read it here.</p><p className="text-sm text-muted-foreground">Use Show file list if the list is closed.</p></div>;
   return <OpenFile key={catalog.scopeKey + ":" + activeProject.projectId + ":" + path}
-    scope={catalog.scopeKey} projectId={activeProject.projectId} projectLabel={activeProject.displayName} path={path} />;
+    scope={catalog.scopeKey} projectId={activeProject.projectId} projectLabel={activeProject.displayName} path={path} line={line} />;
 }
 
 function FileSkeleton() {
   return <div className="file-page-empty space-y-4" aria-busy="true"><Skeleton className="h-8 w-1/2" /><Skeleton className="h-5 w-full" /><Skeleton className="h-5 w-4/5" /><Skeleton className="h-64 w-full" /></div>;
 }
 
-function OpenFile({ scope, projectId, projectLabel, path }: { scope: string; projectId: string; projectLabel: string; path: string }) {
+function OpenFile({ scope, projectId, projectLabel, path, line }: { scope: string; projectId: string; projectLabel: string; path: string; line: number | null }) {
   const key = useQuery({ queryKey: ["file-draft-key", scope, projectId, path], queryFn: () => fileDraftKey(scope, projectId, path), staleTime: Infinity });
   if (key.isError) return <p role="alert" className="file-page-empty">Draft storage could not be opened. <Button onClick={() => void key.refetch()}>Retry</Button></p>;
   if (!key.data) return <FileSkeleton />;
-  return <FileDocument projectId={projectId} projectLabel={projectLabel} path={path} draftKey={key.data} />;
+  return <FileDocument projectId={projectId} projectLabel={projectLabel} path={path} draftKey={key.data} line={line} />;
 }
 
-function FileDocument({ projectId, projectLabel, path, draftKey }: { projectId: string; projectLabel: string; path: string; draftKey: string }) {
+function FileDocument({ projectId, projectLabel, path, draftKey, line }: { projectId: string; projectLabel: string; path: string; draftKey: string; line: number | null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const currentLocation = useRef(location);
@@ -76,6 +79,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey }: { projectId: 
       if (result.code === "saved") {
         draft.put(null);
         void cache.invalidateQueries({ queryKey: ["action", "vivary-project-files"] });
+        void cache.invalidateQueries({ queryKey: ["vivary-handoff-freshness"] });
         if (!mounted.current) return;
         setSavedFile(result.file);
         setEditing(false);
@@ -102,6 +106,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey }: { projectId: 
       if (result.code === "renamed") {
         draft.put(null);
         void cache.invalidateQueries({ queryKey: ["action", "vivary-project-files"] });
+        void cache.invalidateQueries({ queryKey: ["vivary-handoff-freshness"] });
         const current = currentLocation.current;
         const params = new URLSearchParams(current.search);
         if (mounted.current && current.pathname === "/" && params.get("project") === projectId && params.get("path") === path) {
@@ -149,7 +154,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey }: { projectId: 
     </header>
     <div className="file-document-status" role="status">
       {draft.saveStatus === "saving" ? "Saving draft to this host…" : draft.saveStatus === "error" ? "Draft could not be saved to the host. Keep this page open and retry."
-        : dirty ? "Unsaved changes · draft retained on this host" : notice || (editing ? "Editing source" : "Reading file")}
+        : dirty ? "Unsaved changes · draft retained on this host" : notice || (editing ? "Editing source" : line ? `Reading file · line ${line}` : "Reading file")}
       {draft.saveStatus === "error" && <Button variant="ghost" size="sm" onClick={draft.retrySave}>Retry draft</Button>}
     </div>
     {notice && dirty && <p className="file-notice" role="status">{notice}</p>}
@@ -182,11 +187,34 @@ function FileDocument({ projectId, projectLabel, path, draftKey }: { projectId: 
           }
         }} />
       {tooLarge && <p role="alert">This draft exceeds the 256 KB text-file limit. Shorten it before saving.</p>}
-    </div> : file ? <div className="file-reading-surface">
-      {file.kind === "markdown" ? <SharedRichEditor key={file.version} value={file.content} onChange={() => {}}
+    </div> : file ? <div className="file-reading-surface" onClickCapture={focusFootnote}>
+      {line !== null ? <SourceLines path={path} content={file.content} line={line} navigation={location.key} />
+        : file.kind === "markdown" ? <SharedRichEditor key={file.version} value={file.content} onChange={() => {}}
         editable={false} interactive={false} dragHandle={false} dialect="gfm" features={readonlyFeatures}
         ariaLabel={path} /> : <pre tabIndex={0}>{file.content}</pre>}
     </div> : draft.data ? <div className="file-page-empty"><h3>Your draft is retained</h3><p>Use Resume edit to view or copy it while the file is unavailable.</p></div> : null}
     <footer className="file-document-footer"><span>Conversation stays open beside this document.</span><span>Opening a file does not change it.</span></footer>
   </article>;
+}
+
+// A search match opens the file here: the source split into numbered lines
+// with the requested line marked and scrolled into view. Markdown shows its
+// source in this view too, so the line number stays exact.
+function SourceLines({ path, content, line, navigation }: { path: string; content: string; line: number; navigation: string }) {
+  const target = useRef<HTMLElement>(null);
+  const lines = content.split("\n");
+  const found = line <= lines.length;
+  // Re-scroll on every navigation, including choosing the same match again
+  // after scrolling away; the panel stays mounted while hidden.
+  useEffect(() => { target.current?.scrollIntoView({ block: "center" }); }, [line, content, navigation]);
+  return <pre tabIndex={0} className="file-source-lines" aria-label={found ? `${path}, line ${line} selected` : `${path}, line ${line} is past the end`}>
+    {lines.map((text, index) => {
+      const number = index + 1;
+      const current = number === line;
+      return <span key={number} ref={current ? target : undefined} className={current ? "file-line is-target" : "file-line"}
+        aria-current={current ? "location" : undefined}>
+        <span className="file-line-number" aria-hidden>{number}</span>{text}{"\n"}
+      </span>;
+    })}
+  </pre>;
 }

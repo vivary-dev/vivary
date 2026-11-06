@@ -212,6 +212,32 @@ pip install pytest
 python -m pytest packages/core/tests/ -q
 ```
 
+Three proofs depend on the host and report an unsupported environment as a
+skip with its reason, never as a pass:
+
+- The chmod refusal proofs in `tests/test_root_identity_lifecycle.py` and
+  `tests/test_root_vcs_identity_lifecycle.py` need an unprivileged POSIX
+  user, because UID 0 bypasses directory mode bits.
+- The fsmonitor hook proof in `tests/test_observe.py` needs a temp directory
+  that permits execution; a `noexec` tmpfs cannot run the hook.
+- The identity lifecycle suites need `TMPDIR`, or
+  `VIVARY_ROOT_IDENTITY_PROOF_ROOT`, on a filesystem the physical observer
+  supports, such as tmpfs; a 9p root is refused.
+
+On a root host such as the Zo development box, run the suite unprivileged
+with a tmpfs proof root, then the hook proof with an exec-capable temp
+directory:
+
+```sh
+T=$(mktemp -d /dev/shm/vivary-core-XXXX); chmod 0777 "$T"
+TMPDIR="$T" setpriv --reuid=65534 --regid=65534 --clear-groups \
+  python -m pytest packages/core/tests/ -q -p no:cacheprovider
+H=$(mktemp -d /tmp/vivary-hook-XXXX); chmod 0777 "$H"
+TMPDIR="$H" setpriv --reuid=65534 --regid=65534 --clear-groups \
+  python -m pytest packages/core/tests/test_observe.py -q -p no:cacheprovider \
+  -k fsmonitor_hook_is_not_invoked
+```
+
 The current platform-specific proof is **771 tests on Windows**. On Linux, it is
 **770 passed plus 1 skip**. The suite translates the reference contracts across
 observation, capsules, receipts, the Strato/Ozone/Exo/Bellamente role-policy surfaces,

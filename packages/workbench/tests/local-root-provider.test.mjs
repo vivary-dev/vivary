@@ -21,12 +21,17 @@ const { createLocalRootProvider, LOCAL_ROOT_VERIFICATION } = await import("../se
 const { createNativeRegistry } = await import("../server/native-registry.mjs");
 const { createProjectCatalog } = await import("../server/project-catalog.mjs");
 const {
+  matchChatProject,
   getLocalProjectAccess,
   connectLocalProjectFolder,
   resolveLocalProjectHistory,
   resolveLocalProjectWorkspace,
 } = await import("../server/project-services.mjs");
 const { evaluateRegistryOperation, deriveMutationKeys } = await import("../../../scripts/registry_contract_model.mjs");
+const { projectChatScopeId } = await import("../server/chat-project-scope.mjs");
+const { runWithRequestContext } = await import("@agent-native/core/server");
+const { resolveNativeChatProject } = await import("../server/native-chat-project.ts");
+const { createProjectReadRunner } = await import("../server/original-runtime.ts");
 
 test("local project grants register real folders and reopen without content snapshots", async suite => {
   const email = "owner@local.vivary.test";
@@ -167,6 +172,59 @@ test("local project grants register real folders and reopen without content snap
       assert.equal(resolved.projectId, alphaResult.projectId);
       await assert.rejects(resolveLocalProjectWorkspace({ ...actionContext, orgId: "foreign" }, alphaResult.projectId));
       await assert.rejects(resolveLocalProjectWorkspace({ ...actionContext, caller: "agent" }, alphaResult.projectId));
+      const tool = { ...actionContext, appId: "workbench", caller: "tool" };
+      await assert.rejects(getLocalProjectAccess(tool), { statusCode: 403 });
+      await assert.rejects(resolveLocalProjectWorkspace(tool, alphaResult.projectId), { statusCode: 403 });
+      await assert.rejects(resolveLocalProjectWorkspace({ ...tool, chatProjectId: alphaResult.projectId }, alphaResult.projectId),
+        { statusCode: 403 });
+      const alphaScope = projectChatScopeId(actionContext.userEmail, actionContext.orgId, alphaResult.projectId);
+      const inChat = (chatScope, run) => runWithRequestContext({ userEmail: actionContext.userEmail,
+        orgId: actionContext.orgId, run: { chatScope } }, run);
+      const alphaChat = { type: "workspace-app", id: alphaScope };
+      const personalId = (org) => projectChatScopeId(actionContext.userEmail, org, null);
+      assert.deepEqual(await matchChatProject(tool), { kind: "not-project" }, "a request outside a chat reaches no project");
+      assert.deepEqual(await inChat({ type: "workspace-app", id: `vivary-workbench-chat-v1:${actionContext.orgId}` },
+        () => matchChatProject(tool)), { kind: "not-project" }, "a legacy chat keeps Native's own behavior");
+      await assert.rejects(inChat({ type: "thread", id: alphaScope }, () => matchChatProject(tool)), { statusCode: 403 });
+      assert.deepEqual(await inChat({ type: "workspace-app", id: personalId(actionContext.orgId) },
+        () => matchChatProject(tool)), { kind: "personal" });
+      await assert.rejects(inChat({ type: "workspace-app", id: personalId("another-org") }, () => matchChatProject(tool)),
+        { statusCode: 403 }, "another organization's Personal scope is not this one's");
+      await assert.rejects(inChat({ type: "workspace-app", id: "vivary-project-chat-v2:" + "0".repeat(64) },
+        () => matchChatProject(tool)), { statusCode: 403 });
+      await assert.rejects(inChat(alphaChat, () => matchChatProject({ ...tool, orgId: undefined })), { statusCode: 403 },
+        "a project scope without an organization is refused");
+      const owned = await inChat(alphaChat, () => matchChatProject(actionContext));
+      assert.equal(owned.kind, "project");
+      assert.equal(owned.context, actionContext, "the owner's request keeps its own context");
+      const admitted = await inChat(alphaChat, () => matchChatProject(tool));
+      assert.equal(admitted.projectId, alphaResult.projectId);
+      assert.equal(admitted.context.caller, "tool");
+      assert.equal((await resolveLocalProjectWorkspace(admitted.context, alphaResult.projectId)).root, alpha);
+      await assert.rejects(resolveLocalProjectWorkspace(admitted.context, betaResult.projectId), { statusCode: 403 });
+      await assert.rejects(resolveLocalProjectWorkspace({ ...admitted.context }, alphaResult.projectId), { statusCode: 403 });
+      await assert.rejects(getLocalProjectAccess(admitted.context), { statusCode: 403 });
+      await assert.rejects(connectLocalProjectFolder(admitted.context, beta, "Beta"), { statusCode: 403 });
+
+      // The real chain: the chat resolver, project services, and the project read runner.
+      const runtime = path.join(directory, "runtime");
+      const interpreter = process.platform === "win32" ? "python/python.exe" : "python/bin/python3";
+      await mkdir(path.join(runtime, path.dirname(interpreter)), { recursive: true });
+      await writeFile(path.join(runtime, interpreter), "fixture interpreter, not executable");
+      await writeFile(path.join(runtime, "manifest.json"), JSON.stringify({ schemaVersion: 1, platform: process.platform,
+        arch: process.arch, pythonVersion: "3.12.14", pythonExecutable: interpreter }));
+      const appData = path.join(directory, "app-data");
+      await mkdir(appData);
+      const read = createProjectReadRunner({ resolveWorkspace: resolveLocalProjectWorkspace, parallelism: 4,
+        environment: () => ({ VIVARY_ORIGINAL_RUNTIME: runtime, VIVARY_DATA_DIR: appData }),
+        execute: async () => ({ exitCode: 0, stdout: "{}", stderr: "", signal: null }) });
+      const chat = await inChat(alphaChat, () => resolveNativeChatProject(tool));
+      assert.equal(chat.projectId, alphaResult.projectId);
+      assert.equal((await read(chat.projectId, { verb: "doctor" }, chat.projectContext)).exitCode, 0);
+      await assert.rejects(read(chat.projectId, { verb: "doctor" }, { ...chat.projectContext }), { statusCode: 403 },
+        "a copy of the admitted context is not admitted");
+      await assert.rejects(resolveLocalProjectWorkspace(actionContext, "../alpha"),
+        { message: "Choose a registered project.", statusCode: 400 });
       assert.equal(betaResult.code, "registered");
       const current = await catalog.run({}, context);
       assert.equal(current.projects.length, 2);
@@ -238,7 +296,8 @@ test("local project grants register real folders and reopen without content snap
         rootId: alphaBinding.rootId,
         bindingRevision: alphaBinding.bindingRevision,
       });
-      await assert.rejects(resolveLocalProjectWorkspace(context, alphaResult.projectId), /missing or changed/);
+      await assert.rejects(resolveLocalProjectWorkspace(context, alphaResult.projectId),
+        { message: /missing or changed/, statusCode: 409 });
       await assert.rejects(provider.addGrantedFolder(context, alpha), /different folder/);
     });
     await suite.test("role removal survives restart and cannot be repaired by ordinary reads", async () => {

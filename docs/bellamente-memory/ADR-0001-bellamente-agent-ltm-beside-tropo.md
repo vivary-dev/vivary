@@ -1,6 +1,6 @@
 # ADR-0001: Bellamente Agent LTM beside tropo under governed recall
 
-**Status:** approved predecessor contract. Per [#217](https://github.com/vivary-dev/vivary/issues/217), this contract lands before and governs [#190](https://github.com/vivary-dev/vivary/pull/190); it describes required future behavior, not a shipped Bellamente integration.
+**Status:** approved predecessor contract. Per [#217](https://github.com/vivary-dev/vivary-cli/issues/217), this contract lands before and governs [#190](https://github.com/vivary-dev/vivary-cli/pull/190); it describes required future behavior, not a shipped Bellamente integration.
 
 ## Decision
 
@@ -62,6 +62,6 @@ owned by [SPEC §6.2](SPEC-bellamente-memory.md#62-required-distinct-results).
 - [Vivary architecture and `vivary-core`](../ARCHITECTURE.md)
 - [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
 - [Public command contract](../COMMANDS.md)
-- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
-- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
-- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)
+- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary-cli/issues/205)
+- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary-cli/issues/207)
+- [#217 — spec precedes implementation](https://github.com/vivary-dev/vivary-cli/issues/217)

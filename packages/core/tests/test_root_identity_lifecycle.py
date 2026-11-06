@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from test_support import UNPRIVILEGED_POSIX_REASON, unprivileged_posix  # noqa: E402
+
 from vivary_core.physical_observe import CaptureLimits, ObservationFailure
 from vivary_core.root_identity_lifecycle import (
     IdentityStateError, LiveRootIdentity, RootIdentityLifecycle, linux_mount_epoch,
@@ -269,6 +271,7 @@ class IdentityLifecycleTests(unittest.TestCase):
             self.owner(state_path=self.root / "identity.json")
         self.assertEqual(tree_state(self.scope), before)
 
+    @unittest.skipUnless(unprivileged_posix(), UNPRIVILEGED_POSIX_REASON)
     def test_real_record_write_failure_does_not_issue_verified_identity(self):
         owner = self.owner()
         before = tree_state(self.scope)
@@ -337,6 +340,7 @@ class IdentityLifecycleTests(unittest.TestCase):
         self.assertEqual(owner.inspect(live.root_id, location_ref="root").reason, "identity-state-changed")
         self.assertEqual(self.state.read_bytes(), raw + b" ")
 
+    @unittest.skipUnless(unprivileged_posix(), UNPRIVILEGED_POSIX_REASON)
     def test_chmod_after_temp_write_returns_refusal_and_names_orphan(self):
         owner = self.owner()
         before = tree_state(self.scope)

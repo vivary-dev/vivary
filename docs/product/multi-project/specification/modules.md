@@ -34,10 +34,10 @@ Stable project identity and authorized folders.
 - Calls: M05.
 - Replacement contract: Replace a root or VCS observation adapter while preserving IDs and current grants.
 - Conceptual request/result: RegisterRoot / ResolveProject / RebindRoot -> stable identity, revision and scoped capability result. Root observation is separate from adoption.
-- Current recovery slice: Review connection checks one already-registered managed folder; explicit confirm rechecks its reviewed inputs before changing that project's binding. Project and conversation IDs survive loss of folder access. Cancel writes nothing; changed inputs require re-review. Reconnect changes no project files or agent state and accepts no arbitrary folder path. Old Code root metadata is provenance: continuing a saved conversation needs the same current canonical path, a new grant and fresh approval; a moved path refuses. Reconnect refuses during an active or awaiting-approval Code request.
+- Current recovery slice: Review connection checks one already-registered managed folder; explicit confirm rechecks its reviewed inputs before changing that project's binding. Project and conversation IDs survive loss of folder access. Cancel writes nothing; changed inputs require re-review. Reconnect changes no project files or agent state and accepts no arbitrary folder path. Old Code root metadata is provenance: continuing a saved conversation needs the same current canonical path, a new grant and current execution authorization. Native action approvals follow the runtime policy. A moved path refuses. Reconnect refuses during an active or awaiting-approval Code request.
 - Verification: The bounded increment passed private hosted desktop/phone, cancel, reconnect, retained-history, fresh-approval/deny, refusal, file-hash and reload checks on 2026-09-15. That is the earlier tested candidate; the full issue #15 Create/apply goal remains open under issue #14's shared operation.
 - Follow-up contract: The mounted UI keeps exact uncertain attempts through new reviews. A read-only preview can recover the original operation/hash from one current scoped receipt (`recorded: true`, `identityChanged: false`) and offer Finish reconnecting; a changed folder gets a fresh plan. One managed binding is eligible. Keyboard completion keeps focus/status stable; post-commit path change returns uncertain with the receipt intact.
-- Follow-up evidence: Private hosted lost-response, recorded-preview, exact authenticated replay, desktop/390px keyboard and Cancel, reload, idle/model-zero and all 28 file hashes passed on 2026-09-15. Catalog refresh restored availability before Finish was clicked. External/multi-binding eligibility and post-commit path change passed nine real SQLite tests; a hosted rename returned EXDEV before files changed. Full #15 remains open, Windows execution is unrun, and PR #43 stays held.
+- Follow-up evidence: Private hosted lost-response, recorded-preview, exact authenticated replay, desktop/390px keyboard and Cancel, reload, idle/model-zero and all 28 file hashes passed on 2026-09-15. Catalog refresh restored availability before Finish was clicked. External/multi-binding eligibility and post-commit path change passed nine real SQLite tests; a hosted rename returned EXDEV before files changed. Full #15 remains open. PR #43 is merged. Later Windows evidence belongs to the acceptance register.
 - Acceptance: Register two no-VCS folders, switch away and back, remove one root, then retry without falling back to the other.
 - Actions: A010, A011, A012, A013, A014, A015, A016, A017. See [the action catalog](actions.md#m02-projects-and-roots).
 
@@ -60,7 +60,7 @@ Current source or design entry points:
 
 Reopen several project conversations and link history across harnesses.
 
-Implementation status: the verified first shell composes existing Code and Native conversation owners in one workspace. The private hosted journey created two real conversation requests, denied both before model or tool execution, reopened the first from history, preserved authorized history for an unavailable project, and restored the selected conversation after returning. The supported harness catalog, linked cross-harness conversation flow, and concurrent runtime remain unimplemented. The current runtime permits one active run at a time. The shell proof did not execute a model. [PR #43](https://github.com/vivary-dev/Vivary-New/pull/43) subsequently completed six real Code turns across two projects and Personal. Its Native fixture exposed unresolved saved-head and composer-gating defects, so project-session acceptance remains open.
+Implementation status: Code and Native conversations retain their existing owners in one workspace. Project-bound history and the maintained Native saved-head repair are integrated. Codex has native-session continuation, catalog-backed models, native action approvals, and persisted progress/subagent activity. The host admits one root run at a time. Linked cross-harness conversations and concurrent independent runs remain planned. The [acceptance register](../desktop-acceptance-status.md) separates real Windows execution, hosted fixtures, and remaining Native-provider work.
 
 - Owns: References to Native threads, Code runs and harness sessions, plus proposed linkage metadata.
 - Calls: M02, M04, M05.
@@ -100,14 +100,18 @@ Current source or design entry points:
 - [packages/workbench/server/local-runtime-setup.ts](../../../../packages/workbench/server/local-runtime-setup.ts)
 - [packages/workbench/server/code-execution-host.ts](../../../../packages/workbench/server/code-execution-host.ts)
 - [packages/workbench/server/code-execution-worker.ts](../../../../packages/workbench/server/code-execution-worker.ts)
+- [packages/workbench/server/codex-models.ts](../../../../packages/workbench/server/codex-models.ts)
+- [packages/workbench/server/codex-approval.ts](../../../../packages/workbench/server/codex-approval.ts)
+- [packages/workbench/server/code-permissions.ts](../../../../packages/workbench/server/code-permissions.ts)
+- [Maintained Core patch](../../../../packages/workbench/patches/README.md)
 
-The grouped supported-harness catalog, adapter-backed model discovery, manual catalog refresh, and linked cross-harness conversation behavior remain unimplemented.
+Codex account-effective model discovery and explicit refresh are implemented. The generic grouped harness catalog and linked cross-harness conversation behavior remain planned. See [implemented Codex behavior](harness-adapters.md#implemented-codex-behavior).
 
 ## M05: Authority and approvals
 
 Make effects explicit, scoped and revocable.
 
-- Owns: Actor/project grant validation, deterministic policy and Vivary pre-launch request binding. Native retains originating approval state and lifecycle.
+- Owns: Actor/project grant validation, deterministic policy, and exact native action-request binding. The runtime retains originating approval state and lifecycle.
 - Calls: no product module. Validates supplied identity and authoritative policy through existing framework/registry seams.
 - Replacement contract: Adapters cannot widen permissions or turn unknown capability into approval. Harness-native permissions do not replace Vivary project and host authorization or its approval, denial and Stop controls.
 - Conceptual request/result: ValidateScope / ApproveExactRequest / Deny / Stop -> policy decision or observed lifecycle result. Approval state stays with the originating Native owner. The facade delegates using its approval reference. Stop is an ownership-checked Native control.
@@ -126,7 +130,7 @@ Current source or design entry points:
 
 Browse, read, edit, save and reconcile real files.
 
-Implementation status: the verified workspace opens the existing file browser and document view as an optional panel. In the private hosted journey, a document opened in read mode, explicit Edit and Save wrote the file, the selected conversation draft remained intact, and a refresh reread the saved content. Delayed rename with the panel closed also passed the isolated production-composition checks. Windows artifact proof remains pending.
+Implementation status: the verified workspace opens the existing file browser and document view as an optional panel. In the private hosted journey, a document opened in read mode, explicit Edit and Save wrote the file, the selected conversation draft remained intact, and a refresh reread the saved content. Delayed rename with the panel closed also passed the isolated production-composition checks. The acceptance register records later Windows file-operation proof.
 
 - Owns: Project files own bytes. Existing draft state owns unsaved edits and base versions.
 - Calls: M02, M05.
@@ -203,7 +207,9 @@ Current source or design entry points:
 
 Find files, history and sourced project knowledge.
 
-- Owns: Original files and Native history remain truth. Optional indexes are projections.
+Implementation status: issue #21's scoped file memory is implemented and hosted-tested. Its [receipt](../receipts/18a-scoped-file-memory.md) records the hosted journey and one real Codex check. Each project fact is one Markdown file in `.vivary/knowledge/` or the folders the `memory` role names, and Tropo types it as `vivary_fact`. Code and Full chat load the project's instructions, state, and facts at the start of every message. The Details Memory section remembers, corrects, and forgets facts through their files. Packaged Windows acceptance is pending.
+
+- Owns: Original files and Native history remain truth. Optional indexes are projections. Authored facts are project files, and `.vivary/memory/` holds only optional provider state.
 - Calls: M02, M03, M05, M06, M07.
 - Replacement contract: Replace an index or retrieval provider without losing source references or private exclusions.
 - Conceptual request/result: Search / RetrieveScopedSources / CorrectMemory -> bounded matches and source references. Indexes never own the only copy.
@@ -213,6 +219,11 @@ Find files, history and sourced project knowledge.
 Current source or design entry points:
 
 - [packages/workbench/server/project-files.ts](../../../../packages/workbench/server/project-files.ts)
+- [packages/workbench/server/project-memory.ts](../../../../packages/workbench/server/project-memory.ts)
+- [packages/workbench/app/lib/project-memory-schema.ts](../../../../packages/workbench/app/lib/project-memory-schema.ts)
+- [packages/workbench/actions/vivary-project-memory.ts](../../../../packages/workbench/actions/vivary-project-memory.ts)
+- [packages/workbench/actions/vivary-project-memory-write.ts](../../../../packages/workbench/actions/vivary-project-memory-write.ts)
+- [packages/workbench/app/components/projects/ProjectMemoryPanel.tsx](../../../../packages/workbench/app/components/projects/ProjectMemoryPanel.tsx)
 - [packages/workbench/actions/vivary-code-state.ts](../../../../packages/workbench/actions/vivary-code-state.ts)
 - [packages/tropo](../../../../packages/tropo)
 

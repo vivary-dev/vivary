@@ -1,6 +1,6 @@
 # Coverage and delivery map
 
-This specification retains all 36 product outcomes. The table maps scope, not current lifecycle. Live GitHub issues remain authoritative. Always qualify outcome numbers and GitHub issue numbers. The generated program graph remains a supporting snapshot. Issue #38's first workspace shell merged in PR #42 after private hosted verification, independent review and CI. The supported harness catalog, selectable Codex execution, cross-harness linking, handoff workflow, concurrent runtime, real Native-provider and automation acceptance, and the complete release journey remain incomplete. Focused Windows evidence is summarized in the [acceptance register](../desktop-acceptance-status.md).
+This specification retains all 36 product outcomes. The table maps scope, not current lifecycle. Live GitHub issues remain authoritative. Always qualify outcome numbers and GitHub issue numbers. The generated program graph remains a supporting snapshot. Issue #38's first workspace shell merged in PR #42 after private hosted verification, independent review and CI. Codex selection and bounded native execution are integrated with recorded Windows acceptance. The generic harness catalog, cross-harness linking, handoff workflow, concurrent runtime, real Native-provider and automation acceptance, and the complete release journey remain incomplete. Focused Windows evidence is summarized in the [acceptance register](../desktop-acceptance-status.md).
 
 ## Complete outcome coverage
 

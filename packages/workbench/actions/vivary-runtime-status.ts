@@ -1,8 +1,11 @@
+import { claudeCodeModelChoices } from "../shared/claude-models";
+import { homedir } from "node:os";
+import { getCodexModels } from "../server/codex-models";
 import { defineAction, fail, type ActionRunContext } from "@agent-native/core/action";
 import { CLI_REGISTRY } from "@agent-native/core/terminal/server";
 import { z } from "zod";
 
-import { VIVARY_LOCAL_OWNER_EMAIL } from "../server/local-access.ts";
+import { VIVARY_LOCAL_OWNER_EMAIL } from "../shared/owner-session.ts";
 import { getVivaryRuntimeStatus, type VivaryRuntimeStatusResult } from "../server/local-runtime-setup.ts";
 
 export default defineAction({
@@ -33,7 +36,8 @@ export default defineAction({
       getVivaryRuntimeStatus("claude-cli", { refresh }),
       getVivaryRuntimeStatus("codex-cli", { refresh }),
     ]);
-    return { runtimes: [
+    const codexModels = codex.status === "ready" ? await getCodexModels(homedir(), { refresh }) : null;
+    return { codexModels, claudeModels: claudeCodeModelChoices(claude.version), runtimes: [
       { engine: "claude-cli", label: CLI_REGISTRY.claude.label, ...claude },
       { engine: "codex-cli", label: CLI_REGISTRY.codex.label, ...codex },
     ] };

@@ -2,12 +2,13 @@
 Type: packet
 GitHub-issue: https://github.com/vivary-dev/Vivary-New/issues/17
 Parent: 08
-Status: needs-info
+Status: done
 Depends-on: [07b]
 Owner: Root-assigned adoption integrator, sole writer
 Scope: Fix verified folder-name/type collisions and plan/apply disagreement, then expose preservation-focused adoption in the GUI.
 Verification-kind: runtime
-Needs: 07b provides the shared plan/apply operation. Start by reproducing the named type-collision cases and preserve explicit existing declarations.
+Evidence: [Populated-folder adoption acceptance](../receipts/08a-populated-folder-adoption.md)
+Verification-result: passed
 Timebox: One coherent user-visible increment with focused checks and review.
 
 ## Goal
@@ -58,7 +59,7 @@ Assert file preservation and truthful outcomes, not an invented minimum edge cou
 
 ```console
 python -m unittest discover -s packages/create-vivary/tests -p test_adopt.py
-python -m pytest packages/tropo/tests/test_tropo.py -q
+python packages/tropo/tests/test_tropo.py
 pnpm --dir packages/workbench typecheck
 git diff --check
 ```
@@ -75,6 +76,34 @@ Semantic indexing, PDF extraction, and external templates are separate capabilit
   unresolved. No implementation or runtime acceptance is claimed.
 
 - 2026-09-13: Required by the desktop release. Use the original adoption plan and journals through the same packaged Native action and project identity.
+
+- 2026-09-23: Issue #14 accepted the shared plan and apply operation, so
+  this packet's only recorded dependency is complete. Start with the named
+  type-collision reproduction. Issue #15 remains the active ticket until its
+  reviewed fix and acceptance record merge. Start #17 after that merge.
+
+- 2026-09-23: Activated after #15 merged through PR #85. Source inspection
+  reproduced implicit folder typing in a new thin adoption. Implementation
+  keeps existing schema declarations authoritative and removes unintended
+  type inference from newly adopted ordinary folders. Preview and apply must
+  report the same validation blockers and unsupported-content boundary.
+  Acceptance remains pending.
+
+- 2026-09-23: Accepted on source `f024979` after review, exact-workflow checks,
+  representative S2 hosted GUI adoption, mixed-schema refusal, and packaged
+  Windows S2 and mixed-folder journeys. Preview reports retained content and
+  configured validation findings before writes. Original files and the
+  installed profile remained unchanged. See the
+  [acceptance receipt](../receipts/08a-populated-folder-adoption.md).
+  Parent packet 08 and desktop release acceptance remain open.
+
+- 2026-09-23: PR review fixes accepted on `2d620af` after focused regressions,
+  independent review, fresh hosted S2 adoption, mixed-schema refusal and an
+  existing ignore-file patch preview. All seven GitHub CI jobs passed, including
+  Windows. Internal records retain their own schemas without colliding with
+  owner types. The `f024979` actual-EXE journey carries forward as packaged
+  integration evidence. The final source has not run inside a new EXE. Final
+  ticket #23 still owns its exact release artifact acceptance.
 
 ## Shared desktop and web behavior
 

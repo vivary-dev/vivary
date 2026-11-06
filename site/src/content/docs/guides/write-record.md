@@ -1,7 +1,7 @@
 ---
 title: "Write a governed Vivary record"
 description: "Plan, approve, apply, and verify one capsule-bound Vivary record after completed work earns durable project context."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/guides/write-record.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/write-record.md"
 ---
 
 Use this guide after verified work earns durable context.

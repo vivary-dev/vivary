@@ -309,6 +309,47 @@ def test_governed_control_dispatches_all_eight_exact_operations():
         assert request == before
 
 
+def _native_agent(fill="0123456789abcdef"):
+    return {"kind": "agent", "id": "agent_" + fill * 4}
+
+
+def test_governed_control_round_trips_a_native_agent_claim_and_refuses_another_agent():
+    agent = _native_agent()
+    other = _native_agent("fedcba9876543210")
+    claimed = exo.governed_control(
+        _control_request(
+            "claim",
+            {"claims": []},
+            {
+                "scope": _control_scope(),
+                "actor": agent,
+                "now": "2026-01-02T10:00:00Z",
+                "authority_class": "contributor",
+            },
+        )
+    )
+    _assert_control_result(claimed, "claim")
+    assert claimed["result"]["decision"] == "granted"
+    claims = claimed["result"]["claims"]
+    claim_id = claimed["result"]["claim"]["claim_id"]
+
+    foreign = exo.governed_control(
+        _control_request("release", {"claims": claims}, {"claim_id": claim_id, "actor": other})
+    )
+    _assert_control_result(foreign, "release")
+    assert foreign["result"] == {
+        "decision": "refused",
+        "reason_codes": ["not_claim_holder"],
+        "claims": claims,
+    }
+
+    released = exo.governed_control(
+        _control_request("release", {"claims": claims}, {"claim_id": claim_id, "actor": agent})
+    )
+    _assert_control_result(released, "release")
+    assert released["result"] == {"decision": "released", "reason_codes": [], "claims": []}
+
+
 def test_governed_control_rejects_missing_unknown_and_operation_fields_exactly():
     missing = {
         "schema": exo.CONTROL_REQUEST_SCHEMA,

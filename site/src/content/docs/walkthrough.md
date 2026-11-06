@@ -1,7 +1,7 @@
 ---
 title: "Getting started proof"
 description: "A public, generic product walkthrough showing Vivary scaffold, health, review, coordination, and impact checks."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/WALKTHROUGH.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/WALKTHROUGH.md"
 ---
 
 > **Historical published-line fixture.** This page records the public 0.3.1 full
@@ -98,7 +98,7 @@ provider runtime calls. The next productization gates are:
 - Semantic memory in an incognito, privacy-first mode: optional, explicit, and never
   default.
 - Typed semantic search over Tropo graph truth, tracked in
-  [#20](https://github.com/vivary-dev/vivary/issues/20), returning Vivary node ids and
+  [#20](https://github.com/vivary-dev/vivary-cli/issues/20), returning Vivary node ids and
   paths rather than opaque chunks.
 
 Those belong in separate feature PRs so each can run CI and review cleanly.

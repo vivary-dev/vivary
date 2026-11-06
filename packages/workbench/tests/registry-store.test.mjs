@@ -5,6 +5,7 @@ import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { assertNativeSqliteMatchesNode, ensureCorePackageJson, ensureProofRoot } from "./maintained-test-options.mjs";
 
 const TEST_FILE = fileURLToPath(import.meta.url);
 const CHILD_HEAP_ARG = "--max-old-space-size=192";
@@ -231,6 +232,8 @@ const rememberProofCase = (entry) => proofWitness.cases.push(structuredClone(ent
 if (process.env.VIVARY_REGISTRY_WORKER === "1") { // guard:allow-env-credential — Test child mode flag; no credential value.
   await worker();
 } else {
+  assertNativeSqliteMatchesNode(ensureCorePackageJson());
+  ensureProofRoot("VIVARY_REGISTRY_PROOF_ROOT");
   test("native migrations are repeatable and an unopened registry has no product records", async () => sandbox(async (dir) => {
     empty((await run(dir, { migrate: true, action: "snapshot" })).snapshot);
     empty((await run(dir, { migrate: true, action: "snapshot" })).snapshot);

@@ -66,6 +66,7 @@ evidence, or publish/sign without the specific authority. Preserve user files an
 ## Log
 
 - 2026-09-16: The private `26798df` Windows candidate passed focused extraction, launch, bundled-runtime, project, file, Claude Code, restart, second-instance, and cleanup checks. See the [desktop acceptance register](../desktop-acceptance-status.md). This does not close the live issue or establish public release readiness.
+- 2026-09-18: Local candidate `43ae417` (merged dev after PR #66, not published) passed first launch, existing-folder registration, the 09a project-health step with output identical to headless Doctor, narrow layout at the 488 px frame floor, a real Claude Code tool turn, Stop from another project, restart persistence, second-instance reuse, and shutdown cleanup on the laptop. Approval and denial were not rerun on it; last proven on `98515c9` with Codex Normal mode. See the [desktop acceptance register](../desktop-acceptance-status.md). Issue #68 records the folder-picker timeout message.
 
 - 2026-09-13: Drafted. No current artifact satisfies the complete Windows release target.
 

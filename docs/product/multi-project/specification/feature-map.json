@@ -154,7 +154,7 @@
         30,
         38
       ],
-      "owns": "Actor/project grant validation, deterministic policy and Vivary pre-launch request binding. Native retains originating approval state and lifecycle.",
+      "owns": "Actor/project grant validation, deterministic policy, and exact native action-request binding. The runtime retains originating approval state and lifecycle.",
       "swap": "Adapters cannot widen permissions or turn unknown capability into approval."
     },
     {
@@ -227,6 +227,12 @@
       "name": "Search and file memory",
       "purpose": "Find files, history and sourced project knowledge",
       "sourcePaths": [
+        "packages/workbench/server/project-search.ts",
+        "packages/workbench/actions/vivary-project-search.ts",
+        "packages/workbench/app/components/projects/ProjectSearch.tsx",
+        "packages/workbench/app/lib/project-search-schema.ts",
+        "packages/workbench/app/lib/project-search-state.ts",
+        "packages/workbench/app/lib/project-file-location.ts",
         "packages/workbench/server/project-files.ts",
         "packages/workbench/actions/vivary-code-state.ts",
         "packages/tropo"
@@ -650,8 +656,8 @@
       "phase": "release",
       "mode": "agent",
       "name": "Send a message",
-      "result": "Bind request and context to current project. Show approval before work where required",
-      "recovery": "Denial or stale scope starts nothing"
+      "result": "Bind request and context to current project. Start through the selected runtime and surface its native action decisions",
+      "recovery": "Stale scope prevents launch. A denied native action does not run"
     },
     {
       "id": "A021",
@@ -785,7 +791,7 @@
       "phase": "release",
       "mode": "local",
       "name": "Deny a pending request",
-      "result": "Record denial. Start no model or tools",
+      "result": "Deny the exact requested action. An already running native turn may continue within its remaining permissions",
       "recovery": "Retry cannot convert denial into approval"
     },
     {

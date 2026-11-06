@@ -24,6 +24,7 @@ const execFile = promisify(execFileCallback);
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultCacheDirectory = path.join(packageRoot, ".tmp", "original-runtime");
 const buildHelper = path.join(packageRoot, "build-original-wheels.py");
+const hostPython = process.platform === "win32" ? "python" : "python3";
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 const PYTHON_RELEASE = "20261021";
 const PYTHON_VERSION = "3.12.15";
@@ -135,6 +136,9 @@ export async function prepareOriginalRuntime({
   if (typeof sourceDirty !== "boolean") throw new Error("sourceDirty must be a boolean.");
 
   const target = originalRuntimeTarget(platform, arch);
+  // The README requires qualified host CPython 3.12.15. A refused host stops before the destination,
+  // the download cache and every build-helper call.
+  await execFile(hostPython, ["-I", "-B", path.join(repository, "scripts/check_python_runtime.py")], { cwd: repository });
   await prepareEmptyDirectory(destination);
   await mkdir(cacheDirectory, { recursive: true });
   const wheelhouse = await mkdtemp(path.join(cacheDirectory, "wheels-"));
@@ -168,7 +172,10 @@ export async function prepareOriginalRuntime({
     const components = await componentManifestEntries(wheelhouse, destination, target);
     await verifyComponentLicenses(destination, components);
     await writeOriginalRuntimeLauncher(destination, target);
-    const managedProjectBridge = await stageManagedProjectBridge(destination, repository);
+    const managedProjectBridge = await stageWorkbenchBridge(destination, repository,
+      "managed_project_workspace.py", "LICENSE.vivary-managed-project-bridge");
+    const previewOwnerBridge = await stageWorkbenchBridge(destination, repository,
+      "windows_preview_owner.py", "LICENSE.vivary-preview-owner");
     const aggregateLicensePath = await stageAggregateRuntimeLicense(destination, aggregateLicense);
 
     const componentLicensePaths = new Set(components.flatMap(component => component.licensePaths));
@@ -186,6 +193,7 @@ export async function prepareOriginalRuntime({
       sourceDirty,
       components,
       managedProjectBridge,
+      previewOwnerBridge,
       runtimeLicensePaths,
       pipCertificateOverlay: {
         kind: "vivary-certifi-overlay",
@@ -262,6 +270,7 @@ export function createOriginalRuntimeManifest({
   sourceDirty,
   components,
   managedProjectBridge,
+  previewOwnerBridge,
   runtimeLicensePaths,
   pipCertificateOverlay,
 }) {
@@ -277,6 +286,7 @@ export function createOriginalRuntimeManifest({
     runtimeLicenseAsset: { ...ORIGINAL_RUNTIME_LICENSE_ASSET },
     components: components.map(component => ({ ...component })),
     managedProjectBridge: { ...managedProjectBridge },
+    previewOwnerBridge: { ...previewOwnerBridge },
     runtimeLicensePaths: [...runtimeLicensePaths],
     ...(pipCertificateOverlay ? { pipCertificateOverlay } : {}),
   };
@@ -312,18 +322,18 @@ async function verifyComponentLicenses(destination, components) {
   }
 }
 
-export async function stageManagedProjectBridge(destination, repository) {
+export async function stageWorkbenchBridge(destination, repository, fileName, licenseName) {
   requireAbsolutePath(destination, "destination");
   requireAbsolutePath(repository, "repository");
-  const sourceBridge = path.join(repository, "packages", "workbench", "server", "managed_project_workspace.py");
+  const sourceBridge = path.join(repository, "packages", "workbench", "server", fileName);
   const sourceLicense = path.join(repository, "LICENSE");
   for (const source of [sourceBridge, sourceLicense]) {
     const metadata = await lstat(source);
-    if (!metadata.isFile()) throw new Error("Managed project bridge source must be a regular file.");
+    if (!metadata.isFile()) throw new Error("Workbench bridge source must be a regular file.");
   }
 
-  const bridgePath = path.join(destination, "bridge", "managed_project_workspace.py");
-  const licensePath = path.join(destination, "licenses", "LICENSE.vivary-new-managed-project-bridge");
+  const bridgePath = path.join(destination, "bridge", fileName);
+  const licensePath = path.join(destination, "licenses", licenseName);
   await Promise.all([mkdir(path.dirname(bridgePath), { recursive: true }), mkdir(path.dirname(licensePath), { recursive: true })]);
   await Promise.all([copyFile(sourceBridge, bridgePath), copyFile(sourceLicense, licensePath)]);
   return {
@@ -360,8 +370,7 @@ async function collectRuntimeLicenses(destination, componentLicensePaths) {
 }
 
 async function runBuildHelper(args, repository) {
-  const python = process.platform === "win32" ? "python" : "python3";
-  await execFile(python, ["-I", "-B", buildHelper, ...args], {
+  await execFile(hostPython, ["-I", "-B", buildHelper, ...args], {
     cwd: repository,
     env: {
       ...process.env,

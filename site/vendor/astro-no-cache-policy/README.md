@@ -1,9 +1,12 @@
 # Astro remote-image freshness policy
 
 This private, independently written module replaces Astro 7.3.5's use of
-`http-cache-semantics`. GHSA-ch52-4w7c-c8xp affects upstream releases through
-4.2.0, and no patched release was available on 2026-10-03. Astro 7.3.5 still
-declares that affected dependency, so upgrading Astro alone does not repair it.
+`http-cache-semantics`. GHSA-ch52-4w7c-c8xp lists `<= 4.2.0` as vulnerable and
+names no patched release (GitHub advisory record, read 2026-10-24). The lock this
+module replaced held 4.3.0, which that range does not list, and no 4.3.0 fix for the
+max-stale disclosure is confirmed either. Keep this module until the advisory names a
+patched release or the 4.3.0 fix is confirmed from upstream source. Astro 7.3.5 still
+declares the dependency, so upgrading Astro alone does not repair it.
 
 The site's direct local dependency supplies the import name Astro expects.
 The Astro-only npm override references that same dependency with

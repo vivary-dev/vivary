@@ -86,6 +86,26 @@ export type ProjectFileRenameResult =
       current?: ProjectFile;
     };
 
+export type ProjectFileCreateResult =
+  | { code: "created"; project: ProjectFileIdentity; file: ProjectFile }
+  | {
+      code: "conflict";
+      operation: "create";
+      reason: "target-exists" | "project-changed";
+      path: string;
+      current?: ProjectFile;
+    };
+
+export type ProjectFileRemoveResult =
+  | { code: "removed"; project: ProjectFileIdentity; path: string }
+  | {
+      code: "conflict";
+      operation: "remove";
+      reason: "changed" | "renamed-or-deleted" | "project-changed";
+      path: string;
+      current?: ProjectFile;
+    };
+
 export const projectFilesInputSchema = z.strictObject({
   projectId: projectFileIdSchema,
   path: projectFilePathSchema.optional(),

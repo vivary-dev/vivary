@@ -1,7 +1,7 @@
 ---
 title: "Verify and recover a Vivary workspace"
 description: "Run Vivary Doctor and Tropo checks, interpret health findings, and use explicit bounded recovery for interrupted adoption."
-editUrl: "https://github.com/vivary-dev/Vivary-New/edit/dev/docs/guides/verify-recover.md"
+editUrl: "https://github.com/vivary-dev/vivary/edit/dev/docs/guides/verify-recover.md"
 ---
 
 Use this guide after setup, adoption, or an approved record write.

@@ -4,8 +4,8 @@ This folder is the authoritative predecessor contract for adding Bellamente as a
 optional **AgentLTM** beside `tropo`. It is intentionally documentation-only:
 there is no current Bellamente provider, adapter bridge, active MCP setup, install
 flow, or public Bellamente command implied by these files. By
-[#217](https://github.com/vivary-dev/vivary/issues/217), this contract lands before
-and governs [#190](https://github.com/vivary-dev/vivary/pull/190).
+[#217](https://github.com/vivary-dev/vivary-cli/issues/217), this contract lands before
+and governs [#190](https://github.com/vivary-dev/vivary-cli/pull/190).
 
 ## Read in this order
 
@@ -32,6 +32,6 @@ This page routes; it does not restate the normative requirements:
 - [Vivary architecture / `vivary-core`](../ARCHITECTURE.md)
 - [Optional semantic-memory adapter contract](../SEMANTIC-MEMORY.md)
 - [Public commands](../COMMANDS.md)
-- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary/issues/205)
-- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary/issues/207)
-- [#217 — the spec precedes implementation](https://github.com/vivary-dev/vivary/issues/217)
+- [#205 — governed candidate recall](https://github.com/vivary-dev/vivary-cli/issues/205)
+- [#207 — capability and Doctor wiring](https://github.com/vivary-dev/vivary-cli/issues/207)
+- [#217 — the spec precedes implementation](https://github.com/vivary-dev/vivary-cli/issues/217)

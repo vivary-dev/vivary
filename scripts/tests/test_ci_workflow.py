@@ -9,11 +9,6 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-import importlib.util
-import sys
-import tempfile
-from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check_ci_workflow.py"
@@ -52,18 +47,264 @@ RELEASE_BUILD_COMMANDS = _load().release_build_commands()
 
 
 def _workflow(site_steps: str, trailing_job: str = "") -> str:
-    # Mutate the actual six-job security composition, retaining its source bindings.
+    text = (
+        "name: ci\n"
+        "on:\n"
+        "  workflow_dispatch:\n"
+        "    inputs:\n"
+        "      head_sha:\n"
+        "        required: true\n"
+        "      base_sha:\n"
+        "        required: true\n"
+        "      pull_request_number:\n"
+        "        required: true\n"
+        "permissions:\n"
+        "  contents: read\n"
+        "  pull-requests: read\n"
+        "env:\n"
+        "  PIP_USE_DEPRECATED: legacy-certs\n"
+        "jobs:\n"
+        "  changes:\n"
+        "    steps:\n"
+        "      - name: validate dispatched pull request\n"
+        "        env:\n"
+        "          HEAD_SHA: ${{ inputs.head_sha }}\n"
+        "          BASE_SHA: ${{ inputs.base_sha }}\n"
+        "          PR_NUMBER: ${{ inputs.pull_request_number }}\n"
+        "        run: |\n"
+        "          test \"$GITHUB_SHA\" = \"$HEAD_SHA\"\n"
+        "          LIVE_HEAD=$(gh pr view \"$PR_NUMBER\" --json headRefOid --jq .headRefOid)\n"
+        "          LIVE_BASE=$(gh pr view \"$PR_NUMBER\" --json baseRefOid --jq .baseRefOid)\n"
+        "          test \"$LIVE_HEAD\" = \"$HEAD_SHA\"\n"
+        "          test \"$LIVE_BASE\" = \"$BASE_SHA\"\n"
+        "      - name: detect site inputs\n"
+        "        env:\n"
+        "          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}\n"
+        "          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}\n"
+        "        run: echo detect\n"
+        "\n"
+        "  test:\n"
+        "    needs: changes\n"
+        "    if: ${{ always() }}\n"
+        "    steps:\n"
+        "      - name: require changed-path and dispatch validation\n"
+        "        if: needs.changes.result != 'success'\n"
+        "        run: exit 1\n"
+        "      - name: high-level design review\n"
+        "        env:\n"
+        "          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}\n"
+        "          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}\n"
+        "        run: |\n"
+        "          python scripts/tests/test_hldd.py\n"
+        "          python scripts/check_hldd.py --base \"$BASE_SHA\" --head \"$HEAD_SHA\"\n"
+        "      - name: install Python test runner\n"
+        "        run: python -I -m pip --use-deprecated=legacy-certs install pytest packaging\n"
+        "      - name: CI workflow contract\n"
+        "        run: python scripts/check_ci_workflow.py\n"
+        "      - name: CI workflow contract tests\n"
+        "        run: python scripts/tests/test_ci_workflow.py\n"
+        "      - name: required review gate tests\n"
+        "        run: python scripts/tests/test_review_gate.py\n"
+        "      - name: source navigation contract\n"
+        "        run: python -B scripts/check-source-navigation.py --check\n"
+        "      - name: source navigation contract tests\n"
+        "        run: python -B scripts/tests/test-source-navigation.py\n"
+        "      - name: repository automation contract\n"
+        "        run: python scripts/check_repository_automation.py\n"
+        "      - name: repository automation contract tests\n"
+        "        run: python scripts/tests/test_repository_automation.py\n"
+        "      - name: repository automation behavior tests\n"
+        "        run: python -m pytest scripts/tests/test_update_stats.py scripts/tests/test_steward_health.py -q\n"
+        "      - name: install release build frontend\n"
+        "        env:\n"
+        f"          PIP_CONFIG_FILE: {UV_DIGEST_PIP_CONFIG_FILE}\n"
+        "        run: |\n"
+        f"          {UV_DIGEST_COMMANDS['test']}\n"
+        "      - name: actual uv runtime admission\n"
+        "        run: python -I -B scripts/check_uv_runtime.py\n"
+        "      - name: release artifact contract tests\n"
+        "        run: python scripts/tests/test_release_artifacts.py\n"
+        "      - name: release artifact license contract\n"
+        "        run: |\n"
+        "          artifacts=\"$(mktemp -d)\"\n"
+        "          uv=\"$(python -I -B scripts/check_uv_runtime.py)\" || exit $?\n"
+        + "".join(f"          {command}\n" for command in RELEASE_BUILD_COMMANDS)
+        + "          \"$RUNNER_TEMP/vivary-build-tools/bin/npm\" pack packages/create-vivary/npm --pack-destination \"$artifacts\"\n"
+        "          python scripts/check_release_artifacts.py --repository . --artifacts \"$artifacts\"\n"
+        "      - name: installed route parity contract tests\n"
+        "        run: python scripts/tests/test_installed_route_parity.py\n"
+        "      - name: core\n"
+        "        run: python -m pytest packages/core/tests/ -q\n"
+        "      - name: wheelhouse smoke\n"
+        "        run: |\n"
+        "          assert version(\"vivary-strato\") == \"0.1.3\"\n"
+        "      - name: packaged front door smoke\n"
+        "        run: python scripts/check_installed_route_parity.py \"$smoke/venv/bin\"\n"
+        "      - name: installed command surface\n"
+        "        run: python scripts/check_installed_route_parity.py --characterize \"$smoke/venv/bin\"\n"
+        "      - name: diff hygiene\n"
+        "        env:\n"
+        "          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}\n"
+        "        run: git diff --check \"$BASE_SHA...HEAD\"\n"
+        "\n"
+        "  workbench:\n"
+        "    needs: changes\n"
+        "    if: ${{ always() }}\n"
+        "    steps:\n"
+        "      - name: require changed-path and dispatch validation\n"
+        "        if: needs.changes.result != 'success'\n"
+        "        run: exit 1\n"
+        "\n"
+        "  workbench-maintained:\n"
+        "    needs: changes\n"
+        "    if: ${{ always() }}\n"
+        "    steps:\n"
+        "      - name: require changed-path and dispatch validation\n"
+        "        if: needs.changes.result != 'success'\n"
+        "        run: exit 1\n"
+        "      - name: maintained workbench checks\n"
+        f"        run: {MAINTAINED_CHECKS_COMMAND}\n"
+        "\n"
+        "  governed-platform-proof:\n"
+        "    needs: changes\n"
+        "    steps:\n"
+        "      - name: source navigation contract on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_CHECK_COMMAND}\n"
+        "      - name: source navigation contract tests on Windows\n"
+        f"        run: {SOURCE_NAVIGATION_TEST_COMMAND}\n"
+        "      - name: installed-wheel capability surface\n"
+        "        shell: pwsh\n"
+        "        run: |\n"
+        f"          {WINDOWS_PARITY_CHECK_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed route parity failed\" }\n"
+        f"          {WINDOWS_PARITY_CHARACTERIZE_COMMAND}\n"
+        "          if ($LASTEXITCODE -ne 0) { throw \"installed command surface failed\" }\n"
+        "\n"
+        "  orientation-proof:\n"
+        "    needs: changes\n"
+        "    steps:\n"
+        "      - name: install pinned uv runner\n"
+        "        env:\n"
+        f"          PIP_CONFIG_FILE: {UV_DIGEST_PIP_CONFIG_FILE}\n"
+        "        run: |\n"
+        f"          {UV_DIGEST_COMMANDS['orientation-proof']}\n"
+        "      - name: actual uv runtime admission\n"
+        "        run: python -I -B scripts/check_uv_runtime.py\n"
+        "      - name: run disposable orientation proof\n"
+        "        run: python packages/create-vivary/tests/orientation_proof.py --receipt orientation-proof.json\n"
+        "\n"
+        "  review:\n"
+        "    needs: changes\n"
+        "    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'\n"
+        "    steps: []\n"
+        "\n"
+        f"{SITE_JOB_HEADER}"
+        "    steps:\n"
+        f"{SITE_TOOLS_STEP}"
+        f"{SITE_DEPENDENCY_STEP}"
+        f"{site_steps.replace(INSTALL, INSTALL + SITE_INSTALLED_DEPENDENCY_STEP)}"
+        f"{SITE_BUILD_STEP}"
+        f"{trailing_job}"
+    )
+
     module = _load()
-    text = REAL_WORKFLOW.read_text(encoding="utf-8")
-    text = re.sub(r"(?m)^        description:.*\n", "", text)
-    site = module.job_block(text, "site")
-    altered = site.replace(INSTALL, "__SITE_STEPS__", 1).replace(AUDIT, "", 1)
-    altered = altered.replace(module.SITE_INSTALLED_DEPENDENCY_STEP, "", 1)
-    site_steps = site_steps.replace(INSTALL, INSTALL + module.SITE_INSTALLED_DEPENDENCY_STEP)
-    return text.replace(site, altered.replace("__SITE_STEPS__", site_steps), 1) + trailing_job
+    for name in module.NODE_JOBS:
+        block = module.job_block(text, name)
+        setup = (
+            '      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n'
+            '        with:\n          node-version: "24.22.1"\n'
+            '      - name: actual Node security admission\n'
+            f'        run: {module.NODE_GUARD}\n'
+        )
+        if name == "workbench":
+            setup += '      - run: node --test packages/workbench/tests/runtime-security.test.mjs\n'
+        if name == "test":
+            setup += module.TEST_CLIENTS_STEP
+            setup += '      - run: python scripts/tests/test_npm_trusted_publish_workflow.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_runner_action_node.py\n'
+            setup += module.REPAIR_TEST_STEP
+            setup += '      - run: python -I -B scripts/tests/test_pip_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_python_runtime.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_certifi_bundle.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_site_dependencies.py\n'
+            setup += module.BUILD_TEST_STEP
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_pip.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_bootstrap_ci_python.py\n'
+            setup += '      - run: python -I -B scripts/tests/test_ci_python_windows_bootstrap.py\n'
+        if name in ("workbench", "workbench-maintained", "governed-platform-proof"):
+            windows = name == "governed-platform-proof"
+            setup += (module.WINDOWS_WORKBENCH_TOOLS_STEP + module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+                      + module.WINDOWS_WORKBENCH_INSTALL_STEP) if windows else (
+                          module.WORKBENCH_TOOLS_STEP + module.WORKBENCH_DEPENDENCY_STEP + module.WORKBENCH_INSTALL_STEP)
+            if name == "workbench":
+                setup += '      - name: fixture route and type check\n        run: |\n' + module.WORKBENCH_TYPECHECK
+        if '    steps: []\n' in block:
+            updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
+        else:
+            updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
+        text = text.replace(block, updated, 1)
+    for name in module.PYTHON_JOBS:
+        block = module.job_block(text, name)
+        setup = "".join(module.python_admission_prefix(name))
+        if name in module.PIP_JOBS:
+            setup += PIP_BOOTSTRAP_STEP + PIP_RUNTIME_STEP
+        if name in PIP_MCP_FIXTURES:
+            block += PIP_MCP_FIXTURES[name]
+        if '    steps: []\n' in block:
+            updated = block.replace('    steps: []\n', '    steps:\n' + setup, 1)
+        else:
+            updated = block.replace('    steps:\n', '    steps:\n' + setup, 1)
+        original = module.job_block(text, name)
+        text = text.replace(original, updated, 1)
+    for index, name in enumerate(module.CI_JOBS):
+        block = module.job_block(text, name)
+        bootstrap = module.runner_bootstrap_step() if index == 0 else module.BOOTSTRAP_ALIAS
+        host = '' if name == 'site' else '    runs-on: ubuntu-latest\n'
+        if name == 'orientation-proof':
+            host = '    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n'
+            block_with_upload = block.rstrip("\n") + "\n" + (
+                '      - name: preserve orientation receipt\n'
+                "        if: ${{ !cancelled() && steps.runner_action_node.outcome == 'success' }}\n"
+                '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n'
+            ) + "\n"
+        else:
+            block_with_upload = block
+        if '    steps: []\n' in block_with_upload:
+            updated = block_with_upload.replace('    steps: []\n', host + '    steps:\n' + bootstrap, 1)
+        else:
+            updated = block_with_upload.replace('    steps:\n', host + '    steps:\n' + bootstrap, 1)
+        text = text.replace(block, updated, 1)
+    return text
 
 
-
+SITE_JOB_HEADER = (
+    "  site:\n"
+    "    name: site build\n"
+    "    needs: changes\n"
+    "    if: needs.changes.outputs.site == 'true'\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n"
+)
+SITE_TOOLS_STEP = (
+    '      - name: qualified site build tools\n'
+    '        run: |\n'
+    '          python -I -B scripts/bootstrap_build_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          python -I -B scripts/build_go_tools.py --root "$RUNNER_TEMP/vivary-build-tools" || exit $?\n'
+    '          printf \'ESBUILD_BINARY_PATH=%s/vivary-build-tools/esbuild-0.28.2-go1.26.10\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+)
+SITE_DEPENDENCY_STEP = (
+    "      - name: known site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py\n"
+)
+SITE_INSTALLED_DEPENDENCY_STEP = (
+    "      - name: installed site dependency admission\n"
+    "        run: python -I -B scripts/check_site_dependencies.py --installed\n"
+)
+SITE_BUILD_STEP = (
+    "      - name: build (re-syncs docs, then astro build)\n"
+    '        run: |\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run sync-docs || exit $?\n          "$RUNNER_TEMP/vivary-build-tools/bin/npm" run build\n'
+    "        working-directory: site\n"
+)
 INSTALL = (
     "      - name: install\n"
     '        run: \'"$RUNNER_TEMP/vivary-build-tools/bin/npm" ci --ignore-scripts\'\n'
@@ -102,6 +343,7 @@ WINDOWS_PARITY_CHARACTERIZE_COMMAND = (
     "python scripts/check_installed_route_parity.py --characterize $scripts"
 )
 STRATO_PIN = 'assert version("vivary-strato") == "0.1.3"'
+MAINTAINED_CHECKS_COMMAND = "pnpm --dir packages/workbench test:maintained"
 
 
 def test_real_workflow_passes_and_is_not_modified():
@@ -189,10 +431,10 @@ def test_repository_automation_behavior_tests_must_run():
 def test_release_artifact_contract_and_real_archives_must_run():
     workflow = _workflow(INSTALL + AUDIT)
     for command in (
-        _load().UV_INSTALLS["test"],
+        UV_DIGEST_COMMANDS["test"],
         ARTIFACT_TEST_COMMAND,
         *RELEASE_BUILD_COMMANDS,
-        _load().TEST_PACK_COMMAND,
+        '"$RUNNER_TEMP/vivary-build-tools/bin/npm" pack packages/create-vivary/npm --pack-destination "$artifacts"',
         ARTIFACT_CHECK_COMMAND,
     ):
         message = _run(workflow.replace(command, "echo artifact proof skipped", 1))
@@ -213,11 +455,17 @@ def test_installed_route_parity_proofs_must_run():
 
 
 def test_installed_command_surface_must_follow_route_parity():
-    workflow = _workflow(INSTALL + AUDIT)
-    first = "          " + PARITY_CHECK_COMMAND + "\n"
-    second = "          " + PARITY_CHARACTERIZE_COMMAND + "\n"
-    reordered = workflow.replace(first + second, second + first, 1)
-    assert reordered != workflow, "the fixture must reorder the real smoke commands"
+    reordered = _workflow(INSTALL + AUDIT).replace(
+        "      - name: packaged front door smoke\n"
+        f"        run: {PARITY_CHECK_COMMAND}\n"
+        "      - name: installed command surface\n"
+        f"        run: {PARITY_CHARACTERIZE_COMMAND}\n",
+        "      - name: installed command surface\n"
+        f"        run: {PARITY_CHARACTERIZE_COMMAND}\n"
+        "      - name: packaged front door smoke\n"
+        f"        run: {PARITY_CHECK_COMMAND}\n",
+        1,
+    )
     message = _run(reordered)
     assert message, "replaying the surface before proving route parity must fail"
     assert "must precede" in message
@@ -260,6 +508,31 @@ def test_missing_site_audit_gate_fails():
     message = _run(_workflow(INSTALL))
     assert message, "a workflow without the blocking audit must fail"
     assert "npm audit --audit-level=high" in message
+
+
+def test_isolated_build_tool_regressions_must_run():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    step = module.BUILD_TEST_STEP
+    for mutation in (
+        step.replace("python -I -B scripts/tests/test_build_tools.py", "echo skipped", 1),
+        step.replace("/node/bin/node", "/bin/node", 1),
+        step.replace('          VIVARY_TEST_TOOL_ROOT: ${{ runner.temp }}/vivary-build-tools\n', "", 1),
+    ):
+        assert mutation != step
+        message = _run(workflow.replace(step, mutation, 1))
+        assert message and "isolated build tool regressions" in message
+
+
+def test_build_tool_changes_select_the_site_job():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"grep -Eq \\\n\s+'([^']+)'", workflow)
+    assert match, "site input selection must remain explicit"
+    expression = re.compile(match[1])
+    for filename in ("scripts/bootstrap_build_tools.py", "scripts/build_go_tools.py",
+                     "scripts/check_site_dependencies.py", "site/package-lock.json"):
+        assert expression.search(filename), filename
+    assert not expression.search("packages/workbench/tests/chat-title.test.mjs")
 
 
 def test_site_audit_must_follow_install():
@@ -349,6 +622,60 @@ def test_dispatch_must_run_graph_review_gate():
     assert "workflow_dispatch" in message
 
 
+def test_workbench_jobs_must_wait_for_dispatch_validation():
+    for job in ("workbench", "workbench-maintained"):
+        workflow = _workflow(INSTALL + AUDIT).replace(
+            f"  {job}:\n    needs: changes\n",
+            f"  {job}:\n",
+            1,
+        )
+        message = _run(workflow)
+        assert message, f"the {job} job must wait for dispatch validation"
+        assert f"{job} job must wait" in message
+
+
+def test_maintained_workbench_checks_must_run_once_in_their_own_job():
+    workflow = _workflow(INSTALL + AUDIT)
+    step = (
+        "      - name: maintained workbench checks\n"
+        f"        run: {MAINTAINED_CHECKS_COMMAND}\n"
+    )
+    duplicated_in_tests = workflow.replace(
+        "      - name: diff hygiene\n",
+        step + "      - name: diff hygiene\n",
+        1,
+    )
+    in_workbench_job = workflow.replace(step, "").replace(
+        "\n  workbench-maintained:\n",
+        step + "\n  workbench-maintained:\n",
+        1,
+    )
+    skipped = workflow.replace(MAINTAINED_CHECKS_COMMAND, "echo skipped")
+    for variant in (duplicated_in_tests, in_workbench_job, skipped):
+        message = _run(variant)
+        assert message, "maintained checks must run once, in their own job"
+        assert MAINTAINED_CHECKS_COMMAND in message
+
+
+def test_hldd_gate_and_regressions_must_run():
+    workflow = _workflow(INSTALL + AUDIT)
+    for command in (
+        "python scripts/tests/test_hldd.py",
+        'python scripts/check_hldd.py --base "$BASE_SHA" --head "$HEAD_SHA"',
+    ):
+        message = _run(workflow.replace(command, "echo skipped", 1))
+        assert message and "HLDD" in message
+
+
+def test_hldd_must_use_the_actual_pr_head():
+    workflow = _workflow(INSTALL + AUDIT).replace(
+        "HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}",
+        "HEAD_SHA: ${{ github.sha }}",
+    )
+    message = _run(workflow)
+    assert message and "actual PR head" in message
+
+
 def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
     module = _load()
     text = _workflow(INSTALL + AUDIT)
@@ -361,8 +688,7 @@ def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
         assert message and expected in message, (name, message)
         unrelated = missing + '\n  unrelated:\n    steps:\n' + guard_step
         message = _run(unrelated)
-        # main also refuses any added job, which refuses an unrelated guard copy too.
-        assert message and (expected in message or "existing jobs" in message), (name, message)
+        assert message and expected in message, (name, message)
         for alteration in (
             guard_step.replace('        run:', '        if: false\n        run:'),
             guard_step.replace('        run:', '        continue-on-error: true\n        run:'),
@@ -379,7 +705,7 @@ def test_node_guard_must_run_in_each_owning_job_immediately_after_selection():
 def test_node_guard_cannot_follow_install_or_an_unguarded_direct_build():
     module = _load()
     text = _workflow(INSTALL + AUDIT)
-    block = module.job_block(text, 'test')
+    block = module.job_block(text, 'workbench')
     guard_step = '      - name: actual Node security admission\n        run: ' + module.NODE_GUARD + '\n'
     for command in ('npm install', 'pnpm install', 'agent-native build', 'astro build'):
         mutation = block.replace(guard_step, '      - run: ' + command + '\n' + guard_step, 1)
@@ -820,7 +1146,7 @@ def test_actual_workflow_requires_pip_runtime_admission():
     workflow = before.decode("utf-8")
     assert _run(workflow) is None, "actual admitted workflow must pass"
     job_block = _load().job_block
-    for name in ("test", "governed-platform-proof", "orientation-proof"):
+    for name in ("test", "workbench", "governed-platform-proof", "orientation-proof"):
         block = job_block(workflow, name)
         assert block.count(PIP_RUNTIME_STEP) == 1, name
         assert block.count(PIP_BOOTSTRAP_STEP) == 1, (name, "verified pip provisioning missing")
@@ -900,28 +1226,6 @@ def test_actual_workflow_binds_mcp_pip_interpreters_and_later_isolation():
         assert mutation != workflow, label
         message = _run(mutation)
         assert message and "pip" in message, (label, message)
-    assert REAL_WORKFLOW.read_bytes() == before
-
-
-def test_installed_mcp_proofs_require_the_admitted_sdk_identity_on_each_platform():
-    before = REAL_WORKFLOW.read_bytes()
-    workflow = before.decode("utf-8")
-    assert _run(workflow) is None
-    for name in ("test", "governed-platform-proof"):
-        block = _load().job_block(workflow, name)
-        expected = '          assert interop["sdk_version"] == "2.2.0"\n'
-        assert block.count(expected) == 1, name
-        for label, changed in {
-            "stale_doctor_sdk": block.replace(expected, expected.replace("2.2.0", "2.0.0"), 1),
-            "missing_doctor_sdk": block.replace(expected, "", 1),
-            "stale_sdk_module": block.replace('assert version("mcp") == "2.2.0"', 'assert version("mcp") == "2.0.0"', 1),
-            "stale_types_module": block.replace('assert version("mcp-types") == "2.2.0"', 'assert version("mcp-types") == "2.0.0"', 1),
-            "stale_dependency": block.replace('assert "mcp==2.2.0" in mcp_requirements', 'assert "mcp==2.0.0" in mcp_requirements', 1),
-            "doctor_assertion_outside_proof": block.replace(expected, "", 1) + expected,
-        }.items():
-            assert changed != block, (name, label)
-            message = _run(workflow.replace(block, changed, 1))
-            assert message and name in message and "MCP installed identity" in message, (name, label, message)
     assert REAL_WORKFLOW.read_bytes() == before
 
 
@@ -1116,6 +1420,12 @@ def test_python_provisioning_regressions_must_run():
     assert message and "verified Python provisioning regressions" in message
 
 
+def test_certificate_overlay_regressions_must_run():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    message = _run(workflow.replace("python -I -B scripts/tests/test_certifi_bundle.py", "echo skipped", 1))
+    assert message and "certificate overlay preservation regressions" in message
+
+
 def test_windows_python_bootstrap_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_ci_python_windows_bootstrap.py", "echo skipped", 1))
@@ -1198,7 +1508,7 @@ def test_linux_workbench_jobs_cannot_restore_unqualified_clients_or_compilers():
     module = _load()
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     module.check_workbench_build_tools(workflow)
-    for name in ("test",):
+    for name in ("workbench", "workbench-maintained"):
         block = module.job_block(workflow, name)
         tools, install, dependencies = module.WORKBENCH_TOOLS_STEP, module.WORKBENCH_INSTALL_STEP, module.WORKBENCH_DEPENDENCY_STEP
         mutations = {
@@ -1225,7 +1535,7 @@ def test_linux_workbench_jobs_cannot_restore_unqualified_clients_or_compilers():
                 raise AssertionError((name, label, "bypassed Workbench client/compiler admission"))
     for mutation in (
         workflow.replace(module.WORKBENCH_TYPECHECK, "          pnpm --dir packages/workbench typecheck\n", 1),
-        workflow.replace(module.WORKBENCH_TYPECHECK, '', 1),
+        workflow.replace('          pnpm --dir packages/workbench exec react-router typegen\n', '', 1),
     ):
         try:
             module.check_workbench_build_tools(mutation)
@@ -1235,13 +1545,43 @@ def test_linux_workbench_jobs_cannot_restore_unqualified_clients_or_compilers():
             raise AssertionError("unqualified TypeScript bypassed Workbench compiler admission")
 
 
+def test_windows_workbench_rejects_unqualified_clients_and_compilers():
+    module = _load()
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    block = module.job_block(workflow, "governed-platform-proof")
+    tools = module.WINDOWS_WORKBENCH_TOOLS_STEP
+    dependencies = module.WINDOWS_WORKBENCH_DEPENDENCY_STEP
+    install = module.WINDOWS_WORKBENCH_INSTALL_STEP
+    mutations = {
+        "missing_tools": block.replace(tools, "", 1),
+        "conditional_tools": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),
+        "ignored_tools": block.replace(tools, tools.replace("        shell:", "        continue-on-error: true\n        shell:"), 1),
+        "missing_exit_check": block.replace('          if ($LASTEXITCODE -ne 0) { throw "compiler provisioning failed" }\n', "", 1),
+        "unrebuilt_compiler": block.replace(tools, tools.replace(" --typescript", ""), 1),
+        "late_tools": block.replace(tools + dependencies + install, dependencies + install + tools, 1),
+        "missing_admission": block.replace(dependencies, "", 1),
+        "cmd_metacharacter_expansion": block.replace(" --% --test", " --test", 1),
+        "global_client": block.replace(install, install + "      - run: npm install --global pnpm@10.33.2\n", 1),
+        "lifecycle_install": block.replace(install, install.replace(" --ignore-scripts", ""), 1),
+        "unfrozen_install": block.replace(install, install.replace(" --frozen-lockfile", ""), 1),
+        "unqualified_client": block.replace('"$env:RUNNER_TEMP/vivary-build-tools/bin/pnpm.cmd"', '"pnpm"', 1),
+        "wrong_platform_binary": block.replace("esbuild-0.28.2-go1.26.10.exe", "esbuild-0.28.2-go1.26.10", 1),
+    }
+    for label, mutation in mutations.items():
+        assert mutation != block, label
+        try:
+            module.check_workbench_build_tools(workflow.replace(block, mutation, 1))
+        except SystemExit as error:
+            assert "governed-platform-proof" in str(error), (label, error)
+        else:
+            raise AssertionError((label, "bypassed Windows client/compiler admission"))
 
 
 def test_release_pack_cannot_use_the_unqualified_image_client():
     module = _load()
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     block = module.job_block(workflow, "test")
-    tools = module.WORKBENCH_TOOLS_STEP
+    tools = module.TEST_CLIENTS_STEP
     mutations = {
         "missing_client_setup": block.replace(tools, "", 1),
         "conditional_client_setup": block.replace(tools, tools.replace("        shell:", "        if: false\n        shell:"), 1),

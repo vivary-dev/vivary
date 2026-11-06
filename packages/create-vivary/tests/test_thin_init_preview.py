@@ -24,6 +24,42 @@ class ThinInitPreviewTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.parent = Path(self.temporary.name).resolve()
 
+    def test_non_bmp_choice_round_trips_through_toml_and_doctor(self):
+        import tomllib
+        target = self.parent/'emoji-project'
+        choices = ({'id': 'capture', 'name': 'Capture 😀', 'path': 'notes/😀.md'},)
+        plan = cv.plan_thin_workspace(target, pattern_choices=choices)
+        config = next(row['content'] for row in plan['files']
+                      if row['path'] == '.vivary/workspace.toml')
+        self.assertEqual(
+            tomllib.loads(config)['workspace']['vivary']['pattern_outputs'][0]['name'],
+            'Capture 😀')
+        self.assertFalse(target.exists())
+        cv.scaffold_thin_workspace(target, pattern_choices=choices, repo_root=ROOT)
+        self.assertEqual(cv.workspace_pattern_state(target)['choices'], list(choices))
+        for field in ('name', 'path'):
+            bad = dict(choices[0])
+            bad[field] = 'bad\ud800' + ('.md' if field == 'path' else '')
+            with self.assertRaises(cv.ScaffoldError):
+                cv.plan_thin_workspace(self.parent/'surrogate', pattern_choices=(bad,))
+
+    def test_pattern_preview_allows_missing_parent_chain_without_writes(self):
+        target = self.parent/'not-yet'/'nested'/'project'
+        choices = ({'id': 'capture', 'name': 'Capture',
+                    'path': 'inbox/README.md'},)
+        plan = cv.plan_thin_workspace(target, pattern_choices=choices)
+        self.assertEqual(plan['pattern_choices'], list(choices))
+        self.assertFalse((self.parent/'not-yet').exists())
+
+    def test_typed_guidance_path_is_refused_before_init_writes(self):
+        target = self.parent/'typed-project'
+        choices = ({'id': 'capture', 'name': 'Capture',
+                    'path': 'projects/capture.md'},)
+        with self.assertRaisesRegex(cv.ScaffoldError, 'E101'):
+            cv.plan_thin_workspace(target, pattern_choices=choices)
+        self.assertFalse(target.exists())
+        self.assertEqual(list(self.parent.iterdir()), [])
+
     def test_preview_is_repeatable_and_does_not_create_absent_target(self):
         target = self.parent/'new-project'
         first = cv.plan_thin_workspace(target)
@@ -221,10 +257,10 @@ class ThinInitPreviewTests(unittest.TestCase):
         accepted = cv.plan_thin_workspace(target)['plan_sha256']
         render = cv._thin_context_doc
         calls = 0
-        def change_between_checks(project, preset):
+        def change_between_checks(project, preset, pattern_choices=()):
             nonlocal calls
             calls += 1
-            text = render(project, preset)
+            text = render(project, preset, pattern_choices)
             return text if calls == 1 else text + 'changed after approval\n'
         with mock.patch.object(cv, '_thin_context_doc', side_effect=change_between_checks):
             with self.assertRaisesRegex(cv.ScaffoldError, 'plan changed before writing'):
