@@ -10,10 +10,11 @@ The original `vivary-dev/vivary-cli` repository retains its release workflow and
 is a separate delivery target.
 
 - `dev` integrates reviewed work.
-- `main` is the default branch and receives reviewed promotions from `dev`.
-- Topic branches start from current `origin/dev`. Use `feat/`, `fix/`, `docs/`,
-  `chore/`, `refactor/`, `test/`, or `perf/` followed by a short purpose.
-- Open topic PRs into `dev`. Do not commit directly to `dev` or `main`.
+- `prod` is the default branch and receives reviewed promotions from `dev`.
+- Topic branches start from current `origin/dev`. An agent task uses
+  `task/<id>-<slug>`. Other work uses `feat/`, `fix/`, `docs/`, `chore/`,
+  `refactor/`, `test/`, or `perf/` followed by a short purpose.
+- Open topic PRs into `dev`. Do not commit directly to `dev` or `prod`.
 - Push reviewed source branches to GitHub (`origin`) and the Entire mirror
   (`entire`). Source mirroring does not establish agent-session capture.
 
@@ -49,11 +50,11 @@ On 2026-09-13, GitHub refused branch-protection configuration while this
 repository was private under the organization's Free plan. These rules remain
 contributor policy. On 2026-09-24, `dev` still had no branch protection.
 
-Dependabot reads configuration from `main`. Its version updates target `dev`
-once this configuration reaches `main`. GitHub security updates still target
-`main`, so review those changes and bring equivalent fixes into `dev` before
-promotion. Do not merge a security update that leaves the integration branch
-unfixed. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
+Dependabot reads configuration from `prod`. Its version updates target `dev`
+once this configuration reaches `prod`. GitHub security updates still target
+`prod`, and the promotion guard refuses them, because `prod` changes only by a
+promotion from `dev`. Make the equivalent fix in `dev`, close the Dependabot PR
+with a link to it, and let the next promotion carry it to `prod`. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
 
 Dependency-only Dependabot commits pass the HLDD gate without a design update,
 so the dependency review before merge is the gate that catches a bad update.
