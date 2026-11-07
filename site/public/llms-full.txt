@@ -8262,6 +8262,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Remove Entire from the repository, part 1: delete the config,
+hooks and skill files (task 228, Jeff's yes). `.entire/settings.json`,
+`.claude/settings.json` and `.codex/hooks.json` held nothing but Entire's
+own config and session/tool hooks (every hook in both settings files
+called `entire hooks ...`, guarded by a `command -v entire` check, and
+nothing else); deleted all three, the four Entire skill files
+(`.claude/skills/entire`, `.claude/skills/entire-search`,
+`.agents/skills/entire-search`, `.codex/agents/entire.toml`),
+`docs/ENTIRE.md` (no site-mirror page existed for it), and the
+`.gitignore` carve-out that existed only to share
+`.entire/settings.json`. No application code, route, or persisted state
+changed; nothing here reads or writes those deleted files. The Entire
+GitHub App stays installed, unchanged and out of scope. Part 2 of this
+change follows in the next commit.
+
 2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
 to 7.4.2, and its scoped overrides now follow that version instead of the
 obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
