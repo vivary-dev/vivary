@@ -8262,6 +8262,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Branch id decided: GitHub issue number, agent work only. Jeff
+decided (via the CEO) that in `task/<id>-<slug>`, `<id>` is the GitHub issue
+number this agent work resolves, not an OpenBot `tasks` row. `AGENTS.md`'s
+"Delivery and authority" section and its `## Git` section both now say
+`task/<issue>-<slug>`, naming the issue, and both now state explicitly that
+this naming is for agent work only: people keep `feat/`, `fix/`, `docs/`,
+`chore/` and the other typed prefixes, and Dependabot keeps its own branch
+names. `CONTRIBUTING.md`'s topic-branch bullet says the same. This removes
+the task-ownership contradiction between AGENTS.md (which pointed at an
+OpenBot tasks row) and CONTRIBUTING.md's "Find the implementation owner"
+section (which already said GitHub issues own task goals and lifecycle);
+they now agree. No architecture, component, or trust-boundary change.
+
+2026-11-07 PR #324 review follow-up: accurate promotion-guard wording and a stale `main` reference. CONTRIBUTING.md's Dependabot paragraph said the promotion guard "refuses" a security PR into `prod`; `promotion-source` is not a required status check there yet (Jeff has not added branch protection requiring it), so the paragraph now says the check fails and a maintainer must still refuse the merge manually, same decided policy (fix in `dev`, close the Dependabot PR with a link, let the promotion carry it) just accurately worded. A separate, unrelated leftover sentence still read "Promotion to `main`" from before the rename; it now reads `prod`, matching every other place this same follow-up commit touches. It doesn't claim every `main` reference in this file is gone: CONTRIBUTING.md's required-review-gate paragraph still names `main` as the base-with-no-script fallback, and other `main` mentions remain outside this PR's own scope (the ci.yml triggers and the Git-law text). #333 owns that repo-wide sweep under the agreed split. No branch protection setting changed, no architecture, component or trust-boundary change.
+
+2026-11-07 PR #324's own ci.yml trigger correction. This PR's "Git law" commit wrote `.github/workflows/ci.yml`'s push trigger as `[dev, main, prod]`, keeping the stale `main` entry. #333 separately confirmed by `git ls-remote` and the GitHub API that no `main` branch remains and `prod` is the sole default, and owns removing `main` everywhere else. This commit makes 324's own trigger list consistent with that same fact ahead of #333 landing: `branches: [dev, prod]`. No architecture, component, or trust-boundary change; the promotion-guard workflow and the rest of the Git-law documentation added earlier in this PR are unchanged.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or
@@ -8273,6 +8290,24 @@ that the page read back from the DOM. The atlas link base is now a fixed value.
 Both pages stay generated, read-only documentation with no server, so the
 description of the specification reader still holds. No runtime or product
 boundary changed.
+
+2026-11-03 Git law in AGENTS.md, promotion guard and `prod` CI triggers.
+`AGENTS.md` now names the `task/<id>-<slug>` branch rule and ends with a Git
+section that states Jeff's Git law (`prod` is the default and finished branch,
+work lands in `dev`, `prod` changes only by a promotion PR). A new workflow,
+`.github/workflows/promotion-guard.yml`, runs one job, `promotion-source`, on
+pull requests into `prod`. It has `permissions: {}`, checks out
+nothing, and fails unless the head is this repository's `dev`. `ci.yml` adds
+`prod` beside `main` in its triggers, because the default branch is now `prod`
+and a trigger naming only `main` would no longer run. `CONTRIBUTING.md` now
+names `prod`, the `task/<id>-<slug>` branches, and the route for a security
+update that targets `prod`. This document
+describes no branch model, and no component, flow, persisted state or trust
+boundary changes, so the description above still holds. Evidence: the diff
+touches `AGENTS.md`, `CONTRIBUTING.md`, the two workflows, this file and its
+two generated mirrors, and the same guard failed a
+throwaway pull request from a non-`dev` branch in Jeff-Kazzee/ps5-agent-remote
+(run 41661854747).
 
 2026-11-03 Discord presence reload order, isolation and settings fixes. The
 desktop controller numbers each settings reload before it reads the file and

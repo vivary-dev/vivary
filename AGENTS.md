@@ -7,8 +7,8 @@ Jeff selected this complete new repository on 2026-09-13. It was
 on 2026-09-24, and was renamed `vivary-dev/vivary` on 2026-09-30. The original
 CLI repository is `vivary-dev/vivary-cli`. His later branching correction
 selects typed topic
-branches from `dev`, PRs into `dev`, and reviewed promotion from `dev` to `main`.
-Do not commit directly to either long-lived branch. `main` is the default branch.
+branches from `dev`, PRs into `dev`, and reviewed promotion from `dev` to `prod`.
+Do not commit directly to either long-lived branch. `prod` is the default branch.
 The `origin` remote is that GitHub repository. The `entire` remote is its Entire
 mirror. Push reviewed source to both. Preserve the previous repositories and
 history. This supersedes the earlier Entire-only `feat/vivary-gui` restriction.
@@ -191,8 +191,12 @@ named dangerous failure. Select controls for that risk.
 
 ## Delivery and authority
 
-Follow [CONTRIBUTING.md](CONTRIBUTING.md). Branch from current `origin/dev`,
-use a typed topic branch, and open a PR into `dev`. Review and verify each
+Follow [CONTRIBUTING.md](CONTRIBUTING.md). Branch from current `origin/dev`.
+An agent working a GitHub issue names its branch `task/<issue>-<slug>`, after
+that issue's number; other work keeps the typed prefixes in
+[CONTRIBUTING.md](CONTRIBUTING.md#active-repository) (`feat/`, `fix/`,
+`docs/`, `chore/`, and the rest), and Dependabot keeps its own branch names.
+Open a PR into `dev`. Review and verify each
 increment before committing and pushing to GitHub and Entire.
 Never create draft PRs. Open PRs ready for review.
 Keep each PR within the size rule in [CONTRIBUTING.md](CONTRIBUTING.md#size).
@@ -251,3 +255,7 @@ Update durable docs when behavior, architecture, contracts, or lasting
 constraints change. Give each fact one owner and refresh generated views when
 their inputs change. Keep the existing handoff concise. Failed or unrun
 verification remains incomplete regardless of a policy change.
+
+## Git
+
+- Follow the Git law in Jeff's `~/AGENTS.md` (2026-11-03). `prod` is the default branch and the finished product. All work happens on `dev`. An agent working a GitHub issue branches `task/<issue>-<slug>` from `origin/dev`, naming that issue's number; other work keeps `feat/`, `fix/`, `docs/`, `chore/` and the other typed prefixes, and Dependabot keeps its own branch names. Open the PR into `dev`, never push or force-push `prod`, `main` or `dev`, and end every commit with `Task:`, `Agent:` and `Agent-Session:` trailers. `prod` changes only through a promotion PR from `dev`, and every merge waits for Jeff's approval.
