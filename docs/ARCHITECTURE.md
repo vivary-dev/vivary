@@ -748,6 +748,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Branch id decided: GitHub issue number, agent work only. Jeff
+decided (via the CEO) that in `task/<id>-<slug>`, `<id>` is the GitHub issue
+number this agent work resolves, not an OpenBot `tasks` row. `AGENTS.md`'s
+"Delivery and authority" section and its `## Git` section both now say
+`task/<issue>-<slug>`, naming the issue, and both now state explicitly that
+this naming is for agent work only: people keep `feat/`, `fix/`, `docs/`,
+`chore/` and the other typed prefixes, and Dependabot keeps its own branch
+names. `CONTRIBUTING.md`'s topic-branch bullet says the same. This removes
+the task-ownership contradiction between AGENTS.md (which pointed at an
+OpenBot tasks row) and CONTRIBUTING.md's "Find the implementation owner"
+section (which already said GitHub issues own task goals and lifecycle);
+they now agree. No architecture, component, or trust-boundary change.
+
 2026-11-07 PR #324 review follow-up: accurate promotion-guard wording and a stale `main` reference. CONTRIBUTING.md's Dependabot paragraph said the promotion guard "refuses" a security PR into `prod`; `promotion-source` is not a required status check there yet (Jeff has not added branch protection requiring it), so the paragraph now says the check fails and a maintainer must still refuse the merge manually, same decided policy (fix in `dev`, close the Dependabot PR with a link, let the promotion carry it) just accurately worded. A separate, unrelated leftover sentence still read "Promotion to `main`" from before the rename; it now reads `prod`, matching every other reference in this file. No branch protection setting changed, no architecture, component or trust-boundary change.
 
 2026-11-07 PR #324's own ci.yml trigger correction. This PR's "Git law" commit wrote `.github/workflows/ci.yml`'s push trigger as `[dev, main, prod]`, keeping the stale `main` entry. #333 separately confirmed by `git ls-remote` and the GitHub API that no `main` branch remains and `prod` is the sole default, and owns removing `main` everywhere else. This commit makes 324's own trigger list consistent with that same fact ahead of #333 landing: `branches: [dev, prod]`. No architecture, component, or trust-boundary change; the promotion-guard workflow and the rest of the Git-law documentation added earlier in this PR are unchanged.

@@ -11,9 +11,10 @@ is a separate delivery target.
 
 - `dev` integrates reviewed work.
 - `prod` is the default branch and receives reviewed promotions from `dev`.
-- Topic branches start from current `origin/dev`. An agent task uses
-  `task/<id>-<slug>`. Other work uses `feat/`, `fix/`, `docs/`, `chore/`,
-  `refactor/`, `test/`, or `perf/` followed by a short purpose.
+- Topic branches start from current `origin/dev`. An agent working a GitHub
+  issue names its branch `task/<issue>-<slug>`, after that issue's number.
+  Other work uses `feat/`, `fix/`, `docs/`, `chore/`, `refactor/`, `test/`, or
+  `perf/` followed by a short purpose. Dependabot keeps its own branch names.
 - Open topic PRs into `dev`. Do not commit directly to `dev` or `prod`.
 - Push reviewed source branches to GitHub (`origin`) and the Entire mirror
   (`entire`). Source mirroring does not establish agent-session capture.
