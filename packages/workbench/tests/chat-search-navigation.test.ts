@@ -21,7 +21,7 @@ test("Native match replay keeps the saved head for ancestors and selects a retai
 });
 
 test("saved match replay refuses execution even if a retry or edit bypasses the disabled composer", async () => {
-  const adapter = createHistoryReadAdapter({} as never);
+  const adapter = createHistoryReadAdapter();
   await assert.rejects(async () => {
     for await (const _ of adapter.run({} as never)) assert.fail("A read view emitted a model response");
   }, /Reading saved history/);

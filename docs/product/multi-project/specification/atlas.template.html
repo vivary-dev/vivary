@@ -1,4 +1,4 @@
-<div id="vivary-spec-atlas" data-doc-base="./">
+<div id="vivary-spec-atlas">
   <style>
     #vivary-spec-atlas .atlas-map{position:relative;margin:16px 0}
     #vivary-spec-atlas .atlas-nodes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:28px 18px;position:relative}
@@ -36,16 +36,15 @@
     </dl>
     <div class="viz-row"><a data-contract target="_blank" rel="noreferrer">Read module contract</a><a data-manual target="_blank" rel="noreferrer">Contributor operating manual</a></div>
   </div>
-  <script type="application/json" data-atlas-data>__VIVARY_SPEC_DATA__</script>
   <script>
   (()=>{
     const root=document.getElementById('vivary-spec-atlas');
-    const data=JSON.parse(root.querySelector('[data-atlas-data]').textContent);
+    const data=__VIVARY_SPEC_DATA__;
     const nodes=root.querySelector('.atlas-nodes');
     const svg=root.querySelector('.atlas-lines');
     const map=root.querySelector('.atlas-map');
     const select=root.querySelector('[data-action]');
-    const base=root.dataset.docBase;
+    const base='./';
     let selected='M04';
     const titleId=m=>m.id.toLowerCase()+'-'+m.name.toLowerCase().replace(/[^a-z0-9 ]/g,'').replaceAll(' ','-');
     for(const m of data.modules){
