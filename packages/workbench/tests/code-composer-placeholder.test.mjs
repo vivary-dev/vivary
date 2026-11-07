@@ -6,7 +6,7 @@ import test from "node:test";
 const source = await readFile(new URL("../app/components/workspace/CodeConversation.tsx", import.meta.url), "utf8");
 const expression = source.match(/composerDisabledPlaceholder=\{([^\n]+)\}/)?.[1];
 assert.ok(expression, "the Code composer exposes its disabled reason");
-const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", "otherModelAvailable", `return (${expression});`);
+const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", "otherModelAvailable", "pendingSwitch", `return (${expression});`);
 const props = { viewingMatch: false, state: {}, selection: {}, workspaceAvailable: true };
 
 test("review regression: unavailable models explain the refusal without claiming an active run", () => {
@@ -40,5 +40,7 @@ test("existing disabled reasons retain priority over unavailable models", () => 
   assert.match(evaluate({ ...props, workspaceAvailable: false }, true, false), /folder is unavailable/);
   assert.match(evaluate({ ...props, state: { pendingApproval: {} } }, true, false), /Review the pending request/);
   assert.match(evaluate(props, false, false), /Connect a runtime/);
+  assert.match(evaluate(props, true, true, undefined, false, { engine: "codex-cli", model: "gpt-fixture" }),
+    /Resolve the runtime or model choice/);
   assert.match(evaluate(props, true, true), /agent is working/);
 });

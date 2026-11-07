@@ -53,3 +53,46 @@ for (const position of [0, 1, 2]) test(`hidden Code event at position ${position
   assert.equal(JSON.stringify(events), before);
   assert.deepEqual(builder(events), original, "replay must not change the normal builder's repository");
 });
+
+test("a runtime switch note renders as its own divider row between the turns it separates", () => {
+  const event = (id, kind, message, metadata) => ({ schemaVersion: 1, id, runId: "saved-run", kind, message,
+    createdAt: "2026-01-01T00:00:00.000Z", ...(metadata ? { metadata } : {}) });
+  const note = "Switched from Claude Code Sonnet 5.5 to Codex GPT_6 *Astra*. The next message starts a new Codex session.";
+  const events = [event("first", "user", "Earlier turn"),
+    event("reply", "system", "Earlier reply", { role: "assistant" }),
+    event("switch", "note", note, { source: "vivary-runtime-switch", from: { engine: "claude-cli", model: "claude-sonnet-5-5" },
+      to: { engine: "codex-cli", model: "gpt-6-astra" }, switchedAt: "2026-01-01T00:00:00.000Z" }),
+    event("second", "user", "Later turn")];
+  const before = JSON.stringify(events);
+  // Core alone folds the note into the reply before it.
+  const folded = builder(events);
+  assert.match(JSON.stringify(folded.messages[1].message.content), /Earlier reply[\s\S]*Switched from/);
+  const repository = codeMatchRepository(events);
+  const ids = repository.messages.map(entry => entry.message.id);
+  assert.equal(ids.length, 4);
+  assert.equal(ids[2], "code-switch-switch");
+  assert.deepEqual(repository.messages.map(entry => entry.parentId), [null, ...ids.slice(0, -1)]);
+  assert.equal(repository.headId, ids.at(-1));
+  assert.doesNotMatch(JSON.stringify(repository.messages[1].message.content), /Switched from/, "the reply keeps only its own text");
+  const divider = repository.messages[2].message;
+  assert.equal(divider.role, "assistant");
+  assert.equal(divider.content[0].text,
+    "---\n\n*Switched from Claude Code Sonnet 5.5 to Codex GPT\\_6 \\*Astra\\*. The next message starts a new Codex session.*");
+  // A search hit on the switch opens that row. It is not added twice.
+  assert.equal(codeMatchMessageId(repository, "switch"), "code-switch-switch");
+  assert.deepEqual(codeMatchRepository(events, "switch"), repository);
+  assert.equal(JSON.stringify(events), before);
+});
+
+test("a switch after the last turn becomes the head row", () => {
+  const event = (id, kind, message, metadata) => ({ schemaVersion: 1, id, runId: "saved-run", kind, message,
+    createdAt: "2026-01-01T00:00:00.000Z", ...(metadata ? { metadata } : {}) });
+  const events = [event("first", "user", "Only turn"), event("reply", "system", "Only reply", { role: "assistant" }),
+    event("switch", "note", "Switched.", { source: "vivary-runtime-switch" })];
+  const repository = codeMatchRepository(events);
+  assert.deepEqual(repository.messages.map(entry => entry.message.id).slice(-1), ["code-switch-switch"]);
+  assert.equal(repository.headId, "code-switch-switch");
+  // Other notes, such as the project context load, keep Core's rows.
+  const other = [events[0], events[1], event("context", "note", "Project context loaded.", { source: "vivary-project-context" })];
+  assert.deepEqual(codeMatchRepository(other), builder(other));
+});
