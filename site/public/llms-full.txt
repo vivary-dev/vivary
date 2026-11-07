@@ -8262,6 +8262,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #337 fix round 2, part 1: defer guide.html's regeneration
+(the Reviewer's diff-size cap). The independent review tool refuses a
+diff over 2,097,152 bytes; guide.html's generated JSON blob has very
+long lines, so even the prior round's one-phrase hand edit pushed the
+whole PR diff past that cap. Reverted guide.html to dev's unmodified
+version in this commit (no history rewrite of the prior commits); it
+keeps dev's old "matching GitHub/Entire refs" text for now.
+operating-manual.md's own text is unchanged and still says "matching
+GitHub refs", so the source of truth is already correct; only its
+generated mirror is temporarily stale. Task 231 (tracked separately)
+regenerates guide.html from the corrected operating-manual.md once the
+generator's own pre-existing, unrelated mermaid-diagram staleness
+(reported in fix round 1) is fixed by someone running an authoring
+session with network access, Playwright and Chromium. No application
+code, route, or persisted state changed.
+
 2026-11-07 PR #337 fix round, part 2: reword the last live Entire
 reference (QA's finding 2). operating-manual.md's Delivery line said
 Zo CI must check "matching GitHub/Entire refs"; this was the only
