@@ -752,6 +752,13 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Chat draft composer rules named. `chat-draft.ts` now exports
+`composerTextForDraft` and `acceptComposerEdit`, the text the shared composer is
+given and the rule that records a composer edit, so a test can drive them. Both
+keep their earlier behavior, and the Native draft owner, its save path and the
+composer contract are unchanged, so the description here still holds. A new
+regression case shows text deleted before the first draft save being saved.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or

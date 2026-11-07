@@ -23,7 +23,7 @@ const { assertChatDraftThread, changeChatDraft, changeIndexedChatDraft, chatDraf
   reconcileChatDraft, savedThreadHasSubmit } = await import("../server/chat-draft.ts");
 const { draftObservation, applyReconciledDraft, drainDraftChanges, draftNeedsCloseAttention, acceptLoadedDraft,
   flushChatDraftsForClose, registerSelectionCloseFlush, trackSelectionWrite,
-  needsUnmountedDraftRecovery, settleDraftForLink } = await import("../app/lib/chat-draft.ts");
+  needsUnmountedDraftRecovery, settleDraftForLink, composerTextForDraft, acceptComposerEdit } = await import("../app/lib/chat-draft.ts");
 const owner = "owner@example.test";
 const orgId = "org1";
 const identity = createVivaryChatIdentity(owner, orgId, { kind: "project", projectId: "p1", label: "P" });
@@ -193,6 +193,26 @@ test("concurrent flush requests drain each draft edit once", async () => {
   assert.deepEqual(writes, [{ expected: "r0", text: "A" }, { expected: "r1", text: "B" }]);
   assert.equal(current.record.text, "B");
   assert.equal(current.saving, null);
+});
+
+test("text deleted before the first draft save is not saved", async () => {
+  // PR #328 review. A conversation with no saved draft, or a cleared one, had its deleted text saved and restored.
+  for (const record of [null, { revision: "r0", text: "", status: "cleared", submitId: null }]) {
+    const label = record?.status ?? "no saved draft";
+    const current = { loaded: true, record, text: "", reset: 0, saving: null, timer: null, generation: 0, error: null,
+      conflict: false, discarding: false, discardPromise: null, discardFailed: false };
+    // Native's patched composer skips a change equal to the host's text for the thread, then reports the rest.
+    const type = text => text !== composerTextForDraft(current) && acceptComposerEdit(current, text);
+    assert.equal(type("Remove this before it saves"), true, `${label}: typing`);
+    assert.equal(type(""), true, `${label}: the deletion did not reach the draft`);
+    const writes = [];
+    await drainDraftChanges(current, async (expected, next) => {
+      writes.push(next);
+      current.record = { ...next, revision: `r${writes.length}` };
+    }, () => undefined);
+    assert.deepEqual(writes, [], `${label}: the deleted text was saved`);
+    assert.equal(draftNeedsCloseAttention(current), false, `${label}: close still waits for a save`);
+  }
 });
 
 test("a verified saved reload resolves a failed discard before close", () => {
