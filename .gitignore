@@ -37,25 +37,6 @@ sandboxes/*
 !packages/strato/.claude/skills/active-context/
 !packages/strato/.claude/skills/active-context/**
 
-# Tracked source under .claude/ (every skill, not just verify) stays
-# visible even if a global ignore hides .claude/. Anchored to the repo
-# root (leading /) so this cannot affect any other .claude/ directory
-# (for example packages/strato/.claude/ above, or a nested
-# packages/*/.claude/). No blanket /.claude/* or /.claude/skills/*
-# ignore: that hid new source in every other tracked skill
-# (discussion_r4504090672), not just unreviewed verify features. The
-# repo's own __pycache__/ and *.pyc rules, above, are earlier in this
-# file, so the recursive re-include below would otherwise undo them for
-# anything under .claude/; re-assert local-only exclusions here, after
-# the re-include, scoped to .claude/ so nothing here duplicates those
-# repo-wide rules.
-!/.claude/
-!/.claude/skills/
-!/.claude/skills/**
-/.claude/**/settings.local.json
-/.claude/**/__pycache__/
-/.claude/**/*.pyc
-
 # Local drafts
 drafts/
 .release/private/

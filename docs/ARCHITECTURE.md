@@ -748,6 +748,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 7, the last one on ignores: subtract
+instead of patching another edge case (discussion_r4504210433). The
+fix round 6 re-include (`!/.claude/`, `!/.claude/skills/**`) still
+exposed `.DS_Store`, `.pytest_cache` and `node_modules` inside skill
+directories, reproduced with the Reviewer's own `junk_ignore_probe.py`;
+each targeted fix has found a new edge, so `.gitignore` is reverted to
+dev's exact byte content, with no `.claude` re-include or re-ignore of
+any kind. `key.py`'s existing `check_feature_files_tracked`, unchanged
+since fix round 5, is the actual protection: it reads `git ls-files`,
+which is independent of `.gitignore` or any global ignore rule, so a
+mapped feature file hidden from `git add` by a contributor's personal
+`core.excludesFile` still makes key.py refuse loudly (untracked), never
+pass silently. This answers discussion_r4503940604 without touching
+`.gitignore` at all. `GitignoreTests` (7 tests asserting repo ignore
+behaviour, added in fix rounds 5 and 6) are removed; a new
+`test_feature_file_hidden_by_global_exclude_is_refused` reproduces the
+original scenario (a global `core.excludesFile` hiding a new feature
+file) and confirms key.py refuses it with no repo `.gitignore` entry
+involved. No application code, route, or persisted state changed.
+
 2026-11-07 PR #336 fix round 6: stop blanket-ignoring /.claude/* and
 /.claude/skills/*, re-ignore only the specific local files
 (discussion_r4504090672). The previous fix round's `/.claude/*` and
