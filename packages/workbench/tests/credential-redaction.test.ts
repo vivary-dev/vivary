@@ -138,6 +138,69 @@ test("the secret store and legacy credential settings are read from the database
   await refreshHeldCredentials(noSources);
 });
 
+// PR #328 review. A read that fails part way must not drop a value the redactor already holds.
+const fromDatabase = { ...defaultCredentialSources, environment: () => ({}), mcpConfig: () => null };
+
+test("a stored secret that cannot be read stays redacted, and the failed read is logged", async t => {
+  const { writeAppSecret, deleteAppSecret } = await import("@agent-native/core/secrets");
+  const { getDbExec } = await import("@agent-native/core/db");
+  const owner = { scope: "user", scopeId: "unreadable@example.test" } as const;
+  const [kept, added] = [synthetic(44), synthetic(44)];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  try {
+    await writeAppSecret({ ...owner, key: "KEPT_API_KEY", value: kept });
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(kept), "[redacted KEPT_API_KEY]", "before the failed read");
+    // The row stays listed but no longer decrypts, as after a key change or a damaged write.
+    await getDbExec().execute({
+      sql: "UPDATE app_secrets SET encrypted_value = ?, shared_encrypted_value = NULL WHERE scope = ? AND scope_id = ? AND key = ?",
+      args: ["not-a-ciphertext", owner.scope, owner.scopeId, "KEPT_API_KEY"],
+    });
+    await writeAppSecret({ ...owner, key: "ADDED_API_KEY", value: added });
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${kept} ${added}`), "[redacted KEPT_API_KEY] [redacted ADDED_API_KEY]", "after the failed read");
+    assert.equal(warnings.length, 1, "the failed read was not logged");
+    assertMatch(warnings[0], /could not read 1 stored secret\./);
+    assertHidden(warnings.join("\n"), [kept, added], "warning");
+  } finally {
+    // A row that never decrypts would keep every later read incomplete.
+    await deleteAppSecret({ ...owner, key: "KEPT_API_KEY" });
+    await deleteAppSecret({ ...owner, key: "ADDED_API_KEY" });
+    await refreshHeldCredentials(noSources);
+  }
+});
+
+test("a secret store or settings table that cannot be listed keeps the last stored set", async t => {
+  const { writeAppSecret, deleteAppSecret } = await import("@agent-native/core/secrets");
+  const { putSetting } = await import("@agent-native/core/settings");
+  const { getDbExec } = await import("@agent-native/core/db");
+  const db = getDbExec();
+  const [secret, legacy] = [synthetic(44), synthetic(40)];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  await writeAppSecret({ key: "LISTED_API_KEY", value: secret, scope: "user", scopeId: "listed@example.test" });
+  await putSetting("u:listed@example.test:credential:LISTED_TOKEN", { value: legacy });
+  try {
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${secret} ${legacy}`), "[redacted LISTED_API_KEY] [redacted LISTED_TOKEN]", "before");
+    for (const [table, reason] of [["app_secrets", /could not read the secret store\./], ["settings", /could not read the legacy credential settings\./]] as const) {
+      await db.execute({ sql: `ALTER TABLE ${table} RENAME TO ${table}_unlisted`, args: [] });
+      try {
+        await refreshHeldCredentials(fromDatabase);
+      } finally {
+        await db.execute({ sql: `ALTER TABLE ${table}_unlisted RENAME TO ${table}`, args: [] });
+      }
+      assertText(redactCredentials(`${secret} ${legacy}`), "[redacted LISTED_API_KEY] [redacted LISTED_TOKEN]", `without ${table}`);
+      assertMatch(warnings.at(-1) ?? "", reason, `${table} warning`);
+    }
+    assertHidden(warnings.join("\n"), [secret, legacy], "warning");
+  } finally {
+    await deleteAppSecret({ key: "LISTED_API_KEY", scope: "user", scopeId: "listed@example.test" });
+    await refreshHeldCredentials(noSources);
+  }
+});
+
 test("an automation webhook token is a stored secret, so a webhook URL is redacted", async () => {
   const { realpath } = await import("node:fs/promises");
   const coreRoot = await realpath(new URL("../node_modules/@agent-native/core", import.meta.url));
