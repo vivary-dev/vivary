@@ -29,15 +29,21 @@ or a Codex review of the exact head runs, fails when the review failed, covers a
 or base, or lacks a thread for a finding, and fails on any unresolved review thread,
 outdated ones included. It is not a security boundary: a pull request can edit its own
 workflow, and the allowed publisher is the owner's account. The reviewer therefore adds a
-finding whenever CI, agent or instruction files change. A finding on a gate-controlling
-file opens a mandatory owner-review thread; only Jeff resolves an owner thread, so the
-gate blocks on it until he does. Never post or edit a review result by hand. Before merging: run
-`vivary-independent-review --pr N` after the final push, publish a fix or an evidence-backed
-rejection for every finding, resolve each thread only after its disposition is verified,
-then re-run the check, because no event re-runs it when a thread is resolved. A
-High-risk change also waits in the review-gate's ask lane for Jeff's decision
-before anyone merges. An agent can add technical review but never
-records a human approval. Zo is the standing owner-approved CI host. Run the
+finding whenever CI, agent or instruction files change. Never post or edit a review
+result by hand. Before merging: run `vivary-independent-review --pr N` after the final
+push, publish a fix or an evidence-backed rejection for every finding, resolve each
+thread only after its disposition is verified, then re-run the check, because no event
+re-runs it when a thread is resolved.
+
+What the required check actually enforces: an allowed publisher's completed result for
+the exact head and base, and every review thread marked resolved (`isResolved`).
+Nothing more; it does not read who resolved a thread. Owner review beyond that is team
+policy, not a GitHub-enforced control: by policy, only Jeff resolves a thread on a
+gate-controlling finding, and a High-risk change waits in the review-gate skill's ask
+lane for his decision (`agent-git land` refuses without it); neither is carried out by
+this required check. Branch protection itself requires zero approving reviews on `dev`
+and `prod`. An agent can add technical review but never records a human approval. Zo is
+the standing owner-approved CI host. Run the
 applicable workflow commands and gates on Zo against the exact PR commit. GitHub
 Actions billing or runner failures do not block this verification path. Record
 executed checks, omissions, logs, and review evidence as Zo CI. Keep GitHub service

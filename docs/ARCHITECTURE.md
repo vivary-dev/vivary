@@ -748,6 +748,29 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #337 fix round 3: separate what the required review gate
+enforces from team policy (discussion_r4504114054). The prior fix
+round's "only Jeff resolves an owner thread, so the gate blocks on it
+until he does" and "a High-risk change also waits in the review-
+gate's ask lane" read as mechanical guarantees, but
+`scripts/check_review_gate.py`'s `unresolved_threads` only reads
+`isResolved`; it never fetches who resolved a thread, and the installed
+review-gate skill's own policy has every agent posting as
+`Jeff-Kazzee`, the same identity `REVIEW_PUBLISHERS` already trusts, so
+a resolver check would not distinguish an agent from the owner either.
+CONTRIBUTING.md now states plainly what the required check actually
+enforces (an allowed publisher's completed result for the exact head
+and base, and every thread's `isResolved` state, nothing about who
+resolved it), and names owner review of gate-controlling and High-risk
+findings as team policy carried out through the external review-gate
+skill and `agent-git land`, not by this required check. Branch
+protection requiring zero approving reviews on `dev` and `prod` is
+restated for the same reason. `scripts/check_review_gate.py`'s comment
+was reviewed and left unchanged: Jeff's own disposition on
+discussion_r4504120060 found it already states the policy without
+claiming the script enforces resolver identity. No code or branch-
+protection change; wording only.
+
 2026-11-07 PR #337 fix round 2, part 1: defer guide.html's regeneration
 (the Reviewer's diff-size cap). The independent review tool refuses a
 diff over 2,097,152 bytes; guide.html's generated JSON blob has very
