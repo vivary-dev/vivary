@@ -11,6 +11,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 KEY_PY = HERE / "key.py"
 KEY_PATH = ".claude/skills/verify/acceptance.md"
+FEATURES_README_PATH = ".claude/skills/verify/features/README.md"
+FEATURE_FILE_PATH = ".claude/skills/verify/features/demo-feature.md"
 
 
 def run(cmd, cwd, env=None, check=True):
@@ -32,6 +34,16 @@ def init_origin_with_key(origin_dir, content):
     key_file = origin_dir / KEY_PATH
     key_file.parent.mkdir(parents=True, exist_ok=True)
     key_file.write_text(content)
+    readme_file = origin_dir / FEATURES_README_PATH
+    readme_file.parent.mkdir(parents=True, exist_ok=True)
+    readme_file.write_text(
+        "# Workbench feature map\n\n"
+        "| Feature | Journey |\n"
+        "| --- | --- |\n"
+        "| [Demo feature](demo-feature.md) | A single synthetic journey |\n"
+    )
+    feature_file = origin_dir / FEATURE_FILE_PATH
+    feature_file.write_text("# Demo feature\n\nSynthetic journey for key.py tests.\n")
     git(["add", "-A"], origin_dir)
     git(["commit", "--quiet", "-m", "key"], origin_dir)
 
@@ -137,6 +149,25 @@ class KeyPyTests(unittest.TestCase):
         allowed_temp.mkdir()
         evidence = allowed_temp / "vivary-proof-case"
         result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(allowed_temp)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_feature_file_missing_from_map_is_refused(self):
+        """discussion_r4503940604: a global .claude/ ignore rule can hide a
+        new verify feature file from git status, so it never gets tracked.
+        key.py must fail closed if features/README.md maps a file that the
+        candidate does not actually have tracked, not silently admit it."""
+        candidate = self.make_candidate(narrow_refspec=False)
+        git(["rm", "--quiet", FEATURE_FILE_PATH], candidate)
+        git(["commit", "--quiet", "-m", "drop the feature file, keep the map"], candidate)
+        evidence = self.tmp_evidence_dir()
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("demo-feature.md", (result.stdout + result.stderr))
+
+    def test_feature_file_present_and_tracked_is_accepted(self):
+        candidate = self.make_candidate(narrow_refspec=False)
+        evidence = self.tmp_evidence_dir()
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def tmp_evidence_dir(self):

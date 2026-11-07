@@ -37,6 +37,12 @@ sandboxes/*
 !packages/strato/.claude/skills/active-context/
 !packages/strato/.claude/skills/active-context/**
 
+# The verify skill's features are source files even if a global ignore hides .claude/
+!.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/verify/**
+
 # Local drafts
 drafts/
 .release/private/

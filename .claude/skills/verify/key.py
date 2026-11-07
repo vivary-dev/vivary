@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,22 @@ import tempfile
 
 def git(*args):
     return subprocess.check_output(['git', *args], stderr=subprocess.PIPE)
+
+
+def check_feature_files_tracked(root):
+    base = '.claude/skills/verify/features'
+    readme = (root / base / 'README.md').read_text()
+    tracked = set(git('ls-files', base).decode().splitlines())
+    missing = [
+        f'{base}/{rel}'
+        for _name, rel in re.findall(r'\[([^\]]+)\]\(([^)]+\.md)\)', readme)
+        if f'{base}/{rel}' not in tracked
+    ]
+    if missing:
+        raise ValueError(
+            'Feature file(s) mapped in features/README.md are not tracked: '
+            + ', '.join(missing)
+        )
 
 
 def main():
@@ -37,6 +54,7 @@ def main():
             raise ValueError('Candidate answer key differs from origin/dev')
         if git('status', '--porcelain', '--untracked-files=all').strip():
             raise ValueError('Candidate checkout has uncommitted files')
+        check_feature_files_tracked(root)
         (evidence / 'acceptance.md').write_bytes(trusted)
         receipt = {'candidate': candidate, 'origin_dev': upstream,
                    'key_sha256': hashlib.sha256(trusted).hexdigest()}

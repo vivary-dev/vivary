@@ -752,6 +752,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 3, part 2: re-include verify features past a
+global .claude/ ignore, fail closed if one goes untracked
+(discussion_r4503940604). A global `~/.gitignore_global`-style `.claude/`
+rule, already known to this repository (see the existing Strato block),
+was never applied to the root `.claude/skills/verify/` this PR adds;
+reproduced independently with `probe_ignore.py`: a new feature file under
+it stayed invisible to `git status --porcelain --untracked-files=all` and
+so to key.py's own uncommitted-files check. `.gitignore` now re-includes
+`.claude/skills/verify/` the same way as the Strato block
+(`!.claude/`, `.claude/*`, `!.claude/skills/`, `!.claude/skills/verify/**`),
+re-probed clean on this head. As a second, independent layer, `key.py`
+now reads `features/README.md`'s own feature-to-file table and fails
+closed if any mapped file isn't tracked by git, so a maintainer's
+personal ignore settings can no longer let an unreviewed feature file
+slip through even if some other local misconfiguration still hides it.
+New tests in `test_key.py`
+(`test_feature_file_missing_from_map_is_refused`,
+`test_feature_file_present_and_tracked_is_accepted`) cover both sides.
+No application code, route, or persisted state changed.
+
 2026-11-07 PR #336 fix round 3, part 1: export verification evidence before
 sandbox deletion (discussion_r4503861532). SKILL.md required deleting the
 Daytona sandbox on both success and failure, but the evidence folder and
