@@ -8262,6 +8262,28 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 6: stop blanket-ignoring /.claude/* and
+/.claude/skills/*, re-ignore only the specific local files
+(discussion_r4504090672). The previous fix round's `/.claude/*` and
+`/.claude/skills/*` lines re-ignored every direct child of `.claude/`
+and of `.claude/skills/` except the ones explicitly re-included, for
+every contributor, no global ignore rule required; that silently
+hid a new file in any OTHER already-tracked skill (reproduced with the
+Reviewer's own `other_skill_probe.py` against `.claude/skills/
+maintain-hldd/`), the exact class of bug this whole fix line set out to
+prevent, now spread beyond verify. `.gitignore` no longer blanket-
+ignores anything under `.claude/`; it only re-includes `/.claude/` and
+`/.claude/skills/**` recursively, then re-ignores the three genuinely
+local things (`**/settings.local.json`, `**/__pycache__/`, `**/*.pyc`)
+scoped under `.claude/` specifically, placed after the re-include since
+git's existing top-of-file `__pycache__/`/`*.pyc` rules sit earlier in
+the file and would otherwise be overridden for anything under
+`.claude/` by the later, broader re-include. Two new `GitignoreTests`
+cover a new file in `maintain-hldd` staying visible with no global rule
+at all, and both tracked skills staying visible even under a global
+`.claude/` exclude; full suite is now 14/14. No application code,
+route, or persisted state changed.
+
 2026-11-07 PR #336 fix round 5, part 2: narrow the verify .gitignore
 re-inclusion to the exact tracked file set (discussion_r4504017192).
 The previous fix round's broad, unanchored `!.claude/` / `.claude/*` /

@@ -236,6 +236,30 @@ class GitignoreTests(unittest.TestCase):
         packages/probe/.claude/) keeps its own local settings hidden."""
         self.assertTrue(self.is_ignored("packages/probe/.claude/settings.local.json"))
 
+    def test_new_file_in_other_tracked_skill_stays_visible(self):
+        """discussion_r4504090672: the fix must not blanket-ignore
+        .claude/ or .claude/skills/ themselves. A new, not-yet-tracked
+        file in an existing tracked skill that isn't verify (here,
+        maintain-hldd, adapted from the Reviewer's own
+        other_skill_probe.py) must stay visible too, with no global
+        ignore rule involved at all."""
+        full = self.repo / ".claude/skills/maintain-hldd/SKILL.md"
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("# Existing tracked skill fixture\n")
+        git(["add", "-f", ".claude/skills/maintain-hldd/SKILL.md"], self.repo)
+        self.assertFalse(self.is_ignored(".claude/skills/maintain-hldd/new-helper.py"))
+
+    def test_global_exclude_still_shows_every_tracked_skill(self):
+        """The global-.claude/-exclude case (the original r4503940604
+        scenario) must keep showing new source in every tracked skill,
+        not only verify."""
+        self.assertFalse(self.is_ignored(".claude/skills/verify/features/another-new-feature.md"))
+        full = self.repo / ".claude/skills/maintain-hldd/SKILL.md"
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("# Existing tracked skill fixture\n")
+        git(["add", "-f", ".claude/skills/maintain-hldd/SKILL.md"], self.repo)
+        self.assertFalse(self.is_ignored(".claude/skills/maintain-hldd/another-new-helper.py"))
+
 
 if __name__ == "__main__":
     unittest.main()
