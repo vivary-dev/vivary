@@ -68,11 +68,13 @@ content scan. The run keeps these files:
 A manual run (`workflow_dispatch`) or a push to a branch named
 `release-dry-run/<name>` is a dry run. It keeps the files as a workflow artifact
 and creates no tag or release. GitHub starts a manual run only for a workflow on
-the default branch, so until this workflow is on `main`, push a dry-run branch
-instead. A pushed `v<version>` tag that matches
+the default branch. The workflow is on `prod` after promotion #328, so manual
+dry runs are available there; a dry-run branch remains an alternative. A pushed
+`v<version>` tag that matches
 `packages/desktop/package.json`, such as `v0.1.0-beta.1`, also creates a draft
 prerelease with Latest off and attaches the same files. Only the owner pushes the
-tag and publishes the draft. `scripts/check_ci_workflow.py` checks the admission
+tag and publishes the draft. Push the tag on `prod`, after the `dev` to `prod`
+promotion merges, so every release is built from the release branch. `scripts/check_ci_workflow.py` checks the admission
 step and the pinned Actions. `scripts/check_desktop_release_workflow.py` checks that
 the toolchain steps match `ci.yml` and that every Node pin matches the Node the
 Windows package bundles. It also checks the triggers, the permissions, and the

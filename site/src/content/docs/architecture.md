@@ -752,6 +752,26 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-06 Release branch name. `AGENTS.md`, `CONTRIBUTING.md` and
+`docs/RELEASE-WORKFLOW.md` named `main` as the default branch and the target of
+promotions from `dev`. The repository has no `main`. Its default branch is
+`prod`. Promotion #328 merged as `8671131` at 17:05:02 UTC on November 6,
+and #331 synchronized `dev` as `9ef3f7f`; those heads have identical trees.
+The `v0.1.0-beta.1` tag commit is already an ancestor of `prod`. The remaining
+problem is inconsistent instructions for future promotions. These files now name `prod`,
+and they state that a release promotes `dev` into `prod` first and puts its tag
+on `prod`. The push trigger in `.github/workflows/ci.yml` changes from
+`[dev, main]` to `[dev, prod]`, so CI runs on pushes to the branch releases
+come from. No package, runtime, persistence or trust boundary changed. Entries
+below that say `main` record what happened at the time and stay as written.
+Evidence: `git ls-remote` lists `dev` and `prod` and no `main`, the GitHub API
+reports `prod` as the default branch, `python scripts/check_ci_workflow.py`
+passes, and `scripts/tests/test_ci_workflow.py` passes 62 of 62.
+The follow-up source review confirmed that `prod` already contains the gate
+script and desktop-release workflow, removed their obsolete promotion caveats,
+and checked the exact dev/prod trees and tag ancestry. No new release operation
+or package acceptance is implied by this documentation correction.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or
