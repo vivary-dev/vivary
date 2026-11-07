@@ -748,6 +748,19 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 3, part 1: export verification evidence before
+sandbox deletion (discussion_r4503861532). SKILL.md required deleting the
+Daytona sandbox on both success and failure, but the evidence folder and
+the key receipt live under the system temp directory inside that same
+sandbox, so deletion destroyed them with no durable copy. Launch and
+Cleanup now require exporting the evidence folder to a durable
+destination outside the sandbox (the laptop, or a shared QA folder) via
+the Daytona SDK's own download, verifying the exported file list and each
+file's sha256 against the in-sandbox original, before stopping the
+sandbox; a failed or unverified export now blocks deletion the same way a
+failed scratch restoration already did. No application code, route, or
+persisted state changed; no GitHub token is involved in the export.
+
 2026-11-07 PR #336 fix round: verify skill doc fixes. SKILL.md's sandbox
 paragraph said "do not create or resize a sandbox," which assumed a
 shared, owner-released sandbox model; it now says to create one fresh

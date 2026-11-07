@@ -8,8 +8,10 @@ description: Drive Vivary's real web workbench to verify navigation, projects, S
 ## Launch
 
 Run code in a fresh Daytona sandbox created for this one job, at the agreed
-resource ceiling. Do not reuse or resize another owner's sandbox. Delete the
-sandbox when this run ends, whether it passed or failed.
+resource ceiling. Do not reuse or resize another owner's sandbox. Before
+deleting it, export the evidence folder to a durable destination outside the
+sandbox and verify the copy; see Cleanup. Delete the sandbox when this run
+ends, whether it passed or failed.
 
 Read AGENTS.md, ENGINEERING.md, CONTRIBUTING.md and docs/ENTIRE.md. Use an owned
 checkout at the candidate full SHA. Never change Entire hook trust. Report
@@ -121,8 +123,18 @@ Close the browser context and stop only the server process group this run
 created. Confirm its PID exited and the port no longer answers. Remove only the
 run-owned scratch profile, home, projects and data after successful backup and
 restoration checks. If a copy or restoration fails, stop and preserve the saved
-state. Evidence is outside scratch and survives cleanup. List the evidence files
-after cleanup. Stop the sandbox and record elapsed active minutes.
+state. Evidence is outside scratch, but it is still inside this sandbox and
+does not survive sandbox deletion.
+
+Before stopping the sandbox, export the evidence folder to a durable
+destination outside the sandbox (for example the laptop, or a shared folder
+such as Shared/projects/vivary-team/qa/<pr>-<sha>/), using the Daytona SDK's
+own download, never a GitHub token. Verify the export before deleting
+anything: list the exported files and confirm each one's sha256 matches its
+in-sandbox original. Treat a failed or unverified export the same as a failed
+restoration: stop and preserve the sandbox rather than deleting unexported
+evidence. Only after a verified export, stop the sandbox and record elapsed
+active minutes.
 
 ## Helpers
 
