@@ -8279,13 +8279,16 @@ boundary changed.
 section that states Jeff's Git law (`prod` is the default and finished branch,
 work lands in `dev`, `prod` changes only by a promotion PR). A new workflow,
 `.github/workflows/promotion-guard.yml`, runs one job, `promotion-source`, on
-pull requests into `prod` or `main`. It has `permissions: {}`, checks out
+pull requests into `prod`. It has `permissions: {}`, checks out
 nothing, and fails unless the head is this repository's `dev`. `ci.yml` adds
-`prod` beside `main` in its triggers, because `main` was renamed to `prod` on
-2026-11-03 and a trigger naming only `main` would no longer run. This document
+`prod` beside `main` in its triggers, because the default branch is now `prod`
+and a trigger naming only `main` would no longer run. `CONTRIBUTING.md` now
+names `prod`, the `task/<id>-<slug>` branches, and the route for a security
+update that targets `prod`. This document
 describes no branch model, and no component, flow, persisted state or trust
 boundary changes, so the description above still holds. Evidence: the diff
-touches only those three files and this one, and the same guard failed a
+touches `AGENTS.md`, `CONTRIBUTING.md`, the two workflows, this file and its
+two generated mirrors, and the same guard failed a
 throwaway pull request from a non-`dev` branch in Jeff-Kazzee/ps5-agent-remote
 (run 41661854747).
 
