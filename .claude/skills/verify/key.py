@@ -17,15 +17,24 @@ def check_feature_files_tracked(root):
     base = '.claude/skills/verify/features'
     readme = (root / base / 'README.md').read_text()
     tracked = set(git('ls-files', base).decode().splitlines())
-    missing = [
-        f'{base}/{rel}'
-        for _name, rel in re.findall(r'\[([^\]]+)\]\(([^)]+\.md)\)', readme)
-        if f'{base}/{rel}' not in tracked
-    ]
+    missing = []
+    empty = []
+    for _name, rel in re.findall(r'\[([^\]]+)\]\(([^)]+\.md)\)', readme):
+        path = f'{base}/{rel}'
+        if path not in tracked:
+            missing.append(path)
+            continue
+        if not (root / path).read_text().strip():
+            empty.append(path)
+    problems = []
     if missing:
+        problems.append('not tracked: ' + ', '.join(missing))
+    if empty:
+        problems.append('empty or whitespace-only: ' + ', '.join(empty))
+    if problems:
         raise ValueError(
-            'Feature file(s) mapped in features/README.md are not tracked: '
-            + ', '.join(missing)
+            'Feature file(s) mapped in features/README.md failed review: '
+            + '; '.join(problems)
         )
 
 

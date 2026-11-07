@@ -8262,6 +8262,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 5, part 1: refuse an empty mapped feature
+file (discussion_r4504017314). The feature-file-tracking check from the
+previous fix round confirmed a mapped file was tracked but never read
+its content, so a tracked-but-empty (or whitespace-only) feature file
+still admitted and wrote a key receipt, with no reviewed expectations
+for the browser driver to actually follow. key.py now also refuses any
+mapped feature file whose content is empty or whitespace-only. A
+feature-heading cross-check against features/README.md's own link text
+was considered and skipped: the real `documentation.md` file's heading
+("# Bundled documentation") does not literally match the README's link
+text ("Documentation"), a pre-existing naming difference across
+acceptance.md, README.md and the feature file itself, so a strict
+heading match would false-fail this PR's own legitimate content. New
+test `test_empty_mapped_feature_is_refused`, adapted from the
+Reviewer's own `empty_feature_probe.py`, covers the refusal. No
+application code, route, or persisted state changed.
+
 2026-11-07 PR #336 fix round 3, part 2: re-include verify features past a
 global .claude/ ignore, fail closed if one goes untracked
 (discussion_r4503940604). A global `~/.gitignore_global`-style `.claude/`

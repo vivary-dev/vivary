@@ -170,6 +170,22 @@ class KeyPyTests(unittest.TestCase):
         result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_empty_mapped_feature_is_refused(self):
+        """discussion_r4504017314: a tracked but empty (or
+        whitespace-only) mapped feature file must not admit, even though
+        it is correctly tracked and mapped. An empty feature file carries
+        no reviewed expectations for the browser driver to follow."""
+        candidate = self.make_candidate(narrow_refspec=False)
+        feature = candidate / FEATURE_FILE_PATH
+        feature.write_text("   \n\t\n")
+        git(["add", "-A"], candidate)
+        git(["commit", "--quiet", "-m", "empty the tracked mapped feature"], candidate)
+        evidence = self.tmp_evidence_dir()
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("empty", (result.stdout + result.stderr).lower())
+        self.assertFalse((evidence / "key-receipt.json").exists())
+
     def tmp_evidence_dir(self):
         return self.tmp / f"evidence-{len(list(self.tmp.iterdir()))}"
 
