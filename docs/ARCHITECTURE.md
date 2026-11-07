@@ -748,9 +748,9 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
-2026-11-07 Site dependency reconciliation for PR #318. Astro remains pinned to
-7.4.2, and its scoped overrides now follow that version instead of the obsolete
-7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
+2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
+to 7.4.2, and its scoped overrides now follow that version instead of the
+obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
 The site dependency checker retains the reviewed 8.1 line and admits only the
 reviewed 8.3 line from 8.3.4; affected versions, other minor lines, malformed
 registry identities, and mismatched installed copies remain refused. The
