@@ -341,6 +341,23 @@ export class IncompleteStoredSecretsRead extends Error {
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
+// Core creates app_secrets and settings on first use, so a fresh install has neither table until
+// something is saved. A table that does not exist holds no secret, so it reads as empty and
+// complete, as a deleted secret does. Any other failure to list a table leaves the read incomplete.
+function isMissingTable(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  return code === "42P01" || (typeof message === "string" && /\bno such table\b|\brelation "[^"]+" does not exist\b/i.test(message));
+}
+
+async function listRows<Row>(query: Promise<{ rows?: Row[] }>, source: string, unread: string[]): Promise<Row[]> {
+  try {
+    return (await query).rows ?? [];
+  } catch (error) {
+    if (!isMissingTable(error)) unread.push(source);
+    return [];
+  }
+}
+
 /**
  * Read the secret store and the legacy credential settings. A table that cannot be listed, or a
  * listed row whose value cannot be read, makes the read incomplete, and the read rejects with
@@ -351,8 +368,8 @@ async function readStoredSecrets(): Promise<HeldCredential[]> {
   const held: HeldCredential[] = [];
   const unread: string[] = [];
   // Only the identifying columns are selected. readAppSecret decrypts each value.
-  const secrets = await db.execute({ sql: "SELECT scope, scope_id, key FROM app_secrets", args: [] })
-    .then(result => result.rows ?? [], () => { unread.push("the secret store"); return []; });
+  const secrets = await listRows(db.execute({ sql: "SELECT scope, scope_id, key FROM app_secrets", args: [] }),
+    "the secret store", unread);
   let unreadSecrets = 0;
   for (const row of secrets) {
     const ref = { scope: String(row.scope), scopeId: String(row.scope_id), key: String(row.key) };
@@ -364,8 +381,8 @@ async function readStoredSecrets(): Promise<HeldCredential[]> {
   }
   if (unreadSecrets > 0) unread.push(plural(unreadSecrets, "stored secret"));
   // Legacy credential settings, keyed u:<email>:credential:<NAME> or o:<org>:credential:<NAME>.
-  const settings = await db.execute({ sql: "SELECT key, value FROM settings WHERE key LIKE ?", args: ["%:credential:%"] })
-    .then(result => result.rows ?? [], () => { unread.push("the legacy credential settings"); return []; });
+  const settings = await listRows(db.execute({ sql: "SELECT key, value FROM settings WHERE key LIKE ?", args: ["%:credential:%"] }),
+    "the legacy credential settings", unread);
   let unreadSettings = 0;
   for (const row of settings) {
     let stored: unknown;
@@ -399,6 +416,17 @@ function applyHeld(held: HeldCredential[]): void {
   currentRedactor = redactorFor(current);
 }
 
+// The warning text for a failed read. IncompleteStoredSecretsRead builds its message from counts.
+// Any other failure, such as a database that cannot open, can carry hosts, user names, SQL or values
+// Vivary does not hold, which stream redaction would not hide, so only its class and code are named.
+function failedReadReason(error: unknown): string {
+  if (error instanceof IncompleteStoredSecretsRead) return error.message;
+  const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(error.name) ? error.name : "unknown error";
+  const code = (error as { code?: unknown } | null)?.code;
+  const kind = typeof code === "string" && /^[A-Z][A-Z0-9_]{0,39}$/.test(code) ? `${name}, ${code}` : name;
+  return `The stored credentials could not be read (${kind}).`;
+}
+
 // One entry per name and value, so repeated failed reads do not grow the kept set.
 function distinctHeld(held: HeldCredential[]): HeldCredential[] {
   const byKey = new Map<string, HeldCredential>();
@@ -413,7 +441,8 @@ function distinctHeld(held: HeldCredential[]): HeldCredential[] {
  * Reload the held values. Settings from the environment and MCP configuration apply at once.
  * Stored secrets apply when the database answers. A stored read fails closed: when it rejects or
  * cannot read every value, the last stored set is kept, the values it did read are added, and the
- * server logs a warning. A deleted secret leaves the set at the next complete read. Vivary
+ * server logs a warning with counts, or only the error's class and code. A deleted secret, or a
+ * table that does not exist yet, leaves the set at the next complete read. Vivary
  * refreshes at startup, after each secret write, before each Native chat send, and before each
  * Code send.
  */
@@ -425,8 +454,7 @@ export async function refreshHeldCredentials(sources: CredentialSources = defaul
     secrets => secrets.flatMap(storedCredentials),
     (error: unknown) => {
       const read = error instanceof IncompleteStoredSecretsRead ? error.held.flatMap(storedCredentials) : [];
-      const reason = error instanceof Error ? error.message : String(error);
-      console.warn(`[vivary] Credential redaction kept the last stored credentials after a failed read. ${reason}`);
+      console.warn(`[vivary] Credential redaction kept the last stored credentials after a failed read. ${failedReadReason(error)}`);
       return distinctHeld([...storedHeld, ...read]);
     });
   if (sequence !== refreshSequence) return;
