@@ -8423,6 +8423,15 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #258 runtime-switch reply scope. A switch reply can arrive after the
+owner moved on. `CodeConversation.tsx` now applies the accepted route only to the
+conversation that asked for it, keyed like `onStarted`, so another open
+conversation's saved choice is never overwritten. A saved-event replay keeps its
+anchored transcript: the accepted-reply override ends when a replay opens, and the
+submitted switch stays with the host. The switch route, the server records and
+the consent checks are unchanged, so the description here still holds.
+`tests/code-switch-scope.test.mjs` runs both blocks from the component source.
+
 2026-11-07 PR #258 review reconciliation. The branch retains current dev's
 documentation and delivery changes alongside the runtime-switch design. Entering
 history replay or losing the folder discards unsubmitted switch consent; retained

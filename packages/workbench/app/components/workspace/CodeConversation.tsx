@@ -306,6 +306,11 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
     setSelection(current => current?.key === key ? { ...current, runId } : current);
     if (currentSelection.current?.key === key) showInUrl({ key, runId });
   }, [setSelection, showInUrl]);
+  // A switch reply can arrive after the owner opened another conversation. Like onStarted, it updates only the
+  // conversation that asked, so one conversation's route never becomes another's saved choice.
+  const onChoice = useCallback((key: string, choice: ModelChoice) => {
+    setSelection(current => current?.key === key ? { ...current, choice } : current);
+  }, [setSelection]);
 
   async function stopRun() {
     // Retained callbacks use the current view. Losing folder access must still allow the owner to stop its turn.
@@ -408,7 +413,7 @@ function ProjectCodeWorkspace({ projectId, draftScopeKey, ownerKey, projectLabel
           matchedEventId={requestedEvent}
           active={codeState.busy} streaming={streaming} onStreaming={setStreaming}
           onStarted={runId => onStarted(selection.key, runId)}
-          onChoice={choice => setSelection(current => current ? { ...current, choice } : current)}
+          onChoice={choice => onChoice(selection.key, choice)}
           onSettled={() => { void state.refetch(); }}
           onStop={stopRun} stopping={stop.isPending}
           onSettings={() => navigate("/settings/runtimes")} /> :
@@ -569,11 +574,13 @@ function LocalCodeConversation(observed: LocalCodeConversationProps) {
     && observedFromCache;
   // Keep the action's full run while parent polling still presents a previous route generation.
   // Its old query requests are cancelled before the accepted state enters either owner cache below.
-  const props = acceptedRun && observed.selection.runId === acceptedRun.id && !caughtUp
+  // A saved-event replay is anchored to its own query, which that reply never seeds, so it always shows its own
+  // transcript. The override ends there; the submitted switch stays with the host and later polls show its result.
+  const props = acceptedRun && !observed.viewingMatch && observed.selection.runId === acceptedRun.id && !caughtUp
     ? { ...observed, run: acceptedRun } : observed;
   useEffect(() => {
-    if (caughtUp || observed.selection.runId !== acceptedRun?.id) setAcceptedRun(null);
-  }, [caughtUp, observed.selection.runId, acceptedRun?.id]);
+    if (caughtUp || observed.viewingMatch || observed.selection.runId !== acceptedRun?.id) setAcceptedRun(null);
+  }, [caughtUp, observed.viewingMatch, observed.selection.runId, acceptedRun?.id]);
   const chatRef = useRef<AssistantChatHandle>(null);
   const [handoffStatus] = useState(createHandoffStatusHub);
   const { call } = useNativeActionCaller();
