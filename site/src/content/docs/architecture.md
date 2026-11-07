@@ -883,6 +883,15 @@ collapse authority or change persistence boundaries, so the workspace shell desc
 still holds. Local typecheck on the layout change passed; CI `tests + checks` HLDD enforcement
 requested this review entry.
 
+2026-11-02 workbench verification acceptance key. The new
+`.claude/skills/verify/acceptance.md` defines five user journeys for desktop
+navigation, the narrow navigation sheet, project selection, Settings return and
+bundled documentation. Review checked Layout, Sidebar, use-workspace-layout,
+ProjectNavigation and the Settings and architecture routes. This adds acceptance
+expectations without changing application components, persistence or access
+boundaries, so the existing design remains accurate. Runtime execution and the
+verification runner remain outstanding.
+
 2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
 desktop package README, the acceptance register and the changelog now point at the
 `v0.1.0-beta.1` GitHub prerelease instead of the September `desktop-preview-*`
