@@ -7,21 +7,27 @@ description: Drive Vivary's real web workbench to verify navigation, projects, S
 
 ## Launch
 
-Run code in the authorised Daytona sandbox. Do not create or resize a sandbox.
-Before starting the existing sandbox, obtain its owner's release and arm the
-authorised four-hour stop in OpenBot. Stop the sandbox whenever idle.
+Run code in a fresh Daytona sandbox created for this one job, at the agreed
+resource ceiling. Do not reuse or resize another owner's sandbox. Delete the
+sandbox when this run ends, whether it passed or failed.
 
 Read AGENTS.md, ENGINEERING.md, CONTRIBUTING.md and docs/ENTIRE.md. Use an owned
 checkout at the candidate full SHA. Never change Entire hook trust. Report
 capture as unverified when the actual runtime has no captured session.
 
-Run the workspace tools/vivary-preflight command in the execution environment
-before any install, build or test. Require VIVARY_PREFLIGHT_RESULT=pass. If the
-tool or a prerequisite is missing, report FAIL with the exact reason and stop.
-Do not substitute a Linveo pass for a Daytona pass.
+Before any install, build or test, check the Daytona sandbox directly: confirm
+the installed Node version satisfies packages/workbench/package.json's
+engines.node, confirm `pnpm --version` matches the pin in
+.github/workflows/ci.yml, confirm python3's version and OpenSSL build are the
+qualified pair the repo's own scripts require, and confirm enough free disk for
+the install. Report FAIL with the exact mismatch and stop. This replaces
+tools/vivary-preflight, a Linveo-workspace tool not present in a Daytona
+sandbox; do not substitute a Linveo pass for a Daytona pass.
 
-From the repository root, choose a new private evidence directory outside the
-checkout. Do not reuse one from an earlier run. Then read the answer key:
+From the repository root, choose a new private evidence directory under the
+system temp directory and outside the checkout (for example
+/tmp/vivary-proof-UNIQUE). Do not reuse one from an earlier run. Then read the
+answer key:
 
 ```sh
 python3 .claude/skills/verify/key.py /tmp/vivary-proof-UNIQUE
@@ -132,4 +138,4 @@ backup. Stop if cmp fails. Rebuild and rerun the affected journey to confirm the
 clean behaviour returns. Record the observed failing assertion and both restore
 and clean-rerun results. Never commit a mutation or its backup.
 
-Use /maintain-verification-skill after application changes to keep this map true.
+Use /verification after application changes to keep this map true.

@@ -8262,6 +8262,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round: verify skill doc fixes. SKILL.md's sandbox
+paragraph said "do not create or resize a sandbox," which assumed a
+shared, owner-released sandbox model; it now says to create one fresh
+sandbox per job and delete it on exit, matching this team's actual
+Daytona practice. SKILL.md required `tools/vivary-preflight`, a
+Linveo-workspace tool absent from every Daytona sandbox, which made the
+skill fail closed there unconditionally (QA's gap 1); it now checks the
+sandbox's own Node, pnpm, Python/OpenSSL and disk directly. SKILL.md's
+closing line pointed at `/maintain-verification-skill`; QA found no skill
+by that name in this repository's own `.claude/skills/`, so it now reads
+`/verification`. features/README.md's coverage-limits paragraph now also
+states that Project selection and Documentation have no planted-bug
+fixture, matching fixtures.json's actual three entries. No application
+code, route, or persisted state changed.
+
 2026-11-07 PR #336 fix round: key.py stale-ref and evidence-path fixes.
 key.py pinned `origin/dev` by `git rev-parse origin/dev` after fetching it;
 under a narrow `remote.origin.fetch` (a typical single-branch CI checkout),

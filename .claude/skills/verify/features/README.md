@@ -8,6 +8,11 @@ outside this seed. Project selection checks selection and reload only,
 not draft or conversation preservation. Record these exclusions in every
 verification receipt. A pass does not establish those untested behaviours.
 
+Project selection and Documentation have no planted-bug fixture yet
+(fixtures.json currently covers only Desktop navigation, Narrow navigation
+and Settings return); a pass on those two journeys does not prove a
+regression there would be caught.
+
 | Feature | Journey |
 | --- | --- |
 | [Desktop navigation](desktop-navigation.md) | Collapse and expand through the topbar |
