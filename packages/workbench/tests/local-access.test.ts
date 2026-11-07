@@ -308,7 +308,7 @@ describe("Vivary local access configuration", () => {
     assert.match(chatPlugin, /\.\.\.vivaryNativeChatProjectOptions,\s*\.\.\.VIVARY_NATIVE_MCP_OPTIONS\.agentChat,?\s*\}\)/);
     const nativeChat = await readFile(new URL("./agent-chat-plugin.js", nativeServer), "utf8");
     // Native imports mountMCP inside the gate, so no call outside it can mount the endpoint.
-    const endpointGate = /if\s*\(\s*mcpOptions\.enabled\s*\)\s*\{\s*(?:\/\/[^\n]*\s*)*const\s*\{\s*mountMCP\s*\}\s*=\s*await\s+import\([^)]*\);\s*mountMCP\(\s*nitroApp\b/;
+    const endpointGate = /if\s*\(\s*mcpOptions\.enabled\s*\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*const\s*\{\s*mountMCP\s*\}\s*=\s*await\s+import\([^)]*\);\s*mountMCP\(\s*nitroApp\b/;
     assert.match(nativeChat, endpointGate);
     assert.equal(nativeChat.match(/\bmountMCP\s*\(/g)?.length, 1);
     // With the endpoint off, Integrations still manages the MCP servers that Vivary connects to.

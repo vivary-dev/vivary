@@ -105,6 +105,13 @@ status. Open folder uses the system directory chooser to connect a project;
 Vivary keeps the selected folder and its conversations separate from other
 projects.
 
+Optional Discord Rich Presence is off by default. Turn it on under Settings >
+General when you run the desktop app, paste a Discord Developer Portal
+application id, and keep Discord running locally. Vivary publishes only the
+active project name and a coarse phase (managing memory, agent running, or
+reviewing) through `@xhayper/discord-rpc` over Discord's local IPC pipe. That
+is the desktop package's only runtime npm dependency.
+
 ## Package
 
 ```console

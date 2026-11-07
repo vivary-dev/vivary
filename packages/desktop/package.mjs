@@ -186,13 +186,17 @@ export async function packageDesktop() {
     const runtimeDir = path.join(stage, "workbench");
     const nodeDir = path.join(stage, "node");
     await Promise.all([mkdir(appDir), mkdir(path.join(runtimeDir, "bin"), { recursive: true }), mkdir(nodeDir)]);
-    for (const file of ["main.mjs", "browser-access.mjs"]) {
+    for (const file of ["main.mjs", "browser-access.mjs", "discord-presence.mjs", "desktop-settings.mjs"]) {
       await copyFile(path.join(sourceDesktop, file), path.join(appDir, file));
     }
+    await copyFile(path.join(sourceDesktop, "package-lock.json"), path.join(appDir, "package-lock.json"));
     await writeFile(path.join(appDir, "package.json"), JSON.stringify({
       name: "vivary", productName: "Vivary", version: manifest.version,
       private: true, type: "module", main: "main.mjs",
+      dependencies: manifest.dependencies ?? {},
     }, null, 2));
+    execFileSync(process.platform === "win32" ? "npm.cmd" : "npm",
+      ["ci", "--omit=dev", "--ignore-scripts"], { cwd: appDir, stdio: "inherit", shell: process.platform === "win32" });
     await cp(path.join(workbench, ".output"), path.join(runtimeDir, ".output"), { recursive: true, dereference: true });
     for (const file of ["start.mjs", "desktop-server.mjs", "runtime-security.mjs"]) {
       await copyFile(path.join(sourceWorkbench, "bin", file), path.join(runtimeDir, "bin", file));

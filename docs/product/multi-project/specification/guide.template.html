@@ -32,11 +32,10 @@ button,input,select,textarea{font:inherit}button,a,input,select,summary{touch-ac
 <section class="page" data-page="doc" hidden><div class="row doc-toolbar"><a href="#library">All chapters</a><span class="subtle small" id="doc-meta"></span><button id="print-chapter">Print chapter</button></div><article class="article" id="article"></article><div class="row next-links"><a href="#decisions">Leave review notes</a><a href="#library">Choose another chapter</a></div></section>
 </main></div></div>
 <dialog id="diagram-dialog" aria-labelledby="diagram-title"><div class="row"><strong id="diagram-title">Diagram</strong><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" aria-label="Zoom in">+</button><button id="zoom-fit">Fit</button><span id="zoom-label" class="small"></span><button id="close-diagram">Close diagram</button></div><div class="diagram-view" tabindex="0" role="region" aria-label="Scrollable enlarged diagram"><img id="large-diagram" alt=""></div></dialog>
-<script id="guide-data" type="application/json">__GUIDE_DATA__</script>
 <script>
 (()=>{
 'use strict';
-const data=JSON.parse(document.getElementById('guide-data').textContent);
+const data=__GUIDE_DATA__;
 const byId=id=>document.getElementById(id);
 const safeText=(tag,text,className)=>{const e=document.createElement(tag);e.textContent=text;if(className)e.className=className;return e;};
 const storageKey='vivary-guide-review';
