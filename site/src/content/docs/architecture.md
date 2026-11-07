@@ -764,6 +764,21 @@ Both pages stay generated, read-only documentation with no server, so the
 description of the specification reader still holds. No runtime or product
 boundary changed.
 
+2026-11-03 Git law in AGENTS.md, promotion guard and `prod` CI triggers.
+`AGENTS.md` now names the `task/<id>-<slug>` branch rule and ends with a Git
+section that states Jeff's Git law (`prod` is the default and finished branch,
+work lands in `dev`, `prod` changes only by a promotion PR). A new workflow,
+`.github/workflows/promotion-guard.yml`, runs one job, `promotion-source`, on
+pull requests into `prod` or `main`. It has `permissions: {}`, checks out
+nothing, and fails unless the head is this repository's `dev`. `ci.yml` adds
+`prod` beside `main` in its triggers, because `main` was renamed to `prod` on
+2026-11-03 and a trigger naming only `main` would no longer run. This document
+describes no branch model, and no component, flow, persisted state or trust
+boundary changes, so the description above still holds. Evidence: the diff
+touches only those three files and this one, and the same guard failed a
+throwaway pull request from a non-`dev` branch in Jeff-Kazzee/ps5-agent-remote
+(run 41661854747).
+
 2026-11-03 Discord presence reload order, isolation and settings fixes. The
 desktop controller numbers each settings reload before it reads the file and
 applies only the newest request. An older On read that finishes after a newer
