@@ -9,9 +9,8 @@ CLI repository is `vivary-dev/vivary-cli`. His later branching correction
 selects typed topic
 branches from `dev`, PRs into `dev`, and reviewed promotion from `dev` to `main`.
 Do not commit directly to either long-lived branch. `main` is the default branch.
-The `origin` remote is that GitHub repository. The `entire` remote is its Entire
-mirror. Push reviewed source to both. Preserve the previous repositories and
-history. This supersedes the earlier Entire-only `feat/vivary-gui` restriction.
+The `origin` remote is that GitHub repository. Preserve the previous repositories and
+history.
 
 The original public `vivary-dev/vivary-cli` repository and its `dev` branch are not
 this development target. Publication, releases, and changes to the public product
@@ -107,7 +106,7 @@ Jeff confirmed these practices on 2026-09-16. They apply to this repository.
 - Aim for a complete, usable checkpoint before usage is exhausted. Check usage
   between bounded work waves. Jeff's stop boundary is 1% remaining. Reserve enough
   capacity to finish the current unit, stop task-owned jobs, update the canonical
-  handoff and acceptance docs, commit reviewed work, push GitHub and Entire, and
+  handoff and acceptance docs, commit reviewed work, push GitHub, and
   verify matching remote refs and a clean checkout. Do not start another large
   unit if it would leave unfinished work at the boundary.
 - Preserve Windows Defender and file associations. Dismiss unexpected Open With
@@ -193,7 +192,7 @@ named dangerous failure. Select controls for that risk.
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md). Branch from current `origin/dev`,
 use a typed topic branch, and open a PR into `dev`. Review and verify each
-increment before committing and pushing to GitHub and Entire.
+increment before committing and pushing to GitHub.
 Never create draft PRs. Open PRs ready for review.
 Keep each PR within the size rule in [CONTRIBUTING.md](CONTRIBUTING.md#size).
 Split it before opening, never after its review starts.
@@ -202,11 +201,6 @@ Do not promote this work into the original repository or its release branches.
 Make small, coherent, reviewed commits. Preserve unrelated work, accepted
 evidence, and historical budgets. Keep private handoffs, credentials, transcripts,
 and machine-specific continuity notes outside public source and Git history.
-Source hosting does not establish agent-session capture. Follow
-[the Entire contributor setup](docs/ENTIRE.md) before supported agent work.
-Verify enabled hooks and the private checkpoint destination. Use Entire session
-and checkpoint commands to confirm capture, then search prior checkpoints when
-past decisions matter. Never claim MCP controller edits were captured locally.
 
 Use the user's existing authorization. Complete reversible preparation before
 requesting any missing approval for pushes, PR creation, merges, publication,

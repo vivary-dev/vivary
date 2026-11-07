@@ -8262,6 +8262,114 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #337 fix round 3: separate what the required review gate
+enforces from team policy (discussion_r4504114054). The prior fix
+round's "only Jeff resolves an owner thread, so the gate blocks on it
+until he does" and "a High-risk change also waits in the review-
+gate's ask lane" read as mechanical guarantees, but
+`scripts/check_review_gate.py`'s `unresolved_threads` only reads
+`isResolved`; it never fetches who resolved a thread, and the installed
+review-gate skill's own policy has every agent posting as
+`Jeff-Kazzee`, the same identity `REVIEW_PUBLISHERS` already trusts, so
+a resolver check would not distinguish an agent from the owner either.
+CONTRIBUTING.md now states plainly what the required check actually
+enforces (an allowed publisher's completed result for the exact head
+and base, and every thread's `isResolved` state, nothing about who
+resolved it), and names owner review of gate-controlling and High-risk
+findings as team policy carried out through the external review-gate
+skill and `agent-git land`, not by this required check. Branch
+protection requiring zero approving reviews on `dev` and `prod` is
+restated for the same reason. `scripts/check_review_gate.py`'s comment
+was reviewed and left unchanged: Jeff's own disposition on
+discussion_r4504120060 found it already states the policy without
+claiming the script enforces resolver identity. No code or branch-
+protection change; wording only.
+
+2026-11-07 PR #337 fix round 2, part 1: defer guide.html's regeneration
+(the Reviewer's diff-size cap). The independent review tool refuses a
+diff over 2,097,152 bytes; guide.html's generated JSON blob has very
+long lines, so even the prior round's one-phrase hand edit pushed the
+whole PR diff past that cap. Reverted guide.html to dev's unmodified
+version in this commit (no history rewrite of the prior commits); it
+keeps dev's old "matching GitHub/Entire refs" text for now.
+operating-manual.md's own text is unchanged and still says "matching
+GitHub refs", so the source of truth is already correct; only its
+generated mirror is temporarily stale. Task 231 (tracked separately)
+regenerates guide.html from the corrected operating-manual.md once the
+generator's own pre-existing, unrelated mermaid-diagram staleness
+(reported in fix round 1) is fixed by someone running an authoring
+session with network access, Playwright and Chromium. No application
+code, route, or persisted state changed.
+
+2026-11-07 PR #337 fix round, part 2: reword the last live Entire
+reference (QA's finding 2). operating-manual.md's Delivery line said
+Zo CI must check "matching GitHub/Entire refs"; this was the only
+remaining process instruction still requiring Entire after task 228's
+removal. Reworded to "matching GitHub refs". `guide.html`, its
+generated mirror, got the same one-phrase text edit by hand rather
+than through its generator, render-guide.py: that script's own
+`--check` fails with "journeys-4 changed; use --refresh-diagrams" on
+vanilla `dev` with no edits of mine, a pre-existing mermaid-diagram-
+manifest staleness unrelated to this PR. `--refresh-diagrams` needs
+network access to a pinned external renderer plus Playwright and
+Chromium, an authoring-only operation per the script's own docstring,
+and guide.html is not wired into any CI check, so this hand edit
+carries no gate risk; reported to the Lead as a separate, out-of-
+scope finding for whoever next runs an authoring session there. QA's
+informational note that `docs/ARCHITECTURE.md:3249`'s own history
+entry links to the now-deleted docs/ENTIRE.md is left as-is: that
+entry is append-only history describing a decision already closed at
+the time, same as every other HLDD entry mentioning Entire, not a
+live instruction. No application code, route, or persisted state
+changed.
+
+2026-11-07 PR #337 fix round, part 1: .gitignore diff hygiene and keep
+ignoring private local Entire data (QA's finding 1, and
+discussion_r4503960077). The prior commit's .gitignore edit left a
+trailing blank line at EOF, which failed `git diff --check` and GitHub's
+required "tests + checks" diff-hygiene step; removed. Separately,
+removing the Entire integration also removed `.gitignore`'s only rule
+for `.entire/`, which existed to keep each contributor's own local-only
+Entire data (settings.local.json, logs, transcripts) out of source
+control; that local data still exists on checkouts that had Entire
+enabled before this removal, so `.gitignore` now keeps a plain
+`/.entire/` ignore, with a comment explaining why, but drops the
+`!/.entire/settings.json` exception since that file is deleted and has
+no tracked replacement. No application code, route, or persisted state
+changed.
+
+2026-11-07 Remove Entire from the repository, part 2: reword the
+remaining references (task 228, Jeff's yes). `AGENTS.md` and
+`CONTRIBUTING.md` no longer describe the now-deleted Entire mirror
+remote or an Entire session-capture step; kept both edits to the literal
+Entire sentences only, since PR #324 also edits both files.
+`scripts/check_review_gate.py`'s comment named Entire as why
+REVIEW_PUBLISHERS is restricted; that check's code never called Entire,
+so only the comment changes, to name the actual mechanism: a finding on
+a gate-controlling file opens a mandatory owner-review thread that only
+Jeff resolves, and a High-risk change waits in the review-gate's ask
+lane for his decision. Per the Lead's facts (branch protection
+read-back: `dev` and `prod` both require zero approving reviews), this
+is a wording fix, not a new control; the gate's code is unchanged.
+Historical HLDD and changelog entries mentioning Entire describe
+decisions already closed at the time and are unchanged, append-only.
+No application code, route, or persisted state changed.
+
+2026-11-07 Remove Entire from the repository, part 1: delete the config,
+hooks and skill files (task 228, Jeff's yes). `.entire/settings.json`,
+`.claude/settings.json` and `.codex/hooks.json` held nothing but Entire's
+own config and session/tool hooks (every hook in both settings files
+called `entire hooks ...`, guarded by a `command -v entire` check, and
+nothing else); deleted all three, the four Entire skill files
+(`.claude/skills/entire`, `.claude/skills/entire-search`,
+`.agents/skills/entire-search`, `.codex/agents/entire.toml`),
+`docs/ENTIRE.md` (no site-mirror page existed for it), and the
+`.gitignore` carve-out that existed only to share
+`.entire/settings.json`. No application code, route, or persisted state
+changed; nothing here reads or writes those deleted files. The Entire
+GitHub App stays installed, unchanged and out of scope. Part 2 of this
+change follows in the next commit.
+
 2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
 to 7.4.2, and its scoped overrides now follow that version instead of the
 obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.

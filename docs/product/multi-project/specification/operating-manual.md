@@ -50,7 +50,7 @@ API rule: verify installed exports. Specification signatures are conceptual.
 Verification: <focused existing check> and <affected hosted user journey>.
 Failure: preserve authored data, report denied/conflict/uncertain state, repair and repeat.
 Delivery: reviewed topic PR into dev, applicable CI and one approval,
-Zo CI against the exact candidate, matching GitHub/Entire refs, and authorized merge only.
+Zo CI against the exact candidate, matching GitHub refs, and authorized merge only.
 Preview source verified. No automatic main/public promotion.
 Stop only the operation needing a missing actual prerequisite.
 Update the owning docs and existing handoff, not a parallel task ledger.
