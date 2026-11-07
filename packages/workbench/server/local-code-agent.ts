@@ -1098,6 +1098,9 @@ export async function sendVivaryCodeMessage(input: {
       app: VIVARY_CODE_APP_MARKER,
       engine: selectedEngine,
       model: selectedModel === "default" ? null : selectedModel,
+      modelDisplay: { id: selectedModel, label: claudeModel?.label
+        ?? (catalog?.status === "ready" ? catalog.models.find(model => model.id === selectedModel)?.label : undefined)
+        ?? selectedModel },
       ownerEmail: input.ownerEmail,
       orgId: input.orgId,
       workspaceRoot: workspace.root,
@@ -1546,6 +1549,13 @@ export async function switchVivaryCodeRuntime(input: {
     }
     target = await switchTargetModel(input.engine, input.model, runtime, workspace);
   }
+  // Older conversations predate retained labels. Resolve a known Codex label before the final admission checks;
+  // an unavailable catalog must not prevent leaving that runtime, so unknown historical IDs remain honest IDs.
+  let fromLabel = recordedModelLabel(run);
+  if (target && fromEngine === "codex-cli" && fromLabel === null) {
+    const catalog = await getCodexModels(workspace.root);
+    if (catalog.status === "ready") fromLabel = catalog.models.find(model => model.id === fromModel)?.label ?? null;
+  }
   if (input.revalidateWorkspace) {
     const current = await input.revalidateWorkspace();
     if (!current || !sameWorkspace(current, workspace)) {
@@ -1571,7 +1581,7 @@ export async function switchVivaryCodeRuntime(input: {
     if (input.stop && active) requestUserStop(current.id, active);
     return getVivaryCodeState(input.ownerEmail, current.id, workspace, input.orgId);
   }
-  const to = { engine: input.engine, model: target.id, label: target.label };
+  const to = { engine: input.engine, model: target.id, label: target.label, fromLabel: fromLabel ?? fromModel };
   if (active) {
     updateCodeAgentRunRecord(current.id, { metadata: { pendingSwitch: { ...to, requestedAt: new Date().toISOString() } } });
     requestUserStop(current.id, active);
@@ -1652,7 +1662,7 @@ async function switchTargetModel(engine: VivaryCodeEngine, requested: string, ru
 function applyPendingSwitch(runId: string): void {
   const run = getCodeAgentRunRecord(runId);
   if (!run?.metadata?.pendingSwitch) return;
-  const pending = run.metadata.pendingSwitch as { label?: unknown };
+  const pending = run.metadata.pendingSwitch as { label?: unknown; fromLabel?: unknown };
   const target = pendingSwitchFromRun(run);
   if (!target || cleanupRefusalsInForce().some(refusal => refusal.runId === runId)) {
     updateCodeAgentRunRecord(runId, { metadata: { pendingSwitch: undefined } });
@@ -1663,7 +1673,22 @@ function applyPendingSwitch(runId: string): void {
     return;
   }
   applyVivaryCodeRuntimeSwitch(run, { ...target,
-    label: typeof pending.label === "string" ? pending.label : target.model });
+    label: typeof pending.label === "string" ? pending.label : target.model,
+    fromLabel: typeof pending.fromLabel === "string" ? pending.fromLabel : undefined });
+}
+
+function recordedModelLabel(run: CodeAgentRunRecord): string | null {
+  const model = modelFromRun(run);
+  const display = run.metadata?.modelDisplay as { id?: unknown; label?: unknown } | undefined;
+  if (display?.id === model && typeof display.label === "string" && display.label) return display.label;
+  return metadataString(run, "engine") === "claude-cli"
+    ? CLAUDE_CODE_MODELS.find(item => item.id === model)?.label ?? null : null;
+}
+
+function codeEngineLabel(engine: unknown): string {
+  if (engine === "claude-cli") return "Claude Code";
+  if (engine === "codex-cli") return "Codex CLI";
+  return "Local code agent";
 }
 
 /**
@@ -1672,16 +1697,18 @@ function applyPendingSwitch(runId: string): void {
  * `previousProviderSessions`, so its provider log can still be found. Exported for the offline worker fixture.
  */
 export function applyVivaryCodeRuntimeSwitch(run: CodeAgentRunRecord,
-  to: { engine: VivaryCodeEngine; model: string; label: string }, at = new Date()): void {
+  to: { engine: VivaryCodeEngine; model: string; label: string; fromLabel?: string }, at = new Date()): void {
   const fromEngine = metadataString(run, "engine");
   const fromModel = modelFromRun(run);
   const fromSession = fromEngine === "claude-cli" || fromEngine === "codex-cli" ? providerSessionId(run, fromEngine) : null;
   const earlier = Array.isArray(run.metadata?.previousProviderSessions) ? run.metadata.previousProviderSessions : [];
+  const fromLabel = to.fromLabel ?? recordedModelLabel(run) ?? fromModel;
   const switchedAt = at.toISOString();
   const switchGeneration = randomUUID();
   updateCodeAgentRunRecord(run.id, { metadata: {
     engine: to.engine,
     model: to.model,
+    modelDisplay: { id: to.model, label: to.label },
     // Route, session reset, pending consumption and generation form one durable record update.
     pendingSwitch: undefined,
     switchGeneration,
@@ -1692,10 +1719,9 @@ export function applyVivaryCodeRuntimeSwitch(run: CodeAgentRunRecord,
       { engine: fromEngine, model: fromModel, sessionId: fromSession, endedAt: switchedAt }]
       .slice(-MAX_PREVIOUS_PROVIDER_SESSIONS) } : {}),
   } });
-  const fromLabel = CLAUDE_CODE_MODELS.find(model => model.id === fromModel)?.label ?? fromModel;
-  const toEngineLabel = to.engine === "claude-cli" ? "Claude Code" : "Codex";
+  const toEngineLabel = codeEngineLabel(to.engine);
   appendCodeAgentTranscriptEvent({ runId: run.id, kind: "note",
-    message: `Switched from ${engineLabelFromRun(run)} ${fromLabel} to ${toEngineLabel} ${to.label}. `
+    message: `Switched from ${codeEngineLabel(fromEngine)} ${fromLabel} to ${toEngineLabel} ${to.label}. `
       + `The next message starts a new ${toEngineLabel} session with the visible conversation text.`,
     metadata: { source: VIVARY_CODE_SWITCH_SOURCE, from: { engine: fromEngine, model: fromModel },
       to: { engine: to.engine, model: to.model }, switchedAt, switchGeneration } });
@@ -1896,10 +1922,7 @@ function pendingSwitchFromRun(run: CodeAgentRunRecord): VivaryCodeRunSummary["pe
 }
 
 function engineLabelFromRun(run: CodeAgentRunRecord): string {
-  const engine = metadataString(run, "engine");
-  if (engine === "claude-cli") return "Claude Code";
-  if (engine === "codex-cli") return "Codex CLI";
-  return "Local code agent";
+  return codeEngineLabel(metadataString(run, "engine"));
 }
 
 function modelFromRun(run: CodeAgentRunRecord): string {

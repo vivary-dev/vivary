@@ -1,114 +1,186 @@
 <p align="center">
-  <img src="https://shieldcn.dev/header/glow.svg?title=Vivary&amp;subtitle=Your+projects.+Your+agents.+Your+machine.&amp;mode=dark&amp;font=geist&amp;width=500&amp;height=140&amp;align=center&amp;bg=101713&amp;accent=b5ef4a&amp;glow=b5ef4a&amp;titleColor=eaf3e7&amp;subtitleColor=bdc9bb&amp;radius=12&amp;watermark=false" alt="Vivary. Your projects, agents, and workspace on your own machine." width="1100">
-</p>
-
-<p align="center">
-  <a href="#release-status"><img src="https://shieldcn.dev/badge/status-in%20development-b5ef4a.svg?mode=dark&amp;variant=default&amp;font=geist" alt="Status: in development"></a>
-  <a href="https://github.com/vivary-dev/vivary/milestone/1"><img src="https://shieldcn.dev/badge/desktop-Windows%20first-b5ef4a.svg?mode=dark&amp;variant=default&amp;font=geist" alt="Desktop target: Windows first"></a>
-  <a href="LICENSE"><img src="https://shieldcn.dev/badge/license-MIT-b5ef4a.svg?mode=dark&amp;variant=default&amp;font=geist" alt="License: MIT"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/vivary-dev/vivary/milestone/1">Release queue</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a> ·
-  <a href="docs/product/multi-project/design.md">Product design</a> ·
-  <a href="docs/ORIGINAL-CLI.md">Original CLI reference</a>
+  <img src="assets/vivary-mascot.png" alt="The Vivary mascot, a felted woodland character with branch-shaped horns holding a small notebook." width="140">
 </p>
 
 <h1 align="center">Vivary</h1>
 
-<h3 align="center">A workspace for working with agents on your own projects.</h3>
-
 <p align="center">
-Vivary brings agent chat, project files, tools, and memory into one desktop app.
+  A desktop workspace for AI agents on your own projects.
 </p>
 
 <p align="center">
-The product target is a Windows desktop app and a responsive web client connected
-to the same Vivary instance. That instance can run on your computer or a suitable
-server. Your agents, credentials, files, and history stay on the host.
+  <a href="https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1"><img src="https://img.shields.io/github/v/release/vivary-dev/vivary?include_prereleases&label=beta&color=b5ef4a&labelColor=161b22" alt="Latest release"></a>
+  <a href="https://github.com/vivary-dev/vivary/actions/workflows/ci.yml?query=branch%3Adev"><img src="https://github.com/vivary-dev/vivary/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI on the dev branch"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b5ef4a?labelColor=161b22" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/vivary-mascot.png" alt="Vivary's charcoal woodland agent character, with branch-shaped horns, an olive leaf, and a small notebook." width="240" height="192">
+  <a href="https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1"><strong>Download for Windows</strong></a> &nbsp;·&nbsp;
+  <a href="https://www.vivaryagent.xyz/">Website and full demo</a> &nbsp;·&nbsp;
+  <a href="docs/desktop-preview.md">Installation guide</a>
 </p>
 
-The woodland character is the visual identity of Vivary's main project agent.
-It appears in the new-conversation introduction. The selected runtime still
-owns the agent's tools, permissions, and execution. The character's public name
-is still open. [Character and brand guidance](https://github.com/vivary-dev/vivary-site/blob/dev/docs/brand/system/README.md)
-owns its appearance, voice, and asset versions.
+<p align="center">
+  <img src="assets/vivary-beta-demo.gif" alt="Vivary 0.1.0-beta.1 on Windows. A user asks Claude Code to create a packing list. The agent writes the file, and the user opens it in the Files panel." width="900">
+</p>
 
-## The experience we are building
+<p align="center"><sub>Published build 0.1.0-beta.1, recorded 2026-11-01 with a disposable profile. Cut for length. The <a href="https://www.vivaryagent.xyz/">56-second version</a> is on the website.</sub></p>
 
-- Open a project and work with an agent that can read files, edit them, and run tools.
-- Return to project conversations, search past sessions, and keep useful memory in files.
-- Use supported installed coding harnesses and their tools, with workspace guidance in files.
-- Preview the site or dashboard you are building and let the agent inspect and debug it.
-- Connect a phone browser to your self-hosted instance when you choose to enable remote access.
+Vivary puts agent chat, project files, project memory and search in one window.
+It runs on your computer and needs no Vivary account. Your agents, credentials,
+files and history stay on that computer. The model provider you use receives
+what your agent reads and writes.
 
-Local desktop use needs no Vivary account. Remote access requires explicit setup
-and authentication. Provider accounts are separate.
+## Download
+
+| Platform | Download | Requires |
+| --- | --- | --- |
+| Windows, 64-bit. Tested on Windows 11. | [Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) | No administrator rights |
+
+Beta, published 2026-10-31. The installer is `Vivary-Setup-0.1.0-beta.1.exe`. A
+portable ZIP is on the same page. Both are unsigned, so Windows shows
+**Windows protected your PC**. Select **More info**, then **Run anyway**.
+
+Verify the download first. Download the installer and its `.sha256` file. Then,
+in PowerShell, in the download folder:
+
+```powershell
+$file = '.\Vivary-Setup-0.1.0-beta.1.exe'
+$expected = (Get-Content "$file.sha256").Split(' ')[0].Trim()
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $expected) { throw 'Checksum mismatch. Do not run this file.' }
+```
+
+<!-- tested: 2026-11-06, PowerShell 5.1 on Windows 11, against the release files -->
+
+No output means the checksum matches. The command comes from the
+[installation guide](docs/desktop-preview.md), which also covers the portable
+ZIP, upgrades and removal.
+
+There is no macOS or Linux build.
+
+## What you can do
+
+Each line is in the 0.1.0-beta.1 [release notes](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1).
+
+- Open an existing folder as a project, or create a new project.
+- Chat with Claude Code or Codex in a project. The agent can read files, change files and run tools.
+- Save project facts as readable files in the project, and search project files.
+- Check project health with the bundled Python.
+- Set up automations that run on a schedule, on an event or from a webhook while Vivary is open.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/vivary-saved-fact.png" alt="The Project details panel after a fact is saved. The fact shows its source, its confirmed date and its Markdown file under .vivary/knowledge."></td>
+    <td width="50%"><img src="assets/vivary-project-search.png" alt="The Search panel with the query water. It lists four matches in packing-list.md with line and column numbers."></td>
+  </tr>
+  <tr>
+    <td>A saved fact is a Markdown file in the project, with its source.</td>
+    <td>Project search reports each match with its line and column.</td>
+  </tr>
+</table>
+
+## Requirements
+
+- For coding conversations: Claude Code or Codex, installed and signed in on the same computer.
+- For automations: your own provider key. Automations run from a Native chat.
+- Vivary includes no model access and no credentials. Provider accounts are separate.
+
+The download bundles Node, Python and Electron. You do not need to install them.
 
 ## Release status
 
-**Public Windows prerelease available. Full desktop acceptance remains open.**
+Beta. The first Windows beta is public. Full desktop acceptance is still open.
 
-[Download the Windows preview](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22) and follow the
-[installation guide](docs/desktop-preview.md). The portable ZIP includes
-`Vivary.exe` and its runtime files. There is no setup wizard in this release.
+On 2026-10-31 the installed app passed the checks in the left column, in a
+separate application profile. That pass ran on a build of `dev` commit `32c2a26`.
+The release came from a later documentation-only commit. The right column is not yet accepted on the installed
+app. The [acceptance register](docs/product/multi-project/desktop-acceptance-status.md)
+lists each check.
 
-The `9884670` artifact includes PR #78's desktop browser-link fix alongside
-Codex conversations, setup previews, project search, and adoption-request replay.
-**Open preview in a new tab** now shows a native confirmation before opening an
-HTTP or HTTPS address in your default browser. Cancel opens nothing.
-
-Windows checks covered the exact destination, Cancel, confirmed browser launch,
-project-preview clearing, graceful shutdown, and selected-project persistence
-after restart. Earlier setup and model-runtime journeys retain their dated evidence.
-Six applicable GitHub CI jobs passed on the reviewed fix head. The site job skipped.
-The historical Entire trail-approval failure remains separate from those checks.
-
-Later unpublished changes passed populated-folder adoption in the hosted app.
-The completed Windows EXE journey remains qualified evidence for its tested revision. See the [#17 receipt](docs/product/multi-project/receipts/08a-populated-folder-adoption.md).
-The public download above remains the earlier preview. Built-in workspace
-patterns under #16 are the next focused project increment.
-
-The [acceptance register](docs/product/multi-project/desktop-acceptance-status.md)
-separates these checks from earlier runtime journeys and unfinished work.
-Clean-profile onboarding, upgrade/removal acceptance, full native journeys,
-real Native-provider turns, automations, and remaining desktop/web work stay open.
-The executable is unsigned. The preview does not publish new PyPI/npm packages.
-
-## Start here
-
-This is the development repository for the app. Development and hosted
-preview run on Zo. Zo is not a product dependency.
-
-| You want to… | Start with |
+| Passed on the installed app | Not yet accepted |
 | --- | --- |
-| Install the Windows prerelease | [Download and installation](docs/desktop-preview.md) |
-| Build or run the GUI from source | [Workbench setup](packages/workbench/README.md#run-from-source) |
-| Run or package the desktop shell | [Desktop setup](packages/desktop/README.md#development) |
-| Pick up an issue and contribute | [Contributor guide](CONTRIBUTING.md) |
-| Understand current desktop acceptance and gaps | [Acceptance register](docs/product/multi-project/desktop-acceptance-status.md) |
-| Understand the product and implementation | [Interactive guide](docs/product/multi-project/specification/README.md#open-the-guided-reader), [release target](docs/product/multi-project/desktop-release.md#what-exists-and-what-is-missing), and [source map](docs/product/multi-project/source-map/index.md) |
-| Enable agent-session recording | [Entire setup](docs/ENTIRE.md) |
-| Use the original published command tools | [Original CLI reference](docs/ORIGINAL-CLI.md) |
+| Silent install and first launch | A coding-runtime turn |
+| Settings, project creation and project health | Provider-backed automations |
+| A saved fact and project search | Remote access from another device |
+| Second-instance handoff, close and relaunch | An upgrade over an earlier install |
+| Uninstall with user data kept | Code signing |
 
-Agent-Native owns conversations, runs, actions, and connectors. Vivary connects
-those capabilities to project workspaces and the original Vivary tools.
-The [engineering policy](ENGINEERING.md) keeps implementation focused on completed
-user workflows.
+The pass also did not cover native dialogs or a File Explorer launch.
 
-GitHub issues own task scope, acceptance, dependencies, and status. Contributors
-use topic branches from `dev`, reviewed PRs into `dev`, and accepted promotions to
-`main`. Follow the [contributor workflow](CONTRIBUTING.md#active-repository).
+The recording at the top shows one Claude Code turn on the published portable
+ZIP. That is a demo. It is not an acceptance pass.
 
-## Original Vivary
+Known limits of this build:
 
-The original CLI, package history, and release tables are preserved in the
-[original CLI reference](docs/ORIGINAL-CLI.md). Those published packages do not
-constitute a release of the desktop app.
+- It runs one coding conversation at a time on a computer.
+- Rollback after an upgrade is not supported. Back up `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary` before you upgrade.
+
+Settings has a Remote access option. It opens Vivary on another device over a protected HTTPS connection that you set up, such as Tailscale. It is not yet accepted on the installed app, and phone use is still open.
+
+## Your data
+
+- Vivary opens without a Vivary account and without a sign-up.
+- Application data is in `%USERPROFILE%\.vivary\workbench` and `%APPDATA%\Vivary`.
+- Project memory is saved as files inside the project folder.
+- Claude Code and Codex keep their own sessions and credentials.
+
+Report a security problem through [SECURITY.md](SECURITY.md).
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/vivary-architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/vivary-architecture-light.svg">
+  <img src="assets/vivary-architecture-dark.svg" alt="Architecture diagram. The Vivary window connects to the Workbench host on loopback. The host connects to the project registry. The registry reaches Agent-Native and the bundled Python engine bridge. Agent-Native drives Claude Code or Codex, which change project folders and call the model provider. A browser client on another device connects through remote access, which is not yet accepted." width="860">
+</picture>
+
+Simplified from the [system architecture diagram](docs/product/multi-project/diagrams/01-system-architecture.jpg). It leaves out the direct path from Native chat to the model provider.
+
+- **The window has little access.** The renderer has no Node access, uses Electron's sandbox, and can navigate only to its own loopback server ([desktop package](packages/desktop/README.md)).
+- **The host owns the work.** Workbench is a local server on a numeric loopback address. Agent-Native owns conversations, runs and actions.
+- **The runtime stays yours.** Vivary drives the Claude Code or Codex that you installed. The download includes no model access or credentials.
+- **A release proves its contents.** Each download has a `.sha256` file. `BUILD-INFO.json` names the source commit, and a licenses ZIP holds the notices of each bundled component.
+
+The 2026-10-31 pass recorded these results on the installed app: the silent
+install exited 0 in 31 seconds, and 3,163 application files matched the portable
+ZIP byte for byte. Closing the window ended each app process and freed the port.
+<!-- source: docs/product/multi-project/desktop-acceptance-status.md, section "Installed Windows beta, October 31" -->
+
+## Build from source
+
+Most people need only the download. To run the app from source, start with the
+Workbench package:
+
+```console
+pnpm --dir packages/workbench install --frozen-lockfile
+pnpm --dir packages/workbench build
+pnpm --dir packages/workbench start
+```
+
+Untested on a clean machine. Read
+[Workbench setup](packages/workbench/README.md#run-from-source) for the sign-in
+step and [Desktop setup](packages/desktop/README.md#development) for the
+Electron shell and its Node version rule.
+
+| Path | What it holds |
+| --- | --- |
+| `packages/workbench/` | The local server and the workspace interface |
+| `packages/desktop/` | The Electron shell and the Windows packaging |
+| `docs/` | Product design, the acceptance register and guides |
+| `site/` | The original project website source |
+
+The other packages hold the original Vivary command-line tools. See the
+[original CLI reference](docs/ORIGINAL-CLI.md). Those published packages are not
+a release of the desktop app.
+
+## Contributing
+
+GitHub issues hold task scope and status. The
+[release milestone](https://github.com/vivary-dev/vivary/milestone/1) holds the
+remaining work for the desktop release. Start a topic branch from `dev` and open
+the pull request into `dev`. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[engineering policy](ENGINEERING.md).
+
+## License
 
 MIT. See [LICENSE](LICENSE).

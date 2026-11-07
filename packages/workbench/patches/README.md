@@ -3505,6 +3505,39 @@ so its run stayed `resuming` and its job could not be deleted or moved.
 paths, and one checks the missing-table fallback with a stub executor. All seven
 failed against the previous patch and pass with this one.
 
+## Approval wait in Settings
+
+Issue #206, first two items. `executeJob` in `dist/jobs/scheduler.js` answered Run now on an
+automation with an unresolved approval through `refuseAlreadyRunning`, so the queued history row
+said "The automation is already running." while nothing ran. `refuseApprovalPending` now finishes
+that row as `error` with the code `automation_approval_pending` and the message "This automation
+is waiting for an approval decision in Past runs. Approve or decline it before running it again.
+No delivery was confirmed." The call returns `{ status: "skipped" }` as before. The scheduler reads the unfinished
+approval run's status through `unresolvedAutomationApprovalStatus` in `dist/jobs/run-history.js`.
+Only `waiting_approval` gets this refusal. A run that is `resuming` after a claimed decision,
+executing, or holding the run lease keeps the already-running refusal.
+
+Settings showed stored statuses verbatim, such as `waiting_approval`. `automationStatusLabel` in
+`dist/client/agent-page/AutomationDetailsDialog.js` maps `running`, `waiting_approval`,
+`resuming`, `success`, `error`, `interrupted`, `declined` and `skipped` to words through
+`t("jobs.runStatus.<status>")`, because `jobs.status` is already the Status label. The list
+row badge and the Details field Last status in `AgentJobsTab.js`, the Past runs rows and run
+inspection use it. A refused Run now row is stored as `error`, so it still reads Failed. Any other value shows as stored. These sections are appended to
+the end of the patch, after the earlier sections for the same files, and pnpm applies them in
+order.
+
+## Qualified esbuild for the server build
+
+Desktop releases build Core's server output on `windows-latest`. `bundleYjsRuntimeForServerlessOutput`
+in `dist/deploy/build.js` runs esbuild through `findEsbuild()`, which returned
+`node_modules/esbuild/bin/esbuild`. On Windows that file is a JavaScript launcher, so
+`execFileSync` failed with ENOENT, and the 2026-10-31 beta-candidate dry run stopped there. The
+one earlier successful dry run built on `ubuntu-latest`, where the launcher has a shebang.
+`findEsbuild()` now returns `process.env.ESBUILD_BINARY_PATH` first when that file exists. The
+build workflows export the Go-built `esbuild-0.28.2-go1.26.10` there, the same qualified binary
+the rest of the build uses. Without it, the lookup is unchanged.
+`tests/core-esbuild-binary.test.mjs` runs the yjs bundling with a recording esbuild at that path.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a

@@ -12,6 +12,7 @@ import re
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 import types
 import unittest
@@ -374,6 +375,91 @@ class RunnerBootstrapTests(unittest.TestCase):
                                  "exception=RuntimeError, observedNode=24.22.0, requiredNode=24.22.1)\n", workflow.name)
                 # A non-zero step result is what keeps every later action from running.
                 self.assertEqual(result, 1)
+
+
+@unittest.skipIf(sys.platform == "win32", "linked-externals fixtures need POSIX symlinks")
+class LinkedExternalsTests(unittest.TestCase):
+    """Hosted ubuntu-latest 20261025 runs the Worker from cached/<version>, whose externals links to one shared tree."""
+
+    def test_only_the_pinned_shared_externals_tree_is_admitted_in_every_actual_source(self):
+        expected = {"unpinned": "must name the pinned", "relative": "must name the pinned",
+                    "chained": "must resolve in one step", "interpreter-link": "selected interpreter must resolve inside the linked externals"}
+        for name, source in sources():
+            for mode in ("shared", "unpinned", "relative", "chained", "interpreter-link"):
+                with self.subTest(source=name, mode=mode), tempfile.TemporaryDirectory() as directory:
+                    module = load_source(source)
+                    with controlled_runner(module, directory) as (root, worker, interpreter, chain, probing):
+                        shared = Path(directory) / "runner-cache/externals"
+                        shared.parent.mkdir()
+                        (root / "externals").rename(shared)
+                        link = root / "externals"
+                        alias = Path(directory) / "cache-alias"
+                        pins = (str(alias / "externals"),) if mode == "chained" else (str(shared),)
+                        if mode == "unpinned":
+                            pins = ("/opt/runner-cache/externals",)
+                        if mode == "relative":
+                            link.symlink_to(os.path.relpath(shared, root), target_is_directory=True)
+                        elif mode == "chained":
+                            alias.symlink_to(shared.parent, target_is_directory=True)
+                            link.symlink_to(alias / "externals", target_is_directory=True)
+                        else:
+                            link.symlink_to(shared, target_is_directory=True)
+                        canonical = shared / "node24/bin/node"
+                        if mode == "interpreter-link":
+                            outside = Path(directory) / "outside-node"
+                            canonical.rename(outside)
+                            canonical.symlink_to(outside)
+                        with mock.patch.object(module, "SHARED_EXTERNALS", pins):
+                            if mode == "shared":
+                                actual = module.check_runner_action_node()
+                                self.assertEqual(actual["interpreter"], str(canonical))
+                                self.assertEqual(actual["sha256"], module.sha256(canonical))
+                                probing.assert_called_once_with(canonical, {"LANG": "C", "LC_ALL": "C"})
+                            else:
+                                with self.assertRaisesRegex(RuntimeError, expected[mode]):
+                                    module.check_runner_action_node()
+                                probing.assert_not_called()
+
+    def test_the_pin_names_only_the_hosted_shared_tree(self):
+        for name, source in sources():
+            with self.subTest(source=name):
+                self.assertEqual(load_source(source).SHARED_EXTERNALS, ("/opt/runner-cache/externals",))
+
+
+@unittest.skipIf(sys.platform == "win32", "externals swap fixtures need POSIX symlinks")
+class ExternalsSwapDuringProbeTests(unittest.TestCase):
+    """Independent review P1 on #313: hashes read the resolved path, so the Worker's path must still resolve there."""
+
+    def test_externals_entry_swapped_during_the_probe_is_refused_in_every_actual_source(self):
+        for name, source in sources():
+            for layout in ("linked", "plain"):
+                with self.subTest(source=name, layout=layout), tempfile.TemporaryDirectory() as directory:
+                    module = load_source(source)
+                    with controlled_runner(module, directory) as (root, worker, interpreter, chain, probing):
+                        shared = Path(directory) / "runner-cache/externals"
+                        other = Path(directory) / "other-cache/externals"
+                        shared.parent.mkdir()
+                        other.parent.mkdir()
+                        link = root / "externals"
+                        if layout == "linked":
+                            link.rename(shared)
+                            link.symlink_to(shared, target_is_directory=True)
+                            shutil.copytree(shared, other)
+                        else:
+                            shutil.copytree(link, other)
+                        def swap(*args):
+                            if layout == "linked":
+                                link.unlink()
+                                link.symlink_to(other, target_is_directory=True)
+                            else:
+                                link.rename(Path(directory) / "externals-aside")
+                                shutil.copytree(other, link)
+                            return "v24.22.1"
+                        probing.side_effect = swap
+                        with mock.patch.object(module, "SHARED_EXTERNALS", (str(shared), str(other))):
+                            with self.assertRaisesRegex(RuntimeError, "externals entry changed during the probe"):
+                                module.check_runner_action_node()
+                        probing.assert_called_once()
 
 
 class RunnerDiagnosticTests(unittest.TestCase):

@@ -1,9 +1,44 @@
 # Desktop acceptance status
 
-Updated 2026-10-06. This page is the current tracked acceptance register for the
+Updated 2026-10-31. This page is the current tracked acceptance register for the
 Windows desktop and self-hosted Workbench. GitHub issues still own task
 scope and lifecycle. Dated receipts preserve detailed evidence. This page states
 what a new contributor or tester can rely on now.
+
+## Installed Windows beta, October 31
+
+The `desktop release` workflow built `dev` commit
+`32c2a26b9e5a477e2dd1e5d23684fe49f6f80eac` on `windows-latest` as a dry run (run
+41248345854). Its `BUILD-INFO.json` reports version 0.1.0-beta.1,
+`sourceDirty: false`, Electron 45.2.1, and Node 24.22.1. Every file matched
+`SHA256SUMS`. The installer is not code signed. The 0.1.0-beta.1 release is built
+from a later commit that changes only documentation.
+
+On Windows 11 Home 10.0.26300 x64, in a separate application profile with a
+system-only `PATH`:
+
+- The installer, run silently for the current user without administrator rights,
+  exited 0 in 31 seconds. It installed 3,166 files, and the 3,163 application files
+  matched the portable ZIP byte for byte. It added the Installed apps entry
+  `0.1.0-beta.1+32c2a26` and a Start menu shortcut.
+- First launch opened the workspace without an account and showed Claude Code setup
+  guidance, because no coding runtime was on `PATH`.
+- Settings and the Automations empty state rendered.
+- **New project** previewed five files and created them with the previewed sizes.
+  Project health reported Healthy with the bundled Python.
+- **Remember a fact** required a source and saved the fact under
+  `.vivary/knowledge/`. Project search found it.
+- A second launch handed off to the running instance. Closing the window ended every
+  app process and freed the port. Relaunch restored the project, the fact, and the
+  draft.
+- The uninstaller removed the application, its Installed apps entry, and its
+  shortcut, and kept the separate profile. The existing Vivary folders on the
+  computer had the same file hashes before and after. Defender reported no new
+  detection.
+
+The pass was driven through the DevTools protocol. It did not cover native dialogs,
+a File Explorer launch, a coding-runtime turn, provider-backed automations, remote
+access, an upgrade over an earlier install, or signing.
 
 ## Claude provider log reader, October 6
 
@@ -406,20 +441,14 @@ records this correction separately from the full `27499cf` journey.
 
 ## Release boundary
 
-The [public Windows prerelease](https://github.com/vivary-dev/Vivary-New/releases/tag/desktop-preview-2026-09-22) contains the tested `9884670`
-application. Stable desktop and self-hosted web acceptance remain incomplete.
-The repository and download are public. No access invitation is required.
+[Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) is the current Windows prerelease. It has the
+per-user installer and the portable ZIP, both unsigned. Its `SHA256SUMS` asset lists
+each file's digest, and `BUILD-INFO.json` names the exact source commit. Stable
+desktop and self-hosted web acceptance remain incomplete. See the
+[install guide](../../desktop-preview.md).
 
-Exact source: `98846706227432e26f519d1b546889261eb08ff1`, the merged PR #78 commit.
-ZIP size: 236,072,825 bytes.
-SHA-256: `e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0`.
-
-The executable is unsigned and retains `version: 0.0.0`, `channel: private-preview`,
-and prebuilt Workbench `sourceCommitVerified: false`. The tag pins the binary's
-source, not later documentation commits. See the [install guide](../../desktop-preview.md).
-
-Earlier archives remain available. Dated sections preserve their own candidate
-evidence and do not imply retesting on the replacement.
+The September `desktop-preview-*` prereleases are no longer published. Their dated
+sections below remain evidence for those builds only.
 
 ### September 22 browser-link and lifecycle review of `9884670`
 

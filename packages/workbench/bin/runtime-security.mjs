@@ -127,9 +127,17 @@ export async function validateStagedNode(executable, target) {
 }
 
 // Electron releases admitted for packaging, each with the Node version that DEPS pins at its tag
-// and with no patches/node file touching the October fix files. Empty until a stable release
-// bundles Node 24.22.1 or later: 45.0.0 and 44.9.3 bundle 24.22.0.
-export const ADMITTED_ELECTRON = Object.freeze({});
+// and with no patches/node file touching the October fix files. 45.0.0 and 44.9.3 bundle
+// 24.22.0. Checked on 2026-10-31 at tag v45.2.1: DEPS pins node v24.22.1, and none of its 58
+// patches/node files touches lib/internal/dns/{callback_resolver,promises,utils}.js.
+// These criteria cover Node only. Chromium coverage, checked the same day: of the 18 changes
+// Electron backported to 44.10.1 on 2026-10-30, 45.2.1 carries 17, some under their M156
+// branch hashes. It lacks cherry-pick 3318e836e90b (Blink Element attribute mutation
+// re-entry and copied id/class in DidMoveToNewDocument), which Chromium 156.0.8078.75 and
+// .80 also lack. 44.10.1 in turn lacks at least two fixes 45.2.1 has (bugs 574516887 and
+// 571156746), so no supported release covers both. Move to the first 45.x whose
+// patches/chromium lists 3318e836e90b or whose Chromium contains that change.
+export const ADMITTED_ELECTRON = Object.freeze({ "45.2.1": "24.22.1" });
 
 function pinnedElectron() {
   try {

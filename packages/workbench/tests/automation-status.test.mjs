@@ -499,9 +499,15 @@ test("past runs remain in Settings without an interactive Open thread control", 
     run("done", "success", null),
     run("cut", "interrupted", INTERRUPTED_RUN_MESSAGE),
     run("failed", "error", "The tool failed. No delivery was confirmed."),
+    run("waiting", "waiting_approval", null),
+    run("refused", "declined", null),
   ]);
-  assert.equal(details.rows, 3, "every past run is listed");
-  for (const status of ["success", "interrupted", "error"]) assert.match(details.text, new RegExp(status));
+  assert.equal(details.rows, 5, "every past run is listed");
+  // Vivary #206: each status reads as words, never as the stored value.
+  for (const label of ["Succeeded", "Interrupted", "Failed", "Waiting for approval", "Declined"]) {
+    assert.match(details.text, new RegExp(label));
+  }
+  assert.doesNotMatch(details.text, /waiting_approval|\bsuccess\b|\bdeclined\b/);
   assert.match(details.text, /The run stopped before it recorded a result/, "an interrupted run shows its message");
   assert.deepEqual(details.buttons.filter(label => /open thread/i.test(label)), [], "no run offers Open thread");
 });
@@ -579,7 +585,7 @@ test("Settings inspects retained tools and sends only the exact pending approval
     pending: { askId: "exact-ask", toolName: "mcp__fixture__write", input: { value: "Exact pending content" }, expiresAt: Date.now() + 60_000 } };
   const view = await proof.inspectDetails(data);
   assert.equal(view.inspectedId, data.run.id);
-  for (const retained of ["Retained local result", "notes/prior.md", "Exact pending content", "waiting approval"])
+  for (const retained of ["Retained local result", "notes/prior.md", "Exact pending content", "Waiting for approval"])
     assert.ok(view.text.includes(retained), retained);
   assert.equal(view.interactiveInputs, 0);
   assert.deepEqual(view.openRequests, []);
@@ -837,11 +843,13 @@ const sectionNote = /Could not refresh automations\. The values shown may be out
 const detailsNote = /Could not refresh\. These values may be out of date\./;
 const runsNote = /Could not refresh run history\./;
 
+// Vivary #206: Details shows a stored status as words.
+const statusWords = { success: "Succeeded" };
 function assertDetailsShow(shown, row, where) {
   assert.equal(shown?.["Last checked"], row.lastCheck, `${where} shows the LAST CHECKED the list now holds`);
   assert.equal(shown?.["Next run"], row.nextRun, `${where} shows the NEXT RUN the list now holds`);
   assert.equal(shown?.["Last run"], row.lastRun, `${where} shows the LAST RUN the list now holds`);
-  assert.equal(shown?.["Last status"], row.lastStatus, `${where} shows the LAST STATUS the list now holds`);
+  assert.equal(shown?.["Last status"], statusWords[row.lastStatus] ?? row.lastStatus, `${where} shows the LAST STATUS the list now holds`);
 }
 
 test("an open Details dialog follows the automation list when the list changes", async t => {

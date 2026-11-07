@@ -6463,23 +6463,18 @@ container resize.
 
 # Install the Windows prerelease
 
-This guide covers the unsigned Windows x64 desktop release of Vivary. This release
-adds a per-user installer, `Vivary-Setup-<version>.exe`, as the main download and
-keeps the portable ZIP as an option.
+This guide covers [Vivary 0.1.0-beta.1](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1), the unsigned Windows x64 desktop beta. Its
+main download is a per-user installer, `Vivary-Setup-<version>.exe`, and it keeps the
+portable ZIP as an option.
 
-Installer acceptance is pending. The installer steps below describe how setup is
-designed to behave, and they stay unverified until this release records its Windows
-results. See [Verification and known limits](#verification-and-known-limits).
-
-The portable ZIP facts were verified on 2026-09-22 for the published
-[GitHub prerelease](https://github.com/vivary-dev/vivary/releases/tag/desktop-preview-2026-09-22),
-which includes PR #78's desktop browser-link fix and the preceding application
-changes. That prerelease has only the portable ZIP. The repository and download are
-public. The complete desktop and self-hosted web acceptance journey remains unfinished.
+The installer passed an installed-Windows pass on 2026-10-31.
+[Verification and known limits](#verification-and-known-limits) says what that pass
+covered and what remains open. The repository and the download are public. The
+complete desktop and self-hosted web acceptance journey remains unfinished.
 
 ## Download and verify
 
-A release's Assets list holds the desktop downloads. Choose one:
+The [0.1.0-beta.1 release page](https://github.com/vivary-dev/vivary/releases/tag/v0.1.0-beta.1) lists the desktop downloads under Assets. Choose one:
 
 - `Vivary-Setup-<version>.exe` is the installer. Use it unless you need a portable copy.
 - `Vivary-<version>-windows-x64.zip` is the optional portable ZIP.
@@ -6498,22 +6493,18 @@ $actual = (Get-FileHash $file -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw 'Vivary download checksum mismatch' }
 ```
 
-The 2026-09-22 prerelease's ZIP is `Vivary-windows-x64-9884670.zip`.
-It is 236,072,825 bytes. Its SHA-256 must be:
+The release also lists `SHA256SUMS`, which holds the digest of every asset, and
+`BUILD-INFO.json`, which names the exact source commit.
 
-```text
-e9c0abf09e9e5a66c1dbea9ec3e05d479829138d35372b10c90a34124d1b81a0
-```
-
-If you already use GitHub CLI, download that prerelease's pinned assets with:
+If you already use GitHub CLI, download the installer and its checksum with:
 
 ```console
-gh release download desktop-preview-2026-09-22 --repo vivary-dev/vivary --pattern Vivary-windows-x64-9884670.zip --pattern Vivary-windows-x64-9884670.zip.sha256
+gh release download v0.1.0-beta.1 --repo vivary-dev/vivary --pattern Vivary-Setup-0.1.0-beta.1.exe --pattern Vivary-Setup-0.1.0-beta.1.exe.sha256
 ```
 
 ## Install and launch
 
-### With the installer (acceptance pending)
+### With the installer
 
 1. Run `Vivary-Setup-<version>.exe` after its checksum matches. The installer is
    not code signed, so Windows can show **Windows protected your PC** with an
@@ -6531,7 +6522,7 @@ install does not start Vivary or create a desktop shortcut.
 
 ### With the portable ZIP (optional)
 
-1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\9884670`.
+1. Extract the entire ZIP to a new, writable folder, such as `C:\Apps\Vivary\0.1.0-beta.1`.
 2. Keep all extracted files together. Do not move `Vivary.exe` out of `Vivary-win32-x64`.
 3. Open `Vivary-win32-x64\Vivary.exe` in File Explorer.
 
@@ -6546,7 +6537,7 @@ Windows Explorer can reject a deeply nested destination before the application s
 Both downloads hold the same application. It bundles Node, Python, and the
 original Vivary runtime. It does not require a source checkout or a separate
 global Node or Python install.
-Clean-profile first-run acceptance remains open, so report missing-runtime errors.
+A first launch in a new profile passed on 2026-10-31. Report missing-runtime errors.
 
 Vivary opens locally without a Vivary account. Claude Code, Codex, and model
 provider access require their own supported installation and authentication.
@@ -6598,7 +6589,7 @@ Use disposable projects for preview testing.
    installer keeps one version. To return to an earlier one, run that version's
    installer, within the rollback limits below.
 
-To move from the 2026-09-22 portable prerelease to the installer, close the
+To move from a September portable prerelease to the installer, close the
 portable Vivary first, because two copies must not use one profile at the same
 time. Then run setup. For setup this is a first install into
 `%LOCALAPPDATA%\Programs\Vivary`, and it does not touch the folder you extracted
@@ -6721,8 +6712,8 @@ journeys. This exact artifact's visual review did not repeat paid model calls.
 The bundled command launcher is available for command-line inspection:
 
 ```powershell
-& 'C:\Apps\Vivary\9884670\Vivary-win32-x64\resources\original-runtime\bin\vivary.cmd' --help
-& 'C:\Apps\Vivary\9884670\Vivary-win32-x64\resources\original-runtime\bin\vivary.cmd' adopt --help
+& "$env:LOCALAPPDATA\Programs\Vivary\resources\original-runtime\bin\vivary.cmd" --help
+& "$env:LOCALAPPDATA\Programs\Vivary\resources\original-runtime\bin\vivary.cmd" adopt --help
 ```
 
 The included creator contains approved adoption-request replay and bounded journal
@@ -6731,8 +6722,8 @@ do not add a general GUI Apply button or publish newer PyPI/npm packages.
 
 ### Automations
 
-The published `9884670` prerelease predates the issue #51 automation changes. This section
-describes later builds. The [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md)
+The September `9884670` prerelease predates the issue #51 automation changes. This section
+describes later builds, including 0.1.0-beta.1. The [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md)
 records their test on an unpublished package. The [#114 and #115 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/114-automation-quit-and-status.md)
 records a later package's test of quitting during a run and of LAST CHECKED. The [#109 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/109-automation-file-review.md)
 records a package's test of **Automation files**. Issue #108 approval waiting and retained run inspection have maintained regression controls. Test counts, builds and reviews are recorded per commit in the pull request and its receipts. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain pending. These results do not establish released-package or final GUI acceptance.
@@ -6978,9 +6969,10 @@ per-user folder, the exact-folder guard, removal limited to listed files with no
 recursive delete, the kept user data, and the current-user registry entry. Its
 build verifies every payload file against the package's file manifest, checks that
 every file went into the installer, and records the payload and installer commits
-in the installer's file properties and a build receipt. Installation, launch,
-upgrade, profile preservation, and uninstallation are pending acceptance on
-Windows. The installer is not code signed.
+in the installer's file properties and a build receipt. On 2026-10-31 a build of `32c2a26`
+passed silent installation, launch, profile preservation, and uninstallation on
+Windows, as described below. Upgrade over an earlier install is not yet accepted.
+The installer is not code signed.
 
 To build the installer from source, run
 `npm --prefix packages/desktop run package -- --windows-x64`. It writes the
@@ -6989,43 +6981,31 @@ folder. Then run `npm --prefix packages/desktop run installer` with `--payload` 
 to that `Vivary-win32-x64` folder, `--manifest` set to that
 `package-file-manifest.json`, and `--output` set to `Vivary-Setup-<version>.exe`.
 The [desktop package README](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/README.md#windows-installer)
-covers the tools it needs. The rest of this section describes the
-2026-09-22 portable prerelease.
+covers the tools it needs. The rest of this section describes the 0.1.0-beta.1 release.
 
-The exact source commit is `98846706227432e26f519d1b546889261eb08ff1`.
-This is the merged PR #78 source commit.
-The tag identifies the packaged source, rather than later documentation commits.
-`resources\workbench\build.json` reports `sourceDirty: false`, version `0.0.0`,
-and channel `private-preview`. These internal development labels remain in the
-reviewed binary. The GitHub artifact is publicly downloadable as a prerelease.
+The release's `BUILD-INFO.json` names the exact source commit and reports
+`sourceDirty: false` and version `0.1.0-beta.1`. The `desktop release` workflow built
+it on a GitHub Windows runner from that commit, and `SHA256SUMS` covers every asset.
+The application bundles Electron 45.2.1, Node 24.22.1, and Python 3.12.15.
 
-The prebuilt Workbench metadata reports `sourceCommitVerified: false`. The build
-log records a Workbench build immediately before packaging. The metadata does
-not assert complete compiler-input provenance. The executable is unsigned.
+The installed-Windows pass on 2026-10-31 used the build of `dev` commit `32c2a26`,
+which differs from the release commit only in documentation. In a separate profile it
+covered silent per-user installation, a byte-for-byte match with the portable ZIP,
+first launch without an account, Settings, project creation, project health with the
+bundled Python, saving and searching a fact, second-instance handoff, close and
+relaunch, and uninstallation that kept user data.
 
-Six applicable GitHub CI jobs passed on the reviewed PR #78 fix head. The site
-job skipped. Twenty-seven desktop and startup tests passed on Zo. These source
-checks are separate from packaged Windows evidence. Historical Entire trail
-approval failures remain recorded and are not relabeled as passing.
+Not yet accepted on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing. A File Explorer launch and native
+dialogs were not part of that pass. This release runs one coding conversation at a
+time on a computer.
 
-The exact Windows package displayed the complete destination with Cancel selected
-by default. Cancel dismissed the dialog without opening a preview tab. Confirming
-opened Chrome at the exact path, query, and fragment, and page interaction passed.
-Switching projects cleared the old preview. Graceful close stopped all observed
-app processes and released the listener. Restart retained the selected project
-and an empty Preview. Local profile backups were hash-verified before launch.
+Electron 45.2.1 lacks one Chromium fix that Electron backported to its 44 line,
+cherry-pick `3318e836e90b`. The [architecture review](https://github.com/vivary-dev/vivary/blob/dev/docs/ARCHITECTURE.md#last-change-review)
+records it. Vivary moves to the first Electron 45 release that carries the fix.
 
-The September 21 candidate retains its separate setup-preview, chooser-recovery,
-and 390-pixel browser evidence. Those journeys and earlier real model turns were
-not repeated on this package. Native minimum-width testing, full native existing-folder
-registration, conflict cases, clean-profile onboarding, upgrade/removal acceptance,
-Native-provider turns, full adoption, search/memory coverage,
-self-hosted phone access, and integrated debugging remain outside this bounded review.
-Automations were not part of this package's review either. In later builds they run only
-while Vivary is open. The original #51 candidate could not use MCP tools or wait for
-approval. Issue #108 changes that behavior in source and still needs acceptance.
-Ending Vivary without quitting during a run delays scheduling for up to ten minutes,
-and desktop webhook calls reach Vivary only from the same computer. The
+Automations run only while Vivary is open. Ending Vivary without quitting during a run
+delays scheduling for up to ten minutes, and desktop webhook calls reach Vivary only
+from the same computer. The
 [#51 receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/51-automation-lifecycle.md) lists each limit and its tracking issue.
 
 See the [acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md)
@@ -8224,7 +8204,7 @@ keeps schema support and the existing one-second autosave owner unchanged.
 6. **Find a past conversation.** Project and unassigned history offer title/message search through the owner-only, read-only GET action `vivary-chat-search`. Authorized Native repositories are parsed once per session page; Code metadata establishes scope before transcript access or session counts. Bounded scans use recency cursors, skip malformed records, and retain Native results when Personal Code history is unavailable. The client continues automatically toward a page of hits, shows progress/Cancel, highlights excerpt terms and preserves matches/cursors on Retry. Clear/Escape restores the ordinary list. Search and Native match reads use the owner transport's session rejection registry and invalidation hook on 401. Opening a result imports the Native path through the match to its retained head/leaf, or a checked Code window with preceding context and normal deduplication. A normally hidden Code event gets a transient row in saved event order with the parent chain preserved. Focus, theme-aware marking and scroll settling reveal the match. Replay refuses execution and server saves; the standalone Native import is cleared from session storage on exit. The Native match read reports authoritative archive state; Return stays disabled while loading and for archived matches. Project and Personal archived matches explain restoration through Archived conversations and reopening; Unassigned matches say they are archived and read-only here because that history has no restore control. A failed read explains recovery; Return removes the unread thread and match anchors, then uses the existing saved-selection restore, which refuses archived threads. Read-only replay preserves that saved selection. Malformed or missing Native match data returns the same stale-result 404. Project switching clears message and event anchors before admitting the new conversation. The normal twenty-run list and latest-400-event Code view stay unchanged. No index or new transcript owner is created. Forgotten or removed active-memory facts can remain findable in chat history. [The workspace contract](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/unified-workspace.md#conversation-content-search) owns interaction, ordering and scan limits.
 7. **Preview a project.** A reviewed local command starts a project process. The app presents its page in an isolated frame and supports Stop. The selected coding runtime can inspect and repair the project through its supported browser tools. The [preview receipt](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/receipts/11e-live-project-preview.md) states what passed on Zo and what still needs packaged or platform proof.
 
-8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
+8. **Wait for an automation approval.** Scheduler, Run now, event and webhook paths use Native's background runner and restricted registry. At a gated call the existing history row becomes `waiting_approval` before the worker yields. Ready waiting is published only after the retained turn save and confirmed Native terminal finalization, awaited outside its completion callback. Waiting metadata is written atomically against that exact history and current chunk, so a late original caller cannot revive a terminal wait. Settings > Agent > Automations > Details > Past runs includes scoped unresolved or recoverable approvals alongside recent history, without duplicating rows. Inspect run reads the retained Native thread and exact pending input. Listed runs carry a server-derived inspection capability from the same read-only app, retained thread owner, organization and current-membership checks. Organization members retain shared history visibility without gaining another owner's transcript or approval access. Details offers Inspect only when permitted. Inspection and decisions revalidate current bindings rather than trusting this advisory flag. Older history without an application binding stays listed with inspection unavailable, rather than offering a failing action. Approval decisions still require exact application identity. Authorization uses the persisted run scope and retained owner binding. A personal run keeps its null organization even when the normal action transport supplies an active organization. Organization runs require that exact retained organization and current membership for inspection and decisions. The approved tool result is saved before the follow-up model work. Later saves replace that current chunk by Native event sequence and retain prior chunks in the same assistant turn. An owner decision claims that ask once. Approve uses Native's guarded tool executor and continues the same history, thread and logical turn in a fresh execution chunk. Decline ends it without the pending action. Waiting persists across restart and prevents another execution, schedule advancement, final delivery and a finished event. A Run now request during that wait finishes its queued history row with the code `automation_approval_pending` and a message that names the wait and Past runs, instead of the refusal for a run that is still executing or resuming after a decision. Settings shows each stored run status as words, such as Waiting for approval, Succeeded and Failed, in the jobs list, Past runs and run inspection. A webhook stays under its original Native pending-task owner. Interactive chat send and resume reject automation-owned threads on the server. [The maintained patch contract](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/patches/README.md#durable-automation-approvals) owns binding and crash rules. The [automation approval statechart](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/specification/journeys.md#automation-approval-waits) shows the user-visible states. Maintained regression controls cover this flow. Test counts, builds and reviews are recorded per commit in the pull request and its receipts rather than here. A built UI journey on the final head, live PostgreSQL execution and packaged Windows acceptance remain separate pending gates. Native pruning retains terminal chunks referenced by unresolved approval history. An approval continuation retains exact known execution outcome evidence in its existing approval history context before terminal bookkeeping. Exhausted terminal writes propagate a typed bookkeeping failure to completion while preserving the execution outcome. When that evidence was stored successfully, the existing sweep can settle it only after confirming its exact terminal Native identity. If every evidence write fails, completion reports an unsettled outcome without a durable automatic-recovery guarantee. Recovery redispatches no model, tool or delivery and does not infer an outcome from age or liveness. Terminal history keeps a reconciliation marker and its exact task and resource binding until existing sweeps finish bookkeeping. Recovery never dispatches tools or delivery and cannot replace a newer history outcome. Declared configured tools await the existing lazy MCP initializer before their registry is built. Deletion refuses unresolved waits and terminal approval history whose outcome is not yet reconciled. The authenticated resource DELETE route applies that same exact persisted-history guard inside the snapshot deletion custody transaction for jobs. Its full mutable-row snapshot comparison remains intact, and ordinary non-job deletion keeps its existing behavior. This preserves owner discovery and lets settlement finish before history cleanup, so a same-name replacement cannot inherit the deleted definition's runs.
 
 ## Data and trust boundaries
 
@@ -8342,7 +8322,7 @@ Refresh preview replaces only the frame for the same identity. Separate transpor
 required. This source slice does not establish packaged Windows or actual-phone
 acceptance.
 
-The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) own those limits.
+The Electron window accepts its local server origin, isolates the renderer, denies browser permissions and downloads, and routes a small set of setup links externally. Optional Discord Rich Presence is off by default. When enabled in desktop settings, the workbench server publishes a sanitized project label and coarse activity phase to the Electron parent over existing IPC; the main process sets Discord activity through a local IPC client (`@xhayper/discord-rpc`). No conversation text, file paths, or credentials leave the machine through that path. The controller owns pending login clients as well as the connected client. Disabling presence, changing the application ID, clearing activity or disposing the controller invalidates that connection generation and destroys both clients. Login continuations and activity publication check that the generation and enabled application ID still match, so a cancelled login cannot publish an old project label or replace a newer connection. A project grant does not bypass CLI-native permissions. A prompt containing a path is not filesystem isolation. The selected harness may send supplied model context to its provider. Local storage does not imply offline model inference. The [runtime isolation decision](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/design.md#runtime-ownership-and-isolation) and [desktop host](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/main.mjs) own those limits.
 
 OS sandbox coverage belongs to each execution surface. Full chat production code
 execution defaults off; optional QuickJS evaluation does not contain host bridge
@@ -8407,7 +8387,11 @@ keeps the same terminal history unreconciled. No original tool or delivery is re
 Build and publication have a runtime admission boundary separate from the
 application's project and session owners. Native workflow setup binds the actual
 ancestor Worker's action interpreter and retains its complete admission after a
-hash-bound repair of known affected Node bytes. Jobs provision authenticated
+hash-bound repair of known affected Node bytes. On hosted Ubuntu images whose
+runner root links `externals` to the pinned shared `/opt/runner-cache/externals`,
+admission follows only that link and only on Linux, and requires the Worker's
+selected interpreter to resolve to the shared one, which it hashes and probes at
+that moment. The repair keeps every directory below the target plain. Jobs provision authenticated
 standalone CPython 3.12.15, replace its retained pip seed with the verified
 certificate overlay, export filtered task trust, and admit its loaded OpenSSL
 3.5.9 before package operations. The site and Linux/Windows Workbench jobs use
@@ -8438,6 +8422,244 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-11-07 PR #258 review reconciliation. The branch retains current dev's
+documentation and delivery changes alongside the runtime-switch design. Entering
+history replay or losing the folder discards unsubmitted switch consent; retained
+callbacks recheck the current view before switching or stopping. Latest-view Stop
+still works after folder loss. Retained switches offer Claude only when its
+catalog has a supported target, while preserving the conversation's current route.
+Run metadata now keeps a model label bound to its ID, and host-owned pending
+switches retain the previous label, so switch notes use consistent runtime names
+without needing a catalog after cleanup or restart. Historical unknown labels
+fall back to their IDs. The generation and turn consent checks, exact accepted
+state cache handling, session reset and durable pending-target ownership remain
+in place. Added regressions exercise real owner/router replay transitions,
+supported-model selection, label persistence and the real Stop owner's single
+stopping record and abort. Qualified backend, component and real-worker
+regressions, typechecking and the guarded Workbench build pass. Host review,
+human/Entire approval, live-provider and packaged Windows acceptance remain pending.
+
+2026-11-06 Repository README rewrite. The README now describes the published
+beta, with its download, status and an architecture diagram simplified from the
+existing system diagram. Images sit under `assets/`. No package, runtime or
+boundary changed, so the architecture described here still holds.
+
+2026-11-06 Specification reader data embedding. The guide and atlas pages now
+hold their generated data in the page script instead of a JSON script element
+that the page read back from the DOM. The atlas link base is now a fixed value.
+Both pages stay generated, read-only documentation with no server, so the
+description of the specification reader still holds. No runtime or product
+boundary changed.
+
+2026-11-03 Discord presence reload order, isolation and settings fixes. The
+desktop controller numbers each settings reload before it reads the file and
+applies only the newest request. An older On read that finishes after a newer
+Off read no longer starts sharing. The controller keeps its connection
+generations. The RPC package now loads through a dynamic import, only when a
+read reports sharing On. A missing or broken package logs one line and leaves
+presence off. The desktop main module therefore loads without the package, as
+beta.1 did. While the saved setting is Off, the workbench poller reads only the
+settings file and skips the selection, org, scope and code host readers. A tick
+whose snapshot cannot be built publishes hidden. Before, it sent nothing, so
+Discord kept the last project. The Discord settings section carries the
+`discord` anchor that its search entry scrolls to. The entry appears only where
+the section renders, in the desktop app. Settings saves run one at a time in
+order, and the toggle stays enabled while a save runs. A click made while the
+application id saves on blur is no longer lost. Leaving the id field saves only
+when the trimmed id changed. The snapshot label still counts code points, because
+pinned Zod 4.6.7 measures string length in code points. A 150-emoji project name
+is cut to 128 code points and sent. Tests cover both completion orders of the
+reloads, an application id change, the main module and controller with the
+package absent, Off with no other reader calls, the anchor, a toggle click right
+after pasting an id, and an unchanged blur. Each fails on `9f026b1` where it
+describes a change. `test:discord-presence` also runs the desktop isolation test,
+because `ci.yml` lists the desktop tests and this change leaves it alone. That
+test needs no desktop packages. The IPC messages, the settings file and the snapshot fields
+are unchanged, so the description above still holds.
+
+2026-11-03 Discord presence saved-state refetch and end-to-end timer test. A
+settings save can write the file and then fail while it publishes the presence
+snapshot. After a failed save, the settings view now refetches the settings and
+shows the saved values, instead of the copy cached before the save.
+`tests/discord-presence-settings-component.test.mjs` renders the real component
+under linkedom with stubbed actions. It checks a rejected opt-in, a rejected
+opt-out, a save that fails after it writes and a successful save. Only the third
+case failed on `b133d23`. `tests/desktop-presence-timer.test.ts` forks a desktop
+server child with real Core app state, the owner's org, the local folder
+provider, the registry and the catalog. It has no request and no
+`AGENT_USER_EMAIL`, and only the code host is a stand-in. The installed timer
+must follow a switch to the personal workspace, from project A to project B, and
+from idle to agent to review and back. It passes on `b133d23` and fails on the
+`c5ea21e` poller. When the catalog scope read is broken so that presence always
+hides, the reader-replacing `desktop-presence.test.mjs` still passes and this
+test fails. The poller, the scope check, the IPC messages and the settings file
+are unchanged, so the description above still holds. `test:maintained` runs
+both files.
+
+2026-11-03 Discord presence poller identity and failed-save state. The presence
+snapshot now runs inside the owner's request context, because the desktop
+poller starts outside a request and Core's app-state read has no session of its
+own. A saved project selection also only counts while its `scopeKey` matches the
+scope the catalog would return now, read through the registry's existing
+`readScope` with the local owner admission; presence degrades to hidden when
+project services are not ready. The publisher's single tick is exported for a
+direct test that runs without a request, and the settings view restores the
+last saved values when the server rejects a save. Selection, desktop IPC,
+opt-in settings, and persistence ownership remain as described above.
+
+2026-11-03 Desktop settings data folder read. The desktop settings store
+reads `VIVARY_DATA_DIR` through one default helper with the repository's
+`guard:allow-env-credential` opt-out, because the value is a nonsecret path
+to Vivary's own data folder and not a user credential. Behaviour and the
+absolute-path refusal are unchanged, so no design section changes.
+
+2026-11-03 Discord presence connection lifetime. Pending clients are retained
+and destroyed when presence is disabled, cleared, disposed or moved to another
+application ID. Generation checks after login and before activity publication
+reject cancelled work. An old connection's completion or rejection cannot clear
+the newer connection attempt. Controller tests cover pending disable, clear,
+dispose and application-ID changes, normal enable and shutdown, and late login
+rejection. The local test run injects a fake RPC transport because the sandbox
+lacks the dependency. Real Discord and installed-desktop acceptance remain open.
+
+2026-11-02 Discord presence typecheck fixes. The settings view calls Core's
+one-argument error helper and supplies its own fallback message. The presence
+snapshot reads the project display name through Core's typed `getDbExec`
+parameterised query, following the existing server database access pattern.
+Settings writes reject a missing or nonabsolute data directory before filesystem
+access, preserving the existing absolute-directory contract. Project selection,
+desktop IPC, opt-in settings and persistence ownership remain as described above.
+The three source changes pass direct TypeScript checking. Installed Discord
+behaviour and pending-login opt-out handling remain outside this typecheck proof.
+
+2026-11-02 optional desktop Discord Rich Presence (issue #70). The Electron main process
+may connect to the user's local Discord client when the owner enables it in desktop
+settings and supplies a Developer Portal application id. The workbench server builds a
+read-only snapshot from project selection and code-host phase
+([`desktop-presence.ts`](https://github.com/vivary-dev/vivary/blob/dev/packages/workbench/server/desktop-presence.ts)), notifies
+the parent over existing desktop IPC, and persists the toggle beside other workbench data
+in `desktop-settings.json`. The main adapter
+([`discord-presence.mjs`](https://github.com/vivary-dev/vivary/blob/dev/packages/desktop/discord-presence.mjs)) maps that snapshot to
+Discord activity through `@xhayper/discord-rpc`; packaging installs that dependency into
+the staged desktop app. Personal workspace clears presence; disabled or absent Discord
+stays silent. Loopback-only server binding, renderer isolation, and owner-proof admission
+are unchanged. `node --test packages/desktop/tests/*.mjs` (with desktop `npm ci`) and
+HLDD enforcement requested this review entry.
+
+2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
+second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
+still renders project navigation, conversation history, settings links, and command search;
+`packages/workbench/app/components/layout/Layout.tsx` still owns sidebar visibility through
+the resizable projects panel, the `vivary.sidebar.collapsed` preference, the workspace topbar
+menu control, and the narrow-layout sheet. Removing the duplicate close button does not move
+collapse authority or change persistence boundaries, so the workspace shell description above
+still holds. Local typecheck on the layout change passed; CI `tests + checks` HLDD enforcement
+requested this review entry.
+
+2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
+desktop package README, the acceptance register and the changelog now point at the
+`v0.1.0-beta.1` GitHub prerelease instead of the September `desktop-preview-*`
+prereleases, which are no longer published. The acceptance register records the
+installed-Windows pass of the `32c2a26` dry-run build, and every page names what that pass
+did not cover. No source, configuration or workflow changed, so the description above
+still holds. The release itself comes from `desktop-release.yml` on the tag, as the
+release workflow describes. The install guide links the release page in its introduction
+and download section, so a visitor without GitHub CLI can reach the assets.
+
+2026-10-31 dependency advisories. `follow-redirects` moves from 1.16.1 to 1.16.2 for
+GHSA-mrwp-f3q8-3g9p through its existing override in `packages/workbench/pnpm-workspace.yaml`,
+and the lockfile changes only those lines. The lockfile is now in pnpm's own layout, and a
+no-change `pnpm install --lockfile-only` run left it byte-identical, so issue #213's rewrite
+no longer applies. `better-auth` stays at 1.6.28, which Core 0.176.5 pins exactly. It is
+inside GHSA-965c-763c-88jm, GHSA-r4xp-prcw-77qf and GHSA-q84f-53jg-9ppm, which only the
+breaking 1.7 line fixes. 1.7 adds a required account column and changes forwarded-host
+handling, so that upgrade needs its own Core change. Vivary stays outside each advisory's
+preconditions: Core's Magic Link stores hashed tokens with plain verification identifiers,
+and neither Core nor Workbench registers the OAuth Proxy or device authorization plugin. A
+test in `packages/workbench/tests/dependency-advisories.test.mjs` fails if that changes. No
+authentication behavior changes, so the descriptions above still hold.
+
+2026-10-31 Electron 45.2.1 qualified for packaging. The desktop shell moves from Electron
+45.0.0 to 45.2.1, and `ADMITTED_ELECTRON` in `runtime-security.mjs` admits it with Node
+24.22.1. At tag v45.2.1, Electron's DEPS pins node v24.22.1, and none of its 58
+`patches/node` files touches the October fix files under `lib/internal/dns/`. Its npm
+dependencies, engines and scripts match 45.0.0's, so only the electron lock entry changes.
+A beta-candidate dry run on 2026-10-31 had stopped at this hold. Packaging and payload
+checks are unchanged: they still admit only the pinned version, require the bundled Node to
+meet the October floor, and require the payload to name the pinned release. The shell's use
+of Electron APIs is unchanged, so the description above still holds. The admission criteria
+cover Node only, so Chromium coverage was checked separately on the same day. Of the 18
+changes Electron backported to 44.10.1 on 2026-10-30, 45.2.1 carries 17, two of them under
+their M156 branch hashes (`e2075db3`, `93f574f1`). It lacks cherry-pick `3318e836e90b`, a Blink
+fix for re-entrant attribute changes in `Element::AppendAttributeInternal` and copied id and
+class values in `DidMoveToNewDocument`. `element.cc` at Chromium 156.0.8078.75 and
+156.0.8078.80 still has the old code, and neither the 45-x-y branch nor its open pull requests
+carry the cherry-pick. 44.10.1 is not a superset either: Chromium 152.0.7977.169 lacks the
+menu runner fix for bug 574516887 and the sandboxed file system database fix for bugs
+571156746 and 576122089, which 45.2.1 carries, and the rest of the 152 to 156 difference is
+unmeasured. 45.2.1 stays the admitted release, and Vivary does not patch Electron. Move to the
+first 45.x whose `patches/chromium/.patches` lists `cherry-pick-3318e836e90b` or whose Chromium
+`element.cc` has the re-entrant append guard. Node 24.22.2, which a 45-x-y pull request adopts,
+is not a security release, so the 24.22.1 floor stands.
+
+2026-10-31 qualified esbuild in Core's server build. Desktop releases build on `windows-latest`,
+where Core's `findEsbuild()` returned esbuild's JavaScript launcher and `execFileSync` failed
+with ENOENT during yjs bundling, so the beta-candidate dry run stopped. The only earlier
+successful dry run built on `ubuntu-latest`. The maintained Core patch gains an appended
+section for `dist/deploy/build.js`: `findEsbuild()` returns `ESBUILD_BINARY_PATH` first when
+that file exists, which the build workflows set to the Go-built qualified esbuild. The patch
+hash moves from `8b6b806f` to `b15426f0`. The next dry run then stopped in the installer:
+`File /r "${PAYLOAD_DIR}/*"` found no files under makensis 3.13 on Windows, because
+`PAYLOAD_DIR` is a Windows path. `installer/vivary.nsi` now uses `\*`, which makensis on
+Linux also accepts. The build's inputs, outputs and admission checks are unchanged, so the
+delivery description above still holds.
+
+2026-10-31 Issue #206, first two items. Run now on an automation whose earlier run waits for an
+approval decision was refused as "The automation is already running.", although nothing ran.
+The maintained Core patch gains an appended section for `dist/jobs/scheduler.js`, where
+`refuseApprovalPending` finishes the queued row as `error` with the code
+`automation_approval_pending` and a message that points to Past runs, only while that run
+is `waiting_approval`. `refuseAlreadyRunning` still answers a run that is executing, holds
+the run lease, or is `resuming` after a claimed decision, which
+`unresolvedAutomationApprovalStatus` in `dist/jobs/run-history.js` tells apart. Settings showed stored statuses
+such as `waiting_approval` and `success` verbatim. `AutomationDetailsDialog.js` now exports
+`automationStatusLabel`, which the list row badge, the Details fields, Past runs and run
+inspection use under `jobs.runStatus.*` keys, because `jobs.status` is already the Status
+label. An unknown status still shows as stored. A refused Run now row still reads Failed. The patch hash moves from `18b96430` to `8b6b806f`. No
+state, storage, scheduling, approval custody or transport changed, so the approval flow above
+still holds. Evidence: `tests/automation-status.test.mjs` and
+`tests/automation-approval.test.mjs` assert the labels, the exact refusal and code, and the
+already-running refusal while a claimed decision resumes, and a
+frozen install of the lockfile rebuilt Core from the pristine package and the full patch
+byte for byte equal to the edited copy. Items three to five of #206 remain open.
+
+2026-10-31 runner action Node admission on a linked externals entry. Every GitHub
+job failed at its first step from the 2026-10-31 PR #312 run on. Hosted
+ubuntu-latest 20261025 (runner 2.338.0) runs the Worker from
+`actions-runner/cached/<version>` and links its `externals` entry to a shared
+`/opt/runner-cache/externals`, and `plain()` refused every symlink. The last green
+run was on 2026-10-26. `shared_externals` in `scripts/check_runner_action_node.py`
+now follows that one link on Linux when its text equals a `SHARED_EXTERNALS` pin
+and it resolves in one step. `selected_interpreter` requires the Worker's selected
+path to resolve to the shared interpreter, which admission hashes and probes.
+Hosted runs on this branch showed `/opt` and `/opt/runner-cache` as root-owned
+mode 0777, so directory modes give no protection on that path and the guard does
+not rely on them. Admission requires the canonical interpreter path. The repair in
+`scripts/bootstrap_runner_action_node.py` keeps `plain()` on the target, `node24`
+and `bin`, records the link's device, inode and text with the directory inodes,
+and re-checks them before it replaces the interpreter, so a swapped link or a
+swapped target directory is refused. The Worker later runs through a link that
+any account could replace under those 0777 parents. That gap predates this
+change. Link refusals raise `ExternalsRefusal`, whose fixed text names no path,
+and the repair prints them instead of the redacted admission summary. Admission
+records the `externals` entry's device, inode and link text before its version probe
+and re-checks them, and re-resolves the selected interpreter, after it, so an entry
+swapped during the probe is refused. A symlinked
+interpreter, a symlink below the target, an unpinned or relative target, and any
+linked externals on Windows stay refused. The six workflows embed the regenerated
+step. A new hosted target needs its own review, like every other pin here. The
+rest of the admission boundary above still holds.
 
 2026-10-26 Runtime switch review fixes for PR #258 on dev `56932a96`. A confirmed
 choice of the current route while a run stops now drops an earlier saved target, so
@@ -12484,6 +12706,26 @@ the `v0.1.0` line.
 **0.3.1** · `vivary-exo` **0.3.0** · `vivary` **0.1.10** · optional
 `vivary-memory-cognee` **0.1.2** · optional `vivary-mcp` **0.1.3**. Versions are
 independent. There is no single "Vivary 0.4.2" release.
+
+## [Desktop 0.1.0-beta.1] - 2026-10-31
+
+The first Windows beta of the Vivary desktop app, published as the GitHub prerelease
+`v0.1.0-beta.1`. It publishes no PyPI or npm package.
+
+- A per-user installer, `Vivary-Setup-0.1.0-beta.1.exe`, and a portable ZIP, both
+  unsigned Windows x64 builds from one GitHub Actions run, with `SHA256SUMS`,
+  `BUILD-INFO.json`, a runtime inventory, and a licenses ZIP.
+- Bundles Electron 45.2.1 with Node 24.22.1, and Python 3.12.15.
+- Includes PRs #312 to #316: the approval-wait label and word statuses for
+  automations, the CI runner guard, the follow-redirects 1.16.2 update with the
+  better-auth precondition test, the Electron 45.2.1 qualification, and the Windows
+  build fixes.
+
+### Verification
+
+The build of `32c2a26` passed an installed-Windows pass on 2026-10-31. See the
+[acceptance register](https://github.com/vivary-dev/vivary/blob/dev/docs/product/multi-project/desktop-acceptance-status.md#installed-windows-beta-october-31). Not yet accepted
+on the installed app: a coding-runtime turn, provider-backed automations, remote access, an upgrade over an earlier install, and signing.
 
 ## [Unreleased: Optional MCP SDK update] - 2026-10-18
 

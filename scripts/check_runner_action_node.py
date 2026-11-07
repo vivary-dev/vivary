@@ -7,6 +7,7 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import re
+import stat
 import struct
 import subprocess
 import sys
@@ -19,6 +20,9 @@ import threading
 # not a zero-vulnerability claim or permission to select another project runtime.
 FLOORS = {22: (23, 4), 24: (22, 1), 26: (12, 1)}
 MAX_ANCESTORS = 64
+# Hosted ubuntu-latest 20261025 (runner 2.338.0) links every cached runner
+# version's externals here. A new target needs its own review, like any pin.
+SHARED_EXTERNALS = ("/opt/runner-cache/externals",)
 PROBE_TIMEOUT = 10
 KNOWN_SELECTION_FLAGS = {
     "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24",
@@ -29,6 +33,14 @@ KNOWN_SELECTION_FLAGS = {
 
 def refuse(message):
     raise RuntimeError("Runner action Node: " + message)
+
+
+class ExternalsRefusal(RuntimeError):
+    """A linked-externals refusal. Its text is fixed and names no path, so the repair may print it."""
+
+
+def refuse_externals(message):
+    raise ExternalsRefusal("Runner action Node: " + message)
 
 
 def node_version(value, selected_major=None):
@@ -173,6 +185,51 @@ def runner_paths(worker, system):
     return str(root), str(node)
 
 
+def shared_externals(root, system):
+    """Return the directory the runner's externals entry names.
+
+    Hosted Ubuntu images from 20261025 (runner 2.338.0) run the Worker from
+    actions-runner/cached/<version>, whose externals entry is a symlink to one
+    externals tree that every cached version shares. Admit only that one link,
+    only on Linux, and only to the pinned target below. The image ships that
+    whole path as root-owned mode 0777, so directory modes give no protection
+    there. Custody instead comes from plain() on every directory below the
+    target, the Worker's selected interpreter resolving to it, and the repair
+    re-checking the link and directory inodes before it replaces any file.
+    """
+    link = Path(root) / "externals"
+    if not stat.S_ISLNK(link.lstat().st_mode):
+        return link
+    if system == "win32":
+        refuse_externals("a linked runner externals directory is admitted only on Linux")
+    text = os.readlink(link)
+    if text not in SHARED_EXTERNALS:
+        refuse_externals("linked runner externals must name the pinned hosted shared externals directory")
+    target = Path(text)
+    if target.resolve(strict=True) != target:
+        refuse_externals("linked runner externals must resolve in one step")
+    return target
+
+
+def selected_interpreter(root, selected, system):
+    """The file the Worker executes for node24, through a validated externals link."""
+    externals = shared_externals(root, system)
+    if externals == Path(root) / "externals":
+        return Path(selected)
+    interpreter = externals / "node24" / "bin" / "node"
+    if Path(selected).resolve(strict=True) != interpreter:
+        refuse_externals("the selected interpreter must resolve inside the linked externals directory")
+    return interpreter
+
+
+def externals_identity(root):
+    """Device, inode and link text of the runner's externals entry, compared across the probe."""
+    entry = Path(root) / "externals"
+    info = entry.lstat()
+    target = os.readlink(entry) if stat.S_ISLNK(info.st_mode) else None
+    return (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode), target)
+
+
 def binary_x64(file, system):
     with open(file, "rb") as stream:
         header = stream.read(64)
@@ -267,7 +324,8 @@ def check_runner_action_node():
     read_process = windows_process if system == "win32" else linux_process
     worker, chain = discover_worker(os.getpid(), read_process, system)
     root, selected = runner_paths(worker, system)
-    interpreter = Path(selected)
+    externals = externals_identity(root)
+    interpreter = selected_interpreter(root, selected, system)
     if not interpreter.is_file() or os.path.normcase(str(interpreter.resolve(strict=True))) != os.path.normcase(str(interpreter)):
         refuse("missing interpreter or a path outside the discovered runner root")
     binary_x64(worker["exe"], system)
@@ -276,6 +334,9 @@ def check_runner_action_node():
     version = node_version(probe_version(interpreter, sanitized_environment(system)), selected_major=24)
     if sha256(interpreter) != before or sha256(worker["exe"]) != worker_hash:
         refuse("Worker or interpreter bytes changed during the probe")
+    # The hashes read the resolved path. Re-check that the Worker's path still resolves there.
+    if externals_identity(root) != externals or selected_interpreter(root, selected, system) != interpreter:
+        refuse_externals("the runner externals entry changed during the probe")
     for item in chain:
         if read_process(item["pid"]) != item:
             refuse("Worker ancestry changed or reused a process identity")
@@ -290,6 +351,8 @@ def admission_failure(error):
         "check_selection_overrides": "selection-policy", "parse_linux_stat": "process-stat",
         "linux_process": "process-identity", "windows_process": "process-identity",
         "discover_worker": "process-ancestry", "runner_paths": "runner-layout",
+        "shared_externals": "runner-layout", "selected_interpreter": "runner-layout",
+        "externals_identity": "runner-layout",
         "binary_x64": "binary-identity", "sha256": "binary-hash",
         "sanitized_environment": "probe-environment", "probe_version": "interpreter-probe",
         "node_version": "interpreter-version",

@@ -32,6 +32,7 @@ const switchCode = await slice("export async function switchVivaryCodeRuntime(",
 const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
 const pendingCode = await slice("function pendingSwitchFromRun(", "\nfunction engineLabelFromRun(");
 const observationCode = await slice("function codeSwitchObservation(", "\nexport async function sendVivaryCodeMessage(");
+const stopCode = await slice("function requestUserStop(", "\n/**");
 const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
   ["VIVARY_CODE_DEFAULT_MODEL", "VIVARY_CODE_MODELS", "CLAUDE_CODE_LEGACY_ALIASES", "fail"])(
   CLAUDE_CODE_DEFAULT_MODEL, CLAUDE_CODE_MODELS.map(model => model.id), CLAUDE_CODE_LEGACY_ALIASES, fail);
@@ -42,7 +43,7 @@ function fixture() {
   let statusGate = null, initializationGate = null, reconnecting = false;
   let afterRecordPersist = null, writeFault = null;
   const allowWrite = () => { if (writeFault) throw writeFault; };
-  const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [], stoppedTurns = [];
+  const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [], stoppedTurns = [], aborts = [];
   const activeRuns = new Map(), hostState = { cleanup: null };
   let linked;
   const workspace = { root: "/fixture", label: "Fixture" };
@@ -87,10 +88,10 @@ function fixture() {
     startVivaryCodeRun: input => { allowWrite(); launches.push(input); },
     getVivaryCodeState: async (owner, id) => ({ run: records.get(id) }),
     projectReconnectionPending: () => reconnecting,
-    requestUserStop: (runId, active) => {
+    recordStoppingRun: runId => {
       allowWrite(); stops.push(runId);
+      const active = activeRuns.get(runId);
       stoppedTurns.push({ runId, turnId: active.turnId ?? events.findLast(event => event.runId === runId && event.kind === "user")?.id ?? null });
-      active.stopReason ??= "user";
     },
     recordProjectContextLoad() { allowWrite(); writes.push("context"); },
     activeRuns, randomUUID, CLAUDE_CODE_MODELS, VIVARY_CODE_SWITCH_SOURCE: "vivary-runtime-switch", MAX_PREVIOUS_PROVIDER_SESSIONS: 20,
@@ -104,7 +105,7 @@ function fixture() {
     applyPendingSwitch: runId => linked.applyPendingSwitch(runId),
   };
   const send = compileFunction(code + "\nreturn sendVivaryCodeMessage;", Object.keys(owners))(...Object.values(owners));
-  const { switchVivaryCodeRuntime: switchWithObservation, applyPendingSwitch, codeSwitchObservation } = compileFunction(observationCode
+  const { switchVivaryCodeRuntime: switchWithObservation, applyPendingSwitch, codeSwitchObservation } = compileFunction(stopCode + "\n" + observationCode
     + "\n" + sessionCode + "\n" + pendingCode + "\n"
     + switchCode + "\nreturn { switchVivaryCodeRuntime, applyPendingSwitch, codeSwitchObservation };", Object.keys(owners))(...Object.values(owners));
   linked = { applyPendingSwitch };
@@ -117,7 +118,8 @@ function fixture() {
       ...(input.stop === true ? { expectedTurnId: observed.turnId } : {}), ...input });
   };
   const snapshot = () => JSON.stringify([Array.from(records), events, launches, writes]);
-  return { send, switchRoute, applyPendingSwitch, records, events, launches, writes, prompts, stops, stoppedTurns, workspace, activeRuns, hostState,
+  return { send, switchRoute, applyPendingSwitch, records, events, launches, writes, prompts, stops, stoppedTurns, aborts, workspace, activeRuns, hostState,
+    activate(runId, active) { activeRuns.set(runId, { controller: { abort() { aborts.push(runId); } }, ...active }); },
     transcript: owners.listCodeAgentTranscriptEvents, switchWithObservation,
     snapshot, setReconnecting(value) { reconnecting = value; },
     setRuntime(value) { runtime = value; }, setCodex(value) { codex = value; },
@@ -229,8 +231,8 @@ test("a switch moves Claude to Codex and back in place, clears both sessions, an
   assert.deepEqual([note.metadata.from, note.metadata.to], [{ engine: "claude-cli", model: "claude-fable-5-1" },
     { engine: "codex-cli", model: "gpt-fixture" }]);
   assert.match(note.metadata.switchedAt, /^\d{4}-\d\d-\d\dT/);
-  assert.equal(note.message, "Switched from Claude Code Fable 5.1 to Codex GPT Fixture. "
-    + "The next message starts a new Codex session with the visible conversation text.");
+  assert.equal(note.message, "Switched from Claude Code Fable 5.1 to Codex CLI GPT Fixture. "
+    + "The next message starts a new Codex CLI session with the visible conversation text.");
 
   await value.send({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", message: "Second", workspace: value.workspace });
   run = value.records.get(runId);
@@ -242,6 +244,7 @@ test("a switch moves Claude to Codex and back in place, clears both sessions, an
   assert.notEqual(run.metadata.switchGeneration, firstGeneration, "a later switch gets a different opaque generation");
   assert.equal(value.events.at(-1).metadata.switchGeneration, run.metadata.switchGeneration);
   assert.deepEqual(run.metadata.previousProviderSessions.map(item => item.sessionId), [claudeSession, "fixture-thread"]);
+  assert.match(value.events.at(-1).message, /^Switched from Codex CLI GPT Fixture to Claude Code Opus 5\.5\./);
   await value.send({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", message: "Third", workspace: value.workspace });
   assert.deepEqual(value.launches.map(launch => [launch.runId, launch.engine, launch.model]), [
     [runId, "claude-cli", "claude-fable-5-1"], [runId, "codex-cli", "gpt-fixture"], [runId, "claude-cli", "claude-opus-5-5"]]);
@@ -261,6 +264,38 @@ test("a same-runtime model switch also clears the session, and choosing the curr
   await value.switchRoute({ ownerEmail: owner, runId: first.run.id, engine: "codex-cli", model: "gpt-other", workspace: value.workspace });
   assert.equal(value.records.get(first.run.id).metadata.model, "gpt-other");
   assert.equal(value.records.get(first.run.id).metadata.codexSessionId, undefined, "Codex refuses to resume a thread under another model");
+  assert.match(value.events.at(-1).message, /^Switched from Codex CLI GPT Fixture to Codex CLI GPT Other\./);
+});
+
+for (const pending of [false, true]) test(`a ${pending ? "host-applied" : "direct"} switch keeps the previous model label after its catalog disappears`, async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "codex-cli", message: "First", model: "gpt-fixture", workspace: value.workspace });
+  const runId = first.run.id;
+  assert.deepEqual(value.records.get(runId).metadata.modelDisplay, { id: "gpt-fixture", label: "GPT Fixture" });
+  value.setCodex({ status: "unavailable", message: "Catalog offline" });
+  if (pending) value.activate(runId, { stopReason: null });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5",
+    workspace: value.workspace, ...(pending ? { stop: true } : {}) });
+  if (pending) {
+    // Pending metadata survives JSON persistence and can apply with no client or catalog available.
+    value.records.set(runId, JSON.parse(JSON.stringify(value.records.get(runId))));
+    value.activeRuns.delete(runId);
+    value.applyPendingSwitch(runId);
+  }
+  assert.match(value.events.at(-1).message, /^Switched from Codex CLI GPT Fixture to Claude Code Opus 5\.5\./);
+  assert.deepEqual(value.records.get(runId).metadata.modelDisplay, { id: "claude-opus-5-5", label: "Opus 5.5" });
+});
+
+for (const available of [false, true]) test(`a historical Codex route without its label can leave with the catalog ${available ? "ready" : "unavailable"}`, async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "codex-cli", message: "First", model: "gpt-fixture", workspace: value.workspace });
+  const runId = first.run.id;
+  // A label bound to another ID is as unusable as an older record without one.
+  value.records.get(runId).metadata.modelDisplay = { id: "other-model", label: "Wrong retained label" };
+  if (!available) value.setCodex({ status: "unavailable", message: "Catalog offline" });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", workspace: value.workspace });
+  assert.ok(value.events.at(-1).message.startsWith(`Switched from Codex CLI ${available ? "GPT Fixture" : "gpt-fixture"} to Claude Code Opus 5.5.`));
+  assert.doesNotMatch(value.events.at(-1).message, /Wrong retained label/);
 });
 
 test("a switch refuses unsupported models, unavailable runtimes, and this run's active, stopping, or cleanup state before writes", async () => {
@@ -286,9 +321,9 @@ test("a switch refuses unsupported models, unavailable runtimes, and this run's 
   await assert.rejects(attempt({}), { errorCode: "vivary_code_models_unavailable" });
   value.setCodex({ status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }], defaultModel: "gpt-fixture" });
 
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await assert.rejects(attempt({}), { errorCode: "vivary_code_switch_run_active", statusCode: 409 });
-  value.activeRuns.set(runId, { stopReason: "user" });
+  value.activate(runId, { stopReason: "user" });
   await assert.rejects(attempt({}), { errorCode: "vivary_code_switch_run_stopping", statusCode: 409 });
   value.activeRuns.delete(runId);
   value.hostState.cleanup = { runId };
@@ -304,7 +339,7 @@ test("a switch refuses unsupported models, unavailable runtimes, and this run's 
   assert.equal(value.snapshot(), before);
 
   // Another conversation's active run or cleanup does not hold this one.
-  value.activeRuns.set("other-run", { stopReason: null });
+  value.activate("other-run", { stopReason: null });
   value.hostState.cleanup = { runId: "other-run" };
   await attempt({});
   assert.equal(value.records.get(runId).metadata.engine, "codex-cli");
@@ -318,7 +353,7 @@ test("a run that starts while a switch checks its runtime keeps its route, and a
   value.holdStatus(() => new Promise(resolve => { release = resolve; }));
   const switching = value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace });
   await new Promise(resolve => setImmediate(resolve));
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   release();
   await assert.rejects(switching, { errorCode: "vivary_code_switch_run_active" });
   assert.equal(value.records.get(runId).metadata.engine, "claude-cli");
@@ -391,7 +426,7 @@ test("Stop and switch records the target on the run, stops it, and the host appl
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
   const runId = first.run.id;
   value.records.get(runId).metadata.claudeSessionId = claudeSession;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   const state = await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture",
     workspace: value.workspace, stop: true });
   let run = value.records.get(runId);
@@ -403,7 +438,8 @@ test("Stop and switch records the target on the run, stops it, and the host appl
   // A second choice while it stops replaces the target and does not stop twice.
   await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-opus-5-5", workspace: value.workspace, stop: true });
   assert.equal(value.records.get(runId).metadata.pendingSwitch.model, "claude-opus-5-5");
-  assert.deepEqual(value.stops, [runId, runId]);
+  assert.deepEqual(value.stops, [runId], "the real stop owner records stopping only once");
+  assert.deepEqual(value.aborts, [runId], "replacing the pending target does not abort twice");
   assert.equal(value.activeRuns.get(runId).stopReason, "user");
   value.activeRuns.delete(runId);
   value.applyPendingSwitch(runId);
@@ -416,7 +452,8 @@ test("Stop and switch records the target on the run, stops it, and the host appl
   // A run that is no longer active switches at once even when Stop and switch was asked.
   await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
   assert.equal(value.records.get(runId).metadata.engine, "codex-cli");
-  assert.deepEqual(value.stops, [runId, runId]);
+  assert.deepEqual(value.stops, [runId]);
+  assert.deepEqual(value.aborts, [runId]);
 });
 
 test("Stop and switch to the route a run already has still stops it", async () => {
@@ -424,24 +461,38 @@ test("Stop and switch to the route a run already has still stops it", async () =
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
   const runId = first.run.id;
   // Another window switched this conversation and started a turn. A stale window confirms Stop and switch to that route.
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   const before = value.records.get(runId);
   await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace, stop: true });
   assert.deepEqual(value.stops, [runId], "the confirmed Stop cancels the current request");
   assert.equal(value.activeRuns.get(runId).stopReason, "user");
   assert.equal(value.records.get(runId), before, "no switch is recorded for the current route");
   // Without Stop, choosing the current route still writes nothing and stops nothing.
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace }),
     { errorCode: "vivary_code_switch_run_active" });
   assert.deepEqual(value.stops, [runId]);
+});
+
+test("the real stop owner does not record or abort a turn already stopping or held by cleanup", async () => {
+  const value = fixture();
+  const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
+  const runId = first.run.id;
+  value.activate(runId, { stopReason: "user" });
+  await value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5", workspace: value.workspace, stop: true });
+  assert.deepEqual([value.stops, value.aborts], [[], []]);
+  value.activate(runId, { stopReason: null });
+  value.hostState.cleanup = { runId };
+  await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5",
+    workspace: value.workspace, stop: true }), { errorCode: "vivary_code_cleanup_required" });
+  assert.deepEqual([value.stops, value.aborts], [[], []]);
 });
 
 test("Stop and switch back to the current route drops an earlier saved target", async () => {
   const value = fixture();
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
   const runId = first.run.id;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
   assert.equal(value.records.get(runId).metadata.pendingSwitch.engine, "codex-cli");
   // While it stops, the user confirms the original route again.
@@ -458,7 +509,7 @@ test("a send applies a target left on a run that already left the host, and star
   const value = fixture();
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
   const runId = first.run.id;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
   // The apply at run exit failed, so the target stays on the settled record.
   value.activeRuns.delete(runId);
@@ -476,7 +527,7 @@ for (const grant of ["revoked", "replaced"]) {
     const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5",
       workspace: value.workspace });
     const runId = first.run.id;
-    value.activeRuns.set(runId, { stopReason: null });
+    value.activate(runId, { stopReason: null });
     const before = value.snapshot();
     let revalidations = 0;
     await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5",
@@ -496,7 +547,7 @@ test("PR258 4330509896 source slice: reconnection during same-route final revali
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5",
     workspace: value.workspace });
   const runId = first.run.id;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   const before = value.snapshot();
   let revalidations = 0;
   await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, engine: "claude-cli", model: "claude-sonnet-5-5",
@@ -519,7 +570,7 @@ test("PR258 4330509909 source slice: pending application retains a recoverable a
     workspace: value.workspace });
   const runId = first.run.id;
   value.records.get(runId).metadata.claudeSessionId = claudeSession;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture",
     workspace: value.workspace, stop: true });
   value.activeRuns.delete(runId);
@@ -558,7 +609,7 @@ test("a recorded switch is dropped with a visible note when the run ends under a
   const value = fixture();
   const first = await value.send({ ownerEmail: owner, engine: "claude-cli", message: "First", model: "claude-sonnet-5-5", workspace: value.workspace });
   const runId = first.run.id;
-  value.activeRuns.set(runId, { stopReason: null });
+  value.activate(runId, { stopReason: null });
   await value.switchRoute({ ownerEmail: owner, runId, engine: "codex-cli", model: "gpt-fixture", workspace: value.workspace, stop: true });
   value.activeRuns.delete(runId);
   value.hostState.cleanup = { runId };
@@ -639,7 +690,7 @@ test("PR258 4331141822 control: a matching current-route observation preserves n
   await switchTo("claude-cli", "claude-sonnet-5-5");
   assert.equal(value.snapshot(), before);
   const turnId = value.transcript(runId).findLast(event => event.kind === "user").id;
-  value.activeRuns.set(runId, { stopReason: null, turnId });
+  value.activate(runId, { stopReason: null, turnId });
   await switchTo("claude-cli", "claude-sonnet-5-5", { stop: true, expectedTurnId: turnId });
   assert.deepEqual(value.stoppedTurns, [{ runId, turnId }]);
   assert.equal(value.snapshot(), before, "a same-route Stop writes no switch or pending target");
@@ -652,7 +703,7 @@ for (const nextTurn of [true, false]) {
   { timeout: 5_000 }, async () => {
     const { value, runId } = await observedRouteFixture("legacy-null");
     const turnA = value.transcript(runId).findLast(event => event.kind === "user").id;
-    value.activeRuns.set(runId, { stopReason: null, turnId: turnA });
+    value.activate(runId, { stopReason: null, turnId: turnA });
     let release, entered;
     const held = new Promise(resolve => { release = resolve; });
     const admission = new Promise(resolve => { entered = resolve; });
@@ -668,7 +719,7 @@ for (const nextTurn of [true, false]) {
       if (nextTurn) {
         // Canonical acceptance precedes worker activation. No idle frame is delivered to a client here.
         value.events.push({ id: "turn-b-user", runId, kind: "user", message: "Accepted turn B" });
-        value.activeRuns.set(runId, { stopReason: null, turnId: "turn-b-user" });
+        value.activate(runId, { stopReason: null, turnId: "turn-b-user" });
       }
       const before = value.snapshot();
       release();
@@ -703,14 +754,14 @@ test("switch admission requires explicit observations at the backend boundary to
 for (const sameRoute of [false, true]) test(`Stop rechecks turn consent after final grant validation on a ${sameRoute ? "matching" : "changed"} route`, { timeout: 5_000 }, async () => {
   const { value, runId } = await observedRouteFixture("legacy-null");
   const turnA = value.transcript(runId).findLast(event => event.kind === "user").id;
-  value.activeRuns.set(runId, { stopReason: null, turnId: turnA });
+  value.activate(runId, { stopReason: null, turnId: turnA });
   let before;
   await assert.rejects(value.switchRoute({ ownerEmail: owner, runId, workspace: value.workspace,
     engine: sameRoute ? "claude-cli" : "codex-cli", model: sameRoute ? "claude-sonnet-5-5" : "gpt-fixture",
     stop: true, expectedSwitchGeneration: null, expectedTurnId: turnA,
     revalidateWorkspace: async () => {
       value.events.push({ id: "turn-b-after-checks", runId, kind: "user", message: "Accepted B" });
-      value.activeRuns.set(runId, { stopReason: null, turnId: "turn-b-after-checks" });
+      value.activate(runId, { stopReason: null, turnId: "turn-b-after-checks" });
       before = value.snapshot();
       return value.workspace;
     } }), { statusCode: 409 });

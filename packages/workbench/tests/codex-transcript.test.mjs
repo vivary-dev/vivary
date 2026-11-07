@@ -92,7 +92,7 @@ test("native activity display is bounded, expandable, and escapes text", () => {
   assert.match(html, /tabindex="0"/);
   assert.match(html, /data-code-activity="progress"/);
   assert.match(html, /max-height:16rem/);
-  assert.doesNotMatch(html, /<script>/);
+  assert.equal(html.toLowerCase().includes("<script"), false);
   assert.equal(Card({ part: { type: "data", name: "unrelated", data: {} } }), null);
 });
 

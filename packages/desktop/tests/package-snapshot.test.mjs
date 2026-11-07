@@ -71,7 +71,8 @@ test("real desktop packaging entry refuses before a packager or staging can run"
     await copyFile(fileURLToPath(new URL("../release-version.mjs", import.meta.url)), path.join(desktop, "release-version.mjs"));
     await copyFile(fileURLToPath(new URL("../../workbench/bin/runtime-security.mjs", import.meta.url)), path.join(workbench, "bin/runtime-security.mjs"));
     await writeFile(path.join(workbench, ".output/server/index.mjs"), "export {};\n");
-    const pinned = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).devDependencies.electron;
+    // An Electron the real table does not admit, so the entry must refuse before the packager loads.
+    const pinned = "45.0.0";
     await writeFile(path.join(desktop, "package.json"), JSON.stringify({ devDependencies: { electron: pinned } }));
     const packager = path.join(desktop, "node_modules/@electron/packager");
     await mkdir(packager, { recursive: true });
@@ -205,7 +206,9 @@ test("payload runtime evidence must match the staged Node exactly", {
     }
     await writeFile(buildFile, JSON.stringify({ ...base, runtimeSecurity: evidence, electron: pinned }));
     await writeFile(versionFile, pinned + "\n");
-    await assert.rejects(assertDesktopPayload(directory), new RegExp(`Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
+    await assert.rejects(assertDesktopPayload(directory, {}), new RegExp(`Electron ${pinned.replaceAll(".", "\\.")} is not admitted`));
     await assertDesktopPayload(directory, admitted);
+    // The real table admits the pinned release.
+    await assertDesktopPayload(directory);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

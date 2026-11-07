@@ -14,7 +14,7 @@ overrides:
   '@modelcontextprotocol/server': 2.3.0
   '@azure/identity@4.13.2>@azure/msal-node': 7.1.0
   markdown-it: 14.3.3
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   hono: 4.13.11
   '@agent-native/core@0.176.5>@anthropic-ai/sdk': 0.93.0
   '@azure/msal-node@2.16.3>uuid': 11.1.1
@@ -45,7 +45,7 @@ packageExtensionsChecksum: sha256-5afwoDjnrcA3Xj410YtDCh7Wr20eAlayPUyqmc//pao=
 
 patchedDependencies:
   '@agent-native/core@0.176.5':
-    hash: 18b9643019b96fbcb98acce9515529256ca360c0d580c9fbc6fc88b58c3ea145
+    hash: b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758
     path: patches/@agent-native__core@0.176.5.patch
   '@agent-native/toolkit@0.19.3':
     hash: 8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb
@@ -57,7 +57,7 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.176.5
-        version: 0.176.5(patch_hash=18b9643019b96fbcb98acce9515529256ca360c0d580c9fbc6fc88b58c3ea145)(d6a1c2ef55e65b164b866a026e4270c5)
+        version: 0.176.5(patch_hash=b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758)(d6a1c2ef55e65b164b866a026e4270c5)
       '@agent-native/toolkit':
         specifier: 0.19.3
         version: 0.19.3(patch_hash=8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -3913,8 +3913,8 @@ packages:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
 
-  follow-redirects@1.16.1:
-    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -5897,7 +5897,7 @@ ignoredOptionalDependencies:
 
 snapshots:
 
-  '@agent-native/core@0.176.5(patch_hash=18b9643019b96fbcb98acce9515529256ca360c0d580c9fbc6fc88b58c3ea145)(d6a1c2ef55e65b164b866a026e4270c5)':
+  '@agent-native/core@0.176.5(patch_hash=b15426f08cb297d09c687c36514f9f1500d87237d27e174f089dc750da80c758)(d6a1c2ef55e65b164b866a026e4270c5)':
     dependencies:
       '@agent-native/recap-cli': 0.5.25
       '@agent-native/toolkit': 0.19.3(patch_hash=8728690c437989c2f1f0fa763dbdbcd758688e027b46b9c3225c15654324b5fb)(@floating-ui/dom@1.8.0)(@tiptap/extension-code-block@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extension-list@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@tiptap/extensions@3.30.5(@tiptap/core@3.30.5(@tiptap/pm@3.30.5))(@tiptap/pm@3.30.5))(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.18)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.3)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react@19.2.8)(redux@5.0.1)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -9029,7 +9029,7 @@ snapshots:
 
   axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.1
+      follow-redirects: 1.16.2
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -9682,7 +9682,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  follow-redirects@1.16.1: {}
+  follow-redirects@1.16.2: {}
 
   form-data@4.0.6:
     dependencies:

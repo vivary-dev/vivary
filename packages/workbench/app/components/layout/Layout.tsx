@@ -74,7 +74,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <ResizablePanel id="projects" panelRef={panel} defaultSize={narrow || collapsed ? 0 : width}
           minSize={200} maxSize={400} collapsible collapsedSize={0} groupResizeBehavior="preserve-pixel-size">
           <div className="h-full" hidden={narrow || collapsed}>
-            <Sidebar collapsed={false} onCollapsedChange={changeCollapsed} />
+            <Sidebar />
           </div>
         </ResizablePanel>
         <ResizableHandle className="workspace-resize-handle" disabled={narrow || collapsed}
@@ -104,7 +104,7 @@ export function Layout({ children }: { children: ReactNode }) {
           onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus(); }}>
           <SheetTitle className="sr-only">Projects and conversations</SheetTitle>
           <SheetDescription className="sr-only">Choose a project, open its conversation, or change settings.</SheetDescription>
-          <Sidebar collapsed={false} collapsible={false} />
+          <Sidebar />
         </SheetContent>
       </Sheet>
     </div>

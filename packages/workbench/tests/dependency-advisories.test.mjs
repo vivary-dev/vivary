@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -40,6 +40,7 @@ const advisoryFloors = [
   { name: "hono", fixed: "4.13.11", advisories: ["GHSA-5r4p-p66f-jhc7"] },
   { name: "markdown-it", fixed: "14.3.3", advisories: ["GHSA-r7fv-28h4-cvq7", "GHSA-vfgh-jcmw-g37q", "GHSA-gfr2-rv44-r23c"] },
   { name: "follow-redirects", fixed: "1.16.1", advisories: ["GHSA-q3jh-wrc6-jgq8", "GHSA-8r9p-f939-6h3c"] },
+  { name: "follow-redirects", fixed: "1.16.2", advisories: ["GHSA-mrwp-f3q8-3g9p"] },
   { name: "vite", fixed: "8.1.6", advisories: ["GHSA-698v-4r3x-3vcv", "GHSA-r825-w8mm-5pxw", "GHSA-587h-7wmj-h5pm", "GHSA-9jrq-w75r-8gcw", "GHSA-rq7h-c2jc-7f22"] },
   { name: "@vitest/mocker", fixed: "4.1.12", advisories: ["GHSA-qxg6-89mg-rqv8", "GHSA-xp26-3454-mjgp"] },
   { name: "@modelcontextprotocol/sdk", fixed: "1.31.0", advisories: ["GHSA-6qxp-vccf-f47h"] },
@@ -281,5 +282,38 @@ test("Core's SQLite binding includes maintenance fixes and preserves transaction
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// better-auth 1.6.28, which Core 0.176.5 pins exactly, is inside GHSA-965c-763c-88jm,
+// GHSA-r4xp-prcw-77qf and GHSA-q84f-53jg-9ppm. Only the breaking 1.7 line fixes them
+// (1.7.7 and 1.7.0-rc.3), and 1.7 changes the account schema and forwarded-host
+// handling, so the upgrade needs its own Core change. Until then Vivary stays outside
+// every advisory's preconditions, and this test fails if that stops being true:
+// - GHSA-965c needs Magic Link storing plain tokens, or hashed tokens with hashed
+//   verification identifiers. Core stores hashed tokens and sets no storeIdentifier,
+//   whose default is plain.
+// - GHSA-r4xp needs the OAuth Proxy plugin. GHSA-q84f needs deviceAuthorization().
+//   Neither Core nor Workbench registers them.
+test("better-auth stays outside the preconditions of its unfixed 1.6 advisories", () => {
+  const versions = [...new Set(lockedVersions("better-auth").map(({ version }) => version))];
+  assert.ok(versions.length > 0, "better-auth is missing from the committed lockfiles");
+  if (versions.every((version) => isAtLeast(version, "1.7.7"))) return;
+  const core = readFileSync(new URL("../node_modules/@agent-native/core/dist/server/better-auth-instance.js", import.meta.url), "utf8");
+  const magicLink = /magicLink\(\{([\s\S]*?)sendMagicLink/.exec(core);
+  assert.ok(magicLink, "Core's Magic Link configuration was not found");
+  assert.match(magicLink[1], /storeToken: "hashed"/, "Magic Link must keep hashed tokens");
+  assert.doesNotMatch(core, /storeIdentifier/, "a verification storeIdentifier can make hashed Magic Link tokens collide with OAuth state");
+  for (const plugin of ["oAuthProxy", "deviceAuthorization"]) {
+    assert.doesNotMatch(core, new RegExp(plugin), `Core must not register ${plugin}`);
+  }
+  for (const folder of ["../server/", "../app/", "../shared/"]) {
+    for (const file of readdirSync(new URL(folder, import.meta.url), { recursive: true })) {
+      if (!/\.(ts|tsx|mjs|js)$/.test(file)) continue;
+      const source = readFileSync(new URL(folder + file, import.meta.url), "utf8");
+      for (const plugin of ["oAuthProxy", "deviceAuthorization"]) {
+        assert.doesNotMatch(source, new RegExp(plugin), `${folder}${file} must not register ${plugin}`);
+      }
+    }
   }
 });

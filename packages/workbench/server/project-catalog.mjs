@@ -8,6 +8,7 @@ import { z } from "zod";
 import { catalogSchema } from "../app/lib/project-catalog-schema.ts";
 import { getDb } from "./db/index.mjs";
 import { bindings, projects, revisions } from "./db/schema.mjs";
+import { catalogScopeKey } from "./project-scope.mjs";
 
 const ACTION_NAME = "vivary-project-catalog";
 const ACTION_PATH = `/_agent-native/actions/${ACTION_NAME}`;
@@ -86,8 +87,8 @@ export function createProjectCatalog({ readScope, provider, locationLabels, canR
           && reconnectable.get(record.locationRef) === true,
       });
     }
-    return { code: "catalog", scopeKey: fingerprint({ actorId: scope.actorId,
-      collectionId: scope.collectionId, deviceId: scope.deviceId }), policyRevision: scope.policyRevision,
+    return { code: "catalog", scopeKey: catalogScopeKey(scope),
+      policyRevision: scope.policyRevision,
       registryRevision: snapshot.registryRevision,
       locations: scope.locationRefs.map(locationRef => ({ locationRef, displayName: labels[locationRef],
         status: observed.get(locationRef)?.code === "available" ? "available" : "unavailable" })),
