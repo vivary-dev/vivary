@@ -47,7 +47,7 @@ def write_installed(site, lock):
 
 class SiteDependencyTests(unittest.TestCase):
     def test_fixed_controls_and_future_patch_releases(self):
-        for vite in ("8.1.6", "8.1.7"):
+        for vite in ("8.1.6", "8.1.7", "8.3.4", "8.3.5"):
             for parser in ("6.1.5", "6.2.0", "7.1.6", "7.2.0"):
                 with self.subTest(vite=vite, parser=parser):
                     lock = fixed_lock()
@@ -111,7 +111,7 @@ class SiteDependencyTests(unittest.TestCase):
 
     def test_affected_and_unverified_majors_fail(self):
         for name, versions in (
-            ("vite", ("8.1.5", "8.0.0", "8.2.0", "8.2.3", "8.3.2", "8.2.4", "8.3.3", "7.3.1", "9.0.0")),
+            ("vite", ("8.1.5", "8.0.0", "8.2.0", "8.2.3", "8.3.0", "8.3.1", "8.3.2", "8.2.4", "8.3.3", "8.4.0", "7.3.1", "9.0.0")),
             ("postcss-selector-parser", ("6.1.4", "7.0.0", "7.1.5", "5.0.0", "8.0.0")),
         ):
             for version in versions:
@@ -122,7 +122,7 @@ class SiteDependencyTests(unittest.TestCase):
                         guard.validate_lock(lock)
 
     def test_all_nested_and_duplicate_copies_are_checked(self):
-        for name, version in (("vite", "8.1.5"), ("postcss-selector-parser", "6.1.4"),
+        for name, version in (("vite", "8.1.5"), ("vite", "8.3.2"), ("postcss-selector-parser", "6.1.4"),
                               ("postcss-selector-parser", "7.1.5")):
             with self.subTest(name=name, version=version):
                 lock = fixed_lock()
@@ -136,7 +136,7 @@ class SiteDependencyTests(unittest.TestCase):
         guard.validate_lock(lock)
 
     def test_aliased_target_packages_are_checked(self):
-        for name, version in (("vite", "8.1.5"), ("postcss-selector-parser", "6.1.4")):
+        for name, version in (("vite", "8.1.5"), ("vite", "8.3.2"), ("postcss-selector-parser", "6.1.4")):
             with self.subTest(name=name):
                 lock = fixed_lock()
                 lock["packages"]["node_modules/alias"] = {"name": name, **record(name, version)}
