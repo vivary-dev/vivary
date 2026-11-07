@@ -752,6 +752,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #337 fix round, part 1: .gitignore diff hygiene and keep
+ignoring private local Entire data (QA's finding 1, and
+discussion_r4503960077). The prior commit's .gitignore edit left a
+trailing blank line at EOF, which failed `git diff --check` and GitHub's
+required "tests + checks" diff-hygiene step; removed. Separately,
+removing the Entire integration also removed `.gitignore`'s only rule
+for `.entire/`, which existed to keep each contributor's own local-only
+Entire data (settings.local.json, logs, transcripts) out of source
+control; that local data still exists on checkouts that had Entire
+enabled before this removal, so `.gitignore` now keeps a plain
+`/.entire/` ignore, with a comment explaining why, but drops the
+`!/.entire/settings.json` exception since that file is deleted and has
+no tracked replacement. No application code, route, or persisted state
+changed.
+
 2026-11-07 Remove Entire from the repository, part 2: reword the
 remaining references (task 228, Jeff's yes). `AGENTS.md` and
 `CONTRIBUTING.md` no longer describe the now-deleted Entire mirror
