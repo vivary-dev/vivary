@@ -8262,6 +8262,28 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #337 fix round, part 2: reword the last live Entire
+reference (QA's finding 2). operating-manual.md's Delivery line said
+Zo CI must check "matching GitHub/Entire refs"; this was the only
+remaining process instruction still requiring Entire after task 228's
+removal. Reworded to "matching GitHub refs". `guide.html`, its
+generated mirror, got the same one-phrase text edit by hand rather
+than through its generator, render-guide.py: that script's own
+`--check` fails with "journeys-4 changed; use --refresh-diagrams" on
+vanilla `dev` with no edits of mine, a pre-existing mermaid-diagram-
+manifest staleness unrelated to this PR. `--refresh-diagrams` needs
+network access to a pinned external renderer plus Playwright and
+Chromium, an authoring-only operation per the script's own docstring,
+and guide.html is not wired into any CI check, so this hand edit
+carries no gate risk; reported to the Lead as a separate, out-of-
+scope finding for whoever next runs an authoring session there. QA's
+informational note that `docs/ARCHITECTURE.md:3249`'s own history
+entry links to the now-deleted docs/ENTIRE.md is left as-is: that
+entry is append-only history describing a decision already closed at
+the time, same as every other HLDD entry mentioning Entire, not a
+live instruction. No application code, route, or persisted state
+changed.
+
 2026-11-07 PR #337 fix round, part 1: .gitignore diff hygiene and keep
 ignoring private local Entire data (QA's finding 1, and
 discussion_r4503960077). The prior commit's .gitignore edit left a
