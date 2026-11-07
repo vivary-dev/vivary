@@ -227,6 +227,14 @@ reason. The [journeys state chart](https://github.com/vivary-dev/vivary/blob/dev
 draws these states. A linked conversation, described next, remains the way to
 continue in a separate conversation that keeps the source unchanged.
 
+Switch consent belongs to the latest editable view. Entering history replay or
+losing the workspace folder discards an unsubmitted choice; returning to latest
+requires a fresh choice. A switch already submitted keeps settling. Current-view
+checks also guard the switch handlers, so a retained callback cannot submit from
+replay. Replay cannot stop a live run. In the latest view, losing the folder does
+not revoke Stop: the owner checks current view authority and targets only the
+selected conversation's own active run, leaving concurrent conversations alone.
+
 Offline evidence: `tests/code-route-selection.test.mjs` runs the switch owner as
 written against stub records, `tests/code-run-worker.test.ts` runs the real worker
 with stub Claude Code and Codex executables from Claude to Codex and back,
@@ -1107,6 +1115,17 @@ links open online through the browser or desktop's existing confirmation flow.
 No documentation route reads arbitrary host files.
 
 ## Last change review
+
+2026-10-23 Code replay and Stop authority. History navigation now discards
+unsubmitted runtime/model switch consent and prevents replay from stopping the
+live run. Latest-view Stop remains available after folder loss and still targets
+only the selected run. Router-level component regressions reproduced six failures
+before the repair, then all ten new cases passed, including fresh consent and
+concurrent-run controls. The affected component, placeholder and route-hold suite
+passed 70 tests, and the rebuilt TypeScript compiler passed. These Linux checks
+use the qualified dependency graph from the dependency-maintenance branch; they
+do not establish live provider streaming, packaged Windows or hosted CI acceptance.
+Pending-route placeholder reconciliation remains separate from this repair.
 
 2026-10-23 Desktop Python build dependencies. The desktop pins the authenticated
 CPython 3.12.15 release archives and pip 26.2.2/setuptools 84.1.0 build wheels.

@@ -37,6 +37,10 @@ const stubs = new Map([
     export function trackSelectionWrite() {}
     export async function flushChatDraftsForClose() {}
     export function useChatDraftList() { return { data: [] }; }`],
+  // The real conversation owner is mounted below; opening a project folder is outside these replay/Stop cases.
+  [join(WORKBENCH, "app", "components", "projects", "open-project-folder.ts"), `
+    export function useOpenProjectFolder() { return { available: false, choosing: false, error: undefined,
+      async openFolder() { throw new Error("No folder selection expected"); } }; }`],
   [join(CLIENT, "settings", "useBuilderStatus.js"), `
     export function useBuilderConnectFlow() {
       return { configured: false, connecting: false, error: null, orgName: null, statusResolved: true, start() {} };
@@ -50,7 +54,7 @@ const proofSource = String.raw`
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { AssistantChat } from "@proof/assistant-chat";
-import { LocalCodeConversation } from "@proof/workbench-code";
+import { LocalCodeConversation, ProjectCodeWorkspace } from "@proof/workbench-code";
 import { claudeCodeModelChoices } from "../shared/claude-models.ts";
 import { MultiTabAssistantChat } from "@proof/multi-tab-chat";
 import { useState } from "react";
@@ -59,7 +63,7 @@ import * as messages from "@proof/message-components";
 import { processEvent } from "@proof/sse-event-processor";
 import { AssistantRuntimeProvider, ThreadPrimitive, useLocalRuntime } from "@assistant-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { TiptapComposer } from "@proof/tiptap-composer";
 import { TooltipProvider } from "@proof/tooltip";
 import { UsageSection } from "@proof/usage-section";
@@ -198,6 +202,112 @@ export async function renderCodeSwitch({ running = false, folderRuns = [], viewi
     },
     async unmount() { await view.unmount(); client.clear(); delete globalThis.codeActionFixture; },
   };
+}
+
+// Exercise replay through the actual owner/router without a loading unmount discarding pending consent for us.
+export async function renderReplayOwner({ running = false } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const version = "2.1.300";
+  const claude = { engine: "claude-cli", label: "Claude Code", configured: true,
+    runtime: { status: "ready", message: "Signed in", version }, modelCatalog: null,
+    models: claudeCodeModelChoices(version).map(model => model.id), claudeModels: claudeCodeModelChoices(version) };
+  const codex = { engine: "codex-cli", label: "Codex", configured: true,
+    runtime: { status: "ready", message: "Signed in" }, models: ["gpt-fixture"], claudeModels: null,
+    modelCatalog: { status: "ready", models: [{ id: "gpt-fixture", label: "GPT Fixture" }],
+      defaultModel: "gpt-fixture", connections: [], message: "" } };
+  let run = { id: "retained-run", title: "Retained conversation", projectId: null, engine: "claude-cli",
+    engineLabel: "Claude Code", model: "claude-sonnet-5-5", status: running ? "running" : "completed",
+    phase: running ? "running" : "complete", pendingSwitch: null, turnId: "replay-turn-a", pendingApprovals: [],
+    createdAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:01:00.000Z", events: [
+      { id: "replay-turn-a", runId: "retained-run", kind: "user", message: "Keep working on turn A.",
+        createdAt: "2026-10-20T00:00:00.000Z", metadata: { seq: 0 } },
+      { id: "replay-answer-a", runId: "retained-run", kind: "system", message: "Turn A has visible output.",
+        createdAt: "2026-10-20T00:00:01.000Z", metadata: { seq: 1, role: "assistant", source: "claude-cli" } },
+    ] };
+  const other = { ...run, id: "other-active-run", title: "Another conversation", status: "running", phase: "running",
+    turnId: "other-turn", events: [] };
+  const snapshot = () => ({ projectId: null, engines: [claude, codex], defaultEngine: "claude-cli",
+    defaultModel: "claude-sonnet-5-5", runtime: claude.runtime, workspaceLabel: "Personal workspace",
+    busy: run.status === "running", cleanup: null, pendingApproval: null, folderRuns: [],
+    activeRuns: [...(run.status === "running" ? [run] : []), other], run, runs: [run, other] });
+  const key = ["action", "vivary-code-state", { projectId: undefined }];
+  const anchorKey = ["action", "vivary-code-state", { projectId: undefined, runId: run.id,
+    eventId: "replay-turn-a", eventOffset: 0 }];
+  const calls = [];
+  const originalAction = globalThis.codeActionFixture, originalFetch = globalThis.fetch;
+  globalThis.codeActionFixture = async (name, params) => {
+    if (name !== "vivary-code-switch" && name !== "vivary-code-stop") throw new Error("No Code action expected: " + name);
+    calls.push({ name, params });
+    if (params.runId !== run.id || params.projectId != null) throw new Error("Wrong conversation selected");
+    if (name === "vivary-code-stop" || params.stop) run = { ...run, status: "paused", phase: "paused",
+      pendingSwitch: name === "vivary-code-switch" ? { engine: params.engine, model: params.model } : null };
+    else run = { ...run, engine: params.engine, model: params.model, pendingSwitch: null };
+    return snapshot();
+  };
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input instanceof Request ? input.url : input), "http://chat.test");
+    if (url.pathname.endsWith("/vivary-code-state")) return Response.json(snapshot());
+    return originalFetch(input, init);
+  };
+  client.setQueryData(key, snapshot());
+  client.setQueryData(anchorKey, snapshot());
+  let location = "", choice = null, setAvailable;
+  function Owner() {
+    const [selection, setSelection] = useState({ key: run.id, runId: run.id });
+    const [available, changeAvailable] = useState(true);
+    const navigate = useNavigate();
+    location = useLocation().search; choice = selection.choice ?? null; setAvailable = changeAvailable;
+    return <><button type="button" onClick={() => navigate("/?run=retained-run&event=replay-turn-a&eventOffset=0")}>Open history replay</button>
+      <ProjectCodeWorkspace projectId={null} draftScopeKey="fixture" ownerKey="fixture-owner" previewScope="fixture"
+        workspaceAvailable={available} selection={selection} setSelection={setSelection} onOpenActive={async () => false} /></>;
+  }
+  const settle = () => act(async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 5)); });
+  let view;
+  const dispose = async () => {
+    try { await view?.unmount(); } finally {
+      client.clear(); globalThis.fetch = originalFetch;
+      if (originalAction === undefined) delete globalThis.codeActionFixture;
+      else globalThis.codeActionFixture = originalAction;
+    }
+  };
+  try {
+    view = await mount(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/?run=retained-run"]}>
+      <Owner /></MemoryRouter></QueryClientProvider>);
+    await settle();
+    const available = button => !!button && view.host.contains(button) && !button.disabled
+      && !button.closest('[hidden], [inert], [aria-hidden="true"]');
+    const control = label => view.host.querySelector('[aria-label="' + label + '"]');
+    const click = async button => {
+      if (!available(button)) throw new Error("No enabled fixture control");
+      await act(async () => { button.dispatchEvent(new window.Event("click", { bubbles: true })); });
+      await settle();
+    };
+    return { calls, location: () => location, rememberedChoice: () => choice,
+      authoritative: () => ({ engine: run.engine, model: run.model, status: run.status, phase: run.phase,
+        pendingSwitch: run.pendingSwitch, otherStatus: other.status }),
+      panel: () => control("Switch runtime or model")?.textContent ?? null,
+      selectorsDisabled: () => ["Conversation runtime", "Conversation model"].map(label => control(label)?.disabled),
+      async choose() {
+        const select = control("Conversation runtime");
+        if (!available(select)) throw new Error("Runtime choice must be available");
+        Object.defineProperty(select, "value", { value: "codex-cli", configurable: true });
+        await act(async () => { select.dispatchEvent(new window.Event("change", { bubbles: true })); });
+        delete select.value; await settle();
+      },
+      async click(name) { await click([...view.host.querySelectorAll("button")].find(button => button.textContent.trim() === name)); },
+      async clickReplayActions() {
+        for (const button of [...view.host.querySelectorAll("button")]) {
+          if (available(button) && (["Switch", "Stop and switch"].includes(button.textContent.trim())
+            || button.getAttribute("aria-label") === "Stop response")) await click(button);
+        }
+      },
+      async setWorkspaceAvailable(value) { await act(async () => { setAvailable(value); }); await settle(); },
+      async stop() { await click(control("Stop response")); },
+      stopAvailable: () => available(control("Stop response")),
+      ownerActiveIds: () => client.getQueryData(key)?.activeRuns.map(item => item.id),
+      unmount: dispose,
+    };
+  } catch (error) { await dispose(); throw error; }
 }
 
 async function mount(element) {
@@ -597,7 +707,7 @@ const require = createProofRequire(${JSON.stringify(join(WORKBENCH, "package.jso
           return undefined;
         });
         build.onLoad({ filter: /.*/, namespace: "workbench-code" }, args => ({
-          contents: readFileSync(args.path, "utf8") + "\nexport { LocalCodeConversation };",
+          contents: readFileSync(args.path, "utf8") + "\nexport { LocalCodeConversation, ProjectCodeWorkspace };",
           loader: "tsx", resolveDir: dirname(args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "stub" }, args => (
@@ -620,6 +730,7 @@ function installDom() {
   class IntersectionObserver { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } }
   // Radix's menu watches its content for changes. linkedom has no MutationObserver.
   class MutationObserver { observe() {} disconnect() {} takeRecords() { return []; } }
+  class WheelEvent extends view.Event { constructor(type, init = {}) { super(type, init); this.deltaY = init.deltaY ?? 0; } }
   // linkedom has no text selection. An unfocused editor only needs an empty one.
   const selection = { rangeCount: 0, anchorNode: null, anchorOffset: 0, focusNode: null, focusOffset: 0, isCollapsed: true,
     removeAllRanges() {}, addRange() {}, collapse() {}, extend() {} };
@@ -651,7 +762,7 @@ function installDom() {
   view.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
   const values = { window: view, self: view, document: view.document, navigator: view.navigator,
     HTMLElement: view.HTMLElement, Element: view.Element, Node: view.Node, Event: view.Event,
-    CustomEvent: view.CustomEvent, EventTarget: view.EventTarget, MessageChannel: TrackedMessageChannel,
+    CustomEvent: view.CustomEvent, EventTarget: view.EventTarget, MessageChannel: TrackedMessageChannel, WheelEvent,
     ResizeObserver, IntersectionObserver, MutationObserver, getComputedStyle, innerHeight: 800, innerWidth: 1200,
     sessionStorage: view.sessionStorage, localStorage: view.localStorage, matchMedia: view.matchMedia,
     requestAnimationFrame: view.requestAnimationFrame, cancelAnimationFrame: view.cancelAnimationFrame,
@@ -936,6 +1047,88 @@ test("Native chat controls", async t => {
       assert.deepEqual(view.disabled(), [true, true]);
     } finally { await view.unmount(); server(); }
   });
+
+  for (const [label, running] of [["Switch", false], ["Stop and switch", true]]) {
+    const consent = async view => { await view.choose(); if (running) await view.click("Stop and switch"); };
+    await t.test("replay authority: entering history blocks existing " + label + " consent", async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        view = await proof.renderReplayOwner({ running });
+        await consent(view);
+        const before = view.authoritative();
+        assert.ok(view.panel(), "consent exists before the router transition");
+        await view.click("Open history replay");
+        assert.equal(new URLSearchParams(view.location()).get("event"), "replay-turn-a");
+        assert.deepEqual(view.selectorsDisabled(), [true, true]);
+        await view.clickReplayActions();
+        assert.deepEqual(view.calls, [], "visible replay controls must not mutate the live conversation");
+        assert.deepEqual(view.authoritative(), before);
+        assert.equal(view.rememberedChoice(), null);
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+    await t.test("replay authority: returning to latest discards " + label + " consent", async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        view = await proof.renderReplayOwner({ running });
+        await consent(view);
+        const before = view.authoritative();
+        await view.click("Open history replay");
+        await view.click("Return to latest conversation");
+        assert.equal(new URLSearchParams(view.location()).get("event"), null);
+        assert.equal(view.panel(), null, "leaving replay must not revive unsubmitted consent");
+        assert.deepEqual(view.calls, []);
+        assert.deepEqual(view.authoritative(), before);
+        await consent(view);
+        assert.ok(view.panel(), "a fresh choice remains possible");
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+    await t.test("replay authority: fresh latest-view " + label + " reaches the current action", async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        view = await proof.renderReplayOwner({ running });
+        await consent(view);
+        await view.click(label);
+        assert.deepEqual(view.calls, [{ name: "vivary-code-switch", params: {
+          projectId: undefined, runId: "retained-run", engine: "codex-cli", model: "gpt-fixture",
+          ...(running ? { stop: true } : {}),
+        } }]);
+        assert.equal(view.authoritative().otherStatus, "running");
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
+
+  for (const workspaceAvailable of [true, false]) {
+    await t.test("replay authority: latest-view Stop keeps its selected owner with folder " + workspaceAvailable, async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        view = await proof.renderReplayOwner({ running: true });
+        await view.setWorkspaceAvailable(workspaceAvailable);
+        assert.equal(view.stopAvailable(), true);
+        await view.stop();
+        assert.deepEqual(view.calls, [{ name: "vivary-code-stop", params: { projectId: undefined, runId: "retained-run" } }]);
+        assert.equal(view.authoritative().status, "paused");
+        assert.equal(view.authoritative().otherStatus, "running");
+        assert.deepEqual(view.ownerActiveIds(), ["other-active-run"], "the owner refetch keeps the unrelated worker active");
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+    await t.test("replay authority: history never stops a live run with folder " + workspaceAvailable, async () => {
+      const server = installChatServer();
+      let view;
+      try {
+        view = await proof.renderReplayOwner({ running: true });
+        await view.setWorkspaceAvailable(workspaceAvailable);
+        const before = view.authoritative();
+        await view.click("Open history replay");
+        await view.clickReplayActions();
+        assert.deepEqual(view.calls, []);
+        assert.deepEqual(view.authoritative(), before);
+      } finally { try { await view?.unmount(); } finally { server(); } }
+    });
+  }
 
   await t.test("another conversation's run elsewhere locks nothing in a new conversation", async () => {
     const server = installChatServer();
