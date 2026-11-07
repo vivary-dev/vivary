@@ -321,34 +321,65 @@ function mcpCredentials(config: McpConfig): HeldCredential[] {
 }
 
 /** Everything in the secret store is a credential, so its values are held whatever their names. */
-function storedCredential(name: string, value: string): HeldCredential[] {
+function storedCredentials({ name, value }: HeldCredential): HeldCredential[] {
   return heldValuesOf(name, value).map(held => ({ name, value: held }));
 }
 
+/**
+ * A stored-secret read that did not finish. It carries the values it did read, so a refresh adds
+ * them to the last stored set instead of replacing that set. The message gives counts, never names
+ * or values.
+ */
+export class IncompleteStoredSecretsRead extends Error {
+  readonly held: HeldCredential[];
+  constructor(held: HeldCredential[], unread: string[]) {
+    super(`Vivary could not read ${unread.join(" and ")}.`);
+    this.name = "IncompleteStoredSecretsRead";
+    this.held = held;
+  }
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/**
+ * Read the secret store and the legacy credential settings. A table that cannot be listed, or a
+ * listed row whose value cannot be read, makes the read incomplete, and the read rejects with
+ * IncompleteStoredSecretsRead rather than return a shorter list that looks complete.
+ */
 async function readStoredSecrets(): Promise<HeldCredential[]> {
   const db = getDbExec();
   const held: HeldCredential[] = [];
+  const unread: string[] = [];
   // Only the identifying columns are selected. readAppSecret decrypts each value.
   const secrets = await db.execute({ sql: "SELECT scope, scope_id, key FROM app_secrets", args: [] })
-    .then(result => result.rows ?? []).catch(() => []);
+    .then(result => result.rows ?? [], () => { unread.push("the secret store"); return []; });
+  let unreadSecrets = 0;
   for (const row of secrets) {
     const ref = { scope: String(row.scope), scopeId: String(row.scope_id), key: String(row.key) };
+    // Core answers null for a row it cannot decrypt as well as for a missing one. This row was
+    // just listed, so null means its value is unknown, not that it was deleted.
     const secret = await readAppSecret(ref as Parameters<typeof readAppSecret>[0]).catch(() => null);
     if (typeof secret?.value === "string") held.push({ name: ref.key, value: secret.value });
+    else unreadSecrets++;
   }
+  if (unreadSecrets > 0) unread.push(plural(unreadSecrets, "stored secret"));
   // Legacy credential settings, keyed u:<email>:credential:<NAME> or o:<org>:credential:<NAME>.
   const settings = await db.execute({ sql: "SELECT key, value FROM settings WHERE key LIKE ?", args: ["%:credential:%"] })
-    .then(result => result.rows ?? []).catch(() => []);
+    .then(result => result.rows ?? [], () => { unread.push("the legacy credential settings"); return []; });
+  let unreadSettings = 0;
   for (const row of settings) {
     let stored: unknown;
-    try { stored = (JSON.parse(String(row.value)) as { value?: unknown } | null)?.value; } catch { continue; }
+    try { stored = (JSON.parse(String(row.value)) as { value?: unknown } | null)?.value; } catch { unreadSettings++; continue; }
+    // A setting without a string value holds no credential.
     if (typeof stored !== "string") continue;
     let value = stored;
     if (isEncryptedSecretValue(stored)) {
-      try { value = decryptSecretValue(stored); } catch { continue; }
+      try { value = decryptSecretValue(stored); } catch { unreadSettings++; continue; }
     }
     held.push({ name: String(row.key).split(":credential:").at(-1) ?? "credential", value });
   }
+  if (unreadSettings > 0) unread.push(plural(unreadSettings, "legacy credential setting"));
+  if (unread.length > 0) throw new IncompleteStoredSecretsRead(held, unread);
   return held;
 }
 
@@ -368,18 +399,36 @@ function applyHeld(held: HeldCredential[]): void {
   currentRedactor = redactorFor(current);
 }
 
+// One entry per name and value, so repeated failed reads do not grow the kept set.
+function distinctHeld(held: HeldCredential[]): HeldCredential[] {
+  const byKey = new Map<string, HeldCredential>();
+  for (const entry of held) {
+    const key = `${entry.name}\u0000${entry.value}`;
+    if (!byKey.has(key)) byKey.set(key, entry);
+  }
+  return [...byKey.values()];
+}
+
 /**
  * Reload the held values. Settings from the environment and MCP configuration apply at once.
- * Stored secrets apply when the database answers, and a failed read keeps the last stored set.
- * Vivary refreshes at startup, after each secret write, before each Native chat send, and before
- * each Code send.
+ * Stored secrets apply when the database answers. A stored read fails closed: when it rejects or
+ * cannot read every value, the last stored set is kept, the values it did read are added, and the
+ * server logs a warning. A deleted secret leaves the set at the next complete read. Vivary
+ * refreshes at startup, after each secret write, before each Native chat send, and before each
+ * Code send.
  */
 export async function refreshHeldCredentials(sources: CredentialSources = defaultCredentialSources): Promise<void> {
   const sequence = ++refreshSequence;
   const configured = [...environmentCredentials(sources.environment()), ...mcpCredentials(sources.mcpConfig())];
   applyHeld([...configured, ...storedHeld]);
-  const stored = await sources.storedSecrets()
-    .then(secrets => secrets.flatMap(({ name, value }) => storedCredential(name, value)), () => storedHeld);
+  const stored = await sources.storedSecrets().then(
+    secrets => secrets.flatMap(storedCredentials),
+    (error: unknown) => {
+      const read = error instanceof IncompleteStoredSecretsRead ? error.held.flatMap(storedCredentials) : [];
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[vivary] Credential redaction kept the last stored credentials after a failed read. ${reason}`);
+      return distinctHeld([...storedHeld, ...read]);
+    });
   if (sequence !== refreshSequence) return;
   storedHeld = stored;
   applyHeld([...configured, ...stored]);
