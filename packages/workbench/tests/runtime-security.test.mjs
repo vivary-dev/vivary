@@ -160,13 +160,15 @@ test("real Workbench start admits Node before port probing, user state or server
 
 test("standalone Node policy never waives the Electron publication hold", () => {
   assert.doesNotThrow(() => assertNodeVersion("24.22.1"));
-  assert.deepEqual(assertElectronPublication(), { electron: "45.2.1", node: "24.22.1" });
-  assert.throws(() => assertElectronPublication("45.0.0"), /Electron publication is held\. Electron 45\.0\.0 is not admitted\. Admitted: 45\.2\.1\./);
+  assert.deepEqual(assertElectronPublication(), { electron: "45.2.3", node: "24.22.2" });
+  for (const electron of ["45.0.0", "45.2.1"]) {
+    assert.throws(() => assertElectronPublication(electron), new RegExp(`Electron publication is held\\. Electron ${electron.replaceAll(".", "\\.")} is not admitted\\. Admitted: 45\\.2\\.3\\.`));
+  }
 });
 
 test("Electron publication admits only a listed release whose bundled Node meets the floor", () => {
-  assert.deepEqual(ADMITTED_ELECTRON, { "45.2.1": "24.22.1" });
-  assert.throws(() => assertElectronPublication("45.2.1", {}), /no stable Electron release with Node 24\.22\.1 or later is qualified yet/);
+  assert.deepEqual(ADMITTED_ELECTRON, { "45.2.3": "24.22.2" });
+  assert.throws(() => assertElectronPublication("45.2.3", {}), /no stable Electron release with Node 24\.22\.1 or later is qualified yet/);
   const admitted = { "45.0.1": "24.22.1" };
   assert.deepEqual(assertElectronPublication("45.0.1", admitted), { electron: "45.0.1", node: "24.22.1" });
   assert.throws(() => assertElectronPublication("45.0.0", admitted), /Electron 45\.0\.0 is not admitted\. Admitted: 45\.0\.1\./);
