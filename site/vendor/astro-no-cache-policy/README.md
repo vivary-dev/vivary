@@ -1,11 +1,11 @@
 # Astro remote-image freshness policy
 
-This private, independently written module replaces Astro 7.3.5's use of
+This private, independently written module replaces Astro 7.4.2's use of
 `http-cache-semantics`. GHSA-ch52-4w7c-c8xp lists `<= 4.2.0` as vulnerable and
 names no patched release (GitHub advisory record, read 2026-10-24). The lock this
 module replaced held 4.3.0, which that range does not list, and no 4.3.0 fix for the
 max-stale disclosure is confirmed either. Keep this module until the advisory names a
-patched release or the 4.3.0 fix is confirmed from upstream source. Astro 7.3.5 still
+patched release or the 4.3.0 fix is confirmed from upstream source. Astro 7.4.2 still
 declares the dependency, so upgrading Astro alone does not repair it.
 
 The site's direct local dependency supplies the import name Astro expects.
@@ -26,7 +26,7 @@ revalidation. This change does not remove those separate Astro behaviors.
 Builds using optimized remote images may make more origin requests. The current
 site uses local optimized assets.
 
-Astro is pinned to 7.3.5 because compatibility depends on its narrow caller.
+Astro is pinned to 7.4.2 because compatibility depends on its narrow caller.
 Before changing that pin, inspect every import of `http-cache-semantics` in
 Astro and run `npm ci`, `npm run test:site`, the live audit, build, and link
 check. The integration tests execute Astro's real remote helpers with injected
