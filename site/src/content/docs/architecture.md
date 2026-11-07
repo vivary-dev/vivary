@@ -900,6 +900,10 @@ future runtime proof. Review inspected the staged skill, key loader and feature
 recipes against the existing workbench architecture. Application behaviour and
 access boundaries are unchanged. Browser execution, planted-bug proof and
 independent review remain outstanding. This checkpoint is not acceptance.
+The five-feature seed excludes Files, Search, Preview, draft preservation
+and conversation preservation. The feature map and every runtime receipt
+must keep these limits explicit. This clarifies proof coverage without
+changing application behaviour or the design described above.
 
 2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
 desktop package README, the acceptance register and the changelog now point at the
