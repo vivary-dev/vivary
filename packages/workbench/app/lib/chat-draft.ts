@@ -188,16 +188,17 @@ export function needsUnmountedDraftRecovery(current: Entry): boolean {
 
 /**
  * The text the shared composer shows for a draft. The composer skips a change equal to this text, so it must match
- * what the composer holds.
+ * what the composer holds: the local text of an editable draft, saved or not. Returning "" before the first save, or
+ * after a discard, hid a deletion of unsaved text, and the pending save restored it. A send waiting for review shows
+ * nothing.
  */
 export function composerTextForDraft(current: Entry): string {
-  return current.record?.status === "draft" ? current.text : "";
+  return current.record?.status === "pending" ? "" : current.text;
 }
 
 /** Record a composer edit in the local draft. Returns whether the local text changed, so a save is due. */
 export function acceptComposerEdit(current: Entry, text: string): boolean {
   if (!current.loaded || current.discarding || current.error || current.record?.status === "pending") return false;
-  if (current.record?.status === "cleared" && text === "") return false;
   if (current.text === text) return false;
   current.text = text;
   return true;
