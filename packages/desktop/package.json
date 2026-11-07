@@ -15,7 +15,7 @@
     "@xhayper/discord-rpc": "1.5.1"
   },
   "devDependencies": {
-    "electron": "45.2.1",
+    "electron": "45.2.3",
     "@electron/packager": "20.3.0"
   }
 }
