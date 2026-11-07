@@ -43,7 +43,7 @@ Actions billing or runner failures do not block this verification path. Record
 executed checks, omissions, logs, and review evidence as Zo CI. Keep GitHub service
 failures separate from test failures. Do not relabel an unrun Actions or Windows
 job as successful. Passing applicable Zo CI satisfies the CI gate, subject to the
-same review and product acceptance requirements. Promotion to `main` also needs Jeff's acceptance of
+same review and product acceptance requirements. Promotion to `prod` also needs Jeff's acceptance of
 the delivered product milestone. This does not authorize a public release.
 
 On 2026-09-13, GitHub refused branch-protection configuration while this
@@ -52,9 +52,11 @@ contributor policy. On 2026-09-24, `dev` still had no branch protection.
 
 Dependabot reads configuration from `prod`. Its version updates target `dev`
 once this configuration reaches `prod`. GitHub security updates still target
-`prod`, and the promotion guard refuses them, because `prod` changes only by a
-promotion from `dev`. Make the equivalent fix in `dev`, close the Dependabot PR
-with a link to it, and let the next promotion carry it to `prod`. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
+`prod`; the promotion guard's `promotion-source` check fails on them, but it
+is not yet a required status check on `prod`, so a maintainer must still
+refuse to merge it rather than relying on the red check alone. Make the
+equivalent fix in `dev`, close the Dependabot PR with a link to it, and let
+the next promotion carry it to `prod`. See [GitHub's target-branch behavior](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch-).
 
 Dependency-only Dependabot commits pass the HLDD gate without a design update,
 so the dependency review before merge is the gate that catches a bad update.
