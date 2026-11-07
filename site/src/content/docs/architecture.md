@@ -752,6 +752,8 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #324's own ci.yml trigger correction. This PR's "Git law" commit wrote `.github/workflows/ci.yml`'s push trigger as `[dev, main, prod]`, keeping the stale `main` entry. #333 separately confirmed by `git ls-remote` and the GitHub API that no `main` branch remains and `prod` is the sole default, and owns removing `main` everywhere else. This commit makes 324's own trigger list consistent with that same fact ahead of #333 landing: `branches: [dev, prod]`. No architecture, component, or trust-boundary change; the promotion-guard workflow and the rest of the Git-law documentation added earlier in this PR are unchanged.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or
