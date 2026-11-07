@@ -748,6 +748,25 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 5, part 2: narrow the verify .gitignore
+re-inclusion to the exact tracked file set (discussion_r4504017192).
+The previous fix round's broad, unanchored `!.claude/` / `.claude/*` /
+`!.claude/skills/` / `!.claude/skills/verify/**` block also exposed
+generated verify bytecode (`.claude/skills/verify/__pycache__/*.pyc`)
+and, because none of those patterns were anchored to the repo root,
+any unrelated nested `.claude/` directory's local settings elsewhere in
+the tree (for example `packages/probe/.claude/settings.local.json`).
+`.gitignore` now anchors every line (leading `/`) and lists the
+skill's exact known files (`SKILL.md`, `key.py`, `test_key.py`,
+`acceptance.md`, `fixtures.json`) plus `features/*.md` (so a new
+feature file still stays visible), leaving everything else under
+`.claude/skills/verify/` (bytecode included) and every other `.claude/`
+directory in the repo untouched by this rule. New `GitignoreTests` in
+test_key.py, covering the Reviewer's own probe cases plus the known-
+file and nested-directory cases, replace the one-off job-script probe
+used to verify the previous round. No application code, route, or
+persisted state changed.
+
 2026-11-07 PR #336 fix round 5, part 1: refuse an empty mapped feature
 file (discussion_r4504017314). The feature-file-tracking check from the
 previous fix round confirmed a mapped file was tracked but never read
