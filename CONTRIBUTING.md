@@ -14,8 +14,7 @@ is a separate delivery target.
 - Topic branches start from current `origin/dev`. Use `feat/`, `fix/`, `docs/`,
   `chore/`, `refactor/`, `test/`, or `perf/` followed by a short purpose.
 - Open topic PRs into `dev`. Do not commit directly to `dev` or `main`.
-- Push reviewed source branches to GitHub (`origin`) and the Entire mirror
-  (`entire`). Source mirroring does not establish agent-session capture.
+- Push reviewed source branches to GitHub (`origin`).
 
 Before merging, resolve review findings and require passing applicable CI plus
 one approval. The `required review gate` check (`.github/workflows/review-gate.yml`) runs the
@@ -30,12 +29,14 @@ or a Codex review of the exact head runs, fails when the review failed, covers a
 or base, or lacks a thread for a finding, and fails on any unresolved review thread,
 outdated ones included. It is not a security boundary: a pull request can edit its own
 workflow, and the allowed publisher is the owner's account. The reviewer therefore adds a
-finding whenever CI, agent or instruction files change, and the owner's Entire approval
-remains required. Never post or edit a review result by hand. Before merging: run
+finding whenever CI, agent or instruction files change. A finding on a gate-controlling
+file opens a mandatory owner-review thread; only Jeff resolves an owner thread, so the
+gate blocks on it until he does. Never post or edit a review result by hand. Before merging: run
 `vivary-independent-review --pr N` after the final push, publish a fix or an evidence-backed
 rejection for every finding, resolve each thread only after its disposition is verified,
-then re-run the check, because no event re-runs it when a thread is resolved. Since 2026-09-24 the Entire gate counts the author's approval, so
-Jeff can approve his own trail. An agent can add technical review but never
+then re-run the check, because no event re-runs it when a thread is resolved. A
+High-risk change also waits in the review-gate's ask lane for Jeff's decision
+before anyone merges. An agent can add technical review but never
 records a human approval. Zo is the standing owner-approved CI host. Run the
 applicable workflow commands and gates on Zo against the exact PR commit. GitHub
 Actions billing or runner failures do not block this verification path. Record
@@ -73,15 +74,7 @@ security updates"
 A security update can bring a version published hours earlier, so the 72-hour
 check matters most there.
 
-Give a new or low-download package a closer look. The owner's approval of the
-Entire trail stays required before merge.
-
-### Entire session capture
-
-[Enable Entire](docs/ENTIRE.md) in your working checkout before supported agent
-work. The guide covers agent hooks, worktree discovery, private checkpoint
-routing, and checking that a session was actually recorded. Source mirroring
-alone does not provide this record. Keep local settings and transcripts untracked.
+Give a new or low-download package a closer look.
 
 ### Checkout and worktree lifecycle
 
@@ -189,7 +182,7 @@ Install the hook once per Git checkout:
 python scripts/check_hldd.py --install-hook
 ```
 
-The installer preserves Entire and other hooks. It refuses to replace an
+The installer preserves other hooks. It refuses to replace an
 existing pre-commit hook or hook manager. Add the staged command to that
 existing chain when needed. Linked worktrees share hooks, but this hook runs
 only in source trees that track the HLDD checker.

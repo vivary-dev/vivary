@@ -36,7 +36,7 @@ SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
 INDEPENDENT_MARKER = re.compile(r"<!-- vivary-independent-review:v1 (\{.*?\}) -->")
 # Identities allowed to publish independent review results. A workflow's GITHUB_TOKEN acts as
 # github-actions, so pull request code cannot act as them; anyone holding one of these accounts'
-# credentials can, which is why the owner's Entire approval stays required before merging.
+# credentials can, which is why gate-controlling changes need the owner's review before merging.
 REVIEW_PUBLISHERS = {"Jeff-Kazzee"}
 CODEX_BOT = "chatgpt-codex-connector[bot]"
 STATE_MARKER = re.compile(r"<!-- codex-security-review:v1 (\{.*?\}) -->")

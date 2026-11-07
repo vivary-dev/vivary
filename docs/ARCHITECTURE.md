@@ -748,6 +748,23 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Remove Entire from the repository, part 2: reword the
+remaining references (task 228, Jeff's yes). `AGENTS.md` and
+`CONTRIBUTING.md` no longer describe the now-deleted Entire mirror
+remote or an Entire session-capture step; kept both edits to the literal
+Entire sentences only, since PR #324 also edits both files.
+`scripts/check_review_gate.py`'s comment named Entire as why
+REVIEW_PUBLISHERS is restricted; that check's code never called Entire,
+so only the comment changes, to name the actual mechanism: a finding on
+a gate-controlling file opens a mandatory owner-review thread that only
+Jeff resolves, and a High-risk change waits in the review-gate's ask
+lane for his decision. Per the Lead's facts (branch protection
+read-back: `dev` and `prod` both require zero approving reviews), this
+is a wording fix, not a new control; the gate's code is unchanged.
+Historical HLDD and changelog entries mentioning Entire describe
+decisions already closed at the time and are unchanged, append-only.
+No application code, route, or persisted state changed.
+
 2026-11-07 Remove Entire from the repository, part 1: delete the config,
 hooks and skill files (task 228, Jeff's yes). `.entire/settings.json`,
 `.claude/settings.json` and `.codex/hooks.json` held nothing but Entire's
