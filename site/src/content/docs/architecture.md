@@ -768,6 +768,20 @@ keep their earlier behavior, and the Native draft owner, its save path and the
 composer contract are unchanged, so the description here still holds. A new
 regression case shows text deleted before the first draft save being saved.
 
+2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
+to 7.4.2, and its scoped overrides now follow that version instead of the
+obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
+The site dependency checker retains the reviewed 8.1 line and admits only the
+reviewed 8.3 line from 8.3.4; affected versions, other minor lines, malformed
+registry identities, and mismatched installed copies remain refused. The
+maintainer's GHSA-rq7h-c2jc-7f22 advisory fixes 8.3 at 8.3.3, below the selected
+Astro minimum. The independent local cache-policy replacement is retained;
+current upstream source still constructs a policy and uses only `storable()` and
+`timeToLive()`. The build remains a static documentation site and the product
+trust boundaries above remain unchanged. Fifteen focused admission tests pass;
+the regenerated dependency graph, published caller, site behavior, audit and
+build still require their applicable checks before acceptance.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or
@@ -779,6 +793,22 @@ that the page read back from the DOM. The atlas link base is now a fixed value.
 Both pages stay generated, read-only documentation with no server, so the
 description of the specification reader still holds. No runtime or product
 boundary changed.
+
+2026-11-04 Electron 45.2.3 replaces 45.2.1 as the sole admitted desktop shell.
+The [release DEPS](https://github.com/electron/electron/blob/d0a18d02058b21ff292e25d5f53f00bd120f2f61/DEPS)
+pins Node 24.22.2; none of its 58 Node patches modifies the three October DNS fix
+files. Its [Chromium patch list](https://github.com/electron/electron/blob/d0a18d02058b21ff292e25d5f53f00bd120f2f61/patches/chromium/.patches)
+includes `cherry-pick-3318e836e90b.patch`, satisfying the upgrade condition in the
+October 31 review without a local Electron patch. The npm archive matches its
+registry integrity, has no lifecycle scripts or `binding.gyp`, and retains the
+same dependency ranges and engines, so only Electron's lock entry changes.
+The exact pin, admission table, and regression fixtures move together. Older
+Electron payloads remain refused, and the standalone Node floor stays 24.22.1.
+The desktop README now describes that admission instead of the earlier hold.
+The shell uses the same Electron APIs, local server, renderer sandbox, and data
+directories, so the component and trust-boundary descriptions still hold.
+Source qualification does not establish packaged-app or Windows acceptance and
+does not authorize publication.
 
 2026-11-03 Discord presence reload order, isolation and settings fixes. The
 desktop controller numbers each settings reload before it reads the file and
