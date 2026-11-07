@@ -73,7 +73,7 @@ A manual run (`workflow_dispatch`) or a push to a branch named
 `release-dry-run/<name>` is a dry run. It keeps the files as a workflow artifact
 and creates no tag or release. GitHub starts a manual run only for a workflow on
 the default branch. The workflow is on `prod` after promotion #328, so manual
-dry runs are available there; a dry-run branch remains an alternative. A pushed
+dry runs are available there. A dry-run branch remains an alternative. A pushed
 `v<version>` tag that matches
 `packages/desktop/package.json`, such as `v0.1.0-beta.1`, also creates a draft
 prerelease with Latest off and attaches the same files. Only the owner pushes the

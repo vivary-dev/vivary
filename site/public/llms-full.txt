@@ -7088,7 +7088,7 @@ A manual run (`workflow_dispatch`) or a push to a branch named
 `release-dry-run/<name>` is a dry run. It keeps the files as a workflow artifact
 and creates no tag or release. GitHub starts a manual run only for a workflow on
 the default branch. The workflow is on `prod` after promotion #328, so manual
-dry runs are available there; a dry-run branch remains an alternative. A pushed
+dry runs are available there. A dry-run branch remains an alternative. A pushed
 `v<version>` tag that matches
 `packages/desktop/package.json`, such as `v0.1.0-beta.1`, also creates a draft
 prerelease with Latest off and attaches the same files. Only the owner pushes the
@@ -8268,7 +8268,7 @@ No documentation route reads arbitrary host files.
 `docs/RELEASE-WORKFLOW.md` named `main` as the default branch and the target of
 promotions from `dev`. The repository has no `main`. Its default branch is
 `prod`. Promotion #328 merged as `8671131` at 17:05:02 UTC on November 6,
-and #331 synchronized `dev` as `9ef3f7f`; those heads have identical trees.
+and #331 synchronized `dev` as `9ef3f7f`. Those heads have identical trees.
 The `v0.1.0-beta.1` tag commit is already an ancestor of `prod`. The remaining
 problem is inconsistent instructions for future promotions. These files now name `prod`,
 and they state that a release promotes `dev` into `prod` first and puts its tag
@@ -8280,9 +8280,12 @@ Evidence: `git ls-remote` lists `dev` and `prod` and no `main`, the GitHub API
 reports `prod` as the default branch, `python scripts/check_ci_workflow.py`
 passes, and `scripts/tests/test_ci_workflow.py` passes 62 of 62.
 The follow-up source review confirmed that `prod` already contains the gate
-script and desktop-release workflow, removed their obsolete promotion caveats,
-and checked the exact dev/prod trees and tag ancestry. No new release operation
-or package acceptance is implied by this documentation correction.
+script and desktop-release workflow, and checked the exact dev/prod trees and
+tag ancestry. The header comments in `.github/workflows/review-gate.yml` and
+`.github/workflows/desktop-release.yml` still describe `main` and the old
+promotion caveats. `scripts/check_ci_workflow.py` pins that review-gate text,
+so those comments change in a separate reviewed change. No new release
+operation or package acceptance is implied by this documentation correction.
 
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
