@@ -888,6 +888,15 @@ expectations without changing application components, persistence or access
 boundaries, so the existing design remains accurate. Runtime execution and the
 verification runner remain outstanding.
 
+2026-11-02 workbench verification skill checkpoint. The new
+`.claude/skills/verify/SKILL.md` and feature map describe five browser journeys.
+`key.py` admits only a clean candidate with the acceptance key fetched from
+`origin/dev`. The fixture catalogue names temporary navigation mutations for
+future runtime proof. Review inspected the staged skill, key loader and feature
+recipes against the existing workbench architecture. Application behaviour and
+access boundaries are unchanged. Browser execution, planted-bug proof and
+independent review remain outstanding. This checkpoint is not acceptance.
+
 2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
 desktop package README, the acceptance register and the changelog now point at the
 `v0.1.0-beta.1` GitHub prerelease instead of the September `desktop-preview-*`
