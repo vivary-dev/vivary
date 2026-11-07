@@ -752,6 +752,20 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
+to 7.4.2, and its scoped overrides now follow that version instead of the
+obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
+The site dependency checker retains the reviewed 8.1 line and admits only the
+reviewed 8.3 line from 8.3.4; affected versions, other minor lines, malformed
+registry identities, and mismatched installed copies remain refused. The
+maintainer's GHSA-rq7h-c2jc-7f22 advisory fixes 8.3 at 8.3.3, below the selected
+Astro minimum. The independent local cache-policy replacement is retained;
+current upstream source still constructs a policy and uses only `storable()` and
+`timeToLive()`. The build remains a static documentation site and the product
+trust boundaries above remain unchanged. Fifteen focused admission tests pass;
+the regenerated dependency graph, published caller, site behavior, audit and
+build still require their applicable checks before acceptance.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or

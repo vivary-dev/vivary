@@ -104,12 +104,14 @@ def validate_lock(lock):
         if match is None:
             refuse(name + " requires a stable numeric release at " + location)
         version = tuple(map(int, match.groups()))
-        # Only the reviewed 8.1 line is admitted. Later minor lines have distinct
-        # advisory floors (GHSA-rq7h-c2jc-7f22); a greater version alone is unsafe.
+        # Admit only the reviewed 8.1 and 8.3 lines. GHSA-rq7h-c2jc-7f22 fixes
+        # 8.3 at 8.3.3; Astro 7.4.2 requires at least 8.3.4. Other minor lines
+        # still need review rather than a greater-version comparison.
         # GHSA-rj75-hqrm-r3gf has separate 6.1.5 and 7.1.6 fixes. Registry bulk
         # currently disagrees about 6.x; this does not suppress its raw finding.
         if name == "vite":
-            fixed = version[:2] == (8, 1) and version >= (8, 1, 6)
+            fixed = ((version[:2] == (8, 1) and version >= (8, 1, 6))
+                     or (version[:2] == (8, 3) and version >= (8, 3, 4)))
         elif name == "postcss-selector-parser":
             fixed = (version[0] == 6 and version >= (6, 1, 5)) or (version[0] == 7 and version >= (7, 1, 6))
         elif name == "undici":

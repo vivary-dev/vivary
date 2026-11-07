@@ -16,16 +16,16 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.5",
-    "astro": "7.3.5",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "7.4.2",
     "sharp": "^0.35.4",
     "http-cache-semantics": "file:./vendor/astro-no-cache-policy"
   },
   "overrides": {
     "esbuild": "0.28.2",
-    "astro@7.3.5": {
+    "astro@7.4.2": {
       "http-cache-semantics": "$http-cache-semantics",
-      "vite": "8.1.6"
+      "vite": "8.3.4"
     }
   }
 }
