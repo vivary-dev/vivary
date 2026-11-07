@@ -1408,6 +1408,16 @@ def test_python_selection_and_actual_admission_cannot_float_or_be_bypassed():
                 raise AssertionError((name, label, "bypassed actual Python/OpenSSL admission"))
 
 
+def test_setup_python_update_keeps_an_exact_reviewed_action_identity():
+    workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
+    current = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0"
+    assert current in workflow
+    for replacement in ("actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+                        "actions/setup-python@v7.1.0", "actions/setup-python@" + "0" * 40):
+        message = _run(workflow.replace(current, replacement, 1))
+        assert message, replacement
+
+
 def test_python_runtime_regressions_must_run():
     workflow = REAL_WORKFLOW.read_text(encoding="utf-8")
     message = _run(workflow.replace("python -I -B scripts/tests/test_python_runtime.py", "echo skipped", 1))

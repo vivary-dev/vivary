@@ -8262,6 +8262,17 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-06 PR #319 Actions contract repair. The CI, review and npm workflows
+already select setup-python 7.1.0 and setup-node 7.1.0 by immutable commit.
+Their checkers now require those exact identities, after reading each pinned
+upstream action manifest: both keep Node24 setup/cache-save entrypoints, no pre
+entrypoint and a success-only post. Previous or mutable refs remain refused.
+The Python/OpenSSL and Node runtime admission steps, base-owned review script,
+publication consent and permissions are unchanged. Diagnostic contract checks
+failed on the original head and pass on the correction; qualified hosted
+execution and independent/human review remain required. No publication or
+application runtime behavior changed, so the architecture above remains accurate.
+
 2026-11-06 Repository README rewrite. The README now describes the published
 beta, with its download, status and an architecture diagram simplified from the
 existing system diagram. Images sit under `assets/`. No package, runtime or

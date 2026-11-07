@@ -306,7 +306,7 @@ class ReviewGate(unittest.TestCase):
         bootstrap_condition = "        if: ${{ steps.base.outputs.missing == 'true' && steps.runner_action_node.outcome == 'success' }}\n"
         self.assertIn("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
                       + bootstrap_condition + "        with:\n          ref: " + BOOTSTRAP, real)
-        python_setup = "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n"
+        python_setup = "      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0\n"
         weakened = {
             "push": real.replace("on:\n  pull_request:\n", "on:\n  push:\n  pull_request:\n"),
             "dispatch": real + "  workflow_dispatch:\n",

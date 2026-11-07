@@ -77,7 +77,7 @@ jobs:
           ref: 80370e094248c84c55da663d977efc7601d17e84
           path: bootstrap
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12.15"
       - __PYTHON_PROVISIONING__
@@ -212,9 +212,11 @@ BOOTSTRAP_ALIAS = "      - *" + BOOTSTRAP_ANCHOR + "\n"
 # is essential to the first-step admission argument, including post actions.
 ACTION_MANIFESTS = {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": {"using": "node24", "main": "dist/index.js", "post": "dist/index.js"},
-    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
+    # setup-python 7.1.0 action.yml blob 645de4f5108b28bcc7ed043ee171770b0754cc35;
+    # setup-node 7.1.0 action.yml blob 31057efa69b67281683c7b601a1d202329eaa3c1.
+    # Both retain Node24 setup/cache-save entrypoints, no pre, and success-only post.
+    "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
-    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": {"using": "node24", "main": "dist/setup/index.js", "post": "dist/cache-save/index.js"},
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9": {"using": "node24", "main": "dist/upload/index.js"},
     # v8.0.2 action.yml, read at this SHA on 2026-10-24: node24, dist/index.js, no pre or post.
     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333": {"using": "node24", "main": "dist/index.js"},
@@ -289,7 +291,7 @@ def check_runner_action_bootstrap(text: str, names: tuple[str, ...], npm=False, 
             reference = uses[0]
             validate_action_manifest(reference, ACTION_MANIFESTS.get(reference, {}))
             if reference.startswith("actions/setup-node@"):
-                pin = "820762786026740c76f36085b0efc47a31fe5020" if npm else "949feb2413d6458794dcd2491c4babbbce0c15c1"
+                pin = "949feb2413d6458794dcd2491c4babbbce0c15c1"
                 require(reference == "actions/setup-node@" + pin, name + " has the wrong setup-node identity")
             require("continue-on-error:" not in step, name + " cannot ignore an action failure")
             conditions = re.findall(r"(?m)^(?:      - |        )if: (.+)$", step)
@@ -439,7 +441,7 @@ PIP_BOOTSTRAP_STEP = ('      - name: verified pip runtime provisioning\n'
  '        run: |\n'
  '          import runpy\n'
  '          runpy.run_path("scripts/bootstrap_ci_pip.py", run_name="__main__")\n')
-PIP_SETUP_STEP = ('      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n'
+PIP_SETUP_STEP = ('      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0\n'
  '        with:\n'
  '          python-version: "3.12.15"\n')
 PYTHON_JOBS = (*PIP_JOBS, "review", "site")
