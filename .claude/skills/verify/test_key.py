@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Regression tests for key.py: stale origin/dev and evidence-path confinement."""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+KEY_PY = HERE / "key.py"
+KEY_PATH = ".claude/skills/verify/acceptance.md"
+
+
+def run(cmd, cwd, env=None, check=True):
+    result = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise AssertionError(f"{cmd} failed in {cwd}: {result.stdout}\n{result.stderr}")
+    return result
+
+
+def git(args, cwd):
+    return run(["git", *args], cwd=cwd)
+
+
+def init_origin_with_key(origin_dir, content):
+    origin_dir.mkdir(parents=True)
+    git(["init", "--quiet", "-b", "dev"], origin_dir)
+    git(["config", "user.email", "test@example.com"], origin_dir)
+    git(["config", "user.name", "Test"], origin_dir)
+    key_file = origin_dir / KEY_PATH
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(content)
+    git(["add", "-A"], origin_dir)
+    git(["commit", "--quiet", "-m", "key"], origin_dir)
+
+
+def set_key_and_commit(repo_dir, content):
+    key_file = repo_dir / KEY_PATH
+    key_file.write_text(content)
+    git(["add", "-A"], repo_dir)
+    git(["commit", "--quiet", "-m", "update key"], repo_dir)
+
+
+class KeyPyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="key-py-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.origin = self.tmp / "origin"
+        init_origin_with_key(self.origin, "v1 content\n")
+
+    def make_candidate(self, narrow_refspec=True):
+        candidate = self.tmp / "candidate"
+        candidate.mkdir()
+        git(["init", "--quiet"], candidate)
+        git(["config", "user.email", "test@example.com"], candidate)
+        git(["config", "user.name", "Test"], candidate)
+        git(["remote", "add", "origin", str(self.origin)], candidate)
+        if narrow_refspec:
+            # Mirrors a typical CI checkout action: only the candidate's own
+            # ref is mapped, so a later `git fetch origin dev` never touches
+            # refs/remotes/origin/dev.
+            git(["config", "remote.origin.fetch",
+                 "+refs/heads/candidate:refs/remotes/origin/candidate"], candidate)
+        git(["fetch", "--quiet", "origin", "dev"], candidate)
+        git(["checkout", "--quiet", "-b", "candidate", "FETCH_HEAD"], candidate)
+        return candidate
+
+    def run_key_py(self, candidate, evidence, env_overrides=None):
+        env = dict(os.environ)
+        if env_overrides:
+            env.update(env_overrides)
+        return run([sys.executable, str(KEY_PY), str(evidence)], cwd=candidate,
+                    env=env, check=False)
+
+    def test_stale_origin_dev_ref_no_longer_silently_admitted(self):
+        """QA finding / discussion_r4503593102: a stale refs/remotes/origin/dev
+        must not be trusted once dev has moved. candidate keeps v1; a narrow
+        refspec means `git fetch origin dev` never updates origin/dev, only
+        FETCH_HEAD. Admission must follow FETCH_HEAD, so it must now FAIL
+        (candidate's v1 no longer matches real dev's v2), not silently pass
+        against a cached v1 origin/dev ref that this fetch never refreshed."""
+        candidate = self.make_candidate(narrow_refspec=True)
+        # Establish a stale origin/dev tracking ref, as an earlier full fetch
+        # or a previous job's checkout might have left behind.
+        git(["update-ref", "refs/remotes/origin/dev", "FETCH_HEAD"], candidate)
+        self.assertEqual(
+            git(["rev-parse", "origin/dev"], candidate).stdout.strip(),
+            git(["rev-parse", "FETCH_HEAD"], candidate).stdout.strip(),
+        )
+        # Real dev moves to v2; candidate's own commit stays at v1.
+        set_key_and_commit(self.origin, "v2 content\n")
+        stale_sha = git(["rev-parse", "origin/dev"], candidate).stdout.strip()
+        real_dev_sha = git(["rev-parse", "dev"], self.origin).stdout.strip()
+        self.assertNotEqual(stale_sha, real_dev_sha)
+
+        evidence = self.tmp_evidence_dir()
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
+        self.assertNotEqual(
+            result.returncode, 0,
+            "key.py admitted the candidate: it is trusting a stale origin/dev "
+            "ref instead of the commit git fetch actually wrote",
+        )
+        # Confirm origin/dev itself is still the same stale value: the fetch
+        # inside key.py, under this narrow refspec, never refreshes it either.
+        self.assertEqual(
+            git(["rev-parse", "origin/dev"], candidate).stdout.strip(), stale_sha,
+        )
+
+    def test_matching_key_still_admits_under_narrow_refspec(self):
+        """Control case: when the candidate's committed key genuinely matches
+        the real current dev, admission must still succeed under the same
+        narrow-refspec checkout (the fix must not just make everything fail)."""
+        candidate = self.make_candidate(narrow_refspec=True)
+        evidence = self.tmp_evidence_dir()
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(self.tmp)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((evidence / "key-receipt.json").exists())
+
+    def test_evidence_outside_temp_dir_is_refused(self):
+        """New confinement check: an evidence directory outside the system
+        temp directory (as scoped by TMPDIR) must be refused, even if it is
+        also outside the checkout."""
+        candidate = self.make_candidate(narrow_refspec=False)
+        allowed_temp = self.tmp / "allowed-temp"
+        allowed_temp.mkdir()
+        not_temp = self.tmp / "not-temp-sibling" / "evidence"
+        result = self.run_key_py(candidate, not_temp, env_overrides={"TMPDIR": str(allowed_temp)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("temp", (result.stdout + result.stderr).lower())
+        self.assertFalse(not_temp.exists())
+
+    def test_evidence_under_temp_dir_is_accepted(self):
+        candidate = self.make_candidate(narrow_refspec=False)
+        allowed_temp = self.tmp / "allowed-temp2"
+        allowed_temp.mkdir()
+        evidence = allowed_temp / "vivary-proof-case"
+        result = self.run_key_py(candidate, evidence, env_overrides={"TMPDIR": str(allowed_temp)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def tmp_evidence_dir(self):
+        return self.tmp / f"evidence-{len(list(self.tmp.iterdir()))}"
+
+
+if __name__ == "__main__":
+    unittest.main()

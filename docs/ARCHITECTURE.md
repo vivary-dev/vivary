@@ -748,6 +748,21 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round: key.py stale-ref and evidence-path fixes.
+key.py pinned `origin/dev` by `git rev-parse origin/dev` after fetching it;
+under a narrow `remote.origin.fetch` (a typical single-branch CI checkout),
+that fetch leaves `origin/dev` untouched and admission silently trusted
+whatever it already held (discussion_r4503593102, confirmed independently
+and by QA). It now resolves `FETCH_HEAD`, the commit the fetch actually
+wrote, regardless of tracking-ref configuration. Separately, the evidence
+directory argument was only required to be outside the checkout, with no
+other bound, so any absolute path was accepted; it now must also resolve
+under the system temp directory, matching SKILL.md's own documented usage
+(`/tmp/vivary-proof-UNIQUE`). `test_key.py` is new: it reproduces the
+stale-ref admission, confirms a genuinely matching key still admits under
+the same narrow refspec, and confirms the temp-dir confinement in both
+directions. No application code, route, or persisted state changed.
+
 2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
 to 7.4.2, and its scoped overrides now follow that version instead of the
 obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.

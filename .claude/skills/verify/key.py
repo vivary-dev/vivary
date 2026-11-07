@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 
 def git(*args):
@@ -18,10 +19,13 @@ def main():
     evidence = Path(sys.argv[1]).resolve()
     if evidence == root or root in evidence.parents:
         raise ValueError('Evidence must be outside the checkout')
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if evidence != temp_root and temp_root not in evidence.parents:
+        raise ValueError('Evidence must be under the system temp directory')
     evidence.mkdir(mode=0o700, parents=True, exist_ok=False)
     try:
         git('fetch', 'origin', 'dev')
-        upstream = git('rev-parse', 'origin/dev').decode().strip()
+        upstream = git('rev-parse', 'FETCH_HEAD').decode().strip()
         candidate = git('rev-parse', 'HEAD').decode().strip()
         key = '.claude/skills/verify/acceptance.md'
         trusted = git('show', f'{upstream}:{key}')
