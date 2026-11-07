@@ -342,8 +342,12 @@ export class IncompleteStoredSecretsRead extends Error {
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 // Core creates app_secrets and settings on first use, so a fresh install has neither table until
-// something is saved. A table that does not exist holds no secret, so it reads as empty and
-// complete, as a deleted secret does. Any other failure to list a table leaves the read incomplete.
+// something is saved. A table this process has never listed holds nothing the redactor knows, so
+// its absence reads as empty and complete. Once a table has been listed, it existed: if it is
+// missing later, its rows are unknown, not deleted, so the read is incomplete and the held set stays.
+// Any other failure to list a table also leaves the read incomplete.
+const listedTables = new Set<string>();
+
 function isMissingTable(error: unknown): boolean {
   const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
   return code === "42P01" || (typeof message === "string" && /\bno such table\b|\brelation "[^"]+" does not exist\b/i.test(message));
@@ -351,9 +355,11 @@ function isMissingTable(error: unknown): boolean {
 
 async function listRows<Row>(query: Promise<{ rows?: Row[] }>, source: string, unread: string[]): Promise<Row[]> {
   try {
-    return (await query).rows ?? [];
+    const rows = (await query).rows ?? [];
+    listedTables.add(source);
+    return rows;
   } catch (error) {
-    if (!isMissingTable(error)) unread.push(source);
+    if (!isMissingTable(error) || listedTables.has(source)) unread.push(source);
     return [];
   }
 }
@@ -441,8 +447,9 @@ function distinctHeld(held: HeldCredential[]): HeldCredential[] {
  * Reload the held values. Settings from the environment and MCP configuration apply at once.
  * Stored secrets apply when the database answers. A stored read fails closed: when it rejects or
  * cannot read every value, the last stored set is kept, the values it did read are added, and the
- * server logs a warning with counts, or only the error's class and code. A deleted secret, or a
- * table that does not exist yet, leaves the set at the next complete read. Vivary
+ * server logs a warning with counts, or only the error's class and code. A deleted secret leaves the
+ * set at the next complete read. A table that has never existed in this process, as on a fresh
+ * install, reads as empty; one that existed and is now missing makes the read incomplete. Vivary
  * refreshes at startup, after each secret write, before each Native chat send, and before each
  * Code send.
  */

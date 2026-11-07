@@ -204,22 +204,35 @@ test("a secret store or settings table that cannot be read keeps the last stored
   }
 });
 
-test("a table that does not exist yet reads as empty, without a warning", async t => {
+test("a table that goes missing after a successful read keeps the held set and warns", async t => {
+  // PR #334 review r4503987324: a table read earlier in this process is unavailable, not empty.
   const { writeAppSecret } = await import("@agent-native/core/secrets");
+  const { putSetting } = await import("@agent-native/core/settings");
   const { getDbExec } = await import("@agent-native/core/db");
   const db = getDbExec();
+  const [secret, legacy] = [synthetic(44), synthetic(40)];
   const warnings: string[] = [];
   t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
-  await writeAppSecret({ key: "ABSENT_API_KEY", value: synthetic(44), scope: "user", scopeId: "absent@example.test" });
-  await db.execute({ sql: "ALTER TABLE app_secrets RENAME TO app_secrets_absent", args: [] });
+  await writeAppSecret({ key: "ABSENT_API_KEY", value: secret, scope: "user", scopeId: "absent@example.test" });
+  await putSetting("u:absent@example.test:credential:ABSENT_TOKEN", { value: legacy });
   try {
     await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${secret} ${legacy}`), "[redacted ABSENT_API_KEY] [redacted ABSENT_TOKEN]", "before");
+    for (const [table, reason] of [["app_secrets", /could not read the secret store\./], ["settings", /could not read the legacy credential settings\./]] as const) {
+      await db.execute({ sql: `ALTER TABLE ${table} RENAME TO ${table}_absent`, args: [] });
+      try {
+        await refreshHeldCredentials(fromDatabase);
+      } finally {
+        await db.execute({ sql: `ALTER TABLE ${table}_absent RENAME TO ${table}`, args: [] });
+      }
+      assertText(redactCredentials(`${secret} ${legacy}`), "[redacted ABSENT_API_KEY] [redacted ABSENT_TOKEN]", `without ${table}`);
+      assertMatch(warnings.at(-1) ?? "", reason, `${table} warning`);
+    }
+    assertHidden(warnings.join("\n"), [secret, legacy], "warning");
   } finally {
-    await db.execute({ sql: "ALTER TABLE app_secrets_absent RENAME TO app_secrets", args: [] });
     await db.execute({ sql: "DELETE FROM app_secrets WHERE key = ?", args: ["ABSENT_API_KEY"] });
     await refreshHeldCredentials(noSources);
   }
-  assert.deepEqual(warnings, [], "a missing table is not a failed read");
 });
 
 test("a fresh database with no secret or settings table reads as empty, without a warning", async () => {
