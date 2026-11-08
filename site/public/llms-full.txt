@@ -8262,6 +8262,22 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Chat draft deletion before the first save. `composerTextForDraft`
+now gives the shared composer the local text of every editable draft, saved or
+not, and `acceptComposerEdit` records an empty edit on a cleared draft. Text
+deleted before its first save, or after a discard, is no longer saved and
+restored on reopen. A cleared draft whose text is deleted again still writes
+nothing, because the save path already skips text equal to the saved state. The
+draft owner, its records and the composer contract are unchanged, so the
+description here still holds.
+
+2026-11-07 Chat draft composer rules named. `chat-draft.ts` now exports
+`composerTextForDraft` and `acceptComposerEdit`, the text the shared composer is
+given and the rule that records a composer edit, so a test can drive them. Both
+keep their earlier behavior, and the Native draft owner, its save path and the
+composer contract are unchanged, so the description here still holds. A new
+regression case shows text deleted before the first draft save being saved.
+
 2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
 to 7.4.2, and its scoped overrides now follow that version instead of the
 obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.

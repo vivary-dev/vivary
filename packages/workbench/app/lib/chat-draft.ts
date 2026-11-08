@@ -186,6 +186,24 @@ export function needsUnmountedDraftRecovery(current: Entry): boolean {
   return current.text !== (current.record?.status === "draft" ? current.record.text : "");
 }
 
+/**
+ * The text the shared composer shows for a draft. The composer skips a change equal to this text, so it must match
+ * what the composer holds: the local text of an editable draft, saved or not. Returning "" before the first save, or
+ * after a discard, hid a deletion of unsaved text, and the pending save restored it. A send waiting for review shows
+ * nothing.
+ */
+export function composerTextForDraft(current: Entry): string {
+  return current.record?.status === "pending" ? "" : current.text;
+}
+
+/** Record a composer edit in the local draft. Returns whether the local text changed, so a save is due. */
+export function acceptComposerEdit(current: Entry, text: string): boolean {
+  if (!current.loaded || current.discarding || current.error || current.record?.status === "pending") return false;
+  if (current.text === text) return false;
+  current.text = text;
+  return true;
+}
+
 export function acceptLoadedDraft(current: Entry, record: RecordState | null): void {
   current.record = record;
   current.text = record?.status === "draft" ? record.text : "";
@@ -290,10 +308,7 @@ export function useNativeChatDraft(scope: Scope, ownerKey: string) {
 
   const onChange = useCallback((threadId: string, text: string) => {
     const current = entry(threadId);
-    if (!current.loaded || current.discarding || current.error || current.record?.status === "pending") return;
-    if (current.record?.status === "cleared" && text === "") return;
-    if (current.text === text) return;
-    current.text = text;
+    if (!acceptComposerEdit(current, text)) return;
     if (current.timer) clearTimeout(current.timer);
     current.timer = setTimeout(() => { void flush(threadId).catch(() => {
       if (!current.conflict) current.error = "Your draft could not be saved. Retry before leaving this conversation.";
@@ -478,10 +493,7 @@ export function useNativeChatDraft(scope: Scope, ownerKey: string) {
   }, [flushAll, isDirty, ownerKey, scope.kind, scope.projectId]);
 
   const hostComposerDraft = useMemo<NonNullable<AssistantChatProps["hostComposerDraft"]>>(() => ({
-    textForThread: threadId => {
-      const current = entry(threadId);
-      return current.record?.status === "draft" ? current.text : "";
-    },
+    textForThread: threadId => composerTextForDraft(entry(threadId)),
     resetKeyForThread: threadId => entry(threadId).reset,
     isReady: threadId => {
       const current = entry(threadId);
