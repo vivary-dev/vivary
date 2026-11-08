@@ -33,6 +33,7 @@ AllowSkipFiles off
 !insertmacro REQUIRE_DEFINE LICENSE_FILE
 !insertmacro REQUIRE_DEFINE ICON_FILE
 !insertmacro REQUIRE_DEFINE APP_VERSION
+!insertmacro REQUIRE_DEFINE APP_WINDOWS_VERSION
 !insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT
 !insertmacro REQUIRE_DEFINE PAYLOAD_COMMIT_SHORT
 !insertmacro REQUIRE_DEFINE INSTALLER_COMMIT
@@ -73,8 +74,8 @@ ShowInstDetails show
 ShowUninstDetails show
 
 ; Windows requires four numeric parts here. The readable version is below.
-VIProductVersion "${APP_VERSION}.0"
-VIFileVersion "${APP_VERSION}.0"
+VIProductVersion "${APP_WINDOWS_VERSION}"
+VIFileVersion "${APP_WINDOWS_VERSION}"
 VIAddVersionKey "ProductName" "Vivary"
 VIAddVersionKey "CompanyName" "Vivary"
 VIAddVersionKey "FileDescription" "Vivary Setup"
@@ -452,7 +453,9 @@ Section "Vivary"
   owned_checked:
   System::Call 'kernel32::MoveFileExW(w "$INSTDIR\${INSTALL_LIST_TEMP}", w "$INSTDIR\${INSTALL_LIST}", i 9) i .r0'
   IntCmp $0 0 write_failed
-  File /r "${PAYLOAD_DIR}/*"
+  ; A backslash before the wildcard: makensis on Windows finds no files for "<dir>/*"
+  ; when <dir> is a Windows path, and makensis elsewhere converts "\" itself.
+  File /r "${PAYLOAD_DIR}\*"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
   CreateShortcut "$SMPROGRAMS\Vivary.lnk" "$INSTDIR\vivary.exe" "" "$INSTDIR\vivary.exe" 0
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Vivary"

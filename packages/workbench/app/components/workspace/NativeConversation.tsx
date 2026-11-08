@@ -18,6 +18,8 @@ import { createHistoryReadAdapter } from "@/lib/history-read-adapter";
 import { ConversationMatch } from "./ConversationMatch";
 import { LinkedHistoryNotice, NativeLinkOptions, sourceDraftSaver, useLinkSourceEligibility } from "./LinkedConversation";
 import { HandoffControl } from "./HandoffControl";
+import "./HandoffDisplay";
+import { HandoffStatusContext, createHandoffStatusHub } from "./handoff-status";
 import type { VivaryCodeState } from "../../../server/local-code-agent";
 import "../../chat-search.css";
 
@@ -93,6 +95,7 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
   const navigate = useNavigate();
   const selectedThread = params.get("thread");
   const matchContainer = useRef<HTMLElement>(null);
+  const [handoffStatus] = useState(createHandoffStatusHub);
   const requestedMessage = params.get("message");
   const readAction = useNativeActionReader();
   const matchKey = JSON.stringify([identity.storageKey, selectedThread, requestedMessage]);
@@ -245,7 +248,8 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       void selection.refetch(); void savedThreadCheck.refetch();
     }}>Retry history</Button>
   </div>;
-  return <section ref={matchContainer} aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
+  return <HandoffStatusContext.Provider value={handoffStatus}>
+  <section ref={matchContainer} aria-label="Native chat" className="flex h-full min-h-0 w-full flex-col">
     {!unassigned && !requestedMessage && selectedThread && <>
       <LinkedHistoryNotice key={selectedThread} projectId={identity.projectId} target={{ kind: "native", id: selectedThread }} />
       <NativeLinkOptions key={"link:" + selectedThread} projectId={identity.projectId} threadId={selectedThread}
@@ -305,5 +309,6 @@ function DraftedConversation({ identity, unassigned, workspaceAvailable, ownerKe
       composerDisabledPlaceholder="Reconnect this project before continuing. Saved history remains available."
       showHeader={false} showTabBar={false} restoreActiveThread={false}
       threadUrlSync={threadUrlSync} />}
-  </section>;
+  </section>
+  </HandoffStatusContext.Provider>;
 }

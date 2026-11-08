@@ -63,6 +63,18 @@ process.stdin.on("end", () => {
   const emit = event => process.stdout.write(JSON.stringify(event) + "\\n");
   emit(init);
   if (mode === "wait") { setInterval(() => {}, 1_000); return; }
+  // Real Claude streams each assistant message, then repeats the last one as the result text.
+  if (mode === "reply" || mode === "steps") {
+    const final = mode === "reply" ? "Fixture reply." : "Done.";
+    if (mode === "steps") {
+      emit({ type: "assistant", message: { content: [{ type: "text", text: "Looking." },
+        { type: "tool_use", name: "Read", id: "steps-read", input: { file_path: "fixture.txt" } }] } });
+      emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "steps-read", content: "Read result." }] } });
+    }
+    emit({ type: "assistant", message: { content: [{ type: "text", text: final }] } });
+    emit({ ...result, result: final });
+    return;
+  }
   if (mode === "idless-stream" || invalidEventType === "assistant") emit(assistant);
   if (mode === "idless-stream") {
     emit({ type: "tool_use", name: "Read", id: "fixture-read", input: { file_path: "fixture.txt" } });
@@ -178,4 +190,22 @@ test("Claude accepts ordinary ID-less content/tool events after a valid session 
   assert.ok(events.some(event => event.message === "Ordinary stream text."));
   assert.ok(events.some(event => event.metadata?.type === "tool_start" && event.metadata.tool === "Read"));
   assert.ok(events.some(event => event.metadata?.type === "tool_done" && event.metadata.result === "Ordinary tool result."));
+});
+
+test("Claude records each reply once, and the recorded reply carries the engine and model",
+  { skip: process.platform === "win32" }, async t => {
+  const f = await fixture(t);
+  await f.configure("reply");
+  assert.equal((await f.execute("First question")).status, "completed");
+  await f.configure("steps");
+  assert.equal((await f.execute("Second question")).status, "completed");
+  // A result with no streamed text is still recorded, once.
+  await f.configure("complete");
+  assert.equal((await f.execute("Third question")).status, "completed");
+  const replies = listCodeAgentTranscriptEvents(f.run.id).filter(event => event.kind === "system" && event.metadata?.role === "assistant");
+  assert.deepEqual(replies.map(event => event.message), ["Fixture reply.", "Looking.", "Done.", "Fixture answer."]);
+  for (const reply of replies) {
+    assert.equal(reply.metadata.engine, "claude-cli");
+    assert.ok(typeof reply.metadata.model === "string" && reply.metadata.model.length > 0);
+  }
 });

@@ -4,6 +4,7 @@ import {
 } from "@agent-native/core/server";
 
 import { installDesktopBrowserAccess } from "../browser-ingress.mjs";
+import { installDesktopPresencePublisher } from "../desktop-presence.ts";
 import {
   createVivaryLocalAuthOptions,
   createVivaryOwnerProof,
@@ -16,6 +17,7 @@ export default defineNitroPlugin(nitroApp => {
   // guard:allow-env-credential - Nonsecret desktop process marker set by the parent launcher.
   if (process.env.VIVARY_DESKTOP_HOST === "1") {
     installDesktopBrowserAccess(nitroApp, `http://127.0.0.1:${process.env.PORT}`);
+    installDesktopPresencePublisher();
   }
   if (!config) return;
   // Built here rather than at module load because a one-time sign-in proof saves its first address to disk.

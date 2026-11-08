@@ -7,7 +7,7 @@ const source = await readFile(new URL("../app/components/workspace/CodeConversat
 const expression = source.match(/composerDisabledPlaceholder=\{([^\n]+)\}/)?.[1];
 assert.ok(expression, "the Code composer exposes its disabled reason");
 const evaluate = new Function("props", "runtimeReady", "selectedModelAvailable", "selectedClaudeModel", "otherModelAvailable",
-  "sharedFolderHeld", `return (${expression});`);
+  "sharedFolderHeld", "pendingSwitch", `return (${expression});`);
 const props = { viewingMatch: false, state: {}, selection: {}, workspaceAvailable: true, pendingApprovals: 0 };
 
 test("review regression: unavailable models explain the refusal without claiming an active run", () => {
@@ -44,5 +44,7 @@ test("existing disabled reasons retain priority over unavailable models", () => 
   assert.equal(evaluate(props, true, true, undefined, false, true),
     "Other agents are working in this folder. Choose Proceed or use another folder before sending.");
   assert.match(evaluate(props, false, false), /Connect a runtime/);
+  assert.match(evaluate(props, true, true, undefined, false, false, { engine: "codex-cli", model: "gpt-fixture" }),
+    /Resolve the runtime or model choice/);
   assert.match(evaluate(props, true, true), /agent is working/);
 });

@@ -8,7 +8,7 @@
     "dev": "astro dev",
     "start": "astro dev",
     "prebuild": "node scripts/sync-docs.mjs",
-    "build": "astro build",
+    "build": "node ../packages/workbench/bin/runtime-security.mjs run ./node_modules/astro/package.json astro build",
     "test:support": "node tests/support-modal.test.mjs",
     "test:site": "node --test tests/*.test.mjs",
     "test:links": "node scripts/check-built-links.mjs",
@@ -16,15 +16,16 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.5",
-    "astro": "7.3.5",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "7.4.2",
     "sharp": "^0.35.4",
     "http-cache-semantics": "file:./vendor/astro-no-cache-policy"
   },
   "overrides": {
-    "esbuild": "0.28.1",
-    "astro@7.3.5": {
-      "http-cache-semantics": "$http-cache-semantics"
+    "esbuild": "0.28.2",
+    "astro@7.4.2": {
+      "http-cache-semantics": "$http-cache-semantics",
+      "vite": "8.3.4"
     }
   }
 }

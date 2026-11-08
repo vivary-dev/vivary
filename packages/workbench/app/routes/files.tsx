@@ -8,6 +8,7 @@ import { useProjects } from "@/components/projects/ProjectContext";
 import { fileDraftKey, useFileDraft } from "@/components/projects/FileDrafts";
 import { restoreFileLineEndings } from "@/lib/file-draft-state";
 import { requestedLine } from "@/lib/project-file-location";
+import { focusFootnote } from "@/lib/footnote-links";
 import { useNativeActionCaller } from "@/lib/native-actions";
 import type { ProjectFile, ProjectFilesResult, ProjectFileSaveResult, ProjectFileRenameResult } from "@/lib/project-file-schema";
 import "@agent-native/toolkit/editor.css";
@@ -15,7 +16,7 @@ import "../project-files.css";
 
 export function meta() { return [{ title: "Files | Vivary" }]; }
 const errorText = (error: unknown) => error instanceof Error ? error.message : "The file action could not finish. Retry.";
-const readonlyFeatures = { image: false, tables: true, tasks: true, link: true };
+const readonlyFeatures = { image: false, tables: true, tasks: true, link: true, footnotes: true };
 
 export default function FilesRoute() {
   const { activeProject, catalog, workspaceAvailable, checking, refresh } = useProjects();
@@ -186,7 +187,7 @@ function FileDocument({ projectId, projectLabel, path, draftKey, line }: { proje
           }
         }} />
       {tooLarge && <p role="alert">This draft exceeds the 256 KB text-file limit. Shorten it before saving.</p>}
-    </div> : file ? <div className="file-reading-surface">
+    </div> : file ? <div className="file-reading-surface" onClickCapture={focusFootnote}>
       {line !== null ? <SourceLines path={path} content={file.content} line={line} navigation={location.key} />
         : file.kind === "markdown" ? <SharedRichEditor key={file.version} value={file.content} onChange={() => {}}
         editable={false} interactive={false} dragHandle={false} dialect="gfm" features={readonlyFeatures}

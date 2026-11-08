@@ -570,6 +570,11 @@ Normal allows project work and asks when an action needs broader access. Read on
 prevents local command writes and permission expansion. YOLO allows full host
 command access without action prompts. Connected services retain their own access
 rules. Changes apply to the next turn and never expand an active turn silently.
+The mode does not reach Claude Code. Every Claude Code run starts in Claude Code's
+`acceptEdits` mode with its file tools, so it edits project files without asking in
+every mode. Settings says so under the mode, and the line under a Claude Code
+conversation says that Claude Code accepts file edits and that the mode applies to
+Codex only.
 
 Public progress updates use compact, darker cards within the conversation. Actual
 native subagent activity has distinct cards with recorded identities and status.

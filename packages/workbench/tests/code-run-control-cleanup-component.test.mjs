@@ -39,7 +39,9 @@ const stubs = new Map([
     }`],
   ["../projects/ProjectContext", `
     export function useProjects() { return { catalog: { projects: [] }, async selectProject() { return true; } }; }`],
-  ["react-router", `export function useNavigate() { return () => {}; }
+  ["react-router", `
+    export const navigateProof = { paths: [] };
+    export function useNavigate() { return path => { navigateProof.paths.push(path); }; }
     export function useLocation() { return { pathname: "/", search: "" }; }`],
   ["@agent-native/toolkit/ui", `
     import { forwardRef } from "react";
@@ -55,6 +57,7 @@ import { createRoot } from "react-dom/client";
 import { CodeRunControl } from "@proof/CodeRunControl";
 import { hostProof } from "@agent-native/core/client/hooks";
 import { callProof } from "../../lib/native-actions";
+import { navigateProof } from "react-router";
 
 const HOST = { activeRuns: [], recentRun: null, busy: false };
 const NAMED = {
@@ -290,6 +293,43 @@ export async function aStoppingRunHoldsItsStopOnly() {
       "Stopping in Personal workspace (Claude Code): Write the parser tests");
   } finally { await dispose(); }
 }
+
+const EXPIRED = { method: "item/commandExecution/requestApproval", summary: "pnpm test",
+  reason: "Vivary restarted before this request was answered." };
+const strip = host => host.querySelector('section[aria-label="Agent work"]');
+
+export async function anInterruptedRunShowsInterrupted() {
+  const recentRun = { id: "run-interrupted", title: "Run the tests", status: "paused", phase: "interrupted", projectId: null };
+  const { host, dispose } = await mount(null, { recentRun });
+  try {
+    assert.ok(strip(host), "an interrupted run keeps the strip open");
+    assert.equal(strip(host).querySelector('[role="status"]')?.textContent, "Interrupted in Personal workspace: Run the tests");
+    assert.deepEqual(buttons(host), ["Open conversation"]);
+    navigateProof.paths = [];
+    await click(button(host, "Open conversation"));
+    assert.deepEqual(navigateProof.paths, ["/?run=run-interrupted"], "the row opens the interrupted conversation");
+  } finally { await dispose(); }
+}
+
+export async function anExpiredRequestShowsWhyAndCannotBeAnswered() {
+  const recentRun = { id: "run-interrupted", title: "Run the tests", status: "paused", phase: "interrupted", projectId: null,
+    expiredApproval: EXPIRED };
+  const { host, dispose } = await mount(null, { recentRun });
+  try {
+    assert.equal(strip(host).querySelector('[role="status"]')?.textContent, "Interrupted in Personal workspace: Run the tests");
+    assert.equal(strip(host).querySelector("p")?.textContent,
+      "Codex request expired: pnpm test. Vivary restarted before this request was answered.");
+    assert.deepEqual(buttons(host), ["Open conversation"], "no Allow once, Decline or Stop");
+  } finally { await dispose(); }
+}
+
+export async function aFinishedRunLeavesNoStrip() {
+  const recentRun = { id: "run-done", title: "Run the tests", status: "completed", phase: "complete", projectId: null };
+  const { host, dispose } = await mount(null, { recentRun });
+  try {
+    assert.equal(strip(host), null, "a finished run's outcome stays in its conversation");
+  } finally { await dispose(); }
+}
 `;
 
 async function buildProof() {
@@ -361,6 +401,18 @@ test("the host strip lists leftover coding processes and offers End them, then C
     ["the run's owner sees its failed stop's check in place of Stop", proof.theOwnerSeesItsFailedStopsCheckInPlaceOfStop],
     ["each running conversation has its own approvals and Stop", proof.eachRunningConversationHasItsOwnApprovalsAndStop],
     ["a stopping run holds only its own Stop", proof.aStoppingRunHoldsItsStopOnly],
+  ]) await t.test(name, () => run());
+});
+
+// Beta ticket 05. After a host restart the strip shows the interrupted run and any request that expired with it.
+test("the host strip shows an interrupted run and its expired request", async t => {
+  const proof = await import(`data:text/javascript;base64,${Buffer.from(await buildProof()).toString("base64")}`);
+  const closeChannels = installDom();
+  t.after(() => closeChannels());
+  for (const [name, run] of [
+    ["an interrupted run shows Interrupted", proof.anInterruptedRunShowsInterrupted],
+    ["an expired request shows why and cannot be answered", proof.anExpiredRequestShowsWhyAndCannotBeAnswered],
+    ["a finished run leaves no strip", proof.aFinishedRunLeavesNoStrip],
   ]) await t.test(name, () => run());
 });
 

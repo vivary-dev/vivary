@@ -11,6 +11,27 @@ Core package. Issue #9 also applies `@agent-native__toolkit@0.19.3.patch` to the
 pinned Toolkit package. The lockfile records both patch hashes. Install with
 `pnpm install --frozen-lockfile` from `packages/workbench`.
 
+## Claude replies recorded once
+
+Claude Code streams each assistant message and then repeats the last one as its
+result text. Core recorded both, so every reply was stored twice. The patch puts
+the engine, model and effort on each streamed reply event and records the result
+only when nothing streamed or the result differs from the last streamed message.
+`tests/claude-session-continuity.test.mjs` covers a single reply, a reply after a
+tool call, and a result with no streamed text. Workbench readers treat an exact
+repeat in older transcripts as one reply.
+
+## Message display renderers
+
+`dist/client/chat/message-text-renderers.js` holds two display registries,
+exported from `@agent-native/core/client/chat`. `registerMarkdownFenceRenderer`
+renders a fenced code language in chat Markdown with an app component, and
+`registerUserMessageTextRenderer` renders a matching user message. The `pre`
+component in `markdown-renderer.js` and `UserMessageText` in
+`message-components.js` consult them before their defaults. Stored message text
+and clipboard copies are unchanged. Vivary registers the handoff request and
+reply renderers in `app/components/workspace/HandoffDisplay.tsx`.
+
 ## Claude launcher and provider errors
 
 The optional `claudeCli` executor options preserve the resolved executable,
@@ -3343,6 +3364,180 @@ positives. These successor controls are source-checked and await controller
 runtime validation. Existing eb9bce9 evidence remains historical acceptance of the
 preceding bytes.
 
+### Approval settlement sweeps
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 1. Three
+findings from the #201 review concern the sweeps that settle approval history.
+
+- `listUnreconciledAutomationApprovalRuns` and `listExpiredApprovalWaits`
+  return pages of 100 rows after a cursor, in a stable order: finish time or
+  start time, then ID. A row that a sweep skips or cannot settle stays listed,
+  so a pass that read only the first page let 100 such rows keep every later
+  row from settling. `reconcileAutomationApprovalOutcomes` now reads up to five
+  pages per pass and keeps its cursor in the process between passes, so every
+  listed row is attempted. A row that keeps failing still costs one attempt per
+  pass.
+- The scheduler writes its heartbeat, then reconciles. A failed
+  reconciliation, such as a failed list query, becomes that tick's scheduler
+  health error, and the scan still runs the due jobs. Reconciliation also runs
+  when the jobs cache says there are no jobs, because a wait can outlive its
+  job.
+- The pending-task retry sweep reconciles only for the app of the process's
+  in-process automation webhook runner. A process without that runner
+  reconciles nothing, and the owning app's scheduler does it. The sweep
+  reconciles once, on its first page, and a reconciliation failure does not
+  stop the task retries.
+
+`tests/automation-approval-settlement.test.mjs` owns its SQLite database, so
+its real scheduler sweep sees only its own jobs. Its five cases failed against
+the previous patch and pass with this one. The other #205 findings remain open.
+
+### Approval continuation outcomes
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 2. Three
+findings concern the approved continuation in `background-automation-runner.js`.
+
+- The replay passes `executeAgentToolCall` the consume hook and an
+  `onApprovalRequired` hook that creates nothing. When the store refuses the
+  grant, for example because it expired between the decision and its
+  consumption, the action did not run. The replay closes the tool call with an
+  error result, and the run fails with `automation_approval_unconsumed`. Before
+  this change, Native's gate wrote a new ask and wait, and the interrupted
+  finish orphaned them.
+- An approved tool that ran and returned an error is a known outcome. The run
+  saves it and continues, so the model sees the error as it sees any failed tool
+  call. A Stop, a stopped turn, a refusal by the runner's own guard after
+  consumption, or any other result still ends the run as interrupted with an
+  unconfirmed outcome.
+- After Native finalization of a waiting run, a failed `markAutomationApprovalReady`
+  write goes to the log and the run returns `waiting_approval`. The wait is already
+  saved, and `recoverWaitingTurn` marks it ready on the owner's decision or the
+  expiry sweep.
+- A rejected `activeRun.finalized` removes the run ID from
+  `_activeBackgroundRunIds`, as a resolved one does. Before this change, recovery
+  and reconciliation treated that run as live for the life of the process.
+  Native's run status still blocks a row that finalization left running.
+
+`tests/automation-approval-continuation.test.mjs` owns its SQLite database. Its
+four cases failed against the previous patch and pass with this one. The other
+#205 findings remain open.
+
+### Approval asks and waits that never ended
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 3. Three
+findings concern waits and asks that no decision or sweep could end.
+
+- `reconcileAutomationApprovalOutcome` declines the exact ask of a finished run
+  when it is still `pending`, before task and resource settlement. No decision
+  can reach a finished run. Before this change, a terminal error left the ask
+  pending, also after someone deleted the automation. A consumed or declined ask
+  stays as it is.
+- A decline no longer needs the saved turn. `readyWaitForDecline` recovers a
+  recoverable turn for the transcript, then requires only that no run can save
+  the wait: the run ID is not held in this process and its Native row is gone
+  or not running. Its owner can therefore decline, and the expiry sweep can
+  end, a wait whose run row the pruner removed or whose turn stopped.
+  `claimAutomationApprovalDecision` takes `requireReady` false for declines.
+  Approval still claims only a ready wait.
+- `listStaleApprovalClaims` lists owners' decision claims older than the claim
+  lease. The sweep runs before expiry and applies `decideAutomationApproval`'s
+  resuming recovery when no run holds the claim. A declined ask finishes it as
+  declined, a consumed ask finishes it as interrupted, and a pending ask
+  restores the wait. The expiry pass then declines a restored wait whose ask
+  expired. A claim inside its lease, a claim with a retained known outcome and the
+  expiry sweep's own claims are left to their existing owners.
+
+`tests/automation-approval-stuck.test.mjs` owns its SQLite database. Its cases
+failed against the previous patch, apart from the in-lease control, and pass
+with this one. Maintained cases that asserted a pending ask after reconciliation
+now assert a declined ask. Only the PostgreSQL cleanup finding of #205 remains.
+
+### Approval cleanup outside the custody transaction
+
+Issue [#205](https://github.com/vivary-dev/vivary/issues/205), slice 4.
+`createAgentToolApproval` deleted expired decided asks on whatever executor it
+received. The background runner passes its approval custody transaction, and
+on PostgreSQL a failed statement aborts the whole transaction even when the
+error is caught. A failed cleanup therefore made the next write, the wait
+itself, fail, and the gate ended the run with
+`automation_approval_storage_failed`.
+
+- `createAgentToolApproval` cleans only when it owns its executor. A caller that
+  passes a transaction cleans after that transaction commits.
+- `cleanExpiredAgentToolApprovals` is the cleanup. It logs a failure and never
+  throws, as the inline cleanup did.
+- The background runner calls it after `withAutomationResourceCustody` returns.
+  The interactive gate passes no executor and keeps the old behavior.
+
+CI has no live PostgreSQL. `tests/automation-approval-cleanup.test.mjs` owns its
+SQLite database and wraps its transactions in a driver adapter that rejects
+every statement after a failed one and rolls the transaction back, as
+PostgreSQL does. A control case proves the adapter does that. The two finding
+cases failed against the previous patch and pass with this one. This is the
+last finding of #205.
+
+### Approval cleanup keeps claimed asks
+
+Vivary beta ticket 28, found by the review of #296.
+`cleanExpiredAgentToolApprovals` deleted every decided ask more than 24 hours
+past its expiry. An automation run that a crash left `resuming` still points at
+its ask, and stale-claim recovery reads that ask to settle the run. Once the
+cleanup deleted it, an owner's decline finished as interrupted with an
+unconfirmed outcome. An expiry sweep's own claim returned early on every pass,
+so its run stayed `resuming` and its job could not be deleted or moved.
+
+- The cleanup skips an ask that an unfinished `automation_runs` row names in
+  `pending_ask_id`. In an app with no `automation_runs` table it falls back to
+  the plain delete, because no run can claim an ask there. Any other failure
+  still only logs.
+- `recoverStaleApprovalClaim` finishes a claim as declined when its ask is gone
+  and its resume run id starts with `automation-decline-`. This settles rows
+  that an older cleanup already reached.
+- `expireApprovalWait` settles its own stale expiry claim as
+  `automation_approval_expired` when the ask is gone. That claim never executes
+  anything.
+- `decideAutomationApproval` applies the same rule to a stale claim. An owner's
+  Decline and Settings Delete reach it before the next sweep, so a missing ask
+  ends a decline claim as declined and an expiry claim as
+  `automation_approval_expired`. Only an approval claim still ends interrupted.
+
+`tests/automation-approval-stuck.test.mjs` adds seven cases. Six cover the claim
+paths, and one checks the missing-table fallback with a stub executor. All seven
+failed against the previous patch and pass with this one.
+
+## Approval wait in Settings
+
+Issue #206, first two items. `executeJob` in `dist/jobs/scheduler.js` answered Run now on an
+automation with an unresolved approval through `refuseAlreadyRunning`, so the queued history row
+said "The automation is already running." while nothing ran. `refuseApprovalPending` now finishes
+that row as `error` with the code `automation_approval_pending` and the message "This automation
+is waiting for an approval decision in Past runs. Approve or decline it before running it again.
+No delivery was confirmed." The call returns `{ status: "skipped" }` as before. The scheduler reads the unfinished
+approval run's status through `unresolvedAutomationApprovalStatus` in `dist/jobs/run-history.js`.
+Only `waiting_approval` gets this refusal. A run that is `resuming` after a claimed decision,
+executing, or holding the run lease keeps the already-running refusal.
+
+Settings showed stored statuses verbatim, such as `waiting_approval`. `automationStatusLabel` in
+`dist/client/agent-page/AutomationDetailsDialog.js` maps `running`, `waiting_approval`,
+`resuming`, `success`, `error`, `interrupted`, `declined` and `skipped` to words through
+`t("jobs.runStatus.<status>")`, because `jobs.status` is already the Status label. The list
+row badge and the Details field Last status in `AgentJobsTab.js`, the Past runs rows and run
+inspection use it. A refused Run now row is stored as `error`, so it still reads Failed. Any other value shows as stored. These sections are appended to
+the end of the patch, after the earlier sections for the same files, and pnpm applies them in
+order.
+
+## Qualified esbuild for the server build
+
+Desktop releases build Core's server output on `windows-latest`. `bundleYjsRuntimeForServerlessOutput`
+in `dist/deploy/build.js` runs esbuild through `findEsbuild()`, which returned
+`node_modules/esbuild/bin/esbuild`. On Windows that file is a JavaScript launcher, so
+`execFileSync` failed with ENOENT, and the 2026-10-31 beta-candidate dry run stopped there. The
+one earlier successful dry run built on `ubuntu-latest`, where the launcher has a shebang.
+`findEsbuild()` now returns `process.env.ESBUILD_BINARY_PATH` first when that file exists. The
+build workflows export the Go-built `esbuild-0.28.2-go1.26.10` there, the same qualified binary
+the rest of the build uses. Without it, the lookup is unchanged.
+`tests/core-esbuild-binary.test.mjs` runs the yjs bundling with a recording esbuild at that path.
+
 ## Command menu return focus
 
 The maintained Native command menu is a controlled Radix dialog without a
@@ -3367,3 +3562,83 @@ The resource schema and one-second autosave contract are unchanged. Code remains
 the source editor for syntax outside the Visual schema. Focused installed-component
 checks cover non-content updates, real edits, view switching, and height ownership.
 They do not establish Markdown display fidelity or native pixel acceptance.
+
+## Chat table long tokens
+
+A follow-up to the table wrapping change for issue #256. Workbench gives chat
+Markdown tables `width: auto`, so cell text wraps at spaces. A column still cannot
+be narrower than its longest unbroken string, so a long URL, hash, or identifier
+made the table scroll. The patch adds `th` and `td` to `markdownComponents` in
+`dist/client/chat/markdown-renderer.js`, and the plain branch of its `a` component
+applies the same helper to its children. `markLongTokens` wraps each run of 20 or
+more non-whitespace characters in a cell's text in
+`<span class="agent-markdown-long-token">`. It descends into plain elements such as
+`strong`, `em`, and `del`, since a long run in bold or struck text widens the
+column the same way. Inline `code`, `kbd`, `samp`, and `pre` stay whole. An element
+rendered by a component passes through unchanged, and the `a` component marks its
+own text, so a link inside bold text is marked once. The span adds no characters,
+so DOM text, selection, and hrefs match the unpatched rendering. The cells drop react-markdown's `node`
+prop and pass every other prop, so column alignment is kept. The new-chat and
+Builder link branches and `clipboardMarkdownComponents` are unchanged.
+`dist/client/chat/markdown-renderer.d.ts` declares the two components.
+
+Workbench's `app/global.css` lets only `.agent-markdown-table-wrap
+.agent-markdown-long-token` break anywhere. Short link text keeps breaking at
+spaces. `tests/markdown-reader.test.mjs` renders the installed components with
+react-markdown and remark-gfm and checks the spans, text, hrefs, code, cell
+attributes, and copied HTML. Remove these hunks when a pinned Core release lets
+long unbroken table text wrap without splitting ordinary words.
+
+## Read-only Markdown footnotes
+
+The Files reader and Settings > Documentation showed GFM footnotes as raw text.
+Toolkit's shared editor parses Markdown with tiptap-markdown, which uses plain
+markdown-it with no footnote syntax. `[^id]` references stayed literal, and
+consecutive `[^id]: note` definitions ran together as one paragraph.
+
+The Toolkit patch adds `dist/editor/footnotes.js` and a `features.footnotes`
+option to `createSharedEditorExtensions`. The option is off by default. When it
+is on, three nodes are added. `footnotes` registers markdown-it rules for
+definitions and references through tiptap-markdown's parse setup hook.
+`footnoteReference` renders a superscript link to `#fn-<number>`, and
+`footnoteItem` renders the note as the list item with that id. Following GFM,
+notes appear once in a list at the end in order of first reference, a reference
+with no definition stays text, and a definition that nothing references is not
+shown. Labels match ignoring case, through markdown-it's `normalizeReference`
+as for link references, and the first definition of a label wins. Only `\[`,
+`\]`, and `\\` escapes are accepted in a label. Any other backslash escape
+leaves the citation and definition outside footnote syntax. Citations inside
+Markdown link labels stay literal, including during silent scans for link
+boundaries, so a link label never contains a footnote anchor. A definition
+nested inside another becomes its own note, and the outer note keeps the blocks
+after it. Each node has a serializer that writes the footnote syntax back with
+the label as written, so a read-only reconcile that reads Markdown never falls
+back to placeholder text.
+
+The inline rule records reference identities without assigning numbers. After
+definition blocks are removed from the body, the tail rule numbers body
+references first, then scans each reached definition once in note order.
+References in those retained notes can reach further notes. Discarded duplicate
+definitions and definitions unreachable from body references contribute neither
+numbers nor return links. This also keeps definition placement from changing the
+number of a body's first citation.
+
+As in GFM's HTML, each reference link has its own id, `fnref-<number>` for the
+first reference to a note and `fnref-<number>-<k>` for its k-th. A fourth node,
+`footnoteBackref`, puts one return link per reference at the end of the note's
+last paragraph, or in a paragraph of its own when the note ends with another
+block. A return link points at its reference's id, reads "Back to reference 1"
+or "Back to reference 1-2", and shows `↩`, with the occurrence number after it
+from the second reference on. It adds no text and serializes to nothing, so the
+Markdown a read-only reconcile reads is unchanged.
+
+Only Workbench's two read-only routes pass `footnotes: true`, and their
+`focusFootnote` helper moves focus to a rendered note, and from a rendered return
+link back to its reference, without changing the route. Any other `#fn-` or
+`#fnref-` link keeps its normal handling. An
+editable document gets no footnote nodes, so its parse and save path is
+unchanged. That path already escapes `[^id]` as `\[^id\]` and joins
+consecutive definitions when it saves. `tests/markdown-reader.test.mjs` pins
+that output and the existing round-trip corpus, renders footnotes in the
+reader, and checks the route opt-ins. Remove these hunks when a pinned Toolkit
+release renders GFM footnotes in read-only views.

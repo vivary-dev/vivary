@@ -195,6 +195,8 @@ Follow [CONTRIBUTING.md](CONTRIBUTING.md). Branch from current `origin/dev`,
 use a typed topic branch, and open a PR into `dev`. Review and verify each
 increment before committing and pushing to GitHub and Entire.
 Never create draft PRs. Open PRs ready for review.
+Keep each PR within the size rule in [CONTRIBUTING.md](CONTRIBUTING.md#size).
+Split it before opening, never after its review starts.
 Do not promote this work into the original repository or its release branches.
 
 Make small, coherent, reviewed commits. Preserve unrelated work, accepted

@@ -236,13 +236,13 @@ if (webhookMode) {
       assert.deepEqual(await f.resources.resourceGetByPath(f.owner, resource.path), replacementResource);
       assert.deepEqual(await f.history.listAutomationRuns({ owners: [f.owner], automation: name, appId: f.appId }), replacementHistory);
       assert.equal(replacement.modelCalls.length, 1); assert.equal(replacement.calls.length, 0);
-      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "declined", "#205: settlement declines the finished run's ask");
     } else if (lookupRace) {
       assert.equal(lookupRaceHits, 1); assert.ok(waitPublicationChecks >= 1);
       assert.equal(workerResult, "failed"); assert.equal(task.status, "failed"); assert.equal(task.payload, "{}");
       assert.equal(run.status, "error"); assert.ok(run.finishedAt);
       assert.equal(retained.outcomeReconciled, true);
-      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "declined", "#205: settlement declines the finished run's ask");
       assert.equal((await f.runner.inspectAutomationRun(run.id, f.actor, fixture.deps)).pending, null);
       await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
       await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
@@ -289,7 +289,7 @@ if (webhookMode) {
       await f.runner.reconcileAutomationApprovalOutcomes(f.appId);
       assert.equal(await worker.runAutomationWebhookTaskInProcess(taskId, { appId: f.appId }), "skipped");
       await assert.rejects(fixture.decide(run.id, retained.context), /no longer waiting/);
-      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "pending");
+      assert.equal((await f.approvalStore.readAgentToolApproval(retained.context)).status, "declined", "#205: settlement declines the finished run's ask");
     } else if (waiting) {
       assert.equal(workerResult, "waiting_approval"); assert.equal(run.status, "waiting_approval");
       assert.equal(task.status, "waiting_approval"); assert.deepEqual(JSON.parse(task.payload), payload);

@@ -55,7 +55,8 @@ export type HandoffPrepareResult = { code: "prepared"; requestId: string; facts:
 export type HandoffSaveInput = HandoffInput & { requestId: string };
 export type HandoffSaveResult =
   | { code: "saved"; record: HandoffRecord }
-  | { code: "refused"; problems: string[] }
+  /** `replyRefused` is true when Save read the reply and refused it, not when the reply or request was not ready. */
+  | { code: "refused"; problems: string[]; replyRefused?: true }
   | { code: "conflict"; reason: "changed" | "renamed-or-deleted" | "project-changed"; message: string }
   | { code: "failed"; message: string }
   | HandoffUnavailable;

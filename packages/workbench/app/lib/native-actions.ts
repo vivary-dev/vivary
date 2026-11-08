@@ -3,10 +3,16 @@ import { actionErrorMessage, callAction, tryCallActionKeepalive, notifySessionIn
 import { agentNativePath } from "@agent-native/core/client/api-path";
 import { sessionToken } from "./native-state";
 import { isRejectedSessionToken, rejectSessionToken } from "./native-session-rejections";
-import { VIVARY_OWNER_ACTIONS, type VivaryOwnerAction } from "../../shared/owner-actions";
+import { VIVARY_OWNER_ACTIONS, type VivaryOwnerAction, type VivaryCodeSwitchParams } from "../../shared/owner-actions";
 import { isValidSessionToken } from "../../shared/owner-session";
 
-export type NativeActionCaller = <T>(name: VivaryOwnerAction, params: Record<string, unknown>,
+export type NativeActionCaller = {
+  <T>(name: "vivary-code-switch", params: VivaryCodeSwitchParams, options?: { keepalive?: boolean }): Promise<T>;
+  <T>(name: Exclude<VivaryOwnerAction, "vivary-code-switch">, params: Record<string, unknown>,
+    options?: { keepalive?: boolean }): Promise<T>;
+};
+// The transport forwards already typed inputs. The strict action schema also checks callers outside this UI.
+type OwnerActionTransport = <T>(name: VivaryOwnerAction, params: Record<string, unknown>,
   options?: { keepalive?: boolean }) => Promise<T>;
 // These reach the original runner, which may queue a command for 30 seconds before its own 30-second run.
 const ORIGINAL_RUNNER_ACTIONS: readonly VivaryOwnerAction[] = ["vivary-original-command", "vivary-project-adoption",
@@ -27,7 +33,7 @@ type Session = Pick<ReturnType<typeof useSession>, "session" | "status">;
 type Dependencies = {
   getSession: () => Session;
   fetch: typeof fetch;
-  cookieAction: NativeActionCaller;
+  cookieAction: OwnerActionTransport;
   locationHref: () => string;
   nativePath: (path: string) => string;
   invalidate: () => void;

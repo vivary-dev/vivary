@@ -1,5 +1,6 @@
 import type { CodexModelCatalog } from "./codex-models";
 import { claudeCodeModelChoices } from "../shared/claude-models";
+import { compareReleaseVersions } from "../shared/runtime-versions";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, open, readdir, readFile, realpath, stat } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { CLI_REGISTRY, isAllowedCommand } from "@agent-native/core/terminal/serv
 
 export type VivaryCodeEngine = "claude-cli" | "codex-cli";
 export type VivaryRuntimeStatus = {
-  status: "ready" | "sign-in-required" | "not-installed" | "unavailable";
+  status: "ready" | "sign-in-required" | "update-required" | "not-installed" | "unavailable";
   message: string;
   checkedAt: string;
   version?: string;
@@ -24,7 +25,7 @@ export type VivaryRuntimeStatusResult = {
 type ProbeResult =
   | { kind: "exited"; exitCode: number; stdout: string; stderr: string; version?: string }
   | { kind: "not-installed" }
-  | { kind: "unavailable" };
+  | { kind: "unavailable"; version?: string };
 export type CommandLaunch = { executable: string; prefix: string[]; env: NodeJS.ProcessEnv };
 
 const STATUS_TTL_MS = 30_000;
@@ -86,10 +87,23 @@ export function codingRuntimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.Proc
   }));
 }
 
+// The oldest releases Vivary supports. An older CLI gets an update message before its sign-in is read,
+// because its status command or protocol can fail in ways that do not name the version.
+// Claude Code 2.1.286 is the first release whose `auth status` reports a Console sign-in's stored API key
+// as `api_key` instead of `claude.ai` (Claude Code CHANGELOG.md, checked 2026-10-24), so the subscription
+// check below cannot be passed by an API key. Codex 0.160.0 is the app-server release that Native's
+// stored-thread reader is pinned to (receipts/10-codex-stored-thread-reader.md) and that the 2026-10-06
+// sandbox receipt ran. Codex 0.148.0 could not parse configuration written by the Codex desktop app
+// (desktop-acceptance-status.md), and 0.153.4 could not start its default sandbox on Zo (README.md).
+// `versionPattern` accepts only the complete `--version` line for an installation with no npm manifest.
 const commands = {
-  "claude-cli": { command: "claude", args: ["auth", "status", "--json"], npmEntry: ["@anthropic-ai", "claude-code", "cli.js"] },
-  "codex-cli": { command: "codex", args: ["login", "status"], npmEntry: ["@openai", "codex", "bin", "codex.js"] },
-} satisfies Record<VivaryCodeEngine, { command: string; args: string[]; npmEntry: string[] }>;
+  "claude-cli": { command: "claude", args: ["auth", "status", "--json"], npmEntry: ["@anthropic-ai", "claude-code", "cli.js"],
+    minimumVersion: "2.1.286", versionPattern: /^(\d+\.\d+\.\d+) \(Claude Code\)$/ },
+  "codex-cli": { command: "codex", args: ["login", "status"], npmEntry: ["@openai", "codex", "bin", "codex.js"],
+    minimumVersion: "0.160.0", versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
+} satisfies Record<VivaryCodeEngine, {
+  command: string; args: string[]; npmEntry: string[]; minimumVersion: string; versionPattern: RegExp;
+}>;
 
 export function vivaryRuntimeStatusFromProbe(
   engine: VivaryCodeEngine,
@@ -104,6 +118,12 @@ export function vivaryRuntimeStatusFromProbe(
   };
   if (result.kind === "not-installed") {
     return { status: "not-installed", message: `Install ${label} on this computer, then refresh.`, checkedAt };
+  }
+  // An unknown or malformed version leaves the result to the sign-in check, as before the floors existed.
+  const { minimumVersion } = commands[engine];
+  if (result.version && (compareReleaseVersions(result.version, minimumVersion) ?? 0) < 0) {
+    return { status: "update-required", checkedAt, version: result.version,
+      message: `Update ${label} to ${minimumVersion} or later, then refresh. Installed: ${result.version}.` };
   }
   if (result.kind === "unavailable") return unavailable;
 
@@ -170,8 +190,7 @@ export function getVivaryRuntimeStatus(
 async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
   const launch = await resolveVivaryRuntimeCommand(engine);
   if (!launch) return { kind: "not-installed" };
-  const version = await runtimeInstallationVersion(launch, engine)
-    ?? (engine === "claude-cli" ? await probeClaudeVersion(launch) : undefined);
+  const version = await runtimeInstallationVersion(launch, engine) ?? await probeCliVersion(launch, engine);
   return new Promise(resolve => {
     const child = execFile(launch.executable, [...launch.prefix, ...commands[engine].args], {
       cwd: homedir(),
@@ -185,7 +204,7 @@ async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
     }, (error, stdout, stderr) => {
       if (error) {
         if (error.code === "ENOENT") { resolve({ kind: "not-installed" }); return; }
-        if (error.killed || typeof error.code !== "number") { resolve({ kind: "unavailable" }); return; }
+        if (error.killed || typeof error.code !== "number") { resolve({ kind: "unavailable", version }); return; }
         resolve({ kind: "exited", exitCode: error.code, stdout, stderr, version });
         return;
       }
@@ -195,9 +214,9 @@ async function probeRuntime(engine: VivaryCodeEngine): Promise<ProbeResult> {
   });
 }
 
-// Native Claude installations have no npm manifest. Query the same resolved launch without
-// opening a model session, and accept only the CLI's complete version response.
-async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undefined> {
+// Native Claude Code and Codex installations have no npm manifest. Query the same resolved launch
+// without opening a model session, and accept only the CLI's complete version response.
+async function probeCliVersion(launch: CommandLaunch, engine: VivaryCodeEngine): Promise<string | undefined> {
   return new Promise(resolve => {
     const child = execFile(launch.executable, [...launch.prefix, "--version"], {
       cwd: homedir(),
@@ -209,7 +228,7 @@ async function probeClaudeVersion(launch: CommandLaunch): Promise<string | undef
       shell: false,
       windowsHide: true,
     }, (error, stdout) => {
-      resolve(error ? undefined : /^(\d+\.\d+\.\d+) \(Claude Code\)$/.exec(stdout.trim())?.[1]);
+      resolve(error ? undefined : commands[engine].versionPattern.exec(stdout.trim())?.[1]);
     });
     child.stdin?.end();
   });

@@ -39,6 +39,10 @@
 .file-reading-surface .tiptap .tableWrapper { overflow-x:auto; }
 .file-reading-surface .tiptap table { table-layout:auto; overflow-wrap:break-word; }
 .file-reading-surface .tiptap table code { white-space:nowrap; }
+/* GFM footnotes: a superscript number links to its note in the list after the document. */
+.file-reading-surface .an-rich-md-footnote-ref a { text-decoration:none; padding:0 .1em; }
+.file-reading-surface .an-rich-md-footnotes { margin-top:2rem; padding-top:.75rem; border-top:1px solid hsl(var(--border)); font-size:.9rem; }
+.file-reading-surface .an-rich-md-footnotes p { margin:.25rem 0; }
 .file-reading-surface a, .file-document-footer a { color:hsl(var(--primary)); text-decoration:underline; text-underline-offset:3px; }
 .file-source-editor { flex:1; display:flex; flex-direction:column; padding:1rem clamp(1rem,3vw,2.5rem); gap:.6rem; min-height:420px; }
 .file-source-editor label { font-size:.75rem; color:hsl(var(--muted-foreground)); overflow-wrap:anywhere; }

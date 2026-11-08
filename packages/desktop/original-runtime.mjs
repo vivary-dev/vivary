@@ -8,6 +8,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rename,
   rm,
@@ -23,22 +24,23 @@ const execFile = promisify(execFileCallback);
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultCacheDirectory = path.join(packageRoot, ".tmp", "original-runtime");
 const buildHelper = path.join(packageRoot, "build-original-wheels.py");
+const hostPython = process.platform === "win32" ? "python" : "python3";
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
-const PYTHON_RELEASE = "20260901";
-const PYTHON_VERSION = "3.12.14";
+const PYTHON_RELEASE = "20261021";
+const PYTHON_VERSION = "3.12.15";
 
 const linuxAsset = Object.freeze({
   provider: "astral-sh/python-build-standalone",
   release: PYTHON_RELEASE,
-  fileName: "cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-  url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-  sha256: "72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c",
+  fileName: "cpython-3.12.15+20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+  url: "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.12.15%2B20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+  sha256: "6d7521138fd33afddc1ccd08abb007d9a2829e38117c2576f9efdc0ec73ce772",
 });
 export const ORIGINAL_RUNTIME_LICENSE_ASSET = Object.freeze({
   provider: "astral-sh/python-build-standalone",
   release: PYTHON_RELEASE,
-  fileName: "python-build-standalone-20260901-licenses.rst",
-  url: "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260901/python-licenses.rst",
+  fileName: "python-build-standalone-20261021-licenses.rst",
+  url: "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261021/python-licenses.rst",
   sha256: "e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab",
   size: 105_875,
 });
@@ -46,28 +48,37 @@ export const ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS = Object.freeze([
   Object.freeze({
     provider: "PyPI",
     distribution: "pip",
-    version: "26.0.1",
-    fileName: "pip-26.0.1-py3-none-any.whl",
-    url: "https://files.pythonhosted.org/packages/de/f0/c81e05b613866b76d2d1066490adf1a3dbc4ee9d9c839961c3fc8a6997af/pip-26.0.1-py3-none-any.whl",
-    sha256: "bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b",
-    size: 1_787_723,
+    version: "26.2.2",
+    fileName: "pip-26.2.2-py3-none-any.whl",
+    url: "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+    sha256: "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
+    size: 1_819_850,
   }),
   Object.freeze({
     provider: "PyPI",
     distribution: "setuptools",
-    version: "84.0.0",
-    fileName: "setuptools-84.0.0-py3-none-any.whl",
-    url: "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
-    sha256: "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
-    size: 818_216,
+    version: "84.1.0",
+    fileName: "setuptools-84.1.0-py3-none-any.whl",
+    url: "https://files.pythonhosted.org/packages/18/02/b4bbb90f8f29e334898ff45c6d9b1fffaa6f378017052b3023a06262b5f7/setuptools-84.1.0-py3-none-any.whl",
+    sha256: "5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9",
+    size: 819_380,
   }),
 ]);
+export const ORIGINAL_RUNTIME_CERTIFI_ASSET = Object.freeze({
+  provider: "PyPI",
+  distribution: "certifi",
+  version: "2026.10.23",
+  fileName: "certifi-2026.10.23-py3-none-any.whl",
+  url: "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+  sha256: "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+  size: 135_082,
+});
 const windowsAsset = Object.freeze({
   provider: "astral-sh/python-build-standalone",
   release: PYTHON_RELEASE,
-  fileName: "cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
-  url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
-  sha256: "7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14",
+  fileName: "cpython-3.12.15+20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  url: "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.12.15%2B20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  sha256: "aac5d331fc3307343f95928fdbea4583f0d53973d08c7e1d081884fbd229a0e1",
 });
 
 export const ORIGINAL_RUNTIME_TARGETS = Object.freeze({
@@ -125,6 +136,9 @@ export async function prepareOriginalRuntime({
   if (typeof sourceDirty !== "boolean") throw new Error("sourceDirty must be a boolean.");
 
   const target = originalRuntimeTarget(platform, arch);
+  // The README requires qualified host CPython 3.12.15. A refused host stops before the destination,
+  // the download cache and every build-helper call.
+  await execFile(hostPython, ["-I", "-B", path.join(repository, "scripts/check_python_runtime.py")], { cwd: repository });
   await prepareEmptyDirectory(destination);
   await mkdir(cacheDirectory, { recursive: true });
   const wheelhouse = await mkdtemp(path.join(cacheDirectory, "wheels-"));
@@ -135,6 +149,7 @@ export async function prepareOriginalRuntime({
     for (const asset of ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS) {
       buildBackendWheels.push(await cacheVerifiedAsset(asset, { cacheDirectory }));
     }
+    const certifiWheel = await cacheVerifiedAsset(ORIGINAL_RUNTIME_CERTIFI_ASSET, { cacheDirectory });
     await runBuildHelper([
       "extract-runtime",
       "--archive", archive,
@@ -149,6 +164,7 @@ export async function prepareOriginalRuntime({
       "--repository", repository,
       "--wheelhouse", wheelhouse,
       ...buildBackendWheels.flatMap(wheel => ["--build-backend-wheel", wheel]),
+      "--certifi-wheel", certifiWheel,
       "--runtime-root", destination,
       "--site-packages", sitePackages,
       "--platform", platform,
@@ -169,6 +185,8 @@ export async function prepareOriginalRuntime({
     if (runtimeLicensePaths.length === 0) {
       throw new Error("The bundled Python distribution contains no discoverable license text.");
     }
+    const seedPath = platform === "win32" ? "python/Lib/ensurepip/_bundled/pip-26.2.2-py3-none-any.whl"
+      : "python/lib/python3.12/ensurepip/_bundled/pip-26.2.2-py3-none-any.whl";
     const manifest = createOriginalRuntimeManifest({
       target,
       sourceCommit: sourceCommit.trim(),
@@ -177,6 +195,13 @@ export async function prepareOriginalRuntime({
       managedProjectBridge,
       previewOwnerBridge,
       runtimeLicensePaths,
+      pipCertificateOverlay: {
+        kind: "vivary-certifi-overlay",
+        pipAsset: { ...ORIGINAL_RUNTIME_BUILD_BACKEND_ASSETS[0] },
+        certifiAsset: { ...ORIGINAL_RUNTIME_CERTIFI_ASSET },
+        seedPath,
+        seedSha256: createHash("sha256").update(await readFile(path.join(destination, ...seedPath.split("/")))).digest("hex"),
+      },
     });
     await writeFile(path.join(destination, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
     return manifest;
@@ -247,6 +272,7 @@ export function createOriginalRuntimeManifest({
   managedProjectBridge,
   previewOwnerBridge,
   runtimeLicensePaths,
+  pipCertificateOverlay,
 }) {
   return {
     schemaVersion: 1,
@@ -262,6 +288,7 @@ export function createOriginalRuntimeManifest({
     managedProjectBridge: { ...managedProjectBridge },
     previewOwnerBridge: { ...previewOwnerBridge },
     runtimeLicensePaths: [...runtimeLicensePaths],
+    ...(pipCertificateOverlay ? { pipCertificateOverlay } : {}),
   };
 }
 
@@ -343,8 +370,7 @@ async function collectRuntimeLicenses(destination, componentLicensePaths) {
 }
 
 async function runBuildHelper(args, repository) {
-  const python = process.platform === "win32" ? "python" : "python3";
-  await execFile(python, [buildHelper, ...args], {
+  await execFile(hostPython, ["-I", "-B", buildHelper, ...args], {
     cwd: repository,
     env: {
       ...process.env,

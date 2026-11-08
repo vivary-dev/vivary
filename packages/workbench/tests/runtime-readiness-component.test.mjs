@@ -18,7 +18,7 @@ const expectedDependencies = Object.freeze({
   react: Object.freeze({ name: "react", version: "19.2.8" }),
   reactDom: Object.freeze({ name: "react-dom", version: "19.2.8" }),
   reactQuery: Object.freeze({ name: "@tanstack/react-query", version: "5.102.8" }),
-  zod: Object.freeze({ name: "zod", version: "4.5.4" }),
+  zod: Object.freeze({ name: "zod", version: "4.6.7" }),
 });
 
 function loadDependencies() {

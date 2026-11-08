@@ -8,6 +8,7 @@ import { after, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  appendCodeAgentTranscriptEvent,
   createCodeAgentRunRecord,
   getCodeAgentRunRecord,
   listCodeAgentTranscriptEvents,
@@ -302,6 +303,80 @@ test("Continue anyway lifts a refusal Vivary cannot check, records who chose it,
   const runId = await sendAndSettle("Start after continuing");
   assert.notEqual(getCodeAgentRunRecord(runId)?.status, "errored");
 });
+
+// A switch concerns its own run, while the host strip shows only the oldest refusal. Legacy markers and refusals
+// whose first write failed remain authoritative even when another run owns that strip. Null targets keep these
+// cases isolated from process scans. The lock fixture below covers the failed write that leaves an unsaved refusal.
+for (const storage of ["legacy", "persisted", "unsaved"] as const) {
+  for (const pending of [false, true]) {
+    test(`runtime switch respects a ${storage} cleanup refusal behind the first host slot${pending ? " during pending application" : ""}`, {
+      ...linuxOnly, timeout: 10_000,
+    }, async () => {
+      // Initialize before seeding a pending target, so these cases also work with --test-name-pattern on their own.
+      await agent.initializeVivaryCodeAgent();
+      const id = `switch-refused-${storage}-${pending ? "pending" : "direct"}`;
+      const older = `${id}-older`;
+      const refusedAt = "2026-10-19T00:00:00.000Z";
+      const refusal = { target: null, remaining: [], total: 0, fingerprint: null, hidden: false,
+        scan: "not-recorded", step: null, refusedAt, checkedAt: refusedAt, ends: [] };
+      const target = { engine: "claude-cli" as const, model: "claude-opus-5-5", label: "Opus 5.5" };
+      const initialization = Reflect.get(hostSlots(), "initialization");
+      try {
+        seedRefusal(older, null, "2026-09-28T00:00:00.000Z");
+        seedRun(id, { model: "claude-sonnet-5-5", claudeSessionId: "11111111-1111-4111-8111-111111111111",
+          ...(storage === "legacy" ? { cleanupUnverified: true }
+            : storage === "persisted" ? { cleanupRefusal: refusal } : {}),
+          ...(pending ? { pendingSwitch: { ...target, requestedAt: refusedAt } } : {}) });
+        appendCodeAgentTranscriptEvent({ runId: id, kind: "user", message: "Keep this conversation's earlier work." });
+        if (storage === "unsaved") hostSlots().unsaved.set(id, { runId: id, ...refusal });
+        await agent.recheckVivaryCodeCleanup();
+        assert.equal((await agent.getVivaryCodeHostState(OWNER)).cleanup?.run?.id, older,
+          "a different run owns the first cleanup slot");
+        if (storage === "unsaved") {
+          assert.equal("cleanupRefusal" in metadataOf(id), false, "the failed write left no persisted refusal");
+          assert.equal("cleanupUnverified" in metadataOf(id), false);
+          assert.equal(hostSlots().unsaved.has(id), true, "the refusal exists only in memory");
+        }
+        const before = metadataOf(id);
+        const transcript = listCodeAgentTranscriptEvents(id);
+        if (pending) {
+          // Use the public host-start path, as local-code-agent.test.ts does for a stopped pending switch. No worker
+          // or private switch helper is needed: the settled run still carries the target when this host starts.
+          assert.equal(hostSlots().activeRuns.size, 0, "host restart needs no active fixture worker");
+          Reflect.set(hostSlots(), "initialization", null);
+          await agent.initializeVivaryCodeAgent();
+          const after = metadataOf(id);
+          assert.deepEqual([after.engine, after.model, after.claudeSessionId],
+            [before.engine, before.model, before.claudeSessionId], "cleanup prevents applying the recorded target");
+          assert.equal(after.pendingSwitch, undefined, "the refused pending target is consumed");
+          const events = listCodeAgentTranscriptEvents(id);
+          assert.deepEqual(events.slice(0, transcript.length), transcript, "earlier transcript entries stay intact");
+          assert.equal(events.length, transcript.length + 1, "only the refusal note is appended");
+          assert.equal(events.at(-1)?.metadata?.source, "vivary-runtime-switch-dropped");
+          assert.match(events.at(-1)?.message ?? "", /^The runtime switch did not happen, because Vivary could not confirm/);
+          assert.deepEqual([after.cleanupUnverified, after.cleanupRefusal], [before.cleanupUnverified, before.cleanupRefusal]);
+          if (storage === "unsaved") assert.equal(hostSlots().unsaved.has(id), true, "the refusal remains authoritative");
+        } else {
+          // This newly seeded route has neither a durable generation nor a canonical switch note.
+          await assert.rejects(agent.switchVivaryCodeRuntime({ ownerEmail: OWNER, runId: id, workspace, ...target,
+            expectedSwitchGeneration: null }),
+            { errorCode: "vivary_code_cleanup_required", statusCode: 409 });
+          assert.deepEqual(metadataOf(id), before, "a refused switch changes neither route nor provider session");
+          assert.deepEqual(listCodeAgentTranscriptEvents(id), transcript, "a refused switch adds no transcript entries");
+        }
+      } finally {
+        Reflect.set(hostSlots(), "initialization", initialization);
+        hostSlots().unsaved.delete(id);
+        // Each case removes only its synthetic records, including any switch note the old implementation wrote.
+        for (const runId of [id, older]) {
+          await rm(path.join(fixture, "runs", "runs", `${runId}.json`), { force: true });
+          await rm(path.join(fixture, "runs", "transcripts", `${runId}.jsonl`), { force: true });
+        }
+        await agent.recheckVivaryCodeCleanup();
+      }
+    });
+  }
+}
 
 test("a live process group keeps refusing by name, and a send after it stops lifts the refusal", {
   ...linuxOnly, timeout: WORKER_TEST_TIMEOUT_MS,

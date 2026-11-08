@@ -2,6 +2,10 @@
 
 What changed, why, and which Vivary layer/module it serves.
 
+## Size
+
+Diff bytes and hand-written changed lines, against the size rule in CONTRIBUTING.md.
+
 ## Blast Radius
 
 Files, packages, knowledge-graph surfaces, generated assets, downstream workflows, and

@@ -76,7 +76,10 @@ export function CodeRunControl() {
     }
   }
 
-  if (!runs.length && !cleanup && !status.error) return null;
+  // Beta ticket 05. A finished run's outcome stays in its conversation (J05). A restart's outcome also shows here,
+  // because nothing else tells the owner that work stopped or a request expired. The next send on that run clears it.
+  const restarted = recent && (recent.phase === "interrupted" || recent.expiredApproval);
+  if (!runs.length && !cleanup && !restarted && !status.error) return null;
   const cleanupHeld = !ready || resolving !== null || cleanup?.checking === true;
   const cleanupRun = cleanup?.run;
   return <section aria-label="Agent work" className="shrink-0 border-b px-4 py-3 text-sm">
@@ -107,13 +110,18 @@ export function CodeRunControl() {
           onClick={() => void resolveCleanup("continue")}>{resolving === "continue" ? "Continuing…" : "Continue anyway"}</Button>}
         {cleanupRun && <Button variant="ghost" size="sm" onClick={() => void openConversation(cleanupRun)}>Open conversation</Button>}
       </div>
-    </div> : !runs.length && recent ? <div className="flex flex-wrap items-center gap-2">
-      <span className="min-w-0 flex-1" role="status">{recent.phase === "approval-denied"
-        ? "Request denied. No agent work started" : recent.phase === "interrupted"
-          ? "Agent work was interrupted" : recent.status === "completed"
-            ? "Agent work completed" : recent.status === "errored"
-              ? "Agent work failed" : "Agent work stopped"} in {projectLabel(recent.projectId)}: {recent.title}</span>
-      <Button variant="ghost" size="sm" onClick={() => void openConversation(recent)}>Open conversation</Button>
+    </div> : !runs.length && recent ? <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1" role="status">{recent.phase === "approval-denied"
+          ? "Request denied. No agent work started" : recent.phase === "interrupted"
+            ? "Interrupted" : recent.status === "completed"
+              ? "Agent work completed" : recent.status === "errored"
+                ? "Agent work failed" : "Agent work stopped"} in {projectLabel(recent.projectId)}: {recent.title}</span>
+        <Button variant="ghost" size="sm" onClick={() => void openConversation(recent)}>Open conversation</Button>
+      </div>
+      {recent.expiredApproval && <p className="break-words text-xs text-muted-foreground">
+        Codex request expired{recent.expiredApproval.summary ? `: ${recent.expiredApproval.summary}` : ""}. {recent.expiredApproval.reason}
+      </p>}
     </div> : !runs.length && <div className="flex items-center gap-2">
       <span role="status">Agent status could not be loaded.</span>
       <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>Retry</Button>

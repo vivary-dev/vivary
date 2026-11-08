@@ -11,6 +11,7 @@ import { lowercaseMatches } from "../app/lib/chat-search-matches";
 import { isOwnedRun, type VivaryCodeReadScope } from "./local-code-agent";
 import { readCodeTranscriptPage, TRANSCRIPT_PAGE_BYTES } from "./code-transcript-page";
 import { createVivaryChatIdentity } from "./chat-identity";
+import { assistantReplyKey } from "./linked-history";
 
 const LIMITS = { sessions: 25, messages: 500, bytes: 16 * 1024 * 1024, results: 25 };
 const MAX_RUN_NAMES = 10_000;
@@ -33,18 +34,21 @@ function decodeCursor(cursor: string): unknown {
 }
 type SearchOwner = { ownerEmail: string; orgId: string; identity: VivaryChatIdentity; codeScope?: VivaryCodeReadScope };
 type Position = { phase: "native" | "code"; session: string; time: number; snapshot: number; searched: number;
-  active: boolean; message: number; offset: number; discardLine: boolean; titleDone: boolean };
+  active: boolean; message: number; offset: number; discardLine: boolean; titleDone: boolean;
+  /** assistantReplyKey of the last Code event read, so a repeated reply after a page boundary is still one match. */
+  replyKey: string | null };
 const positionSchema = (value: unknown): value is Position => {
   if (!value || typeof value !== "object") return false;
   const p = value as Position;
   return (p.phase === "native" || p.phase === "code") && typeof p.session === "string" && p.session.length <= 240
     && [p.time, p.snapshot, p.searched, p.message, p.offset].every(n => Number.isSafeInteger(n) && n >= 0)
-    && [p.active, p.discardLine, p.titleDone].every(v => typeof v === "boolean");
+    && [p.active, p.discardLine, p.titleDone].every(v => typeof v === "boolean")
+    && (p.replyKey === null || typeof p.replyKey === "string" && /^[a-f0-9]{64}$/.test(p.replyKey));
 };
 const initialPosition = (): Position => {
   const snapshot = Date.now();
   return { phase: "native", session: "", time: snapshot, snapshot, searched: 0,
-    active: false, message: 0, offset: 0, discardLine: false, titleDone: false };
+    active: false, message: 0, offset: 0, discardLine: false, titleDone: false, replyKey: null };
 };
 function excerpt(text: string, query: string): string {
   const match = lowercaseMatches(text, query).next();
@@ -95,11 +99,13 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
   const beginSession = (id: string, time: number) => {
     page.scannedSessions++;
     if (!cursor.active || cursor.session !== id) {
-      cursor = { ...cursor, session: id, time, active: true, message: 0, offset: 0, discardLine: false, titleDone: false };
+      cursor = { ...cursor, session: id, time, active: true, message: 0, offset: 0, discardLine: false, titleDone: false, replyKey: null };
       cursor.searched++;
     }
   };
-  const finishSession = () => { cursor.active = false; cursor.message = 0; cursor.offset = 0; cursor.titleDone = false; cursor.discardLine = false; };
+  const finishSession = () => {
+    cursor.active = false; cursor.message = 0; cursor.offset = 0; cursor.titleDone = false; cursor.discardLine = false; cursor.replyKey = null;
+  };
   const hit = (sessionId: string, title: string, referenceId: string, text: string, runtime: ChatSearchHit["runtime"],
     archived: boolean, match: ChatSearchHit["match"], updatedAt: number, matchedAt?: unknown, eventOffset?: number) => page.results.push({
       projectId: input.unassigned ? null : owner.identity.projectId, projectLabel, sessionId,
@@ -248,7 +254,12 @@ export async function searchChatContent(owner: SearchOwner, input: ChatSearchInp
         for (const entry of transcript.entries) {
           if (page.results.length >= LIMITS.results) break;
           page.scannedMessages++;
-          const contentMatch = entry.event.message.toLowerCase().includes(query);
+          // An older Claude Code conversation repeats each reply, so the repeat is not a second match. The key is
+          // kept in the cursor, so this holds when a page ends between the two copies.
+          const replyKey = assistantReplyKey(entry.event);
+          const repeated = replyKey !== null && replyKey === cursor.replyKey;
+          cursor.replyKey = replyKey;
+          const contentMatch = !repeated && entry.event.message.toLowerCase().includes(query);
           const titleMatch = !cursor.titleDone && record.title.toLowerCase().includes(query);
           if (contentMatch || titleMatch) hit(record.id, record.title, entry.event.id, contentMatch ? entry.event.message : record.title,
             "code", false, contentMatch ? "content" : "title", cursor.time, entry.event.createdAt, entry.offset);

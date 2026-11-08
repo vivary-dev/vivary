@@ -94,6 +94,79 @@ describe("local coding runtime status", () => {
     }).status, "unavailable");
   });
 
+  it("asks for an update below each CLI's minimum version, whatever its sign-in probe returned", () => {
+    const signedIn = {
+      "claude-cli": '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}',
+      "codex-cli": "Logged in using ChatGPT",
+    };
+    const cases = [
+      { engine: "claude-cli", minimum: "2.1.286", older: ["2.1.285", "2.0.999", "1.9.400"], current: ["2.1.286", "2.1.309", "3.0.0"] },
+      { engine: "codex-cli", minimum: "0.160.0", older: ["0.159.9", "0.153.4", "0.148.0", "0.99.0"], current: ["0.160.0", "0.162.1", "1.0.0"] },
+    ] as const;
+    for (const { engine, minimum, older, current } of cases) {
+      for (const version of older) {
+        // An older CLI can lack the status command, so a failed or hung probe still names the version.
+        for (const result of [
+          { kind: "exited", exitCode: 0, stdout: signedIn[engine], stderr: "", version },
+          { kind: "exited", exitCode: 2, stdout: "", stderr: "error: unrecognized subcommand", version },
+          { kind: "unavailable", version },
+        ] as const) {
+          const status = vivaryRuntimeStatusFromProbe(engine, result);
+          assert.equal(status.status, "update-required", `${engine} ${version} ${result.kind}`);
+          assert.equal(status.version, version);
+          assert.equal(status.message.includes(`to ${minimum} or later`), true, status.message);
+          assert.equal(status.message.includes(`Installed: ${version}.`), true, status.message);
+        }
+      }
+      for (const version of current) {
+        assert.equal(vivaryRuntimeStatusFromProbe(engine, {
+          kind: "exited", exitCode: 0, stdout: signedIn[engine], stderr: "", version,
+        }).status, "ready", `${engine} ${version}`);
+      }
+      // A version the check cannot read keeps the earlier result instead of guessing.
+      for (const version of [undefined, "", "bad.version", "0.148.0-alpha.1", "2.1"]) {
+        assert.equal(vivaryRuntimeStatusFromProbe(engine, {
+          kind: "exited", exitCode: 0, stdout: signedIn[engine], stderr: "", version,
+        }).status, "ready", `${engine} ${version}`);
+        assert.equal(vivaryRuntimeStatusFromProbe(engine, { kind: "unavailable", version }).status, "unavailable");
+      }
+    }
+  });
+
+  it("reads a native Codex version and holds an older one at the update message", { skip: process.platform === "win32" }, async () => {
+    const fixture = await mkdtemp(path.join(tmpdir(), "vivary-codex-version-"));
+    // guard:allow-env-credential - Restore the fixture's executable search path and local deployment mode.
+    const previous = { PATH: process.env.PATH, VIVARY_ACCESS_MODE: process.env.VIVARY_ACCESS_MODE };
+    try {
+      // guard:allow-env-credential - Use the disposable executable for the local runtime probe.
+      process.env.PATH = fixture + path.delimiter + previous.PATH;
+      // guard:allow-env-credential - Local mode enables only this synthetic status probe.
+      process.env.VIVARY_ACCESS_MODE = "local";
+      for (const response of [
+        { text: "codex-cli 0.148.0\n", status: "update-required", version: "0.148.0" },
+        { text: "codex-cli 0.162.1\n", status: "ready", version: "0.162.1" },
+        { text: "0.148.0\n", status: "ready", version: undefined },
+        { text: "codex-cli 0.148.0\nUpdate available", status: "ready", version: undefined },
+      ]) {
+        await writeFile(path.join(fixture, "codex"), `#!/usr/bin/env node
+const args = JSON.stringify(process.argv.slice(2));
+if (args === '["--version"]') { process.stdout.write(${JSON.stringify(response.text)}); process.exit(0); }
+if (args !== '["login","status"]') process.exit(2);
+process.stderr.write("Logged in using ChatGPT\\n");
+`, { mode: 0o755 });
+        const status = await getVivaryRuntimeStatus("codex-cli", { refresh: true });
+        assert.equal(status.status, response.status, response.text);
+        assert.equal(status.version, response.version);
+      }
+    } finally {
+      // guard:allow-env-credential - Restore only the fixture's executable path and local deployment mode.
+      if (previous.PATH === undefined) delete process.env.PATH; else process.env.PATH = previous.PATH;
+      // guard:allow-env-credential - Restore the deployment mode after the local fixture.
+      if (previous.VIVARY_ACCESS_MODE === undefined) delete process.env.VIVARY_ACCESS_MODE; else process.env.VIVARY_ACCESS_MODE = previous.VIVARY_ACCESS_MODE;
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   it("keeps missing installations separate from failed probes", () => {
     assert.equal(vivaryRuntimeStatusFromProbe("claude-cli", { kind: "not-installed" }).status, "not-installed");
     assert.equal(vivaryRuntimeStatusFromProbe("codex-cli", { kind: "unavailable" }).status, "unavailable");

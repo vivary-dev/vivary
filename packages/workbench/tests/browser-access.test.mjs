@@ -182,7 +182,7 @@ test('bootstrap preserves only inert root navigation values when resuming or com
   const { runInNewContext } = await import('node:vm');
   const { browserPairingPage } = await import('../server/browser-pairing-page.mjs');
   const html = await browserPairingPage().text();
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const script = html.slice(html.indexOf('<script>') + '<script>'.length, html.indexOf('</script>'));
   const navigation = { project: 'fixture', run: 'run', draft: 'draft', runtime: 'native', history: 'project',
     thread: 'thread', panel: 'files', path: '</script><script>globalThis.attacked=true</script>&redirect=https://outside.test/', line: '3' };
   const search = new URLSearchParams({ ...navigation, _agentNativeDesktopCode: 'internal', prompt: 'do not submit',

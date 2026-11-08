@@ -1,3 +1,5 @@
+import type { CodeSwitchConsent } from "./code-switch-observation";
+
 // Only these owner actions accept the private proxy session transport on a POST.
 // Same-origin reads may carry it on every route.
 export const VIVARY_OWNER_ACTIONS = [
@@ -17,3 +19,10 @@ export const VIVARY_OWNER_ACTIONS = [
   "vivary-automation-files",
 ] as const;
 export type VivaryOwnerAction = typeof VIVARY_OWNER_ACTIONS[number];
+
+export type VivaryCodeSwitchParams = {
+  projectId?: string;
+  runId: string;
+  engine: "claude-cli" | "codex-cli";
+  model: string;
+} & CodeSwitchConsent;

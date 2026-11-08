@@ -1059,7 +1059,10 @@ for (const decision of ["approve", "decline"]) test(`admission-refused queue can
   try {
     const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
     const refused = await until(async () => { const run = await history.getAutomationRun(queued.automationRunId); return run.finishedAt ? run : null; });
-    assert.equal(refused.status, "error"); assert.match(refused.error, /already running|approval/i);
+    // Vivary #206: the refusal names the approval wait, not a run that is not running.
+    assert.equal(refused.status, "error"); assert.equal(refused.errorCode, "automation_approval_pending");
+    assert.equal(refused.error, "This automation is waiting for an approval decision in Past runs. "
+      + "Approve or decline it before running it again. No delivery was confirmed.");
     assert.ok(refused.claimedAt); assert.equal(refused.threadId, null); assert.equal(refused.runId, null);
     assert.equal(fixture.modelCalls.length, models); assert.equal(fixture.calls.length, calls);
     await fixture.decide(original.id, await fixture.pending(original.id), decision);
@@ -1075,6 +1078,29 @@ for (const decision of ["approve", "decline"]) test(`admission-refused queue can
     await assert.rejects(fixture.decide(original.id, await fixture.pending(original.id), decision), /no longer waiting/);
     assert.equal(configuredCalls(fixture).length, decision === "approve" ? 1 : 0);
   } finally { runNow.setInProcessAutomationRunner(null); }
+});
+
+// Vivary #206: once a decision is claimed the run is resuming, which is running, not waiting.
+test("Run now while a decided run resumes keeps the already-running refusal", async () => {
+  const fixture = await makeApprovalCase("refused-queue-resuming", { repeatLocal: false });
+  const scheduler = await loadCore("jobs/scheduler.js"), runNow = await loadCore("jobs/run-now.js");
+  await scheduler.runJobNow(owner, fixture.automation.name, fixture.deps);
+  const [original] = await history.listAutomationRuns({ owners: [owner], automation: fixture.automation.name, appId });
+  assert.equal(original.status, "waiting_approval");
+  const pending = await fixture.pending(original.id);
+  assert.equal(await history.claimAutomationApprovalDecision(original.id, pending.askId, "resume-206"), true);
+  runNow.setInProcessAutomationRunner(id => scheduler.runQueuedAutomation(id, fixture.deps), { appId });
+  try {
+    const queued = await runNow.queueAutomationRunNow({ userEmail: owner, appId, scope: "personal", name: fixture.automation.name });
+    const refused = await until(async () => { const run = await history.getAutomationRun(queued.automationRunId); return run.finishedAt ? run : null; });
+    assert.equal(refused.status, "error"); assert.equal(refused.errorCode, null);
+    assert.equal(refused.error, "The automation is already running. No delivery was confirmed.");
+  } finally {
+    runNow.setInProcessAutomationRunner(null);
+    assert.equal(await history.restoreUnconsumedAutomationApproval(original.id, pending.askId, "resume-206"), true);
+  }
+  await fixture.decide(original.id, await fixture.pending(original.id), "decline");
+  assert.equal((await fixture.terminal(original.id)).status, "declined");
 });
 
 test("admitted-owner tie has one consistent history and atomic resource CAS winner", async () => {
