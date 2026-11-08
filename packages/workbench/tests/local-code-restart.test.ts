@@ -103,8 +103,8 @@ process.send({ type: "vivary:code-worker:ready" });
       && event.message === "The previous Vivary code host ended before this run finished.").length, 1);
 
     const host = await getVivaryCodeHostState(ownerEmail);
-    assert.equal(host.activeRun, null);
-    assert.equal(host.pendingApproval, null, "an expired request is never offered for an answer");
+    assert.deepEqual(host.activeRuns, []);
+    assert.deepEqual(host.activeRuns.flatMap(item => item.pendingApprovals), [], "an expired request is never offered for an answer");
     assert.deepEqual(host.recentRun?.expiredApproval, { method: "item/commandExecution/requestApproval",
       summary: "pnpm test", reason: "Vivary restarted before this request was answered." });
     await assert.rejects(denyVivaryCodeMessage({ ownerEmail, runId, requestId, projectId: workspace.projectId }),

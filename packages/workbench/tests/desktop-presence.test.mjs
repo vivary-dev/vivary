@@ -11,8 +11,7 @@ const SCOPE = "a".repeat(64);
 
 const selectionOf = (projectId) => ({ scopeKey: SCOPE, projectId });
 const hostOf = (activeProjectId = null) => ({
-  activeRun: activeProjectId === null ? null : { projectId: activeProjectId },
-  pendingApproval: null,
+  activeRuns: activeProjectId === null ? [] : [{ projectId: activeProjectId, pendingApprovals: [] }],
 });
 
 test("the poller reads the owner selection inside a request context", async () => {

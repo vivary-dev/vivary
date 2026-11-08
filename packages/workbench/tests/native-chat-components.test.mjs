@@ -370,8 +370,8 @@ export async function renderReplayOwner({ running = false } = {}) {
     ] };
   const snapshot = () => ({ projectId: null, engines: [claude, codex], defaultEngine: "claude-cli",
     defaultModel: "claude-sonnet-5-5", runtime: claude.runtime, workspaceLabel: "Personal workspace",
-    busy: run.status === "running", cleanup: null, pendingApproval: null, folderRuns: [],
-    activeRun: run.status === "running" ? run : null, run, runs: [run] });
+    busy: run.status === "running", cleanup: null, folderRuns: [],
+    activeRuns: run.status === "running" ? [run] : [], run, runs: [run] });
   const key = ["action", "vivary-code-state", { projectId: undefined }];
   const anchorKey = ["action", "vivary-code-state", { projectId: undefined, runId: run.id,
     eventId: "replay-turn-a", eventOffset: 0 }];
@@ -446,7 +446,7 @@ export async function renderReplayOwner({ running = false } = {}) {
       async setWorkspaceAvailable(value) { await act(async () => { setAvailable(value); }); await settle(); },
       async stop() { await click(control("Stop response")); },
       stopAvailable: () => available(control("Stop response")),
-      ownerActiveIds: () => client.getQueryData(key)?.activeRun ? [client.getQueryData(key).activeRun.id] : [],
+      ownerActiveIds: () => (client.getQueryData(key)?.activeRuns ?? []).map(item => item.id),
       unmount: dispose,
     };
   } catch (error) { await dispose(); throw error; }
@@ -512,7 +512,7 @@ export async function renderWorkspaceSessionDetails(events) {
     engineLabel: "Claude Code", model: "claude-sonnet-5-5", status: "completed", phase: "complete", pendingSwitch: null,
     createdAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:01:00.000Z", events };
   const snapshot = () => ({ projectId: null, engines: [engine, codex], defaultEngine: "claude-cli", defaultModel: "claude-sonnet-5-5",
-    runtime: engine.runtime, activeRun: null, busy: false, cleanup: null, pendingApproval: null,
+    runtime: engine.runtime, activeRuns: [], busy: false, cleanup: null, folderRuns: [],
     run: fixtureRunSnapshot(run), runs: [run] });
   let details = { runId: run.id, engineLabel: "Claude Code", continuity: "native-resume", sessionId: "obsolete-claude-session",
     nextTurn: "native-resume", log: { reference: "native:retained-run", status: "available", excerpt: "", truncated: false },

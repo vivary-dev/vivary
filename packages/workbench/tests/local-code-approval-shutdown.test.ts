@@ -26,7 +26,7 @@ test("a Codex request pending at shutdown expires visibly", () => withCodeHost({
   assert.equal(listCodeAgentTranscriptEvents(runId).filter(event => event.metadata?.requestId === "request-quit"
     && event.message === "Codex request expired. Vivary restarted before this request was answered.").length, 1);
   const state = await host.getVivaryCodeHostState(ownerEmail);
-  assert.equal(state.pendingApproval, null);
+  assert.deepEqual(state.activeRuns.flatMap(item => item.pendingApprovals), []);
   assert.equal(state.recentRun?.phase, "interrupted");
   assert.deepEqual(state.recentRun?.expiredApproval, { method: "item/commandExecution/requestApproval",
     summary: "pnpm test", reason: "Vivary restarted before this request was answered." });

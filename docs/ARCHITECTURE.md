@@ -1006,6 +1006,16 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 Discord desktop presence on concurrent conversations (PR #261). The
+presence phase read the host state's `activeRun` and `pendingApproval`, which
+#261 replaced with `activeRuns`. `resolvePhase` in `server/desktop-presence.ts`
+now applies the same rule to each running conversation. A run counts for the
+selected project when it has no project or the same one. Any counting run with
+a pending request gives review; any other gives agent. Four tests follow the
+merged contracts: #261's concurrency test now names the observed route
+generation that #258 requires for a switch, and #258's ticket 05 expiry tests
+read per-run approvals. The presence phases and the sections above still hold.
+
 2026-11-07 Merge of PR #258's head `04b00510` into the concurrency branch (PR #261).
 Both designs hold together. From #258: retained Stop callbacks read the current view
 through `stopAuthority`, now bound to this conversation's own active run; the

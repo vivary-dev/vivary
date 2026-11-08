@@ -389,12 +389,15 @@ test("switching one conversation's runtime leaves another running conversation u
   const idle = (await send(workspace, "Finish this one")).run!.id;
   await waitFor(() => !host().activeRuns.has(idle), "the idle conversation's turn");
   const running = (await send(workspace, "Keep working", { acknowledgeSharedFolder: true })).run!.id;
+  // A switch names the route generation its owner observed (#258); neither conversation has switched before.
+  const observed = async (runId: string) =>
+    (await agent.getVivaryCodeState(owner.ownerEmail, runId, workspace, owner.orgId)).run?.switchGeneration ?? null;
   try {
     const switched = await agent.switchVivaryCodeRuntime({ ...owner, runId: idle, engine: "codex-cli", model: "gpt-6-astra",
-      workspace });
+      workspace, expectedSwitchGeneration: await observed(idle) });
     assert.equal(switched.run?.engine, "codex-cli");
     await assert.rejects(agent.switchVivaryCodeRuntime({ ...owner, runId: running, engine: "codex-cli", model: "gpt-6-astra",
-      workspace }), { errorCode: "vivary_code_switch_run_active" });
+      workspace, expectedSwitchGeneration: await observed(running) }), { errorCode: "vivary_code_switch_run_active" });
     assert.deepEqual((await hostRuns()).map(run => [run.id, run.engineLabel, run.model]),
       [[running, "Claude Code", "claude-sonnet-5-5"]], "the running conversation keeps its route and keeps running");
     assert.equal(getCodeAgentRunRecord(running)?.metadata?.engine, "claude-cli");

@@ -53,7 +53,7 @@ test("a pending Codex request expires visibly when a fresh host initializes", as
     assert.equal(notices[0].metadata?.reason, "host-restart");
 
     const host = await getVivaryCodeHostState("owner@example.com");
-    assert.equal(host.pendingApproval, null, "an expired request is never offered for an answer");
+    assert.deepEqual(host.activeRuns.flatMap(item => item.pendingApprovals), [], "an expired request is never offered for an answer");
     assert.equal(host.recentRun?.id, run.id);
     assert.equal(host.recentRun?.phase, "interrupted");
     assert.deepEqual(host.recentRun?.expiredApproval, { method: "item/commandExecution/requestApproval",
