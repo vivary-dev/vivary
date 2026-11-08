@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { mock } from "node:test";
 
-let host = { activeRun: null, pendingApproval: null };
+let host = { activeRuns: [] };
 mock.module(new URL("../../server/local-code-agent.ts", import.meta.url).href, {
   namedExports: { getVivaryCodeHostState: async () => host },
 });

@@ -75,7 +75,7 @@ test("native approval rejects cross-owner, cross-org, cross-project, stale and c
   const native = request("item/commandExecution/requestApproval", { command: "read fixture", cwd: directory });
   let resolved: unknown;
   const pending = new Map([[native.requestId, { request: native, resolve: (value: unknown) => { resolved = value; } }]]);
-  const active = { ownerEmail, orgId, workspace, controller: new AbortController(), execution: null,
+  const active = { ownerEmail, orgId, workspace, canonicalRoot: directory, controller: new AbortController(), execution: null,
     stopReason: null, permissionMode: "normal", requests: pending };
   try {
     createCodeAgentRunRecord({ id: runId, goalId: "vivary-local-code", title: "Native action", cwd: directory,

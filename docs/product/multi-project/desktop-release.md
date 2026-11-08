@@ -89,14 +89,20 @@ See the [current desktop acceptance register](desktop-acceptance-status.md) for 
 | Browser experience | [Issue #31](receipts/11e-live-project-preview.md) verifies reviewed project commands, isolated live preview, responsive controls, and real agent repair on Zo | Explicit authenticated phone routing, packaged preview journeys, and supported agent image viewing |
 | Original Vivary | Bundled ten-verb standalone CLI, bounded preview/evaluation app adapter, and issue #14's shared new-folder and existing-folder creator operations | GUI and agent use of the remaining original operations under their owning issues |
 
-**Release limitation: one coding run at a time.** This release runs one Code
-conversation at a time on a host, across all projects. Before any write, a
-second Code request is refused with "An agent is working in another
-conversation" and an **Open** button for the running one. Native chat,
-linked conversations and Prepare handoff remain available. Per-thread
-activity, approvals and Stop for concurrent runs, plus shared-file conflict
-control, arrive with controlled concurrency in a later release (issue
-#228).
+**Concurrent Code conversations.** Several Code conversations can run at once
+on a host, in one project or in different projects, with Claude Code and Codex
+side by side (issue #228). New conversation and every other conversation stay
+available while agents work. One conversation runs one turn at a time, so a
+second send into a working conversation is refused before any write. The strip
+at the top lists each running conversation with its own requests and Stop.
+Before a send in a folder where another conversation's agent works, Vivary shows
+"Other agents are working in this folder. They may change the same files or
+interfere with Git operations. Use a separate worktree or folder to reduce
+conflicts." with **Proceed**, **Use another folder**, and a copyable
+`git worktree add` command. The server enforces the warning for Remote access
+clients too. Vivary does not control conflicting writes or manage worktrees.
+A cleanup refusal after a failed stop still holds new Code sends on the whole
+host. Packaged Windows acceptance of concurrent runs is still required.
 
 Checkpoint, 2026-09-16: the published private `26798df` Windows candidate passed
 the focused journeys in the [acceptance register](desktop-acceptance-status.md).

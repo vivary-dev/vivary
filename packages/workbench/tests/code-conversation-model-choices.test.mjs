@@ -89,7 +89,7 @@ for (const [model, admitted] of [["sonnet", true], [historical, false]]) {
       call: async (...args) => { actions.push(args); throw new Error("Reached owner fixture"); },
       projectId: "project-one", draftThreadId: "saved-draft", runIdRef: { current: null },
       engines: () => [claude, codex],
-      onKnownRejected: async submitId => { rejected.push(submitId); },
+      onKnownRejected: async submitId => { rejected.push(submitId); }, acknowledgeSharedFolder: () => false,
       onStarted() {}, onStreaming() {}, onSettled() {},
     });
     await assert.rejects(async () => {

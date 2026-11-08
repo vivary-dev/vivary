@@ -128,7 +128,7 @@ await import(${JSON.stringify(pathToFileURL(path.join(workbench, "server", "code
         await delay(100);
         record = getCodeAgentRunRecord(runId);
       }
-      for (let attempt = 0; attempt < 100 && (await getVivaryCodeState(owner, runId, workspace)).activeRun; attempt++) await delay(100);
+      for (let attempt = 0; attempt < 100 && (await getVivaryCodeState(owner, runId, workspace)).busy; attempt++) await delay(100);
       if (record?.status !== "completed") {
         const statuses = listCodeAgentTranscriptEvents(runId).filter(event => event.kind === "status").slice(-3)
           .map(event => event.message).join(" | ");

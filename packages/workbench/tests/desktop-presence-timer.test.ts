@@ -90,11 +90,11 @@ test("a timer tick after a switch from project A to project B shows project B", 
 
 test("a timer tick follows the code host from idle to agent to review and back", async () => {
   const run = { id: "run-b", title: "Probe run", projectId: projects.b };
-  await step({ type: "test:host", host: { activeRun: run, pendingApproval: null } });
+  await step({ type: "test:host", host: { activeRuns: [{ ...run, pendingApprovals: [] }] } });
   assert.deepEqual(await presenceAfterTick(), { phase: "agent", projectLabel: "Project B" });
-  await step({ type: "test:host", host: { activeRun: run, pendingApproval: { runId: run.id, projectId: projects.b } } });
+  await step({ type: "test:host", host: { activeRuns: [{ ...run, pendingApprovals: [{ runId: run.id, projectId: projects.b }] }] } });
   assert.deepEqual(await presenceAfterTick(), { phase: "review", projectLabel: "Project B" });
-  await step({ type: "test:host", host: { activeRun: null, pendingApproval: null } });
+  await step({ type: "test:host", host: { activeRuns: [] } });
   assert.deepEqual(await presenceAfterTick(), { phase: "idle", projectLabel: "Project B" });
 });
 

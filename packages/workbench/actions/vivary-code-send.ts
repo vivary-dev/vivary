@@ -20,12 +20,15 @@ export default defineAction({
     runId: z.string().trim().min(1).max(128).optional(),
     draftSubmitId: z.string().uuid().optional(),
     draftThreadId: z.string().regex(/^[A-Za-z0-9_:-]{1,200}$/).optional(),
+    // The sender chose Proceed on the shared-folder warning. Without it, a send beside another agent refuses.
+    acknowledgeSharedFolder: z.boolean().optional(),
   }),
   requiresAuth: true,
   agentTool: false,
   mcpTool: false,
   toolCallable: false,
-  run: async ({ message, model, engine, runId, projectId, draftSubmitId, draftThreadId }, ctx?: ActionRunContext) => {
+  run: async ({ message, model, engine, runId, projectId, draftSubmitId, draftThreadId, acknowledgeSharedFolder },
+    ctx?: ActionRunContext) => {
     const workspace = await resolveVivaryCodeProject(ctx, projectId);
     const loadLinkedContext = linkedConversations.codeSendLinkedContext(ctx, projectId ?? null, runId);
     return sendVivaryCodeMessage({
@@ -43,6 +46,7 @@ export default defineAction({
       runId,
       draftSubmitId,
       draftThreadId,
+      acknowledgeSharedFolder,
     });
   },
 });

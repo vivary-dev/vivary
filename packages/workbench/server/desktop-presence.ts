@@ -96,10 +96,11 @@ function resolvePhase(
   selectedProjectId: string | null,
 ): z.infer<typeof desktopPresencePhaseSchema> {
   if (!selectedProjectId) return "hidden";
-  const activeProjectId = host.activeRun?.projectId ?? host.pendingApproval?.projectId ?? null;
-  const scoped = activeProjectId === null || activeProjectId === selectedProjectId;
-  if (host.pendingApproval && scoped) return "review";
-  if (host.activeRun && scoped) return "agent";
+  // Several conversations can run at once (#261). A run counts for the selected project when it has no project, as in the
+  // personal workspace, or the same one. A pending request on any counting run outranks work.
+  const scoped = host.activeRuns.filter(run => run.projectId === null || run.projectId === selectedProjectId);
+  if (scoped.some(run => run.pendingApprovals.length > 0)) return "review";
+  if (scoped.length > 0) return "agent";
   return "idle";
 }
 

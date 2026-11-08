@@ -30,7 +30,7 @@ const fail = (message, options) => { throw Object.assign(new Error(message), opt
 // vivary-code-switch, its refusals, its model check, and the record change, as written.
 const switchCode = await slice("export async function switchVivaryCodeRuntime(", "\nexport async function getVivaryCodeFiles(");
 const sessionCode = await slice("export function providerSessionId(", "\nexport async function approveVivaryCodeMessage(");
-const pendingCode = await slice("function pendingSwitchFromRun(", "\nfunction engineLabelFromRun(");
+const pendingCode = await slice("function pendingSwitchFromRun(", "\nexport function engineLabelFromRun(");
 const observationCode = await slice("function codeSwitchObservation(", "\nexport async function sendVivaryCodeMessage(");
 const stopCode = await slice("function requestUserStop(", "\n/**");
 const resolveVivaryCodeModel = compileFunction(resolver.code + "\nreturn resolveVivaryCodeModel;",
@@ -44,13 +44,13 @@ function fixture() {
   let afterRecordPersist = null, writeFault = null;
   const allowWrite = () => { if (writeFault) throw writeFault; };
   const records = new Map(), events = [], launches = [], writes = [], prompts = [], stops = [], stoppedTurns = [], aborts = [];
-  const activeRuns = new Map(), hostState = { cleanup: null };
+  const activeRuns = new Map(), hostState = { cleanup: null, unsaved: new Map() };
   let linked;
   const workspace = { root: "/fixture", label: "Fixture" };
   const owners = {
     resolveWorkspace: async () => workspace,
     ensureVivaryCodeHostInitialized: async () => { const gate = initializationGate; initializationGate = null; await gate?.(); },
-    hostState, assertCodeHostAvailable() {},
+    hostState, assertCodeHostAvailable() {}, assertConversationCanStart() {}, canonicalFolder: async folder => folder,
     requireOwnedRun: id => records.get(id) ?? fail("Local Vivary code run not found.", { statusCode: 404 }),
     getCodeAgentRunRecord: id => records.get(id) ?? null,
     engineFromRun: run => run.metadata.engine,
@@ -101,6 +101,11 @@ function fixture() {
       ...[...records.values()].filter(run => run.metadata?.cleanupRefusal).map(run => ({ runId: run.id })),
     ],
     cleanupRefusalMessage: refusal => `Cleanup for ${refusal.runId} is pending.`,
+    // A stored refusal on the record, as cleanupRefusalFromRun reads it.
+    cleanupRefusalFromRun: run => run.metadata?.cleanupRefusal ? { runId: run.id } : null,
+    // The real requestUserStop asks whether this run holds a refusal: the host's, an unsaved one, or one on its record.
+    hasOwnCleanupRefusal: runId => hostState.cleanup?.runId === runId || hostState.unsaved.has(runId)
+      || !!records.get(runId)?.metadata?.cleanupRefusal,
     engineLabelFromRun: run => run.metadata.engine === "claude-cli" ? "Claude Code" : "Codex CLI",
     applyPendingSwitch: runId => linked.applyPendingSwitch(runId),
   };
