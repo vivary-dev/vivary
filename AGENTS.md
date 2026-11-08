@@ -7,8 +7,10 @@ Jeff selected this complete new repository on 2026-09-13. It was
 on 2026-09-24, and was renamed `vivary-dev/vivary` on 2026-09-30. The original
 CLI repository is `vivary-dev/vivary-cli`. His later branching correction
 selects typed topic
-branches from `dev`, PRs into `dev`, and reviewed promotion from `dev` to `main`.
-Do not commit directly to either long-lived branch. `main` is the default branch.
+branches from `dev`, PRs into `dev`, and reviewed promotion from `dev` to `prod`.
+Do not commit directly to either long-lived branch. `prod` is the default branch and
+the release branch. When a version ships, promote `dev` into `prod` with a pull
+request and a merge commit first, then push the release tag on `prod`.
 The `origin` remote is that GitHub repository. The `entire` remote is its Entire
 mirror. Push reviewed source to both. Preserve the previous repositories and
 history. This supersedes the earlier Entire-only `feat/vivary-gui` restriction.
