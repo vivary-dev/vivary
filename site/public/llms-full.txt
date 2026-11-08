@@ -8262,6 +8262,147 @@ No documentation route reads arbitrary host files.
 
 ## Last change review
 
+2026-11-07 PR #336 fix round 7, the last one on ignores: subtract
+instead of patching another edge case (discussion_r4504210433). The
+fix round 6 re-include (`!/.claude/`, `!/.claude/skills/**`) still
+exposed `.DS_Store`, `.pytest_cache` and `node_modules` inside skill
+directories, reproduced with the Reviewer's own `junk_ignore_probe.py`;
+each targeted fix has found a new edge, so `.gitignore` is reverted to
+dev's exact byte content, with no `.claude` re-include or re-ignore of
+any kind. `key.py`'s existing `check_feature_files_tracked`, unchanged
+since fix round 5, is the actual protection: it reads `git ls-files`,
+which is independent of `.gitignore` or any global ignore rule, so a
+mapped feature file hidden from `git add` by a contributor's personal
+`core.excludesFile` still makes key.py refuse loudly (untracked), never
+pass silently. This answers discussion_r4503940604 without touching
+`.gitignore` at all. `GitignoreTests` (7 tests asserting repo ignore
+behaviour, added in fix rounds 5 and 6) are removed; a new
+`test_feature_file_hidden_by_global_exclude_is_refused` reproduces the
+original scenario (a global `core.excludesFile` hiding a new feature
+file) and confirms key.py refuses it with no repo `.gitignore` entry
+involved. No application code, route, or persisted state changed.
+
+2026-11-07 PR #336 fix round 6: stop blanket-ignoring /.claude/* and
+/.claude/skills/*, re-ignore only the specific local files
+(discussion_r4504090672). The previous fix round's `/.claude/*` and
+`/.claude/skills/*` lines re-ignored every direct child of `.claude/`
+and of `.claude/skills/` except the ones explicitly re-included, for
+every contributor, no global ignore rule required; that silently
+hid a new file in any OTHER already-tracked skill (reproduced with the
+Reviewer's own `other_skill_probe.py` against `.claude/skills/
+maintain-hldd/`), the exact class of bug this whole fix line set out to
+prevent, now spread beyond verify. `.gitignore` no longer blanket-
+ignores anything under `.claude/`; it only re-includes `/.claude/` and
+`/.claude/skills/**` recursively, then re-ignores the three genuinely
+local things (`**/settings.local.json`, `**/__pycache__/`, `**/*.pyc`)
+scoped under `.claude/` specifically, placed after the re-include since
+git's existing top-of-file `__pycache__/`/`*.pyc` rules sit earlier in
+the file and would otherwise be overridden for anything under
+`.claude/` by the later, broader re-include. Two new `GitignoreTests`
+cover a new file in `maintain-hldd` staying visible with no global rule
+at all, and both tracked skills staying visible even under a global
+`.claude/` exclude; full suite is now 14/14. No application code,
+route, or persisted state changed.
+
+2026-11-07 PR #336 fix round 5, part 2: narrow the verify .gitignore
+re-inclusion to the exact tracked file set (discussion_r4504017192).
+The previous fix round's broad, unanchored `!.claude/` / `.claude/*` /
+`!.claude/skills/` / `!.claude/skills/verify/**` block also exposed
+generated verify bytecode (`.claude/skills/verify/__pycache__/*.pyc`)
+and, because none of those patterns were anchored to the repo root,
+any unrelated nested `.claude/` directory's local settings elsewhere in
+the tree (for example `packages/probe/.claude/settings.local.json`).
+`.gitignore` now anchors every line (leading `/`) and lists the
+skill's exact known files (`SKILL.md`, `key.py`, `test_key.py`,
+`acceptance.md`, `fixtures.json`) plus `features/*.md` (so a new
+feature file still stays visible), leaving everything else under
+`.claude/skills/verify/` (bytecode included) and every other `.claude/`
+directory in the repo untouched by this rule. New `GitignoreTests` in
+test_key.py, covering the Reviewer's own probe cases plus the known-
+file and nested-directory cases, replace the one-off job-script probe
+used to verify the previous round. No application code, route, or
+persisted state changed.
+
+2026-11-07 PR #336 fix round 5, part 1: refuse an empty mapped feature
+file (discussion_r4504017314). The feature-file-tracking check from the
+previous fix round confirmed a mapped file was tracked but never read
+its content, so a tracked-but-empty (or whitespace-only) feature file
+still admitted and wrote a key receipt, with no reviewed expectations
+for the browser driver to actually follow. key.py now also refuses any
+mapped feature file whose content is empty or whitespace-only. A
+feature-heading cross-check against features/README.md's own link text
+was considered and skipped: the real `documentation.md` file's heading
+("# Bundled documentation") does not literally match the README's link
+text ("Documentation"), a pre-existing naming difference across
+acceptance.md, README.md and the feature file itself, so a strict
+heading match would false-fail this PR's own legitimate content. New
+test `test_empty_mapped_feature_is_refused`, adapted from the
+Reviewer's own `empty_feature_probe.py`, covers the refusal. No
+application code, route, or persisted state changed.
+
+2026-11-07 PR #336 fix round 3, part 2: re-include verify features past a
+global .claude/ ignore, fail closed if one goes untracked
+(discussion_r4503940604). A global `~/.gitignore_global`-style `.claude/`
+rule, already known to this repository (see the existing Strato block),
+was never applied to the root `.claude/skills/verify/` this PR adds;
+reproduced independently with `probe_ignore.py`: a new feature file under
+it stayed invisible to `git status --porcelain --untracked-files=all` and
+so to key.py's own uncommitted-files check. `.gitignore` now re-includes
+`.claude/skills/verify/` the same way as the Strato block
+(`!.claude/`, `.claude/*`, `!.claude/skills/`, `!.claude/skills/verify/**`),
+re-probed clean on this head. As a second, independent layer, `key.py`
+now reads `features/README.md`'s own feature-to-file table and fails
+closed if any mapped file isn't tracked by git, so a maintainer's
+personal ignore settings can no longer let an unreviewed feature file
+slip through even if some other local misconfiguration still hides it.
+New tests in `test_key.py`
+(`test_feature_file_missing_from_map_is_refused`,
+`test_feature_file_present_and_tracked_is_accepted`) cover both sides.
+No application code, route, or persisted state changed.
+
+2026-11-07 PR #336 fix round 3, part 1: export verification evidence before
+sandbox deletion (discussion_r4503861532). SKILL.md required deleting the
+Daytona sandbox on both success and failure, but the evidence folder and
+the key receipt live under the system temp directory inside that same
+sandbox, so deletion destroyed them with no durable copy. Launch and
+Cleanup now require exporting the evidence folder to a durable
+destination outside the sandbox (the laptop, or a shared QA folder) via
+the Daytona SDK's own download, verifying the exported file list and each
+file's sha256 against the in-sandbox original, before stopping the
+sandbox; a failed or unverified export now blocks deletion the same way a
+failed scratch restoration already did. No application code, route, or
+persisted state changed; no GitHub token is involved in the export.
+
+2026-11-07 PR #336 fix round: verify skill doc fixes. SKILL.md's sandbox
+paragraph said "do not create or resize a sandbox," which assumed a
+shared, owner-released sandbox model; it now says to create one fresh
+sandbox per job and delete it on exit, matching this team's actual
+Daytona practice. SKILL.md required `tools/vivary-preflight`, a
+Linveo-workspace tool absent from every Daytona sandbox, which made the
+skill fail closed there unconditionally (QA's gap 1); it now checks the
+sandbox's own Node, pnpm, Python/OpenSSL and disk directly. SKILL.md's
+closing line pointed at `/maintain-verification-skill`; QA found no skill
+by that name in this repository's own `.claude/skills/`, so it now reads
+`/verification`. features/README.md's coverage-limits paragraph now also
+states that Project selection and Documentation have no planted-bug
+fixture, matching fixtures.json's actual three entries. No application
+code, route, or persisted state changed.
+
+2026-11-07 PR #336 fix round: key.py stale-ref and evidence-path fixes.
+key.py pinned `origin/dev` by `git rev-parse origin/dev` after fetching it;
+under a narrow `remote.origin.fetch` (a typical single-branch CI checkout),
+that fetch leaves `origin/dev` untouched and admission silently trusted
+whatever it already held (discussion_r4503593102, confirmed independently
+and by QA). It now resolves `FETCH_HEAD`, the commit the fetch actually
+wrote, regardless of tracking-ref configuration. Separately, the evidence
+directory argument was only required to be outside the checkout, with no
+other bound, so any absolute path was accepted; it now must also resolve
+under the system temp directory, matching SKILL.md's own documented usage
+(`/tmp/vivary-proof-UNIQUE`). `test_key.py` is new: it reproduces the
+stale-ref admission, confirms a genuinely matching key still admits under
+the same narrow refspec, and confirms the temp-dir confinement in both
+directions. No application code, route, or persisted state changed.
+
 2026-11-07 Site dependency reconciliation for PR #318. Astro moves from 7.3.5
 to 7.4.2, and its scoped overrides now follow that version instead of the
 obsolete 7.3.5 selector. Its Vite override moves to 8.3.4, within Astro's declared range.
@@ -8398,6 +8539,28 @@ the staged desktop app. Personal workspace clears presence; disabled or absent D
 stays silent. Loopback-only server binding, renderer isolation, and owner-proof admission
 are unchanged. `node --test packages/desktop/tests/*.mjs` (with desktop `npm ci`) and
 HLDD enforcement requested this review entry.
+
+2026-11-02 workbench verification acceptance key. The new
+`.claude/skills/verify/acceptance.md` defines five user journeys for desktop
+navigation, the narrow navigation sheet, project selection, Settings return and
+bundled documentation. Review checked Layout, Sidebar, use-workspace-layout,
+ProjectNavigation and the Settings and architecture routes. This adds acceptance
+expectations without changing application components, persistence or access
+boundaries, so the existing design remains accurate. Runtime execution and the
+verification runner remain outstanding.
+
+2026-11-02 workbench verification skill checkpoint. The new
+`.claude/skills/verify/SKILL.md` and feature map describe five browser journeys.
+`key.py` admits only a clean candidate with the acceptance key fetched from
+`origin/dev`. The fixture catalogue names temporary navigation mutations for
+future runtime proof. Review inspected the staged skill, key loader and feature
+recipes against the existing workbench architecture. Application behaviour and
+access boundaries are unchanged. Browser execution, planted-bug proof and
+independent review remain outstanding. This checkpoint is not acceptance.
+The five-feature seed excludes Files, Search, Preview, draft preservation
+and conversation preservation. The feature map and every runtime receipt
+must keep these limits explicit. This clarifies proof coverage without
+changing application behaviour or the design described above.
 
 2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
 second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
