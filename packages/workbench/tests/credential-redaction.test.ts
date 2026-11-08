@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 // Issue #97. Every value below is random, generated for this run, and never a real credential.
@@ -136,6 +136,144 @@ test("the secret store and legacy credential settings are read from the database
   await refreshHeldCredentials({ environment: () => ({}), mcpConfig: () => null, storedSecrets: async () => { throw new Error("database closed"); } });
   assertText(redactCredentials(storedKey), "[redacted OPENROUTER_API_KEY]");
   await refreshHeldCredentials(noSources);
+});
+
+// PR #328 review. A read that fails part way must not drop a value the redactor already holds.
+const fromDatabase = { ...defaultCredentialSources, environment: () => ({}), mcpConfig: () => null };
+
+test("a stored secret that cannot be read stays redacted, and the failed read is logged", async t => {
+  const { writeAppSecret, deleteAppSecret } = await import("@agent-native/core/secrets");
+  const { getDbExec } = await import("@agent-native/core/db");
+  const owner = { scope: "user", scopeId: "unreadable@example.test" } as const;
+  const [kept, added] = [synthetic(44), synthetic(44)];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  try {
+    await writeAppSecret({ ...owner, key: "KEPT_API_KEY", value: kept });
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(kept), "[redacted KEPT_API_KEY]", "before the failed read");
+    // The row stays listed but no longer decrypts, as after a key change or a damaged write.
+    await getDbExec().execute({
+      sql: "UPDATE app_secrets SET encrypted_value = ?, shared_encrypted_value = NULL WHERE scope = ? AND scope_id = ? AND key = ?",
+      args: ["not-a-ciphertext", owner.scope, owner.scopeId, "KEPT_API_KEY"],
+    });
+    await writeAppSecret({ ...owner, key: "ADDED_API_KEY", value: added });
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${kept} ${added}`), "[redacted KEPT_API_KEY] [redacted ADDED_API_KEY]", "after the failed read");
+    assert.equal(warnings.length, 1, "the failed read was not logged");
+    assertMatch(warnings[0], /could not read 1 stored secret\./);
+    assertHidden(warnings.join("\n"), [kept, added], "warning");
+  } finally {
+    // A row that never decrypts would keep every later read incomplete.
+    await deleteAppSecret({ ...owner, key: "KEPT_API_KEY" });
+    await deleteAppSecret({ ...owner, key: "ADDED_API_KEY" });
+    await refreshHeldCredentials(noSources);
+  }
+});
+
+test("a secret store or settings table that cannot be read keeps the last stored set", async t => {
+  const { writeAppSecret, deleteAppSecret } = await import("@agent-native/core/secrets");
+  const { putSetting } = await import("@agent-native/core/settings");
+  const { getDbExec } = await import("@agent-native/core/db");
+  const db = getDbExec();
+  const [secret, legacy] = [synthetic(44), synthetic(40)];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  await writeAppSecret({ key: "LISTED_API_KEY", value: secret, scope: "user", scopeId: "listed@example.test" });
+  await putSetting("u:listed@example.test:credential:LISTED_TOKEN", { value: legacy });
+  try {
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${secret} ${legacy}`), "[redacted LISTED_API_KEY] [redacted LISTED_TOKEN]", "before");
+    for (const [table, reason] of [["app_secrets", /could not read the secret store\./], ["settings", /could not read the legacy credential settings\./]] as const) {
+      // The table exists but cannot answer the query, unlike a table not created yet.
+      await db.execute({ sql: `ALTER TABLE ${table} RENAME TO ${table}_unlisted`, args: [] });
+      await db.execute({ sql: `CREATE TABLE ${table} (unrelated TEXT)`, args: [] });
+      try {
+        await refreshHeldCredentials(fromDatabase);
+      } finally {
+        await db.execute({ sql: `DROP TABLE ${table}`, args: [] });
+        await db.execute({ sql: `ALTER TABLE ${table}_unlisted RENAME TO ${table}`, args: [] });
+      }
+      assertText(redactCredentials(`${secret} ${legacy}`), "[redacted LISTED_API_KEY] [redacted LISTED_TOKEN]", `without ${table}`);
+      assertMatch(warnings.at(-1) ?? "", reason, `${table} warning`);
+    }
+    assertHidden(warnings.join("\n"), [secret, legacy], "warning");
+  } finally {
+    await deleteAppSecret({ key: "LISTED_API_KEY", scope: "user", scopeId: "listed@example.test" });
+    await refreshHeldCredentials(noSources);
+  }
+});
+
+test("a table that goes missing after a successful read keeps the held set and warns", async t => {
+  // PR #334 review r4503987324: a table read earlier in this process is unavailable, not empty.
+  const { writeAppSecret } = await import("@agent-native/core/secrets");
+  const { putSetting } = await import("@agent-native/core/settings");
+  const { getDbExec } = await import("@agent-native/core/db");
+  const db = getDbExec();
+  const [secret, legacy] = [synthetic(44), synthetic(40)];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  await writeAppSecret({ key: "ABSENT_API_KEY", value: secret, scope: "user", scopeId: "absent@example.test" });
+  await putSetting("u:absent@example.test:credential:ABSENT_TOKEN", { value: legacy });
+  try {
+    await refreshHeldCredentials(fromDatabase);
+    assertText(redactCredentials(`${secret} ${legacy}`), "[redacted ABSENT_API_KEY] [redacted ABSENT_TOKEN]", "before");
+    for (const [table, reason] of [["app_secrets", /could not read the secret store\./], ["settings", /could not read the legacy credential settings\./]] as const) {
+      await db.execute({ sql: `ALTER TABLE ${table} RENAME TO ${table}_absent`, args: [] });
+      try {
+        await refreshHeldCredentials(fromDatabase);
+      } finally {
+        await db.execute({ sql: `ALTER TABLE ${table}_absent RENAME TO ${table}`, args: [] });
+      }
+      assertText(redactCredentials(`${secret} ${legacy}`), "[redacted ABSENT_API_KEY] [redacted ABSENT_TOKEN]", `without ${table}`);
+      assertMatch(warnings.at(-1) ?? "", reason, `${table} warning`);
+    }
+    assertHidden(warnings.join("\n"), [secret, legacy], "warning");
+  } finally {
+    await db.execute({ sql: "DELETE FROM app_secrets WHERE key = ?", args: ["ABSENT_API_KEY"] });
+    await refreshHeldCredentials(noSources);
+  }
+});
+
+test("a fresh database with no secret or settings table reads as empty, without a warning", async () => {
+  // A new process, as at first startup, where Core has created neither table yet.
+  const fresh = `file:${path.join(caseRoot, "fresh-start.sqlite")}`;
+  const script = `const warnings = []; console.warn = (...parts) => { warnings.push(parts.join(" ")); };
+const { refreshHeldCredentials, defaultCredentialSources } = await import(${JSON.stringify(new URL("../server/credential-redaction.ts", import.meta.url).href)});
+await refreshHeldCredentials({ ...defaultCredentialSources, environment: () => ({}), mcpConfig: () => null });
+process.stdout.write("\\n" + JSON.stringify({ warnings }) + "\\n");`;
+  const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    env: { ...process.env, DATABASE_URL: fresh, DATABASE_URL_UNPOOLED: fresh },
+  });
+  const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}");
+  assert.deepEqual(result.warnings, [], "a fresh install logged a failed-read warning");
+});
+
+test("the failed-read warning names counts or an error kind, never error text", async t => {
+  // Synthetic text: an unheld credential-shaped value, a URL with a password, SQL and a host.
+  const unheld = synthetic(40);
+  const sentinel = `review_probe_unheld_value_${synthetic(12)}`;
+  const failures: unknown[] = [
+    Object.assign(new Error(`connect failed: postgres://app:${unheld}@db.internal.example.test/app ${sentinel}`), { code: "ECONNREFUSED" }),
+    new TypeError(`SELECT * FROM app_secrets WHERE key = '${sentinel}'`),
+    `thrown text ${sentinel} ${unheld}`,
+    Object.assign(new Error(sentinel), { name: `Custom ${sentinel}`, code: `lower ${sentinel}` }),
+  ];
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (message: unknown) => { warnings.push(String(message)); });
+  for (const failure of failures) {
+    await refreshHeldCredentials({ environment: () => ({}), mcpConfig: () => null, storedSecrets: async () => { throw failure; } });
+  }
+  await refreshHeldCredentials(noSources);
+  assert.deepEqual(warnings.map(line => line.replace(/^.*after a failed read\. /, "")), [
+    "The stored credentials could not be read (Error, ECONNREFUSED).",
+    "The stored credentials could not be read (TypeError).",
+    "The stored credentials could not be read (unknown error).",
+    "The stored credentials could not be read (unknown error).",
+  ]);
+  assertHidden(warnings.join("\n"), [unheld, sentinel], "warning");
+  assert.doesNotMatch(warnings.join("\n"), /postgres:|SELECT|db\.internal/);
 });
 
 test("an automation webhook token is a stored secret, so a webhook URL is redacted", async () => {
