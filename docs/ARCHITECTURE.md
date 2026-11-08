@@ -1010,16 +1010,6 @@ stays silent. Loopback-only server binding, renderer isolation, and owner-proof 
 are unchanged. `node --test packages/desktop/tests/*.mjs` (with desktop `npm ci`) and
 HLDD enforcement requested this review entry.
 
-2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
-second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
-still renders project navigation, conversation history, settings links, and command search;
-`packages/workbench/app/components/layout/Layout.tsx` still owns sidebar visibility through
-the resizable projects panel, the `vivary.sidebar.collapsed` preference, the workspace topbar
-menu control, and the narrow-layout sheet. Removing the duplicate close button does not move
-collapse authority or change persistence boundaries, so the workspace shell description above
-still holds. Local typecheck on the layout change passed; CI `tests + checks` HLDD enforcement
-requested this review entry.
-
 2026-11-02 workbench verification acceptance key. The new
 `.claude/skills/verify/acceptance.md` defines five user journeys for desktop
 navigation, the narrow navigation sheet, project selection, Settings return and
@@ -1041,6 +1031,16 @@ The five-feature seed excludes Files, Search, Preview, draft preservation
 and conversation preservation. The feature map and every runtime receipt
 must keep these limits explicit. This clarifies proof coverage without
 changing application behaviour or the design described above.
+
+2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
+second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
+still renders project navigation, conversation history, settings links, and command search;
+`packages/workbench/app/components/layout/Layout.tsx` still owns sidebar visibility through
+the resizable projects panel, the `vivary.sidebar.collapsed` preference, the workspace topbar
+menu control, and the narrow-layout sheet. Removing the duplicate close button does not move
+collapse authority or change persistence boundaries, so the workspace shell description above
+still holds. Local typecheck on the layout change passed; CI `tests + checks` HLDD enforcement
+requested this review entry.
 
 2026-10-31 desktop 0.1.0-beta.1 release documentation. The README, the install guide, the
 desktop package README, the acceptance register and the changelog now point at the
