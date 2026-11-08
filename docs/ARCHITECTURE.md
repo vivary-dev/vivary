@@ -1082,6 +1082,15 @@ stays silent. Loopback-only server binding, renderer isolation, and owner-proof 
 are unchanged. `node --test packages/desktop/tests/*.mjs` (with desktop `npm ci`) and
 HLDD enforcement requested this review entry.
 
+2026-11-02 workbench verification acceptance key. The new
+`.claude/skills/verify/acceptance.md` defines five user journeys for desktop
+navigation, the narrow navigation sheet, project selection, Settings return and
+bundled documentation. Review checked Layout, Sidebar, use-workspace-layout,
+ProjectNavigation and the Settings and architecture routes. This adds acceptance
+expectations without changing application components, persistence or access
+boundaries, so the existing design remains accurate. Runtime execution and the
+verification runner remain outstanding.
+
 2026-11-01 workbench navigation chrome. The project navigation sidebar no longer shows a
 second collapse control in its brand row. `packages/workbench/app/components/layout/Sidebar.tsx`
 still renders project navigation, conversation history, settings links, and command search;
